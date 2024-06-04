@@ -249,12 +249,12 @@ public class KDTreeSegmentMergerTest extends SAITester
 
         MergeOneDimPointValues merger = new MergeOneDimPointValues(segmentIterators, Integer.BYTES);
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(new File(temporaryFolder.newFolder()),
-                                                                                "test",
-                                                                                "test",
-                                                                                new SequenceBasedSSTableId(20)),
-                                                                 Murmur3Partitioner.instance,
-                                                                 SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(new Descriptor(new File(temporaryFolder.newFolder()),
+                                                                                   "test",
+                                                                                   "test",
+                                                                                   new SequenceBasedSSTableId(20)),
+                                                                    Murmur3Partitioner.instance,
+                                                                    SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test", Int32Type.instance);
 
         try (NumericIndexWriter indexWriter = new NumericIndexWriter(indexDescriptor,
@@ -299,12 +299,12 @@ public class KDTreeSegmentMergerTest extends SAITester
 
     private BKDReader createReader(BKDTreeRamBuffer buffer, int maxSegmentRowId, int id) throws Throwable
     {
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(new File(temporaryFolder.newFolder()),
-                                                                                "test",
-                                                                                "test",
-                                                                                new SequenceBasedSSTableId(id)),
-                                                                 Murmur3Partitioner.instance,
-                                                                 SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(new Descriptor(new File(temporaryFolder.newFolder()),
+                                                                                   "test",
+                                                                                   "test",
+                                                                                   new SequenceBasedSSTableId(id)),
+                                                                    Murmur3Partitioner.instance,
+                                                                    SAITester.EMPTY_COMPARATOR);
 
         IndexContext indexContext = SAITester.createIndexContext("test", Int32Type.instance);
 

@@ -89,8 +89,8 @@ public class SegmentsSystemViewTest extends SAITester
     public void testSegmentsMetadata() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, v1 int, v2 text, PRIMARY KEY (k, c))");
-        String numericIndex = createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
-        String stringIndex = createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
+        String numericIndex = createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex' WITH OPTIONS = {'enable_segment_compaction':true}");
+        String stringIndex = createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex' WITH OPTIONS = {'enable_segment_compaction':true}");
         waitForIndexQueryable();
 
         int num = 100;
@@ -205,7 +205,7 @@ public class SegmentsSystemViewTest extends SAITester
             {
                 SSTableReader sstable = sstableIndex.getSSTable();
 
-                IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+                IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
                 indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, index.getIndexContext());
 
                 if (TypeUtil.isLiteral(sstableIndex.getIndexContext().getValidator()))

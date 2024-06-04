@@ -306,7 +306,7 @@ public abstract class ControllerTest
         options.put(Controller.BASE_SHARD_COUNT_OPTION, Integer.toString(3));
         options.put(Controller.TARGET_SSTABLE_SIZE_OPTION, "100MiB");
         options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "10MiB");
-        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0.0");
         Controller controller = Controller.fromOptions(cfs, options);
         assertEquals(0.0, controller.sstableGrowthModifier, 0.0);
 
@@ -348,6 +348,7 @@ public abstract class ControllerTest
         options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "10MiB");
         options.put(Controller.SSTABLE_GROWTH_OPTION, "1.0");
         Controller controller = Controller.fromOptions(cfs, options);
+        assertEquals(1.0, controller.sstableGrowthModifier, 0.0);
 
         // Easy ones
         // x00 MiB = x * 100

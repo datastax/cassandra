@@ -19,18 +19,23 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
+import java.io.UncheckedIOException;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.Map;
+
+import org.slf4j.Logger;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 
 public class PerIndexFiles implements Closeable
 {
+    private static final Logger logger = org.slf4j.LoggerFactory.getLogger(PerIndexFiles.class);
+
     private final Map<IndexComponent, FileHandle> files = new EnumMap<>(IndexComponent.class);
     private final IndexDescriptor indexDescriptor;
     private final IndexContext indexContext;
@@ -39,39 +44,65 @@ public class PerIndexFiles implements Closeable
     {
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
-        if (TypeUtil.isLiteral(indexContext.getValidator()))
+
+        var toOpen = new HashSet<>(indexDescriptor.getVersion(indexContext).onDiskFormat().perIndexComponents(indexContext));
+        toOpen.remove(IndexComponent.META);
+        toOpen.remove(IndexComponent.COLUMN_COMPLETION_MARKER);
+
+        var componentsPresent = new HashSet<IndexComponent>();
+        for (IndexComponent component : toOpen)
         {
-            files.put(IndexComponent.POSTING_LISTS, indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext));
-            files.put(IndexComponent.TERMS_DATA, indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext));
+            try
+            {
+                files.put(component, indexDescriptor.createPerIndexFileHandle(component, indexContext));
+                componentsPresent.add(component);
+            }
+            catch (UncheckedIOException e)
+            {
+                // leave logging until we're done
+            }
         }
-        else
-        {
-            files.put(IndexComponent.KD_TREE, indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext));
-            files.put(IndexComponent.KD_TREE_POSTING_LISTS, indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext));
-        }
+
+        logger.info("Components present for {} are {}", indexDescriptor, componentsPresent);
     }
 
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle termsData()
     {
-        return getFile(IndexComponent.TERMS_DATA);
+        return getFile(IndexComponent.TERMS_DATA).sharedCopy();
     }
 
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle postingLists()
     {
-        return getFile(IndexComponent.POSTING_LISTS);
+        return getFile(IndexComponent.POSTING_LISTS).sharedCopy();
     }
 
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle kdtree()
     {
-        return getFile(IndexComponent.KD_TREE);
+        return getFile(IndexComponent.KD_TREE).sharedCopy();
     }
 
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle kdtreePostingLists()
     {
-        return getFile(IndexComponent.KD_TREE_POSTING_LISTS);
+        return getFile(IndexComponent.KD_TREE_POSTING_LISTS).sharedCopy();
     }
 
-    private FileHandle getFile(IndexComponent indexComponent)
+    /** It is the caller's responsibility to close the returned file handle. */
+    public FileHandle vectors()
+    {
+        return getFile(IndexComponent.VECTOR).sharedCopy();
+    }
+
+    /** It is the caller's responsibility to close the returned file handle. */
+    public FileHandle pq()
+    {
+        return getFile(IndexComponent.PQ).sharedCopy();
+    }
+
+    public FileHandle getFile(IndexComponent indexComponent)
     {
         FileHandle file = files.get(indexComponent);
         if (file == null)

@@ -68,7 +68,7 @@ public class SSTableContextManager
                 continue;
             }
 
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
 
             if (!indexDescriptor.isPerSSTableBuildComplete())
             {
@@ -119,7 +119,9 @@ public class SSTableContextManager
      */
     long diskUsage()
     {
-        return sstableContexts.values().stream().mapToLong(SSTableContext::diskUsage).sum();
+        return sstableContexts.values().stream()
+                              .mapToLong(ssTableContext -> ssTableContext.indexDescriptor.sizeOnDiskOfPerSSTableComponents())
+                              .sum();
     }
 
     Set<SSTableReader> sstables()
@@ -152,5 +154,10 @@ public class SSTableContextManager
         SSTableContext invalidContext = sstableContexts.remove(sstable);
         if (invalidContext != null)
             invalidContext.close();
+    }
+
+    public SSTableContext getContext(SSTableReader sstable)
+    {
+        return sstableContexts.get(sstable);
     }
 }

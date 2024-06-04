@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.cql.types.multicell;
 
 import org.apache.cassandra.index.sai.cql.types.DataSet;
 import org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport;
+import org.apache.cassandra.index.sai.disk.format.Version;
+
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -29,15 +31,15 @@ import java.util.Collection;
 @RunWith(Parameterized.class)
 public class FrozenTupleTupleTest extends IndexingTypeSupport
 {
-    @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
+    @Parameterized.Parameters(name = "version={0},dataset={1},wide={2},scenario={3}")
     public static Collection<Object[]> generateParameters()
     {
         return generateParameters(new FrozenTupleDataSet(new FrozenTupleDataSet(new DataSet.AsciiDataSet(), new DataSet.UuidDataSet()), new DataSet.AsciiDataSet()));
     }
 
-    public FrozenTupleTupleTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    public FrozenTupleTupleTest(Version version, DataSet<?> dataset, boolean widePartitions, Scenario scenario)
     {
-        super(dataset, widePartitions, scenario);
+        super(version, dataset, widePartitions, scenario);
     }
 
     @Test

@@ -26,19 +26,26 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
     private final int bufferSize;
     private final BufferType bufferType;
+    private final long startOffset;
 
     SimpleChunkReader(ChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize)
+    {
+        this(channel, fileLength, bufferType, bufferSize, 0);
+    }
+
+    SimpleChunkReader(ChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize, long startOffset)
     {
         super(channel, fileLength);
         this.bufferSize = bufferSize;
         this.bufferType = bufferType;
+        this.startOffset = startOffset;
     }
 
     @Override
     public void readChunk(long position, ByteBuffer buffer)
     {
         buffer.clear();
-        channel.read(buffer, position);
+        channel.read(buffer, position - startOffset);
         buffer.flip();
     }
 
@@ -58,7 +65,10 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     public Rebufferer instantiateRebufferer()
     {
         if (Integer.bitCount(bufferSize) == 1)
+        {
+            assert startOffset == (startOffset & -bufferSize) : "startOffset must be aligned to buffer size";
             return new BufferManagingRebufferer.Aligned(this);
+        }
         else
             return new BufferManagingRebufferer.Unaligned(this);
     }

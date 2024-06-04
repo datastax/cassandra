@@ -24,6 +24,7 @@ import java.util.Map;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
@@ -35,13 +36,13 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.FileUtils;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.QueryEventListeners;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -57,7 +58,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.index.sai.disk.v1.kdtree.BKDQueries.bkdQueryFrom;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Note: The sstables and SAI indexes used in this test were written with DSE 6.8
@@ -92,7 +95,7 @@ public class LegacyOnDiskFormatTest
                                      .addRegularColumn("text_value", UTF8Type.instance)
                                      .build();
         sstable = TrieIndexFormat.instance.getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(tableMetadata));
-        indexDescriptor = IndexDescriptor.create(sstable);
+        indexDescriptor = IndexDescriptor.createFrom(sstable);
     }
 
     @After
@@ -102,15 +105,21 @@ public class LegacyOnDiskFormatTest
     }
 
     @Test
+    public void correctlyIdentifiesPerSSTableFileVersion()
+    {
+        assertEquals(Version.AA, indexDescriptor.getVersion());
+    }
+
+    @Test
     public void canReadPerSSTableMetadata() throws Throwable
     {
         final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
 
-        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.OFFSETS_VALUES, null)));
+        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.OFFSETS_VALUES, null)));
 
         assertEquals(100, numericValuesMeta.valueCount);
 
-        numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES, null)));
+        numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES, null)));
 
         assertEquals(100, numericValuesMeta.valueCount);
     }
@@ -132,7 +141,7 @@ public class LegacyOnDiskFormatTest
     {
         PrimaryKeyMap.Factory primaryKeyMapFactory = indexDescriptor.newPrimaryKeyMapFactory(sstable);
 
-        PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(SSTableQueryContext.forTest());
+        PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
 
         PrimaryKey expected = indexDescriptor.primaryKeyFactory.createTokenOnly(Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(23)).getToken());
 

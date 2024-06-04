@@ -37,6 +37,13 @@ public enum IndexComponent
      */
     KD_TREE("KDTree"),
     KD_TREE_POSTING_LISTS("KDTreePostingLists"),
+
+    /**
+     * Vector index components
+     */
+    VECTOR("Vector"),
+    PQ("PQ"),
+
     /**
      * Term dictionary written by {@code TrieTermsDictionaryWriter} stores mappings of term and
      * file pointer to posting block on posting file.

@@ -46,7 +46,7 @@ final class TupleSelector extends Selector
 
     public static Factory newFactory(final AbstractType<?> type, final SelectorFactories factories)
     {
-        return new CollectionFactory(type, factories)
+        return new MultiElementFactory(type, factories)
         {
             protected String getColumnName()
             {

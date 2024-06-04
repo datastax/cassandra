@@ -39,6 +39,7 @@ import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
@@ -93,7 +94,7 @@ public class TrieMemoryIndex extends MemoryIndex
         try
         {
             value = TypeUtil.encode(value, indexContext.getValidator());
-            analyzer.reset(value.duplicate());
+            analyzer.reset(value);
             final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
             final long initialSizeOffHeap = data.sizeOffHeap();
@@ -102,7 +103,7 @@ public class TrieMemoryIndex extends MemoryIndex
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
-                if (!indexContext.validateMaxTermSize(key, term, false))
+                if (!indexContext.validateMaxTermSize(key, term))
                     continue;
 
                 setMinMaxTerm(term.duplicate());
@@ -194,7 +195,7 @@ public class TrieMemoryIndex extends MemoryIndex
         boolean lowerInclusive, upperInclusive;
         if (expression.lower != null)
         {
-            lowerBound = encode(expression.lower.value.encoded);
+            lowerBound = encode(expression.getLowerBound());
             lowerInclusive = expression.lower.inclusive;
         }
         else
@@ -205,7 +206,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         if (expression.upper != null)
         {
-            upperBound = encode(expression.upper.value.encoded);
+            upperBound = encode(expression.getUpperBound());
             upperInclusive = expression.upper.inclusive;
         }
         else
@@ -215,8 +216,18 @@ public class TrieMemoryIndex extends MemoryIndex
         }
 
         Collector cd = new Collector(keyRange);
-
-        data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(cd::processContent);
+        Trie<PrimaryKeys> subtrie = data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
+        if (expression.validator instanceof CompositeType)
+            subtrie.entrySet().forEach(entry -> {
+                // When stored in memory, the keys of the trie are encoded, so we must decode them before we can
+                // compare them to the expression.
+                ByteComparable decoded = decode(entry.getKey());
+                byte[] key = ByteSourceInverse.readBytes(decoded.asComparableBytes(ByteComparable.Version.OSS41));
+                if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
+                    cd.processContent(entry.getValue());
+            });
+        else
+            subtrie.values().forEach(cd::processContent);
 
         if (cd.mergedKeys.isEmpty())
         {

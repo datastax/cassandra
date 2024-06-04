@@ -87,6 +87,27 @@ public abstract class Relation
     }
 
     /**
+     * Checks if the operator of this relation is a <code>NOT_CONTAINS</code>.
+     * @return <code>true</code>  if the operator of this relation is a <code>NOT_CONTAINS</code>, <code>false</code>
+     * otherwise.
+     */
+    public final boolean isNotContains()
+    {
+        return relationType == Operator.NOT_CONTAINS;
+    }
+
+    /**
+     * Checks if the operator of this relation is a <code>NOT_CONTAINS_KEY</code>.
+     * @return <code>true</code>  if the operator of this relation is a <code>NOT_CONTAINS_KEY</code>, <code>false</code>
+     * otherwise.
+     */
+    public final boolean isNotContainsKey()
+    {
+        return relationType == Operator.NOT_CONTAINS_KEY;
+    }
+
+
+    /**
      * Checks if the operator of this relation is a <code>IN</code>.
      * @return <code>true</code>  if the operator of this relation is a <code>IN</code>, <code>false</code>
      * otherwise.
@@ -106,6 +127,16 @@ public abstract class Relation
         return relationType == Operator.EQ;
     }
 
+    /**
+     * Checks if the operator of this relation is a <code>NEQ</code>.
+     * @return <code>true</code>  if the operator of this relation is a <code>NEQ</code>, <code>false</code>
+     * otherwise.
+     */
+    public final boolean isNEQ()
+    {
+        return relationType == Operator.NEQ;
+    }
+
     public final boolean isLIKE()
     {
         return relationType == Operator.LIKE_PREFIX
@@ -114,6 +145,16 @@ public abstract class Relation
                 || relationType == Operator.LIKE_MATCHES
                 || relationType == Operator.LIKE;
     }
+
+    public final boolean isNotLIKE()
+    {
+        return relationType == Operator.NOT_LIKE_PREFIX
+               || relationType == Operator.NOT_LIKE_SUFFIX
+               || relationType == Operator.NOT_LIKE_CONTAINS
+               || relationType == Operator.NOT_LIKE_MATCHES
+               || relationType == Operator.NOT_LIKE;
+    }
+
 
     /**
      * Checks if the operator of this relation is a <code>Slice</code> (GT, GTE, LTE, LT).
@@ -141,13 +182,17 @@ public abstract class Relation
         switch (relationType)
         {
             case EQ: return newEQRestriction(table, boundNames);
+            case NEQ: return newNEQRestriction(table, boundNames);
             case LT: return newSliceRestriction(table, boundNames, Bound.END, false);
             case LTE: return newSliceRestriction(table, boundNames, Bound.END, true);
             case GTE: return newSliceRestriction(table, boundNames, Bound.START, true);
             case GT: return newSliceRestriction(table, boundNames, Bound.START, false);
             case IN: return newINRestriction(table, boundNames);
+            case NOT_IN: return newNotINRestriction(table, boundNames);
             case CONTAINS: return newContainsRestriction(table, boundNames, false);
             case CONTAINS_KEY: return newContainsRestriction(table, boundNames, true);
+            case NOT_CONTAINS: return newNotContainsRestriction(table, boundNames, false);
+            case NOT_CONTAINS_KEY: return newNotContainsRestriction(table, boundNames, true);
             case IS_NOT: return newIsNotRestriction(table, boundNames);
             case LIKE_PREFIX:
             case LIKE_SUFFIX:
@@ -155,6 +200,10 @@ public abstract class Relation
             case LIKE_MATCHES:
             case LIKE:
                 return newLikeRestriction(table, boundNames, relationType);
+            case ANN:
+                return newAnnRestriction(table, boundNames);
+            case ANALYZER_MATCHES:
+                return newAnalyzerMatchesRestriction(table, boundNames);
             default: throw invalidRequest("Unsupported \"!=\" relation: %s", this);
         }
     }
@@ -170,6 +219,17 @@ public abstract class Relation
     protected abstract Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames);
 
     /**
+     * Creates a new NEQ restriction instance.
+     *
+     * @param table the table meta data
+     * @param boundNames the variables specification where to collect the bind variables
+     * @return a new NEQ restriction instance.
+     * @throws InvalidRequestException if the relation cannot be converted into an NEQ restriction.
+     */
+    protected abstract Restriction newNEQRestriction(TableMetadata table, VariableSpecifications boundNames);
+
+
+    /**
      * Creates a new IN restriction instance.
      *
      * @param table the table meta data
@@ -178,6 +238,17 @@ public abstract class Relation
      * @throws InvalidRequestException if the relation cannot be converted into an IN restriction.
      */
     protected abstract Restriction newINRestriction(TableMetadata table, VariableSpecifications boundNames);
+
+
+    /**
+     * Creates a new NOT IN restriction instance.
+     *
+     * @param table the table meta data
+     * @param boundNames the variables specification where to collect the bind variables
+     * @return a new NOT IN restriction instance
+     * @throws InvalidRequestException if the relation cannot be converted into an NOT IN restriction.
+     */
+    protected abstract Restriction newNotINRestriction(TableMetadata table, VariableSpecifications boundNames);
 
     /**
      * Creates a new Slice restriction instance.
@@ -205,9 +276,30 @@ public abstract class Relation
      */
     protected abstract Restriction newContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey);
 
+    /**
+     * Creates a new Contains restriction instance representing a NOT CONTAINS operation.
+     *
+     * @param table the table meta data
+     * @param boundNames the variables specification where to collect the bind variables
+     * @param isKey <code>true</code> if the restriction to create is a NOT CONTAINS KEY
+     * @return a new Contains <code>Restriction</code> instance
+     * @throws InvalidRequestException if the <code>Relation</code> is not valid
+     */
+    protected abstract Restriction newNotContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey);
+
     protected abstract Restriction newIsNotRestriction(TableMetadata table, VariableSpecifications boundNames);
 
     protected abstract Restriction newLikeRestriction(TableMetadata table, VariableSpecifications boundNames, Operator operator);
+
+    /**
+     * Creates a new ANN restriction instance.
+     */
+    protected abstract Restriction newAnnRestriction(TableMetadata table, VariableSpecifications boundNames);
+
+    /**
+     * Creates a new Analyzer Matches restriction instance.
+     */
+    protected abstract Restriction newAnalyzerMatchesRestriction(TableMetadata table, VariableSpecifications boundNames);
 
     /**
      * Converts the specified <code>Raw</code> into a <code>Term</code>.

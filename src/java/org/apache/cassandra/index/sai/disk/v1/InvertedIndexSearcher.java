@@ -26,8 +26,10 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
@@ -67,8 +69,8 @@ public class InvertedIndexSearcher extends IndexSearcher
         long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
         reader = new TermsReader(indexContext,
-                                 indexFiles.termsData().sharedCopy(),
-                                 indexFiles.postingLists().sharedCopy(),
+                                 indexFiles.termsData(),
+                                 indexFiles.postingLists(),
                                  root, footerPointer);
     }
 
@@ -80,20 +82,30 @@ public class InvertedIndexSearcher extends IndexSearcher
         return 0;
     }
 
-    @Override
     @SuppressWarnings("resource")
-    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer) throws IOException
+    public RangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    {
+        PostingList postingList = searchPosting(exp, context);
+        return toPrimaryKeyIterator(postingList, context);
+    }
+
+    private PostingList searchPosting(Expression exp, QueryContext context)
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
 
-        if (!exp.getOp().isEquality())
-            throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
-
-        final ByteComparable term = ByteComparable.fixedLength(exp.lower.value.encoded);
-        QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
-        PostingList postingList = reader.exactMatch(term, listener, context.queryContext);
-        return toIterator(postingList, context, defer);
+        if (exp.getOp().isEquality() || exp.getOp() == Expression.Op.MATCH)
+        {
+            final ByteComparable term = ByteComparable.fixedLength(exp.lower.value.encoded);
+            QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
+            return reader.exactMatch(term, listener, context);
+        }
+        else if (exp.getOp() == Expression.Op.RANGE)
+        {
+            QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
+            return reader.rangeMatch(exp, listener, context);
+        }
+        throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }
 
     @Override

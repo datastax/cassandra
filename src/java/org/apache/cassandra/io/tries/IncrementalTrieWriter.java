@@ -72,8 +72,8 @@ public interface IncrementalTrieWriter<VALUE> extends AutoCloseable
     /**
      * Construct a suitable trie writer.
      */
-    static <VALUE> IncrementalTrieWriter<VALUE> open(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
+    static <VALUE> IncrementalTrieWriter<VALUE> open(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version version)
     {
-        return new IncrementalDeepTrieWriterPageAware<>(trieSerializer, dest);
+        return new IncrementalDeepTrieWriterPageAware<>(trieSerializer, dest, version);
     }
 }

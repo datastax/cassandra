@@ -20,7 +20,16 @@ package org.apache.cassandra.cql3;
 
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -42,6 +51,11 @@ import org.apache.cassandra.utils.FBUtilities;
 /** a utility for doing internal cql-based queries */
 public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 {
+    public Stream<Row> stream()
+    {
+        return StreamSupport.stream(spliterator(), false);
+    }
+
     public static UntypedResultSet create(ResultSet rs)
     {
         return new FromResultSet(rs);
@@ -377,6 +391,11 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             return DoubleType.instance.compose(data.get(column));
         }
 
+        public double getFloat(String column)
+        {
+            return FloatType.instance.compose(data.get(column));
+        }
+
         public ByteBuffer getBytes(String column)
         {
             return data.get(column);
@@ -458,6 +477,12 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         public Map<String, String> getFrozenTextMap(String column)
         {
             return getFrozenMap(column, UTF8Type.instance, UTF8Type.instance);
+        }
+
+        public <T> List<T> getVector(String column, AbstractType<T> elementType, int dimension)
+        {
+            ByteBuffer raw = data.get(column);
+            return raw == null ? null : VectorType.getInstance(elementType, dimension).compose(raw);
         }
 
         public List<ColumnSpecification> getColumns()

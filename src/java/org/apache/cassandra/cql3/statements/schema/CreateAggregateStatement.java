@@ -103,11 +103,11 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             throw ire("Aggregate name '%s' is invalid", aggregateName);
 
         rawArgumentTypes.stream()
-                        .filter(raw -> !raw.isTuple() && raw.isFrozen())
+                        .filter(raw -> !raw.isImplicitlyFrozen() && raw.isFrozen())
                         .findFirst()
                         .ifPresent(t -> { throw ire("Argument '%s' cannot be frozen; remove frozen<> modifier from '%s'", t, t); });
 
-        if (!rawStateType.isTuple() && rawStateType.isFrozen())
+        if (!rawStateType.isImplicitlyFrozen() && rawStateType.isFrozen())
             throw ire("State type '%s' cannot be frozen; remove frozen<> modifier from '%s'", rawStateType, rawStateType);
 
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
@@ -182,7 +182,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
 
             // Converts initcond to a CQL literal and parse it back to avoid another CASSANDRA-11064
             String initialValueString = stateType.asCQL3Type().toCQLLiteral(initialValue, ProtocolVersion.CURRENT);
-            assert Objects.equal(initialValue, Terms.asBytes(keyspaceName, initialValueString, stateType));
+            if (!Objects.equal(initialValue, stateType.asCQL3Type().fromCQLLiteral(keyspaceName, initialValueString)))
+                throw new AssertionError(String.format("CQL literal '%s' (from type %s) parsed with a different value", initialValueString, stateType.asCQL3Type()));
 
             if (Constants.NULL_LITERAL != rawInitialValue && UDHelper.isNullOrEmpty(stateType, initialValue))
                 throw ire("INITCOND must not be empty for all types except TEXT, ASCII, BLOB");

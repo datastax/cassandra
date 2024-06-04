@@ -66,8 +66,15 @@ public class FilterTree
     {
         boolean result = localSatisfiedBy(key, currentCluster, staticRow);
 
+        if (shouldReturnNow(result))
+            return result;
+
         for (FilterTree child : children)
+        {
             result = op.apply(result, child.isSatisfiedBy(key, currentCluster, staticRow));
+            if (shouldReturnNow(result))
+                return result;
+        }
 
         return result;
     }
@@ -100,47 +107,28 @@ public class FilterTree
                 if (TypeUtil.isNonFrozenCollection(column.type))
                 {
                     Iterator<ByteBuffer> valueIterator = filter.context.getValuesOf(row, now);
-                    result = op.apply(result, collectionMatch(valueIterator, filter));
+                    result = op.apply(result, filter.isSatisfiedBy(valueIterator));
                 }
                 else
                 {
                     ByteBuffer value = filter.context.getValueOf(key, row, now);
-                    result = op.apply(result, singletonMatch(value, filter));
+                    result = op.apply(result, filter.isSatisfiedBy(value));
                 }
 
-                // If the operation is an AND then exit early if we get a single false
-                if (op == OperationType.AND && !result)
-                    return false;
-                else if (op == OperationType.OR && result)
-                    return true;
+                if (shouldReturnNow(result))
+                    return result;
             }
         }
         return result;
     }
 
-    private boolean singletonMatch(ByteBuffer value, Expression filter)
-    {
-        boolean match = value != null && filter.isSatisfiedBy(value);
-        // If this is NOT_EQ operation we have to
-        // inverse match flag (to check against other expressions),
-        if (filter.getOp() == Op.NOT_EQ)
-            match = !match;
-        return match;
-    }
-
-    private boolean collectionMatch(Iterator<ByteBuffer> valueIterator, Expression filter)
-    {
-        if (valueIterator == null)
-            return false;
-
-        while (valueIterator.hasNext())
-        {
-            ByteBuffer value = valueIterator.next();
-            if (value == null)
-                continue;
-            if (filter.isSatisfiedBy(value))
-                return true;
-        }
-        return false;
+    /**
+     * When evaluating an AND expression, if the current result is false, we can return immediately.
+     * When evaluating an OR expression, if the current result is true, we can return immediately.
+     * @param result the current result
+     * @return true if it is valid to return the current result
+     */
+    private boolean shouldReturnNow(boolean result) {
+        return (op == OperationType.AND && !result) || (op == OperationType.OR && result);
     }
 }

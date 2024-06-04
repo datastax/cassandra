@@ -22,18 +22,14 @@ import java.util.*;
 import java.util.function.UnaryOperator;
 
 import com.google.common.collect.HashMultiset;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.conditions.ColumnConditions;
@@ -48,15 +44,10 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
@@ -355,7 +346,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
     throws InvalidRequestException
     {
         if (appliesOnlyToStaticColumns() && !restrictions.hasClusteringColumnsRestrictions())
-            return FBUtilities.singleton(CBuilder.STATIC_BUILDER.build(), metadata().comparator);
+            return FBUtilities.singleton(ClusteringBuilder.STATIC_BUILDER.build(), metadata().comparator);
 
         return restrictions.getClusteringColumns(options, queryState);
     }
@@ -687,9 +678,10 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         SinglePartitionReadQuery readCommand = request.readCommand(nowInSeconds);
         FilteredPartition current;
         try (ReadExecutionController executionController = readCommand.executionController();
-             PartitionIterator iter = readCommand.executeInternal(executionController))
+             RowIterator row = PartitionIterators.getOnlyElement(readCommand.executeInternal(executionController), readCommand))
         {
-            current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand));
+            // FilteredPartition consumes the row but does not close the iterator
+            current = FilteredPartition.create(row);
         }
 
         if (!request.appliesTo(current))
@@ -790,23 +782,11 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                 {
                     for (Clustering<?> clustering : clusterings)
                     {
-                        validateClustering(clustering);
+                        clustering.validate();
                         addUpdateForKey(updateBuilder, clustering, params);
                     }
                 }
             }
-        }
-    }
-
-    private <V> void validateClustering(Clustering<V> clustering)
-    {
-        ValueAccessor<V> accessor = clustering.accessor();
-        for (V v : clustering.getRawValues())
-        {
-            if (v != null && accessor.size(v) > FBUtilities.MAX_UNSIGNED_SHORT)
-                throw new InvalidRequestException(String.format("Key length of %d is longer than maximum of %d",
-                                                                clustering.dataSize(),
-                                                                FBUtilities.MAX_UNSIGNED_SHORT));
         }
     }
 
@@ -1019,13 +999,14 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                                                         VariableSpecifications boundNames,
                                                         Operations operations,
                                                         WhereClause where,
-                                                        Conditions conditions)
+                                                        Conditions conditions,
+                                                        List<Ordering> orderings)
         {
             if (where.containsCustomExpressions())
                 throw new InvalidRequestException(CUSTOM_EXPRESSIONS_NOT_ALLOWED);
 
             boolean applyOnlyToStaticColumns = appliesOnlyToStaticColumns(operations, conditions);
-            return StatementRestrictions.create(type, metadata, where, boundNames, applyOnlyToStaticColumns, false, false);
+            return StatementRestrictions.create(type, metadata, where, boundNames, orderings, applyOnlyToStaticColumns, false, false);
         }
 
         public List<Pair<ColumnIdentifier, ColumnCondition.Raw>> getConditions()

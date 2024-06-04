@@ -21,7 +21,9 @@ package org.apache.cassandra.index.sai.plan;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
@@ -34,7 +36,6 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
@@ -68,6 +69,7 @@ public class Operation
                                                                            List<RowFilter.Expression> expressions)
     {
         ListMultimap<ColumnMetadata, Expression> analyzed = ArrayListMultimap.create();
+        Map<ColumnMetadata, Boolean> columnIsMultiExpression = new HashMap<>();
 
         // sort all of the expressions in the operation by name and priority of the logical operator
         // this gives us an efficient way to handle inequality and combining into ranges without extra processing
@@ -86,7 +88,7 @@ public class Operation
             AbstractAnalyzer analyzer = analyzerFactory.create();
             try
             {
-                analyzer.reset(e.getIndexValue().duplicate());
+                analyzer.reset(e.getIndexValue());
 
                 // EQ/LIKE_*/NOT_EQ can have multiple expressions e.g. text = "Hello World",
                 // becomes text = "Hello" OR text = "World" because "space" is always interpreted as a split point (by analyzer),
@@ -95,7 +97,7 @@ public class Operation
                 // if there is no EQ operations and NOT_EQ is met or a single NOT_EQ expression present,
                 // in such case we know exactly that there would be no more EQ/RANGE expressions for given column
                 // since NOT_EQ has the lowest priority.
-                boolean isMultiExpression = false;
+                boolean isMultiExpression = columnIsMultiExpression.getOrDefault(e.column(), Boolean.FALSE);
                 switch (e.operator())
                 {
                     case EQ:
@@ -103,26 +105,47 @@ public class Operation
                         // map entries
                         isMultiExpression = indexContext.isNonFrozenCollection();
                         break;
-
                     case CONTAINS:
                     case CONTAINS_KEY:
+                    case NOT_CONTAINS:
+                    case NOT_CONTAINS_KEY:
                     case LIKE_PREFIX:
                     case LIKE_MATCHES:
+                    case ANALYZER_MATCHES:
                         isMultiExpression = true;
                         break;
-
                     case NEQ:
-                        isMultiExpression = (perColumn.size() == 0 || perColumn.size() > 1
-                                             || (perColumn.size() == 1 && perColumn.get(0).getOp() == Expression.Op.NOT_EQ));
+                        // NEQ operator will always be a multiple expression if it is the only operator
+                        // (e.g. multiple NEQ expressions)
+                        isMultiExpression = isMultiExpression || perColumn.isEmpty();
                         break;
                 }
+                columnIsMultiExpression.put(e.column(), isMultiExpression);
+
                 if (isMultiExpression)
                 {
-                    while (analyzer.hasNext())
+                    if (!analyzer.hasNext())
                     {
-                        final ByteBuffer token = analyzer.next();
-                        perColumn.add(new Expression(indexContext).add(e.operator(), token.duplicate()));
+                        perColumn.add(new Expression(indexContext).add(e.operator(), ByteBuffer.allocate(0)));
                     }
+                    else
+                    {
+                        // The hasNext implementation has a side effect, so we need to call next before calling hasNext
+                        do
+                        {
+                            final ByteBuffer token = analyzer.next();
+                            perColumn.add(new Expression(indexContext).add(e.operator(), token.duplicate()));
+                        }
+                        while (analyzer.hasNext());
+                    }
+                }
+                else if (e instanceof RowFilter.GeoDistanceExpression)
+                {
+                    var distance = ((RowFilter.GeoDistanceExpression) e);
+                    var expression = new Expression(indexContext)
+                                     .add(distance.getDistanceOperator(), distance.getDistance().duplicate())
+                                     .add(Operator.BOUNDED_ANN, e.getIndexValue().duplicate());
+                    perColumn.add(expression);
                 }
                 else
                 // "range" or not-equals operator, combines both bounds together into the single expression,
@@ -130,7 +153,7 @@ public class Operation
                 // not-equals is combined with the range iff operator is AND.
                 {
                     Expression range;
-                    if (perColumn.size() == 0 || op != OperationType.AND)
+                    if (perColumn.size() == 0 || op != OperationType.AND || e instanceof RowFilter.MapComparisonExpression)
                     {
                         range = new Expression(indexContext);
                         perColumn.add(range);
@@ -143,6 +166,25 @@ public class Operation
                     if (!TypeUtil.isLiteral(indexContext.getValidator()))
                     {
                         range.add(e.operator(), e.getIndexValue().duplicate());
+                    }
+                    else if (e instanceof RowFilter.MapComparisonExpression)
+                    {
+                        var map = (RowFilter.MapComparisonExpression) e;
+                        switch (map.operator()) {
+                            case EQ:
+                                range.add(Operator.EQ, map.getIndexValue().duplicate());
+                                break;
+                            case GT:
+                            case GTE:
+                                range.add(map.operator(), map.getLowerBound().duplicate());
+                                range.add(Operator.LTE, map.getUpperBound().duplicate());
+                                break;
+                            case LT:
+                            case LTE:
+                                range.add(Operator.GTE, map.getLowerBound().duplicate());
+                                range.add(map.operator(), map.getUpperBound().duplicate());
+                                break;
+                        }
                     }
                     else
                     {
@@ -168,20 +210,26 @@ public class Operation
         switch (op)
         {
             case EQ:
+                return 7;
+
             case CONTAINS:
             case CONTAINS_KEY:
-                return 5;
+                return 6;
 
             case LIKE_PREFIX:
             case LIKE_MATCHES:
-                return 4;
+                return 5;
 
             case GTE:
             case GT:
-                return 3;
+                return 4;
 
             case LTE:
             case LT:
+                return 3;
+
+            case NOT_CONTAINS:
+            case NOT_CONTAINS_KEY:
                 return 2;
 
             case NEQ:
@@ -190,16 +238,6 @@ public class Operation
             default:
                 return 0;
         }
-    }
-
-    static RangeIterator buildIterator(QueryController controller)
-    {
-        return Node.buildTree(controller.filterOperation()).analyzeTree(controller).rangeIterator(controller);
-    }
-
-    static FilterTree buildFilter(QueryController controller)
-    {
-        return Node.buildTree(controller.filterOperation()).buildFilter(controller);
     }
 
     public static abstract class Node
@@ -226,20 +264,28 @@ public class Operation
             throw new UnsupportedOperationException();
         }
 
-        abstract void analyze(List<RowFilter.Expression> expressionList, QueryController controller);
+        /**
+         * Analyze the tree, potentially flattening it and storing the result in expressionMap.
+         */
+        abstract void analyze(QueryController controller);
 
         abstract FilterTree filterTree();
 
-        abstract RangeIterator rangeIterator(QueryController controller);
+        abstract Plan.KeysIteration plan(QueryController controller);
+
+        static Node buildTree(List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
+        {
+            OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
+            for (RowFilter.Expression expression : expressions)
+                node.add(buildExpression(expression));
+            for (RowFilter.FilterElement child : children)
+                node.add(buildTree(child));
+            return node;
+        }
 
         static Node buildTree(RowFilter.FilterElement filterOperation)
         {
-            OperatorNode node = filterOperation.isDisjunction() ? new OrNode() : new AndNode();
-            for (RowFilter.Expression expression : filterOperation.expressions())
-                node.add(buildExpression(expression));
-            for (RowFilter.FilterElement child : filterOperation.children())
-                node.add(buildTree(child));
-            return node;
+            return buildTree(filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
         }
 
         static Node buildExpression(RowFilter.Expression expression)
@@ -259,6 +305,10 @@ public class Operation
                                                                                                         ProtocolVersion.V3))));
                     offset += TypeSizes.INT_SIZE + ByteBufferAccessor.instance.getInt(expression.getIndexValue(), offset);
                 }
+                if (node.children().size() == 1)
+                    return node.children().get(0);
+                if (node.children().isEmpty())
+                    return new EmptyNode();
                 return node;
             }
             else
@@ -267,38 +317,19 @@ public class Operation
 
         Node analyzeTree(QueryController controller)
         {
-            List<RowFilter.Expression> expressionList = new ArrayList<>();
-            doTreeAnalysis(this, expressionList, controller);
-            if (!expressionList.isEmpty())
-                this.analyze(expressionList, controller);
+            analyze(controller);
             return this;
         }
 
-        void doTreeAnalysis(Node node, List<RowFilter.Expression> expressions, QueryController controller)
-        {
-            if (node.children().isEmpty())
-                expressions.add(node.expression());
-            else
-            {
-                List<RowFilter.Expression> expressionList = new ArrayList<>();
-                for (Node child : node.children())
-                    doTreeAnalysis(child, expressionList, controller);
-                node.analyze(expressionList, controller);
-            }
-        }
-
+        @VisibleForTesting
         FilterTree buildFilter(QueryController controller)
         {
-            analyzeTree(controller);
-            FilterTree tree = filterTree();
-            for (Node child : children())
-                if (child.canFilter())
-                    tree.addChild(child.buildFilter(controller));
-            return tree;
+            analyze(controller);
+            return filterTree();
         }
     }
 
-    public static abstract class OperatorNode extends Node
+    static abstract class OperatorNode extends Node
     {
         List<Node> children = new ArrayList<>();
 
@@ -313,58 +344,77 @@ public class Operation
         {
             children.add(child);
         }
-    }
 
-    public static class AndNode extends OperatorNode
-    {
+        abstract protected OperationType operationType();
+        abstract protected Plan.Builder planBuilder(QueryController controller);
+
+        // expression list is the children that are leaf nodes... we could figure that out here...
         @Override
-        public void analyze(List<RowFilter.Expression> expressionList, QueryController controller)
+        public void analyze(QueryController controller)
         {
-            expressionMap = analyzeGroup(controller, OperationType.AND, expressionList);
+            // This operation flattens the tree where possible and stores the result in expressionMap
+            List<RowFilter.Expression> expressionList = new ArrayList<>();
+            for (Node child : children)
+            {
+                if (child instanceof ExpressionNode)
+                    expressionList.add(child.expression());
+                else
+                    child.analyze(controller);
+            }
+            expressionMap = analyzeGroup(controller, operationType(), expressionList);
         }
 
         @Override
         FilterTree filterTree()
         {
-            return new FilterTree(OperationType.AND, expressionMap);
+            assert expressionMap != null;
+            var tree = new FilterTree(operationType(), expressionMap);
+            for (Node child : children())
+                if (child.canFilter())
+                    tree.addChild(child.filterTree());
+            return tree;
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        Plan.KeysIteration plan(QueryController controller)
         {
-            RangeIterator.Builder builder = controller.getIndexes(OperationType.AND, expressionMap.values());
+            var builder = planBuilder(controller);
+            if (!expressionMap.isEmpty())
+                controller.buildPlanForExpressions(builder, expressionMap.values());
             for (Node child : children)
-            {
-                boolean canFilter = child.canFilter();
-                if (canFilter)
-                    builder.add(child.rangeIterator(controller));
-            }
+                if (child.canFilter())
+                    builder.add(child.plan(controller));
             return builder.build();
+        }
+    }
+
+    public static class AndNode extends OperatorNode
+    {
+        @Override
+        protected OperationType operationType()
+        {
+            return OperationType.AND;
+        }
+
+        @Override
+        protected Plan.Builder planBuilder(QueryController controller)
+        {
+            return controller.planFactory.intersectionBuilder();
         }
     }
 
     public static class OrNode extends OperatorNode
     {
         @Override
-        public void analyze(List<RowFilter.Expression> expressionList, QueryController controller)
+        protected OperationType operationType()
         {
-            expressionMap = analyzeGroup(controller, OperationType.OR, expressionList);
+            return OperationType.OR;
         }
 
         @Override
-        FilterTree filterTree()
+        protected Plan.Builder planBuilder(QueryController controller)
         {
-            return new FilterTree(OperationType.OR, expressionMap);
-        }
-
-        @Override
-        RangeIterator rangeIterator(QueryController controller)
-        {
-            RangeIterator.Builder builder = controller.getIndexes(OperationType.OR, expressionMap.values());
-            for (Node child : children)
-                if (child.canFilter())
-                    builder.add(child.rangeIterator(controller));
-            return builder.build();
+            return controller.planFactory.unionBuilder();
         }
     }
 
@@ -373,14 +423,15 @@ public class Operation
         RowFilter.Expression expression;
 
         @Override
-        public void analyze(List<RowFilter.Expression> expressionList, QueryController controller)
+        public void analyze(QueryController controller)
         {
-            expressionMap = analyzeGroup(controller, OperationType.AND, expressionList);
+            expressionMap = analyzeGroup(controller, OperationType.AND, Collections.singletonList(expression));
         }
 
         @Override
         FilterTree filterTree()
         {
+            assert expressionMap != null;
             return new FilterTree(OperationType.AND, expressionMap);
         }
 
@@ -396,10 +447,42 @@ public class Operation
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        Plan.KeysIteration plan(QueryController controller)
         {
-            assert canFilter();
-            return controller.getIndexes(OperationType.AND, expressionMap.values()).build();
+            assert canFilter() : "Cannot process query with no expressions";
+            Plan.Builder builder = controller.planFactory.intersectionBuilder();
+            controller.buildPlanForExpressions(builder, expressionMap.values());
+            return builder.build();
         }
     }
+
+    public static class EmptyNode extends Node
+    {
+        // A FilterTree that filters out all rows
+        private static final FilterTree EMPTY_TREE = new FilterTree(OperationType.OR, ArrayListMultimap.create());
+
+        @Override
+        boolean canFilter()
+        {
+            return true;
+        }
+
+        @Override
+        void analyze(QueryController controller)
+        {
+        }
+
+        @Override
+        FilterTree filterTree()
+        {
+            return EMPTY_TREE;
+        }
+
+        @Override
+        Plan.KeysIteration plan(QueryController controller)
+        {
+            return controller.planFactory.nothing;
+        }
+    }
+
 }

@@ -44,6 +44,7 @@ public class MicrometerCacheMetrics extends MicrometerMetrics implements CacheMe
     private volatile Counter misses;
     private volatile Counter hits;
     private volatile Counter requests;
+    private volatile double totalRequestsLastUpdate;
 
     public MicrometerCacheMetrics(String metricsPrefix, CacheSize cache)
     {
@@ -75,7 +76,7 @@ public class MicrometerCacheMetrics extends MicrometerMetrics implements CacheMe
     @Override
     public long requests()
     {
-        return (long) requests.count();
+        return (long) (misses.count() + hits.count());
     }
 
     @Override
@@ -142,7 +143,6 @@ public class MicrometerCacheMetrics extends MicrometerMetrics implements CacheMe
     public void recordHits(int count)
     {
         hits.increment(count);
-        requests.increment(count);
         updateHitRate();
     }
 
@@ -150,20 +150,24 @@ public class MicrometerCacheMetrics extends MicrometerMetrics implements CacheMe
     public void recordMisses(int count)
     {
         misses.increment(count);
-        requests.increment(count);
         updateHitRate();
     }
 
     private void updateHitRate()
     {
         long lastUpdate = hitRateUpdateTime.get();
-        if (ApproximateTime.nanoTime() - lastUpdate > hitRateUpdateIntervalNanos)
+        long now = ApproximateTime.nanoTime();
+        if (now - lastUpdate > hitRateUpdateIntervalNanos)
         {
-            if (hitRateUpdateTime.compareAndSet(lastUpdate, ApproximateTime.nanoTime()))
+            if (hitRateUpdateTime.compareAndSet(lastUpdate, now))
             {
-                double numRequests = requests.count();
+                double hitCount = hits.count();
+                double numRequests = hitCount + misses.count();
+                double delta = numRequests - totalRequestsLastUpdate;
+                requests.increment(delta);
+                totalRequestsLastUpdate = numRequests;
                 if (numRequests > 0)
-                    hitRate.update(hits.count() / numRequests);
+                    hitRate.update(hitCount / numRequests);
                 else
                     hitRate.update(0);
             }

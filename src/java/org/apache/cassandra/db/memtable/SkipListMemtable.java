@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.memtable;
 
-import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
@@ -45,6 +44,7 @@ import org.apache.cassandra.db.partitions.BTreePartitionData;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -75,6 +75,14 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     private final ConcurrentNavigableMap<PartitionPosition, AtomicBTreePartition> partitions = new ConcurrentSkipListMap<>();
 
     private final AtomicLong liveDataSize = new AtomicLong(0);
+
+    /**
+     * Keeps an estimate of the average row size in this memtable, computed from a small sample of rows.
+     * Because computing this estimate is potentially costly, as it requires iterating the rows,
+     * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
+     * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
+     */
+    private volatile MemtableAverageRowSize estimatedAverageRowSize;
 
     SkipListMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
@@ -171,6 +179,15 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         return partitions.size();
     }
 
+    @Override
+    public long getEstimatedAverageRowSize()
+    {
+        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
+            estimatedAverageRowSize = new MemtableAverageRowSize(this);
+        return estimatedAverageRowSize.rowSize;
+    }
+
+
     public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter,
                                                                      final DataRange dataRange)
     {
@@ -219,6 +236,24 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     public Partition getPartition(DecoratedKey key)
     {
         return partitions.get(key);
+    }
+
+    @Override
+    public DecoratedKey minPartitionKey()
+    {
+        Map.Entry<PartitionPosition, AtomicBTreePartition> entry = partitions.firstEntry();
+        return (entry != null)
+               ? entry.getValue().partitionKey()
+               : null;
+    }
+
+    @Override
+    public DecoratedKey maxPartitionKey()
+    {
+        Map.Entry<PartitionPosition, AtomicBTreePartition> entry = partitions.lastEntry();
+        return (entry != null)
+            ? entry.getValue().partitionKey()
+            : null;
     }
 
     private static int estimateRowOverhead(final int count)

@@ -32,14 +32,21 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.index.sai.disk.EmptyIndex;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * SSTableIndex is created for each column index on individual sstable to track per-column indexer.
@@ -79,6 +86,11 @@ public class SSTableIndex
         return sstableContext;
     }
 
+    public List<Segment> getSegments()
+    {
+        return searchableIndex.getSegments();
+    }
+
     public long indexFileCacheSize()
     {
         return searchableIndex.indexFileCacheSize();
@@ -93,11 +105,19 @@ public class SSTableIndex
     }
 
     /**
-     * @return total size of per-column index components, in bytes
+     * @return total size of per-column SAI components, in bytes
      */
     public long sizeOfPerColumnComponents()
     {
         return sstableContext.indexDescriptor.sizeOnDiskOfPerIndexComponents(indexContext);
+    }
+
+    /**
+     * @return total size of per-sstable SAI components, in bytes
+     */
+    public long sizeOfPerSSTableComponents()
+    {
+        return sstableContext.indexDescriptor.sizeOnDiskOfPerSSTableComponents();
     }
 
     /**
@@ -136,12 +156,38 @@ public class SSTableIndex
         return searchableIndex.maxKey();
     }
 
-    public List<RangeIterator> search(Expression expression,
-                                      AbstractBounds<PartitionPosition> keyRange,
-                                      SSTableQueryContext context,
-                                      boolean defer) throws IOException
+    public RangeIterator search(Expression expression,
+                                AbstractBounds<PartitionPosition> keyRange,
+                                QueryContext context,
+                                boolean defer,
+                                int limit) throws IOException
     {
-        return searchableIndex.search(expression, keyRange, context, defer);
+        if (expression.getOp().isNonEquality())
+        {
+            // For NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE we return everything minus the keys matching
+            // the expression.
+            //
+            // keys k such that row(k) not contains v = (all keys) \ (keys k such that row(k) contains v)
+            //
+            // Note that we will not match rows in other indexes,
+            // so this can return false positives, but they are not a problem as post-filtering would get rid of them.
+            // We could not safely substract the keys matched in other indexes as indexes may contain false positives
+            // caused by deletes and updates.
+            Expression negExpression = expression.negated();
+            RangeIterator allKeys = allSSTableKeys(keyRange);
+            RangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer, Integer.MAX_VALUE);
+            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
+        }
+
+        return searchableIndex.search(expression, keyRange, context, defer, limit);
+    }
+
+    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
+                                                             AbstractBounds<PartitionPosition> keyRange,
+                                                             QueryContext context,
+                                                             int limit) throws IOException
+    {
+        return searchableIndex.orderBy(expression, keyRange, context, limit);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)
@@ -151,12 +197,12 @@ public class SSTableIndex
 
     public Version getVersion()
     {
-        return sstableContext.indexDescriptor.version;
+        return sstableContext.indexDescriptor.getVersion(indexContext);
     }
 
     public IndexFeatureSet indexFeatureSet()
     {
-        return sstableContext.indexDescriptor.version.onDiskFormat().indexFeatureSet();
+        return getVersion().onDiskFormat().indexFeatureSet();
     }
 
     public SSTableReader getSSTable()
@@ -181,6 +227,11 @@ public class SSTableIndex
     public boolean isReleased()
     {
         return references.get() <= 0;
+    }
+
+    public boolean isEmpty()
+    {
+        return searchableIndex instanceof EmptyIndex;
     }
 
     public void release()
@@ -222,6 +273,11 @@ public class SSTableIndex
         return Objects.hashCode(sstableContext, indexContext);
     }
 
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    {
+        return searchableIndex.orderResultsBy(context, keys, exp, limit);
+    }
+
     public String toString()
     {
         return MoreObjects.toStringHelper(this)
@@ -229,5 +285,10 @@ public class SSTableIndex
                           .add("sstable", sstable.descriptor)
                           .add("totalRows", sstable.getTotalRows())
                           .toString();
+    }
+
+    protected final RangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange) throws IOException
+    {
+        return PrimaryKeyMapIterator.create(sstableContext, keyRange);
     }
 }

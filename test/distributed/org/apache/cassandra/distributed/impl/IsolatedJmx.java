@@ -40,7 +40,7 @@ import org.apache.cassandra.utils.JMXServerUtils;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.RMIClientSocketFactoryImpl;
 import org.apache.cassandra.utils.ReflectionUtils;
-import sun.rmi.transport.tcp.TCPEndpoint;
+//import sun.rmi.transport.tcp.TCPEndpoint;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.JAVA_RMI_DGC_LEASE_VALUE_IN_JVM_DTEST;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION;
@@ -207,7 +207,7 @@ public class IsolatedJmx
         // The TCPEndpoint class holds references to a class in the in-jvm dtest framework
         // which transitively has a reference to the InstanceClassLoader, so we need to
         // make sure to remove the reference to them when the instance is shutting down
-        clearMapField(TCPEndpoint.class, null, "localEndpoints");
+//        clearMapField(TCPEndpoint.class, null, "localEndpoints");
         Thread.sleep(2 * RMI_KEEPALIVE_TIME); // Double the keep-alive time to give Distributed GC some time to clean up
     }
 

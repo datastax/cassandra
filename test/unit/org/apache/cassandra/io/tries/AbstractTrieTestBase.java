@@ -18,23 +18,70 @@
 
 package org.apache.cassandra.io.tries;
 
-import java.io.DataOutput;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.function.BiFunction;
 
 import org.junit.Before;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.LEGACY;
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
+
+@RunWith(Parameterized.class)
 abstract public class AbstractTrieTestBase
 {
+    @Parameterized.Parameter(0)
+    public static TestClass writerClass;
+
+    @Parameterized.Parameter(1)
+    public static ByteComparable.Version version;
+
+    enum TestClass
+    {
+        SIMPLE((trieSerializer, dest) -> new IncrementalTrieWriterSimple(trieSerializer, dest, version)),
+        PAGE_AWARE((trieSerializer, dest) -> new IncrementalTrieWriterPageAware(trieSerializer, dest, version)),
+        PAGE_AWARE_DEEP_ON_STACK((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 256, version)),
+        PAGE_AWARE_DEEP_ON_HEAP((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 0, version)),
+        PAGE_AWARE_DEEP_MIXED((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 2, version));
+
+        final BiFunction<TrieSerializer<Integer, DataOutputPlus>, DataOutputPlus, IncrementalTrieWriter<Integer>> constructor;
+        TestClass(BiFunction<TrieSerializer<Integer, DataOutputPlus>, DataOutputPlus, IncrementalTrieWriter<Integer>> constructor)
+        {
+            this.constructor = constructor;
+        }
+    }
+
+    @Parameterized.Parameters(name = "{index}: trie writer class={0}, encoding={1}")
+    public static Collection<Object[]> data()
+    {
+        return Arrays.asList(new Object[]{ TestClass.SIMPLE, LEGACY },
+                             new Object[]{ TestClass.PAGE_AWARE, LEGACY },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_STACK, LEGACY },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_HEAP, LEGACY },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_MIXED, LEGACY },
+                             new Object[]{ TestClass.SIMPLE, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_STACK, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_HEAP, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_MIXED, OSS41 });
+    }
+
     protected final static Logger logger = LoggerFactory.getLogger(TrieBuilderTest.class);
     protected final static int BASE = 80;
 
@@ -48,18 +95,28 @@ abstract public class AbstractTrieTestBase
         payloadSize = 0;
     }
 
-    protected final TrieSerializer<Integer, DataOutput> serializer = new TrieSerializer<Integer, DataOutput>()
+    IncrementalTrieWriter<Integer> newTrieWriter(TrieSerializer<Integer, DataOutputPlus> serializer, DataOutputPlus out)
     {
+        return writerClass.constructor.apply(serializer, out);
+    }
+
+    protected final TrieSerializer<Integer, DataOutputPlus> serializer = new TrieSerializer<Integer, DataOutputPlus>()
+    {
+        @Override
         public int sizeofNode(SerializationNode<Integer> node, long nodePosition)
         {
             return TrieNode.typeFor(node, nodePosition).sizeofNode(node) + payloadSize;
         }
 
-        public void write(DataOutput dataOutput, SerializationNode<Integer> node, long nodePosition) throws IOException
+        @Override
+        public void write(DataOutputPlus dataOutput, SerializationNode<Integer> node, long nodePosition) throws IOException
         {
             if (dump)
                 logger.info("Writing at {} type {} size {}: {}", Long.toHexString(nodePosition), TrieNode.typeFor(node, nodePosition), TrieNode.typeFor(node, nodePosition).sizeofNode(node), node);
+            // Our payload value is an integer of four bits.
+            // We use the payload bits in the trie node header to fully store it.
             TrieNode.typeFor(node, nodePosition).serialize(dataOutput, node, node.payload() != null ? node.payload() : 0, nodePosition);
+            // and we also add some padding if a test needs it
             dataOutput.write(new byte[payloadSize]);
         }
     };
@@ -72,11 +129,25 @@ abstract public class AbstractTrieTestBase
 
     protected ByteComparable source(String s)
     {
+        if (s == null)
+            return null;
         ByteBuffer buf = ByteBuffer.allocate(s.length());
         for (int i = 0; i < s.length(); ++i)
             buf.put((byte) s.charAt(i));
         buf.rewind();
         return ByteComparable.fixedLength(buf);
+    }
+
+    protected String decodeSource(ByteComparable source)
+    {
+        if (source == null)
+            return null;
+        StringBuilder sb = new StringBuilder();
+        ByteComparable.Version version = OSS41;
+        ByteSource.Peekable stream = source.asPeekableBytes(version);
+        for (int b = stream.next(); b != ByteSource.END_OF_STREAM; b = stream.next())
+            sb.append((char) b);
+        return sb.toString();
     }
 
     protected String toBase(long v)
@@ -87,16 +158,19 @@ abstract public class AbstractTrieTestBase
     // In-memory buffer with added paging parameters, to make sure the code below does the proper layout
     protected static class DataOutputBufferPaged extends DataOutputBuffer
     {
+        @Override
         public int maxBytesInPage()
         {
             return PageAware.PAGE_SIZE;
         }
 
+        @Override
         public void padToPageBoundary() throws IOException
         {
             PageAware.pad(this);
         }
 
+        @Override
         public int bytesLeftInPage()
         {
             long position = position();
@@ -104,22 +178,10 @@ abstract public class AbstractTrieTestBase
             return (int) bytesLeft;
         }
 
+        @Override
         public long paddedPosition()
         {
             return PageAware.padded(position());
-        }
-    }
-
-    protected static class InternalIterator extends ValueIterator<InternalIterator>
-    {
-        public InternalIterator(Rebufferer source, long root)
-        {
-            super(source, root);
-        }
-
-        public InternalIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix)
-        {
-            super(source, root, start, end, admitPrefix);
         }
     }
 
@@ -142,6 +204,12 @@ abstract public class AbstractTrieTestBase
         public ByteBuffer buffer()
         {
             return buffer;
+        }
+
+        @Override
+        public ByteOrder order()
+        {
+            return buffer.order();
         }
 
         @Override

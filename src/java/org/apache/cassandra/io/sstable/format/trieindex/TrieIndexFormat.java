@@ -26,6 +26,10 @@ import java.util.UUID;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -48,6 +52,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
 import static org.apache.cassandra.io.sstable.SSTable.componentsFor;
@@ -197,8 +202,8 @@ public class TrieIndexFormat implements SSTableFormat
 
                 try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
                      FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
-                     FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc).compressed(compressedData);
-                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
+                     FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc, stats.zeroCopyMetadata).compressed(compressedData);
+                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, stats.zeroCopyMetadata, desc.version.getByteComparableVersion());
                      FileHandle dFile = dBuilder.complete();
                      FileHandle riFile = riBuilder.complete())
                 {
@@ -289,7 +294,15 @@ public class TrieIndexFormat implements SSTableFormat
     //
     static class TrieIndexVersion extends Version
     {
-        public static final String current_version = "cb";
+        private static final Logger logger = LoggerFactory.getLogger(TrieIndexVersion.class);
+
+        public static final String current_version = CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getString();
+
+        static
+        {
+            logger.info("Trie index format current version: {}", current_version);
+        }
+
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format
@@ -323,6 +336,8 @@ public class TrieIndexFormat implements SSTableFormat
         private final int correspondingMessagingVersion;
         private final boolean hasExplicitlyFrozenTuples;
 
+        private final ByteComparable.Version byteComparableVersion;
+
         TrieIndexVersion(String version)
         {
             super(instance, version = mapAb(version));
@@ -334,6 +349,7 @@ public class TrieIndexFormat implements SSTableFormat
             hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
             correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_SG_10 : MessagingService.VERSION_3014;
             hasExplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include explicitly frozen tuples
+            byteComparableVersion = version.compareTo("ca") >= 0 ? ByteComparable.Version.OSS41 : ByteComparable.Version.LEGACY;
         }
 
         // this is for the ab version which was used in the LABS, and then has been renamed to ba
@@ -464,6 +480,12 @@ public class TrieIndexFormat implements SSTableFormat
         public boolean hasImplicitlyFrozenTuples()
         {
             return hasExplicitlyFrozenTuples;
+        }
+
+        @Override
+        public ByteComparable.Version getByteComparableVersion()
+        {
+            return byteComparableVersion;
         }
     }
 }

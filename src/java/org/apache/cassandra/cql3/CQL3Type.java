@@ -25,15 +25,18 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.CQLTypeParser;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -53,6 +56,11 @@ public interface CQL3Type
         return false;
     }
 
+    default boolean isVector()
+    {
+        return false;
+    }
+
     AbstractType<?> getType();
 
     /**
@@ -63,6 +71,21 @@ public interface CQL3Type
      */
     String toCQLLiteral(ByteBuffer bytes, ProtocolVersion version);
 
+    /**
+     * Generates a binary value for the CQL literal of this type
+     */
+    default ByteBuffer fromCQLLiteral(String literal)
+    {
+        return fromCQLLiteral(SchemaConstants.DUMMY_KEYSPACE_OR_TABLE_NAME, literal);
+    }
+
+    /**
+     * Generates a binary value for the CQL literal of this type
+     */
+    default ByteBuffer fromCQLLiteral(String keyspaceName, String literal)
+    {
+        return Terms.asBytes(keyspaceName, literal, getType());
+    }
 
     /**
      * Generates the string representation of this type, with options regarding the addition of frozen.
@@ -114,7 +137,7 @@ public interface CQL3Type
         return toString(false, true);
     }
 
-    enum Native implements CQL3Type
+    public enum Native implements CQL3Type
     {
         ASCII       (AsciiType.instance),
         BIGINT      (LongType.instance),
@@ -585,6 +608,66 @@ public interface CQL3Type
         }
     }
 
+    public static class Vector implements CQL3Type
+    {
+        private final VectorType<?> type;
+
+        public Vector(VectorType<?> type)
+        {
+            this.type = type;
+        }
+
+        public Vector(AbstractType<?> type, int dimensions)
+        {
+            this.type = VectorType.getInstance(type, dimensions);
+        }
+
+        public boolean isVector()
+        {
+            return true;
+        }
+
+        @Override
+        public VectorType<?> getType()
+        {
+            return type;
+        }
+
+        @Override
+        public String toCQLLiteral(ByteBuffer buffer, ProtocolVersion version)
+        {
+            if (buffer == null)
+                return "null";
+            buffer = buffer.duplicate();
+            CQL3Type elementType = type.elementType.asCQL3Type();
+            List<ByteBuffer> values = getType().split(buffer);
+            StringBuilder sb = new StringBuilder();
+            sb.append('[');
+            for (int i = 0; i < values.size(); i++)
+            {
+                if (i > 0)
+                    sb.append(", ");
+                sb.append(elementType.toCQLLiteral(values.get(i), version));
+            }
+            sb.append(']');
+            return sb.toString();
+        }
+
+        @Override
+        public String toString(boolean alreadyFrozen, boolean forceFrozen)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.append("vector<").append(type.elementType.asCQL3Type()).append(", ").append(type.dimension).append('>');
+            return sb.toString();
+        }
+
+        @Override
+        public String toString()
+        {
+            return toString(false, false);
+        }
+    }
+
     // For UserTypes, we need to know the current keyspace to resolve the
     // actual type used, so Raw is a "not yet prepared" CQL3Type.
     abstract class Raw
@@ -601,6 +684,11 @@ public interface CQL3Type
         public boolean isFrozen()
         {
             return this.frozen;
+        }
+
+        public boolean isImplicitlyFrozen()
+        {
+            return isTuple() || isVector();
         }
 
         public boolean isDuration()
@@ -623,6 +711,11 @@ public interface CQL3Type
             return false;
         }
 
+        public boolean isVector()
+        {
+            return false;
+        }
+
         public String keyspace()
         {
             return null;
@@ -635,6 +728,8 @@ public interface CQL3Type
             String message = String.format("frozen<> is only allowed on collections, tuples, and user-defined types (got %s)", this);
             throw new InvalidRequestException(message);
         }
+
+        public abstract void validate(QueryState state, String name);
 
         /**
          * Prepare this raw type given the current keyspace to obtain a proper {@link CQL3Type}.
@@ -715,6 +810,11 @@ public interface CQL3Type
             return type != null && type.supportsFreezing() ? type.freeze() : type;
         }
 
+        public static Raw vector(CQL3Type.Raw t, int dimention)
+        {
+            return new RawVector(t, dimention);
+        }
+
         private static class RawType extends Raw
         {
             private final CQL3Type type;
@@ -726,7 +826,16 @@ public interface CQL3Type
             }
 
             @Override
-            public CQL3Type prepare(String keyspace, Types udts)
+            public void validate(QueryState state, String name)
+            {
+                if (type.isVector())
+                {
+                    int dimensions = ((Vector) type).getType().dimension;
+                    Guardrails.vectorDimensions.guard(dimensions, name, false, state);
+                }
+            }
+
+            public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
             {
                 return type;
             }
@@ -787,6 +896,12 @@ public interface CQL3Type
             }
 
             @Override
+            public void validate(QueryState state, String name)
+            {
+
+            }
+
+            @Override
             public CQL3Type prepare(String keyspace, Types udts)
             {
                 AbstractType<?> type = TypeParser.parse(className);
@@ -834,7 +949,21 @@ public interface CQL3Type
                 return true;
             }
 
+            public boolean isCollection()
+            {
+                return true;
+            }
+
             @Override
+            public void validate(QueryState state, String name)
+            {
+                if (keys != null)
+                    keys.validate(state, name);
+
+                if (values != null)
+                    values.validate(state, name);
+            }
+
             public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
             {
                 return prepare(keyspace, udts, false);
@@ -923,6 +1052,11 @@ public interface CQL3Type
             }
 
             @Override
+            public void validate(QueryState state, String name)
+            {
+                // nothing to do here
+            }
+
             public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
             {
                 if (name.hasKeyspace())
@@ -1002,6 +1136,12 @@ public interface CQL3Type
             }
 
             @Override
+            public void validate(QueryState state, String name)
+            {
+                for (CQL3Type.Raw t : types)
+                    t.validate(state, name);
+            }
+
             public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
             {
                 // Externally, tuples are frozen by default, so should always be frozen. But because we store UDTs as
@@ -1052,6 +1192,62 @@ public interface CQL3Type
                 }
                 sb.append('>');
                 return sb.toString();
+            }
+        }
+
+        private static class RawVector extends Raw
+        {
+            private final CQL3Type.Raw element;
+            private final int dimensions;
+
+            private RawVector(Raw element, int dimensions)
+            {
+                super(true);
+                this.element = element;
+                this.dimensions = dimensions;
+            }
+
+            @Override
+            public boolean isVector()
+            {
+                return true;
+            }
+
+            @Override
+            public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
+            {
+                // noop
+            }
+
+            @Override
+            public boolean supportsFreezing()
+            {
+                return false;
+            }
+
+            @Override
+            public boolean isFrozen()
+            {
+                return true;
+            }
+
+            @Override
+            public Raw freeze()
+            {
+                return super.freeze();
+            }
+
+            @Override
+            public void validate(QueryState state, String name)
+            {
+                Guardrails.vectorDimensions.guard(dimensions, name, false, state);
+            }
+
+            @Override
+            public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
+            {
+                CQL3Type type = element.prepare(keyspace, udts);
+                return new Vector(type.getType(), dimensions);
             }
         }
     }

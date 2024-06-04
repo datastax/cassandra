@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.view;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -57,7 +58,9 @@ public class View implements Iterable<SSTableIndex>
         for (SSTableIndex sstableIndex : indexes)
         {
             this.view.put(sstableIndex.getSSTable().descriptor, sstableIndex);
-            termTreeBuilder.add(sstableIndex);
+            if (!sstableIndex.getIndexContext().isVector())
+                termTreeBuilder.add(sstableIndex);
+
             keyIntervals.add(Interval.create(new Key(sstableIndex.minKey()),
                                              new Key(sstableIndex.maxKey()),
                                              sstableIndex));
@@ -67,8 +70,16 @@ public class View implements Iterable<SSTableIndex>
         this.keyIntervalTree = IntervalTree.build(keyIntervals);
     }
 
+    /**
+     * Search for a list of {@link SSTableIndex}es that contain values within
+     * the value range requested in the {@link Expression}
+     */
     public Set<SSTableIndex> match(Expression expression)
     {
+        if (expression.getOp() == Expression.Op.ANN
+                || expression.getOp() == Expression.Op.BOUNDED_ANN
+                || expression.getOp().isNonEquality())
+            return new HashSet<>(getIndexes());
         return termTree.search(expression);
     }
 
@@ -112,6 +123,12 @@ public class View implements Iterable<SSTableIndex>
 
         public int compareTo(Key o)
         {
+            if (key == null && o.key == null)
+                return 0;
+            if (key == null)
+                return -1;
+            if (o.key == null)
+                return 1;
             return key.compareTo(o.key);
         }
     }

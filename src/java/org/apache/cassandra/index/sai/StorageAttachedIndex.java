@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -40,6 +41,7 @@ import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
@@ -47,10 +49,16 @@ import com.google.common.util.concurrent.ListenableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.cql3.restrictions.Restriction;
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.CassandraWriteContext;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -66,6 +74,7 @@ import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
@@ -99,18 +108,18 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR;
+import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K;
 
 public class StorageAttachedIndex implements Index
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
-    /**
-     * By default, disable max-term-size validation at coordinator to avoid perf regression, thus no client warning will be sent to driver.
-     * Unindexable term will still be ignored by memtable index at writer side.
-     */
-    private static final boolean VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR =
-        CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getBoolean(false);
+    private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
 
     private static class StorageAttachedIndexBuildingSupport implements IndexBuildingSupport
     {
@@ -134,7 +143,7 @@ public class StorageAttachedIndex implements Index
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
-                                                          .filter(s -> !IndexDescriptor.create(s).isPerIndexBuildComplete(indexContext))
+                                                          .filter(s -> !IndexDescriptor.createFrom(s).isPerIndexBuildComplete(indexContext))
                                                           .collect(Collectors.toList());
                                 }
 
@@ -194,9 +203,15 @@ public class StorageAttachedIndex implements Index
                                                                      IndexTarget.CUSTOM_INDEX_OPTION_NAME,
                                                                      IndexWriterConfig.POSTING_LIST_LVL_MIN_LEAVES,
                                                                      IndexWriterConfig.POSTING_LIST_LVL_SKIP_OPTION,
+                                                                     IndexWriterConfig.MAXIMUM_NODE_CONNECTIONS,
+                                                                     IndexWriterConfig.CONSTRUCTION_BEAM_WIDTH,
+                                                                     IndexWriterConfig.SIMILARITY_FUNCTION,
+                                                                     IndexWriterConfig.SOURCE_MODEL,
+                                                                     IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
                                                                      LuceneAnalyzer.QUERY_ANALYZER);
 
+    // this does not include vectors because each Vector declaration is a separate type instance
     public static final Set<CQL3Type> SUPPORTED_TYPES = ImmutableSet.of(CQL3Type.Native.ASCII, CQL3Type.Native.BIGINT, CQL3Type.Native.DATE,
                                                                         CQL3Type.Native.DOUBLE, CQL3Type.Native.FLOAT, CQL3Type.Native.INT,
                                                                         CQL3Type.Native.SMALLINT, CQL3Type.Native.TEXT, CQL3Type.Native.TIME,
@@ -217,6 +232,9 @@ public class StorageAttachedIndex implements Index
     // Tracks whether the index has been invalidated due to removal, a table drop, etc.
     private volatile boolean valid = true;
 
+    /**
+     * Called via reflection from SecondaryIndexManager
+     */
     public StorageAttachedIndex(ColumnFamilyStore baseCfs, IndexMetadata config)
     {
         this.baseCfs = baseCfs;
@@ -291,7 +309,19 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Cannot create more than one storage-attached index on the same column: " + target.left);
         }
 
+        // Analyzer is not supported against PK columns
+        if (AbstractAnalyzer.isAnalyzed(options))
+        {
+            for (ColumnMetadata column : metadata.primaryKeyColumns())
+            {
+                if (column.name.equals(target.left.name))
+                    throw new InvalidRequestException("Cannot specify index analyzer on primary key column: " + target.left);
+            }
+        }
+
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
+        AbstractAnalyzer.fromOptions(type, options); // will throw if invalid
+        var config = IndexWriterConfig.fromOptions(null, type, options);
 
         // If we are indexing map entries we need to validate the sub-types
         if (TypeUtil.isComposite(type))
@@ -299,16 +329,36 @@ public class StorageAttachedIndex implements Index
             for (AbstractType<?> subType : type.subTypes())
             {
                 if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()) && !TypeUtil.isFrozen(subType))
-                    throw new InvalidRequestException("Unsupported type: " + subType.asCQL3Type());
+                    throw new InvalidRequestException("Unsupported composite type for SAI: " + subType.asCQL3Type());
+            }
+        }
+        else if (type.isVector())
+        {
+            if (type.valueLengthIfFixed() == 4 && config.getSimilarityFunction() == VectorSimilarityFunction.COSINE)
+                throw new InvalidRequestException("Cosine similarity is not supported for single-dimension vectors");
+
+            // vectors of fixed length types are fixed length too, so we can reject the index creation
+            // if that fixed length is over the max term size for vectors
+            if (type.isValueLengthFixed() && IndexContext.MAX_VECTOR_TERM_SIZE < type.valueLengthIfFixed())
+            {
+                AbstractType<?> elementType = ((VectorType<?>) type).elementType;
+                var error = String.format("Vector index created with %s will produce terms of %s, " +
+                                          "exceeding the max vector term size of %s. " +
+                                          "That sets an implicit limit of %d dimensions for %s vectors.",
+                                          type.asCQL3Type(),
+                                          FBUtilities.prettyPrintMemory(type.valueLengthIfFixed()),
+                                          FBUtilities.prettyPrintMemory(IndexContext.MAX_VECTOR_TERM_SIZE),
+                                          IndexContext.MAX_VECTOR_TERM_SIZE / elementType.valueLengthIfFixed(),
+                                          elementType.asCQL3Type());
+                // VSTODO until we can safely differentiate client and system requests, we can only log here
+                // Ticket for this: https://github.com/riptano/VECTOR-SEARCH/issues/85
+                logger.warn(error);
             }
         }
         else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozen(type))
         {
-            throw new InvalidRequestException("Unsupported type: " + type.asCQL3Type());
+            throw new InvalidRequestException("Unsupported type for SAI: " + type.asCQL3Type());
         }
-
-        AbstractAnalyzer.fromOptions(type, options);
-        IndexWriterConfig.fromOptions(null, type, options);
 
         return Collections.emptyMap();
     }
@@ -549,10 +599,15 @@ public class StorageAttachedIndex implements Index
     public Callable<?> getTruncateTask(long truncatedAt)
     {
         /*
-         * index files will be removed as part of base sstable lifecycle in
-         * {@link LogTransaction#delete(java.io.File)} asynchronously.
+         * index files will be removed as part of base sstable lifecycle in {@link LogTransaction#delete(java.io.File)}
+         * asynchronously, but we need to mark the index queryable because if the truncation is during the initial
+         * build of the index it won't get marked queryable by the build.
          */
-        return null;
+        return () -> {
+            logger.info(indexContext.logMessage("Making index queryable during table truncation"));
+            baseCfs.indexManager.makeIndexQueryable(this, Status.BUILD_SUCCEEDED);
+            return null;
+        };
     }
 
     @Override
@@ -593,6 +648,52 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public void postQuerySort(ResultSet cqlRows, Restriction restriction, int columnIndex, QueryOptions options)
+    {
+        // For now, only support ANN
+        assert restriction instanceof SingleColumnRestriction.AnnRestriction;
+
+        Preconditions.checkState(indexContext.isVector());
+
+        SingleColumnRestriction.AnnRestriction annRestriction = (SingleColumnRestriction.AnnRestriction) restriction;
+        VectorSimilarityFunction similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+
+        var targetVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate()));
+
+        List<List<ByteBuffer>> buffRows = cqlRows.rows;
+        // Decorate-sort-undecorate to optimize sorting of vectors by their similarity scores
+        List<Pair<List<ByteBuffer>, Double>> listPairsVectorsScores = buffRows.stream()
+                                                                              .map(row -> {
+                                                                                  ByteBuffer vectorBuffer = row.get(columnIndex);
+                                                                                  var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate()));
+                                                                                  Double score = (double) similarityFunction.compare(vector, targetVector);
+                                                                                  return Pair.create(row, score);
+                                                                              })
+                                                                              .collect(Collectors.toList());
+        listPairsVectorsScores.sort(Comparator.comparing(pair -> pair.right, Comparator.reverseOrder()));
+        List<List<ByteBuffer>> sortedRows = listPairsVectorsScores.stream()
+                                                                  .map(pair -> pair.left)
+                                                                  .collect(Collectors.toList());
+
+        cqlRows.rows = sortedRows;
+    }
+
+    @Override
+    public void validate(ReadCommand command) throws InvalidRequestException
+    {
+        var indexQueryPlan = command.indexQueryPlan();
+        if (indexQueryPlan == null || !indexQueryPlan.isTopK())
+            return;
+
+        // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k
+        if (command.limits().isUnlimited() || command.limits().count() > MAX_TOP_K)
+            throw new InvalidRequestException(String.format("Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
+                                                            MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
+
+        indexContext.validate(command.rowFilter());
+    }
+
+    @Override
     public long getEstimatedResultRows()
     {
         throw new UnsupportedOperationException("Use StorageAttachedIndexQueryPlan#getEstimatedResultRows() instead.");
@@ -607,12 +708,12 @@ public class StorageAttachedIndex implements Index
     @Override
     public void validate(PartitionUpdate update) throws InvalidRequestException
     {
-        if (!VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR)
+        if (!VALIDATE_TERMS_AT_COORDINATOR)
             return;
 
         DecoratedKey key = update.partitionKey();
         for (Row row : update)
-            indexContext.validateMaxTermSizeForRow(key, row, true);
+            indexContext.validate(key, row);
     }
 
     /**
@@ -640,7 +741,7 @@ public class StorageAttachedIndex implements Index
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
             if (!view.containsSSTable(sstable) && !sstable.isMarkedCompacted() &&
-                !IndexDescriptor.create(sstable).isPerIndexBuildComplete(indexContext))
+                !IndexDescriptor.createFrom(sstable).isPerIndexBuildComplete(indexContext))
             {
                 nonIndexed.add(sstable);
             }
@@ -671,7 +772,7 @@ public class StorageAttachedIndex implements Index
         @Override
         public void updateRow(Row oldRow, Row newRow)
         {
-            insertRow(newRow);
+            indexContext.update(key, oldRow, newRow, mt, CassandraWriteContext.fromContext(writeContext).getGroup());
         }
     }
 
@@ -715,11 +816,11 @@ public class StorageAttachedIndex implements Index
     @Override
     public Set<Component> getComponents()
     {
-        return Version.LATEST.onDiskFormat()
+        return Version.latest().onDiskFormat()
                              .perIndexComponents(indexContext)
                              .stream()
                              .map(c -> new Component(Component.Type.CUSTOM,
-                                                     Version.LATEST.fileNameFormatter().format(c, indexContext)))
+                                                     Version.latest().fileNameFormatter().format(c, indexContext)))
                              .collect(Collectors.toSet());
     }
 

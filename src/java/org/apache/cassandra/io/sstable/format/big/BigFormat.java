@@ -41,6 +41,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
@@ -195,7 +196,7 @@ public class BigFormat implements SSTableFormat
     // we always incremented the major version.
     static class BigVersion extends Version
     {
-        public static final String current_version = "nc";
+        public static final String current_version = "nb";
         public static final String earliest_supported_version = "ma";
 
         // ma (3.0.0): swap bf hash order
@@ -207,7 +208,6 @@ public class BigFormat implements SSTableFormat
 
         // na (4.0-rc1): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
         // nb (4.0.0): originating host id
-        // nc (5.0): token space coverage
         //
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
@@ -249,7 +249,7 @@ public class BigFormat implements SSTableFormat
             hasIsTransient = version.compareTo("na") >= 0;
             hasMetadataChecksum = version.compareTo("na") >= 0;
             hasOldBfFormat = version.compareTo("na") < 0;
-            hasTokenSpaceCoverage = version.compareTo("nc") >= 0;
+            hasTokenSpaceCoverage = false; // token space coverage has been introduced in BIG format in OA, which is introduced in Cassandra 5.0
         }
 
         @Override
@@ -369,6 +369,12 @@ public class BigFormat implements SSTableFormat
         public boolean hasImplicitlyFrozenTuples()
         {
             return false;
+        }
+
+        @Override
+        public ByteComparable.Version getByteComparableVersion()
+        {
+            return ByteComparable.Version.OSS41;
         }
     }
 }

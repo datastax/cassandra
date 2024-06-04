@@ -19,13 +19,16 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import org.apache.cassandra.index.sai.disk.io.RAMIndexOutput;
+import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
 
 @NotThreadSafe
@@ -39,22 +42,24 @@ public class MetadataWriter implements Closeable
         this.output = output;
     }
 
-    public Builder builder(String name)
+    public IndexOutput builder(String name)
     {
-        return new Builder(name);
-    }
-
-    public class Builder extends RAMIndexOutput implements Closeable
-    {
-        private Builder(String name)
-        {
-            super(name);
-        }
-
-        @Override
-        public void close()
-        {
-            map.put(getName(), new BytesRef(out.getBytes(), 0, out.getPosition()));
+        if (output.order() == ByteOrder.BIG_ENDIAN) {
+            return new LegacyResettableByteBuffersIndexOutput(1024, name) {
+                @Override
+                public void close()
+                {
+                    map.put(getName(), new BytesRef(toArrayCopy(), 0, intSize()));
+                }
+            };
+        } else {
+            return new ModernResettableByteBuffersIndexOutput(1024, name) {
+                @Override
+                public void close()
+                {
+                    map.put(getName(), new BytesRef(toArrayCopy(), 0, intSize()));
+                }
+            };
         }
     }
 

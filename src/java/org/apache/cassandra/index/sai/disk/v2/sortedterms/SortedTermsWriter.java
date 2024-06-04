@@ -30,7 +30,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.io.tries.IncrementalDeepTrieWriterPageAware;
+import org.apache.cassandra.io.tries.IncrementalTrieWriter;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -73,7 +73,7 @@ public class SortedTermsWriter implements Closeable
 
     static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
 
-    private final IncrementalDeepTrieWriterPageAware<Long> trieWriter;
+    private final IncrementalTrieWriter<Long> trieWriter;
     private final IndexOutput trieOutput;
     private final IndexOutput termsOutput;
     private final NumericValuesWriter offsetsWriter;
@@ -110,7 +110,7 @@ public class SortedTermsWriter implements Closeable
         this.metadataWriter = metadataWriter;
         this.trieOutput = trieWriter;
         SAICodecUtils.writeHeader(this.trieOutput);
-        this.trieWriter = new IncrementalDeepTrieWriterPageAware<>(trieSerializer, trieWriter.asSequentialWriter());
+        this.trieWriter = IncrementalTrieWriter.open(trieSerializer, trieWriter.asSequentialWriter(), ByteComparable.Version.OSS41);
         SAICodecUtils.writeHeader(termsData);
         this.termsOutput = termsData;
         this.bytesStartFP = termsData.getFilePointer();

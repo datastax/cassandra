@@ -19,38 +19,47 @@ package org.apache.cassandra.index.sai.disk.v1.trie;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Iterator;
 import javax.annotation.concurrent.NotThreadSafe;
-
-import com.google.common.collect.AbstractIterator;
 
 import org.apache.cassandra.io.tries.SerializationNode;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.tries.TrieSerializer;
-import org.apache.cassandra.io.tries.Walker;
+import org.apache.cassandra.io.tries.ValueIterator;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SizedInts;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.lucene.util.ArrayUtil;
 
 /**
  * Page-aware random access reader for a trie terms dictionary written by {@link TrieTermsDictionaryWriter}.
  */
 @NotThreadSafe
-public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
+public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionaryReader> implements Iterator<Pair<ByteComparable, Long>>
 {
     public static final long NOT_FOUND = -1;
 
-    public TrieTermsDictionaryReader(Rebufferer rebufferer, long root)
+    public TrieTermsDictionaryReader(Rebufferer rebufferer, long root, ByteComparable.Version version)
     {
-        super(rebufferer, root);
+        super(rebufferer, root, true, version);
     }
 
-    public static final TrieSerializer<Long, DataOutputPlus> trieSerializer = new TrieSerializer<Long, DataOutputPlus>()
+    /**
+     * Creates a reader for a trie terms dictionary range. See {@link ValueIterator} for details.
+     */
+    public TrieTermsDictionaryReader(Rebufferer source,
+                                     long root,
+                                     ByteComparable start,
+                                     ByteComparable end,
+                                     boolean inclStart,
+                                     ByteComparable.Version version)
+    {
+        super(source, root, start, end, inclStart ? LeftBoundTreatment.ADMIT_EXACT : LeftBoundTreatment.GREATER, true, version);
+    }
+
+    public static final TrieSerializer<Long, DataOutputPlus> trieSerializer = new TrieSerializer<>()
     {
         @Override
         public int sizeofNode(SerializationNode<Long> node, long nodePosition)
@@ -95,77 +104,63 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
         return getCurrentPayload();
     }
 
-    public Iterator<Pair<ByteComparable, Long>> iterator()
+    /**
+     * Returns the position associated with the least term greater than or equal to the given key, or
+     * a negative value if there is no such term. In order to optimize the search, the trie is traversed
+     * statefully. Therefore, this method only returns correct results when called for increasing keys.
+     * Warning: ceiling is not idempotent. Calling ceiling() twice for the same key will return successive
+     * values instead of the same value. This is acceptable for the current usage of the method.
+     * @param key the prefix to traverse in the trie
+     * @return a position, if found, or a negative value if there is no such position
+     */
+    public long ceiling(ByteComparable key)
     {
-        return new AbstractIterator<Pair<ByteComparable, Long>>()
-        {
-            final TransitionBytesCollector collector = new TransitionBytesCollector();
-            IterationPosition stack = new IterationPosition(root, -1, null);
+        skipTo(key, LeftBoundTreatment.ADMIT_EXACT);
+        return nextAsLong();
+    }
 
-            @Override
-            protected Pair<ByteComparable, Long> computeNext()
-            {
-                final long node = advanceNode();
-                if (node == -1)
-                {
-                    return endOfData();
-                }
-                return Pair.create(collector.toByteComparable(), getCurrentPayload());
-            }
+    public long nextAsLong()
+    {
+        return nextValueAsLong(this::getCurrentPayload, NOT_FOUND);
+    }
 
-            private long advanceNode()
-            {
-                long child;
-                int transitionByte;
+    @Override
+    public boolean hasNext()
+    {
+        return super.hasNext();
+    }
 
-                go(stack.node);
-                while (true)
-                {
-                    int childIndex = stack.childIndex + 1;
-                    transitionByte = transitionByte(childIndex);
+    @Override
+    public Pair<ByteComparable, Long> next()
+    {
+        return nextValue(this::getKeyAndPayload);
+    }
 
-                    if (transitionByte > 256)
-                    {
-                        // ascend
-                        stack = stack.prev;
-                        collector.pop();
-                        if (stack == null)
-                        {
-                            // exhausted whole trie
-                            return -1;
-                        }
-                        go(stack.node);
-                        continue;
-                    }
+    private Pair<ByteComparable, Long> getKeyAndPayload()
+    {
+        return Pair.create(collectedKey(), getCurrentPayload());
+    }
 
-                    child = transition(childIndex);
-
-                    if (child != -1)
-                    {
-                        assert child >= 0 : String.format("Expected value >= 0 but got %d - %s", child, this);
-
-                        // descend
-                        go(child);
-
-                        stack.childIndex = childIndex;
-                        stack = new IterationPosition(child, -1, stack);
-                        collector.add(transitionByte);
-
-                        if (payloadFlags() != 0)
-                            return child;
-                    }
-                    else
-                    {
-                        stack.childIndex = childIndex;
-                    }
-                }
-            }
-        };
+    /**
+     * Returns the position associated with the greatest term less than or equal to the given key, or
+     * a negative value if there is no such term.
+     * @param key the prefix to traverse in the trie
+     * @return a position, if found, or a negative value if there is no such position
+     */
+    public long floor(ByteComparable key)
+    {
+        Long result = prefixAndNeighbours(key, TrieTermsDictionaryReader::getPayload);
+        if (result != null && result != NOT_FOUND)
+            return result;
+        if (lesserBranch == -1)
+            return NOT_FOUND;
+        goMax(lesserBranch);
+        return getCurrentPayload();
     }
 
     public ByteComparable getMaxTerm()
     {
-        final TransitionBytesCollector collector = new ImmutableTransitionBytesCollector();
+        final TransitionBytesCollector collector = new TransitionBytesCollector();
         go(root);
         while (true)
         {
@@ -182,7 +177,7 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
 
     public ByteComparable getMinTerm()
     {
-        final TransitionBytesCollector collector = new ImmutableTransitionBytesCollector();
+        final TransitionBytesCollector collector = new TransitionBytesCollector();
         go(root);
         while (true)
         {
@@ -198,87 +193,19 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
 
     private long getCurrentPayload()
     {
-        return getPayload(buf, payloadPosition(), payloadFlags());
+        return getPayload(payloadPosition(), payloadFlags());
     }
 
-    private long getPayload(ByteBuffer contents, int payloadPos, int bytes)
+    private long getPayload(int payloadPos, int bits)
+    {
+        return getPayload(buf, payloadPos, bits);
+    }
+
+    private static long getPayload(ByteBuffer contents, int payloadPos, int bytes)
     {
         if (bytes == 0)
-        {
             return NOT_FOUND;
-        }
+
         return SizedInts.read(contents, payloadPos, bytes);
-    }
-
-    public static class ImmutableTransitionBytesCollector extends TransitionBytesCollector
-    {
-        @Override
-        public ByteComparable toByteComparable()
-        {
-            assert pos > 0;
-            final int length = pos;
-            return v -> ByteSource.fixedLength(bytes, 0, length);
-        }
-
-        @Override
-        public void pop()
-        {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    public static class TransitionBytesCollector
-    {
-        protected byte[] bytes = new byte[32];
-        protected int pos = 0;
-
-        public void add(int b)
-        {
-            if (pos == bytes.length)
-            {
-                bytes = ArrayUtil.grow(bytes, pos + 1);
-            }
-            bytes[pos++] = (byte) b;
-        }
-
-        public void pop()
-        {
-            assert pos >= 0;
-            pos--;
-        }
-
-        public ByteComparable toByteComparable()
-        {
-            assert pos > 0;
-            final byte[] value = new byte[pos];
-            System.arraycopy(bytes, 0, value, 0, pos);
-            return v -> ByteSource.fixedLength(value, 0, value.length);
-        }
-
-        @Override
-        public String toString()
-        {
-            return String.format("[Bytes %s, pos %d]", Arrays.toString(bytes), pos);
-        }
-    }
-
-    private static class IterationPosition
-    {
-        final long node;
-        final IterationPosition prev;
-        int childIndex;
-
-        IterationPosition(long node, int childIndex, IterationPosition prev)
-        {
-            this.node = node;
-            this.childIndex = childIndex;
-            this.prev = prev;
-        }
-
-        @Override
-        public String toString()
-        {
-            return String.format("[Node %d, child %d]", node, childIndex);
-        }
     }
 }

@@ -18,47 +18,86 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
+import java.io.OutputStream;
 
+import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.DataInput;
+import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.store.OutputStreamDataOutput;
 
 import static org.apache.lucene.codecs.CodecUtil.CODEC_MAGIC;
 import static org.apache.lucene.codecs.CodecUtil.FOOTER_MAGIC;
+import static org.apache.lucene.codecs.CodecUtil.readBEInt;
+import static org.apache.lucene.codecs.CodecUtil.readBELong;
+import static org.apache.lucene.codecs.CodecUtil.writeBEInt;
+import static org.apache.lucene.codecs.CodecUtil.writeBELong;
 
 public class SAICodecUtils
 {
     public static final String FOOTER_POINTER = "footerPointer";
 
-    public static void writeHeader(IndexOutput out) throws IOException
+    public static DataOutput toLuceneOutput(java.io.DataOutput out) {
+        var os = new OutputStream()
+        {
+            @Override
+            public void write(int b) throws IOException
+            {
+                out.write(b);
+            }
+        };
+        return new OutputStreamDataOutput(os);
+    }
+
+    public static void writeHeader(DataOutput out) throws IOException
     {
-        out.writeInt(CODEC_MAGIC);
-        out.writeString(Version.LATEST.toString());
+        writeBEInt(out, CODEC_MAGIC);
+        out.writeString(Version.latest().toString());
+    }
+
+    public static int headerSize() {
+        // Lucene's string-writing code is complex, but this is what it works out to
+        // until version length exceeds 127 characters or we add non-ascii characters
+        return 7;
     }
 
     public static void writeFooter(IndexOutput out) throws IOException
     {
-        out.writeInt(FOOTER_MAGIC);
-        out.writeInt(0);
+        writeBEInt(out, FOOTER_MAGIC);
+        writeBEInt(out, 0);
         writeCRC(out);
+    }
+
+    public static void writeFooter(BufferedRandomAccessWriter braw, long checksum) throws IOException
+    {
+        var out = toLuceneOutput(braw);
+        writeBEInt(out, FOOTER_MAGIC);
+        writeBEInt(out, 0);
+        writeBELong(out, checksum);
     }
 
     public static Version checkHeader(DataInput in) throws IOException
     {
+        return checkHeader(in, Version.EARLIEST);
+    }
+
+    public static Version checkHeader(DataInput in, Version earliest) throws IOException
+    {
         try
         {
-            final int actualMagic = in.readInt();
+            final int actualMagic = readBEInt(in);
             if (actualMagic != CODEC_MAGIC)
             {
                 throw new CorruptIndexException("codec header mismatch: actual header=" + actualMagic + " vs expected header=" + CODEC_MAGIC, in);
             }
             final Version actualVersion = Version.parse(in.readString());
-            if (!actualVersion.onOrAfter(Version.EARLIEST))
+            if (!actualVersion.onOrAfter(earliest))
             {
                 throw new IOException("Unsupported version: " + actualVersion);
             }
@@ -92,7 +131,12 @@ public class SAICodecUtils
 
     public static void validate(IndexInput input) throws IOException
     {
-        checkHeader(input);
+        validate(input, Version.EARLIEST);
+    }
+
+    public static void validate(IndexInput input, Version earliest) throws IOException
+    {
+        checkHeader(input, earliest);
         validateFooterAndResetPosition(input);
     }
 
@@ -143,6 +187,19 @@ public class SAICodecUtils
         long remaining = in.length() - in.getFilePointer();
         long expected = CodecUtil.footerLength();
 
+        if (remaining >= 4)
+        {
+            final int magic = readBEInt(in);
+
+            if (magic != FOOTER_MAGIC)
+            {
+                String additionalDetails = "";
+                if (remaining != expected)
+                    additionalDetails = " (and invalid number of bytes: remaining=" + remaining + ", expected=" + expected + ", fp=" + in.getFilePointer() + ')';
+                throw new CorruptIndexException("codec footer mismatch (file truncated?): actual footer=" + magic + " vs expected footer=" + FOOTER_MAGIC + additionalDetails, in);
+            }
+        }
+
         if (!padded)
         {
             if (remaining < expected)
@@ -155,14 +212,8 @@ public class SAICodecUtils
             }
         }
 
-        final int magic = in.readInt();
 
-        if (magic != FOOTER_MAGIC)
-        {
-            throw new CorruptIndexException("codec footer mismatch (file truncated?): actual footer=" + magic + " vs expected footer=" + FOOTER_MAGIC, in);
-        }
-
-        final int algorithmID = in.readInt();
+        final int algorithmID = readBEInt(in);
 
         if (algorithmID != 0)
         {
@@ -174,29 +225,36 @@ public class SAICodecUtils
     // Copied from Lucene CodecUtil as they are not public
 
     /**
-     * Writes CRC32 value as a 64-bit long to the output.
-     * @throws IllegalStateException if CRC is formatted incorrectly (wrong bits set)
-     * @throws IOException if an i/o error occurs
-     */
-    static void writeCRC(IndexOutput output) throws IOException {
-        long value = output.getChecksum();
-        if ((value & 0xFFFFFFFF00000000L) != 0) {
-            throw new IllegalStateException("Illegal CRC-32 checksum: " + value + " (resource=" + output + ")");
-        }
-        output.writeLong(value);
-    }
-
-    /**
      * Reads CRC32 value as a 64-bit long from the input.
+     *
      * @throws CorruptIndexException if CRC is formatted incorrectly (wrong bits set)
      * @throws IOException if an i/o error occurs
      */
-    static long readCRC(IndexInput input) throws IOException {
-        long value = input.readLong();
-        if ((value & 0xFFFFFFFF00000000L) != 0) {
+    static long readCRC(IndexInput input) throws IOException
+    {
+        long value = readBELong(input);
+        if ((value & 0xFFFFFFFF00000000L) != 0)
+        {
             throw new CorruptIndexException("Illegal CRC-32 checksum: " + value, input);
         }
         return value;
+    }
+
+    /**
+     * Writes CRC32 value as a 64-bit long to the output.
+     *
+     * @throws IllegalStateException if CRC is formatted incorrectly (wrong bits set)
+     * @throws IOException if an i/o error occurs
+     */
+    static void writeCRC(IndexOutput output) throws IOException
+    {
+        long value = output.getChecksum();
+        if ((value & 0xFFFFFFFF00000000L) != 0)
+        {
+            throw new IllegalStateException(
+            "Illegal CRC-32 checksum: " + value + " (resource=" + output + ")");
+        }
+        writeBELong(output, value);
     }
 
     // Copied from Lucene PackedInts as they are not public

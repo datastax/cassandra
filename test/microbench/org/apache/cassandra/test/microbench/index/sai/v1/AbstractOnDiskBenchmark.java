@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Random;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import com.google.common.base.Stopwatch;
 
@@ -36,6 +35,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v1.SSTableComponentsWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
@@ -51,7 +51,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.lucene.store.IndexInput;
 import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.TearDown;
@@ -125,7 +124,7 @@ public abstract class AbstractOnDiskBenchmark
                                     metadata.keyspace,
                                     metadata.name,
                                     Util.newUUIDGen().get());
-        indexDescriptor = IndexDescriptor.create(descriptor, metadata.partitioner, metadata.comparator);
+        indexDescriptor = IndexDescriptor.createNew(descriptor, metadata.partitioner, metadata.comparator);
         index = "test";
         indexContext = SAITester.createIndexContext(index, IntegerType.instance);
 
@@ -193,7 +192,7 @@ public abstract class AbstractOnDiskBenchmark
     protected final LongArray openRowIdToTokenReader() throws IOException
     {
         MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
         return new BlockPackedReader(token, tokensMeta).open();
     }
 }
