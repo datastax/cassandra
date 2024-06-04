@@ -92,7 +92,7 @@ import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.File;
@@ -1662,7 +1662,7 @@ public class DatabaseDescriptor
     {
         SSTableFormat<?, ?> selectedFormat;
         if (StringUtils.isBlank(selectedFormatName))
-            selectedFormatName = BigFormat.NAME;
+            selectedFormatName = BtiFormat.NAME;
         selectedFormat = sstableFormats.get(selectedFormatName);
         if (selectedFormat == null)
             throw new ConfigurationException(String.format("Selected sstable format '%s' is not available.", selectedFormatName));
@@ -1686,7 +1686,7 @@ public class DatabaseDescriptor
         ServiceLoader<SSTableFormat.Factory> loader = ServiceLoader.load(SSTableFormat.Factory.class, DatabaseDescriptor.class.getClassLoader());
         List<SSTableFormat.Factory> factories = Iterables.toList(loader);
         if (factories.isEmpty())
-            factories = ImmutableList.of(new BigFormat.BigFormatFactory());
+            factories = ImmutableList.of(new BtiFormat.BtiFormatFactory());
         applySSTableFormats(factories, conf.sstable);
     }
 
