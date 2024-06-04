@@ -20,8 +20,13 @@ package org.apache.cassandra.service.paxos.v1;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
+import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 
 public class ProposeVerbHandler extends AbstractPaxosVerbHandler implements IVerbHandler<Commit>
 {
@@ -35,8 +40,17 @@ public class ProposeVerbHandler extends AbstractPaxosVerbHandler implements IVer
     @Override
     void processMessage(Message<Commit> message)
     {
-        Boolean response = doPropose(message.payload);
-        Message<Boolean> reply = message.responseWith(response);
-        MessagingService.instance().send(reply, message.from());
+        // Initialize the sensor and set ExecutorLocals
+        RequestSensors sensors = new RequestSensors();
+        Context context = Context.from(message.payload.update.metadata());
+        // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        RequestTracker.instance.set(sensors);
+
+        Message.Builder<Boolean> reply = message.responseWithBuilder(doPropose(message.payload));
+        SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);
+        SensorsCustomParams.addReadSensorToResponse(reply, sensors, context);
+        MessagingService.instance().send(reply.build(), message.from());
     }
 }
