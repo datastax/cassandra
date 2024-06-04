@@ -22,7 +22,9 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.junit.AfterClass;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
@@ -40,9 +42,21 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 
 public class CQLVectorTest extends CQLTester.InMemory
 {
+    @BeforeClass
+    public static void setUp()
+    {
+        VECTOR_FLOAT_ONLY.setBoolean(false);
+    }
+    @AfterClass
+    public static void tearDown()
+    {
+        VECTOR_FLOAT_ONLY.setBoolean(true);
+    }
+    
     @Test
     public void select()
     {
@@ -553,5 +567,11 @@ public class CQLVectorTest extends CQLTester.InMemory
 
         // make sure the function referencing the UDT is dropped before dropping the UDT at cleanup
         execute("DROP FUNCTION " + f);
+    }
+
+    @SafeVarargs
+    protected final <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
     }
 }
