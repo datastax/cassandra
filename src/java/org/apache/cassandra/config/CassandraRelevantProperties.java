@@ -722,7 +722,7 @@ public enum CassandraRelevantProperties
      *
      * This is a dev/CI only property. Do not use otherwise.
      */
-    TEST_STORAGE_COMPATIBILITY_MODE("cassandra.test.storage_compatibility_mode", StorageCompatibilityMode.CASSANDRA_4.toString()),
+    TEST_STORAGE_COMPATIBILITY_MODE("cassandra.test.storage_compatibility_mode", StorageCompatibilityMode.NONE.toString()),
     TEST_STRICT_LCS_CHECKS("cassandra.test.strict_lcs_checks"),
     /** Turns some warnings into exceptions for testing. */
     TEST_STRICT_RUNTIME_CHECKS("cassandra.strict.runtime.checks"),
