@@ -198,4 +198,10 @@ public class VectorSimilarityFctsTest extends CQLTester
         assertThatThrownBy(() -> execute("SELECT " + function + "(['a', 'b'], ['a', 'b']) FROM %s WHERE pk=0"))
             .hasMessageContaining("Type error: ['a', 'b'] cannot be passed as argument 0");
     }
+
+    @SafeVarargs
+    protected final <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
+    }
 }

@@ -55,7 +55,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 import static org.junit.Assert.assertEquals;
-import static org.apache.cassandra.cql3.CQLTester.vector;
+import static org.apache.cassandra.index.sai.SAITester.vector;
 
 
 public class StorageAttachedIndexTest
