@@ -313,6 +313,9 @@
             <url url="${lib.download.base.url}/lib/sigar-bin/libsigar-x86-freebsd-6.so"/>
             <url url="${lib.download.base.url}/lib/sigar-bin/libsigar-x86-linux.so"/>
             <url url="${lib.download.base.url}/lib/sigar-bin/libsigar-x86-solaris.so"/>
+            <url url="${lib.download.base.url}/lib/sigar-bin/sigar-amd64-winnt.dll"/>
+            <url url="${lib.download.base.url}/lib/sigar-bin/sigar-x86-winnt.dll"/>
+            <url url="${lib.download.base.url}/lib/sigar-bin/sigar-x86-winnt.lib"/>
         </get>
     </target>
 
