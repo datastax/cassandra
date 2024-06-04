@@ -250,6 +250,14 @@ public class SAITester extends CQLTester
                                 MockSchema.newCFS("test_ks"));
     }
 
+    public static Vector<Float> vector(float... v)
+    {
+        var v2 = new Float[v.length];
+        for (int i = 0; i < v.length; i++)
+            v2[i] = v[i];
+        return new Vector<>(v2);
+    }
+
     protected void simulateNodeRestart()
     {
         simulateNodeRestart(true);
