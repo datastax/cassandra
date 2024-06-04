@@ -33,6 +33,7 @@ import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -42,6 +43,7 @@ public class CqlshTest extends CQLTester
     @BeforeClass
     public static void setUp()
     {
+        VECTOR_FLOAT_ONLY.setBoolean(false);
         requireNetwork();
     }
 
@@ -163,5 +165,11 @@ public class CqlshTest extends CQLTester
         Path csv = Files.createTempFile(prefix, ".csv");
         csv.toFile().deleteOnExit();
         return csv;
+    }
+
+    @SafeVarargs
+    protected final <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
     }
 }

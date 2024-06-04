@@ -1011,7 +1011,7 @@ class Shell(cmd.Cmd):
             return False, None
 
         def print_cql_error(err):
-            err_msg = ensure_text(err.message if hasattr(err, 'message') else str(err))
+            err_msg = maybe_ensure_text(err.message if hasattr(err, 'message') else str(err))
             self.printerr(str(err.__class__.__name__) + ": " + err_msg)
 
         future = self.session.execute_async(statement, trace=self.tracing_enabled)
