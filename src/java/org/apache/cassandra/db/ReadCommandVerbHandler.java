@@ -98,7 +98,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         RequestTracker.instance.get().syncAllSensors();
 
         addInternodeSensorToResponse(reply, context);
-        addReadBytesSensorToResponse(reply, context);
+        SensorsCustomParams.addReadSensorToResponse(reply, requestSensors, context);
 
         Tracing.trace("Enqueuing response to {}", message.from());
         MessagingService.instance().send(reply.build(), message.from());
@@ -117,25 +117,6 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
             reply.withCustomParam(SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable()),
                                   bytes);
         });
-    }
-
-    private void addReadBytesSensorToResponse(Message.Builder<ReadResponse> reply, Context context)
-    {
-        addSensorDataToResponse(reply, context, Type.READ_BYTES, SensorsCustomParams.READ_BYTES_REQUEST, SensorsCustomParams.READ_BYTES_TABLE);
-    }
-
-    /**
-     * TODO: Refactor on the basis of https://github.com/datastax/cassandra/pull/1074/files#diff-2d48c168d5192fe4989baf96618533f271cafab1db3f212f6a0ff1b3dff3d606R88-R124 once CNDB-8772 is merged.
-     */
-    private void addSensorDataToResponse(Message.Builder<ReadResponse> reply, Context context, Type type, String requestBytesParam, String tableBytesParam)
-    {
-        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, type);
-        readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
-                         .ifPresent(bytes -> reply.withCustomParam(requestBytesParam, bytes));
-
-        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getOrCreateSensor(context, type);
-        readTableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
-                       .ifPresent(bytes -> reply.withCustomParam(tableBytesParam, bytes));
     }
 
     private void validateTransientStatus(Message<ReadCommand> message)

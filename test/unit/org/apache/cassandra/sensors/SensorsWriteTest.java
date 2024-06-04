@@ -21,6 +21,7 @@ package org.apache.cassandra.sensors;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Supplier;
 
 import org.junit.After;
 import org.junit.Before;
@@ -38,6 +39,7 @@ import org.apache.cassandra.db.MutationVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.Message;
@@ -45,8 +47,15 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.CommitVerbHandler;
+import org.apache.cassandra.service.paxos.PrepareVerbHandler;
+import org.apache.cassandra.service.paxos.ProposeVerbHandler;
 import org.apache.cassandra.utils.BloomFilter;
+import org.apache.cassandra.utils.UUIDGen;
 
+import static org.apache.cassandra.db.SystemKeyspace.PAXOS;
+import static org.apache.cassandra.schema.SchemaConstants.SYSTEM_KEYSPACE_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class SensorsWriteTest
@@ -86,6 +95,10 @@ public class SensorsWriteTest
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).metadata());
 
+        // enable sensor registy for system keyspace
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open("system").getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open("system").getColumnFamilyStore(PAXOS).metadata());
+
         capturedOutboundMessages = new CopyOnWriteArrayList<>();
         MessagingService.instance().outboundSink.add((message, to) ->
                                                      {
@@ -101,6 +114,7 @@ public class SensorsWriteTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).truncateBlocking();
+        Keyspace.open(SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(PAXOS).truncateBlocking();
 
         RequestTracker.instance.set(null);
         SensorsRegistry.instance.clear();
@@ -274,6 +288,96 @@ public class SensorsWriteTest
         assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), CF_COUTNER);
     }
 
+    @Test
+    public void testLWTPrepare() {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+        PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
+                                 .add("val", "0")
+                                 .buildUpdate();
+        Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), UUIDGen.getTimeUUID());
+        handlePaxosPrepare(proposal);
+
+        Sensor writeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(writeSensor.getValue()).isGreaterThan(0);
+        Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(registryWriteSensor).isEqualTo(writeSensor);
+        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
+        Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isZero();
+
+        // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
+        handlePaxosPrepare(proposal);
+        readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isGreaterThan(0);
+        Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
+        assertThat(registryReadSensor).isEqualTo(readSensor);
+        assertReadResponseSensors(readSensor.getValue(), registryReadSensor.getValue());
+    }
+
+    @Test
+    public void testLWTPropose() {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+        PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
+                                .add("val", "0")
+                                .buildUpdate();
+        Commit proposal = Commit.newProposal(UUIDGen.getTimeUUID(), update);
+        handlePaxosPropose(proposal);
+
+        Sensor writeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(writeSensor.getValue()).isGreaterThan(0);
+        Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(registryWriteSensor).isEqualTo(writeSensor);
+        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
+        Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isZero();
+
+        // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
+        handlePaxosPropose(proposal);
+        readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isGreaterThan(0);
+        Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
+        assertThat(registryReadSensor).isEqualTo(readSensor);
+        assertReadResponseSensors(readSensor.getValue(), registryReadSensor.getValue());
+    }
+
+    @Test
+    public void testLWTCommit() {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+        PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
+                                 .add("val", "0")
+                                 .buildUpdate();
+        Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), UUIDGen.getTimeUUID());
+        handlePaxosCommit(proposal);
+
+        Sensor writeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(writeSensor.getValue()).isGreaterThan(0);
+        Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(registryWriteSensor).isEqualTo(writeSensor);
+        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
+
+        // No read is done in the commit phase
+        assertThat(RequestTracker.instance.get().getSensor(context, Type.READ_BYTES)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensor(context, Type.READ_BYTES)).isEmpty();
+    }
+
+    private static void handlePaxosPrepare(Commit prepare)
+    {
+        PrepareVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PREPARE_REQ, prepare).build());
+    }
+
+    private static void handlePaxosPropose(Commit proposal)
+    {
+        ProposeVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PROPOSE_REQ, proposal).build());
+    }
+
+    private static void handlePaxosCommit(Commit commit)
+    {
+        CommitVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build());
+    }
+
     private static void handleMutation(Mutation mutation)
     {
         MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
@@ -284,27 +388,40 @@ public class SensorsWriteTest
         CounterMutationVerbHandler.instance.doVerb(Message.builder(Verb.COUNTER_MUTATION_REQ, mutation).build());
     }
 
-    private void assertResponseSensors(double requestValue, double registryValue, String table)
+    private void assertReadResponseSensors(double requestValue, double registryValue)
     {
         // verify against the last message to enable testing of multiple mutations in a for loop
         Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
-        assertResponseSensors(message, requestValue, registryValue, table);
+        assertResponseSensors(message, requestValue, registryValue, () -> SensorsCustomParams.READ_BYTES_REQUEST, () -> SensorsCustomParams.READ_BYTES_TABLE);
 
         // make sure messages with sensor values can be deserialized on the receiving node
         DataOutputBuffer out = SensorsTestUtil.serialize(message);
         Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
-        assertResponseSensors(deserializedMessage, requestValue, registryValue, table);
+        assertResponseSensors(deserializedMessage, requestValue, registryValue, () -> SensorsCustomParams.READ_BYTES_REQUEST, () -> SensorsCustomParams.READ_BYTES_TABLE);
     }
 
-    private void assertResponseSensors(Message message, double requestValue, double registryValue, String table)
+    private void assertResponseSensors(double requestValue, double registryValue, String table)
+    {
+        Supplier<String> requestParamSupplier = () -> SensorsCustomParams.encodeTableInWriteBytesRequestParam(table);
+        Supplier<String> tableParamSupplier = () -> SensorsCustomParams.encodeTableInWriteBytesTableParam(table);
+        // verify against the last message to enable testing of multiple mutations in a for loop
+        Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
+        assertResponseSensors(message, requestValue, registryValue, requestParamSupplier, tableParamSupplier);
+
+        // make sure messages with sensor values can be deserialized on the receiving node
+        DataOutputBuffer out = SensorsTestUtil.serialize(message);
+        Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
+        assertResponseSensors(deserializedMessage, requestValue, registryValue, requestParamSupplier, tableParamSupplier);
+    }
+
+    private void assertResponseSensors(Message message, double requestValue, double registryValue, Supplier<String> requestParamSupplier, Supplier<String> tableParamSupplier)
     {
         assertThat(message.header.customParams()).isNotNull();
-        String expectedRequestParam = String.format(SensorsCustomParams.WRITE_BYTES_REQUEST_TEMPLATE, table);
-        String expectedTableParam = String.format(SensorsCustomParams.WRITE_BYTES_TABLE_TEMPLATE, table);
+        String expectedRequestParam = requestParamSupplier.get();
+        String expectedTableParam = tableParamSupplier.get();
 
         assertThat(message.header.customParams()).containsKey(expectedRequestParam);
         assertThat(message.header.customParams()).containsKey(expectedTableParam);
-
         double requestWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
         double tableWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedTableParam));
         assertThat(requestWriteBytes).isEqualTo(requestValue);
