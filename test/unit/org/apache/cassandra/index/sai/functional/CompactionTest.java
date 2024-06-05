@@ -161,6 +161,7 @@ public class CompactionTest extends AbstractMetricsTest
         createTable(CREATE_TABLE_TEMPLATE);
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+        waitForIndexQueryable();
 
         int sstables = 2;
         int num = 10;

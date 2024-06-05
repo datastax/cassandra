@@ -24,11 +24,14 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
 import org.apache.cassandra.utils.obs.IBitSet;
 import org.apache.cassandra.utils.obs.MemoryLimiter;
+
+import static org.apache.cassandra.metrics.RestorableMeter.AVAILABLE_WINDOWS;
 
 public class BloomFilter extends WrappedSharedCloseable implements IFilter
 {
@@ -88,6 +91,41 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         super(copy);
         this.hashCount = copy.hashCount;
         this.bitset = copy.bitset;
+    }
+
+    /**
+     * @return true if sstable's bloom filter should be deserialized on read instead of when opening sstable. This
+     *         doesn't affect flushed sstable because there is bloom filter deserialization
+     */
+    public static boolean lazyLoading()
+    {
+        return CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING.getBoolean();
+    }
+
+    /**
+     * @return sstable hits per second to determine if a sstable is hot. 0 means BF should be loaded immediately on read.
+     *
+     * Note that when WINDOW <= 0, this is used as absolute primary index access count.
+     */
+    public static long lazyLoadingThreshold()
+    {
+        return CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_THRESHOLD.getInt();
+    }
+
+    /**
+     * @return Window of time by minute, available: 1 (default), 5, 15, 120.
+     *
+     * Note that if <= 0 then we use threshold as the absolute count
+     */
+    public static int lazyLoadingWindow()
+    {
+        int window = CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_WINDOW.getInt();
+        if (window >= 1 && !AVAILABLE_WINDOWS.contains(window))
+            throw new IllegalArgumentException(String.format("Found invalid %s=%s, available windows: %s",
+                                                             CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_WINDOW.getKey(),
+                                                             window,
+                                                             AVAILABLE_WINDOWS));
+        return window;
     }
 
     public long serializedSize()

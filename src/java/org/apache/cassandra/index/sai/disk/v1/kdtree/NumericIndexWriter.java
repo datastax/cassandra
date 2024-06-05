@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,10 +30,10 @@ import com.google.common.base.MoreObjects;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.lucene.codecs.MutablePointValues;
-import org.apache.lucene.store.IndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
@@ -97,7 +98,9 @@ public class NumericIndexWriter implements Closeable
                                     maxPointsInLeafNode,
                                     BKDWriter.DEFAULT_MAX_MB_SORT_IN_HEAP,
                                     numRows,
-                                    true, null);
+                                    true, null,
+                                    indexDescriptor.getVersion(indexContext).onDiskFormat().byteOrderFor(IndexComponent.KD_TREE, indexContext)
+                                    );
     }
 
     @Override
@@ -175,7 +178,7 @@ public class NumericIndexWriter implements Closeable
             components.put(IndexComponent.KD_TREE, bkdPosition, bkdOffset, bkdLength, attributes);
         }
 
-        try (TraversingBKDReader reader = new TraversingBKDReader(indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext), bkdPosition);
+        try (TraversingBKDReader reader = new TraversingBKDReader(indexDescriptor.createFlushTimePerIndexFileHandle(IndexComponent.KD_TREE, indexContext), bkdPosition);
              IndexOutput postingsOutput = indexDescriptor.openPerIndexOutput(IndexComponent.KD_TREE_POSTING_LISTS, indexContext, true))
         {
             final long postingsOffset = postingsOutput.getFilePointer();

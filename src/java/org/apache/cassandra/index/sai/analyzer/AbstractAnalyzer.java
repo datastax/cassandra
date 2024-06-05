@@ -27,11 +27,15 @@ package org.apache.cassandra.index.sai.analyzer;
 import java.io.Closeable;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
+
+import org.slf4j.Logger;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
@@ -42,6 +46,8 @@ import org.apache.lucene.analysis.Analyzer;
 
 public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
 {
+    private static final Logger logger = org.slf4j.LoggerFactory.getLogger(AbstractAnalyzer.class);
+
     public static final Set<AbstractType<?>> ANALYZABLE_TYPES = ImmutableSet.of(UTF8Type.instance, AsciiType.instance);
 
     protected ByteBuffer next = null;
@@ -105,18 +111,17 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
     public static AnalyzerFactory fromOptionsQueryAnalyzer(final AbstractType<?> type, final Map<String, String> options)
     {
         final String json = options.get(LuceneAnalyzer.QUERY_ANALYZER);
-        try
-        {
-            return toAnalyzerFactory(json, type, options);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed json="+json, ex);
-        }
+        return toAnalyzerFactory(json, type, options);
     }
 
     public static AnalyzerFactory toAnalyzerFactory(String json, final AbstractType<?> type, final Map<String, String> options) //throws Exception
     {
+        if (!TypeUtil.isIn(type, ANALYZABLE_TYPES))
+        {
+            logger.warn("CQL type {} cannot be analyzed options={}; using NoOpAnalyzer", type.asCQL3Type(), options);
+            return NoOpAnalyzer::new;
+        }
+
         try
         {
             final Analyzer analyzer = JSONAnalyzerParser.parse(json);
@@ -134,35 +139,53 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
                 }
             };
         }
+        catch (InvalidRequestException ex)
+        {
+            throw ex;
+        }
         catch (Exception ex)
         {
             throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed options="+options, ex);
         }
     }
 
+    public static boolean isAnalyzed(Map<String, String> options) {
+        return options.containsKey(LuceneAnalyzer.INDEX_ANALYZER) || NonTokenizingOptions.hasNonDefaultOptions(options);
+    }
+
     public static AnalyzerFactory fromOptions(AbstractType<?> type, Map<String, String> options)
     {
-        if (options.containsKey(LuceneAnalyzer.INDEX_ANALYZER))
+        boolean containsIndexAnalyzer = options.containsKey(LuceneAnalyzer.INDEX_ANALYZER);
+        boolean containsNonTokenizingOptions = NonTokenizingOptions.hasNonDefaultOptions(options);
+        if (containsIndexAnalyzer && containsNonTokenizingOptions)
         {
-            String json = options.get(LuceneAnalyzer.INDEX_ANALYZER);
-            try
-            {
-                return toAnalyzerFactory(json, type, options);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed json="+json, ex);
-            }
+            logger.warn("Invalid combination of options for index_analyzer: {}", options);
+            var optionsToStrip = List.of(NonTokenizingOptions.CASE_SENSITIVE, NonTokenizingOptions.NORMALIZE, NonTokenizingOptions.ASCII);
+            options = Maps.filterKeys(options, k -> !optionsToStrip.contains(k));
+            logger.warn("Rewrote options to {}", options);
+        }
+        boolean containsQueryAnalyzer = options.containsKey(LuceneAnalyzer.QUERY_ANALYZER);
+        if (containsQueryAnalyzer && !containsIndexAnalyzer && !containsNonTokenizingOptions)
+        {
+            throw new InvalidRequestException("Cannot specify query_analyzer without an index_analyzer option or any" +
+                                              " combination of case_sensitive, normalize, or ascii options. options=" + options);
         }
 
-        if (hasNonTokenizingOptions(options))
+        if (containsIndexAnalyzer)
+        {
+            String json = options.get(LuceneAnalyzer.INDEX_ANALYZER);
+            return toAnalyzerFactory(json, type, options);
+        }
+
+        if (containsNonTokenizingOptions)
         {
             if (TypeUtil.isIn(type, ANALYZABLE_TYPES))
             {
                 // load NonTokenizingAnalyzer so it'll validate options
                 NonTokenizingAnalyzer a = new NonTokenizingAnalyzer(type, options);
                 a.end();
-                return () -> new NonTokenizingAnalyzer(type, options);
+                Map<String, String> finalOptions = options;
+                return () -> new NonTokenizingAnalyzer(type, finalOptions);
             }
             else
             {
@@ -170,10 +193,5 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
             }
         }
         return NoOpAnalyzer::new;
-    }
-
-    private static boolean hasNonTokenizingOptions(Map<String, String> options)
-    {
-        return options.get(NonTokenizingOptions.ASCII) != null || options.containsKey(NonTokenizingOptions.CASE_SENSITIVE) || options.containsKey(NonTokenizingOptions.NORMALIZE);
     }
 }

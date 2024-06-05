@@ -296,7 +296,9 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
         MessagingService.instance().outboundSink.add((message, to) -> {
             if (!internodeMessagingStarted)
             {
-                inInstancelogger.debug("Dropping outbound message {} to {} as internode messaging has not been started yet",
+                // to avoid NPE in case this is called before inInstancelogger is created
+                if (inInstancelogger != null)
+                    inInstancelogger.debug("Dropping outbound message {} to {} as internode messaging has not been started yet",
                                        message, to);
                 return false;
             }
@@ -442,7 +444,9 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     {
         if (!internodeMessagingStarted)
         {
-            inInstancelogger.debug("Dropping inbound message {} to {} as internode messaging has not been started yet",
+            // to avoid NPE in case this is called before inInstancelogger is created
+            if (inInstancelogger != null)
+                inInstancelogger.debug("Dropping inbound message {} to {} as internode messaging has not been started yet",
                                    message, config().broadcastAddress());
             return;
         }
@@ -875,8 +879,8 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                                 .thenRun(() -> {
                                     // when the instance is eventually stopped, we need to release buffer pools manually
                                     // they are assumed to gone along with JVM, but this is not the case in dtests
-                                    BufferPools.forNetworking().unsafeReset();
-                                    BufferPools.forChunkCache().unsafeReset();
+                                    BufferPools.forNetworking().unsafeReset(true);
+                                    BufferPools.forChunkCache().unsafeReset(true);
                                 });
     }
 

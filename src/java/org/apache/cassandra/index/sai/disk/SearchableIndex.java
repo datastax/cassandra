@@ -27,10 +27,14 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * This is used to abstract the index search between on-disk versions.
@@ -59,10 +63,22 @@ public interface SearchableIndex extends Closeable
 
     public DecoratedKey maxKey();
 
-    public List<RangeIterator> search(Expression expression,
-                                      AbstractBounds<PartitionPosition> keyRange,
-                                      SSTableQueryContext context,
-                                      boolean defer) throws IOException;
+    public RangeIterator search(Expression expression,
+                                AbstractBounds<PartitionPosition> keyRange,
+                                QueryContext context,
+                                boolean defer, int limit) throws IOException;
+
+    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
+                                                             AbstractBounds<PartitionPosition> keyRange,
+                                                             QueryContext context,
+                                                             int limit) throws IOException;
+
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context,
+                                                                    List<PrimaryKey> keys,
+                                                                    Expression exp,
+                                                                    int limit) throws IOException;
+
+    List<Segment> getSegments();
 
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 }

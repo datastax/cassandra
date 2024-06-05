@@ -28,7 +28,6 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -64,14 +63,16 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
                                       Collection<StorageAttachedIndex> indices,
-                                      LifecycleNewTracker lifecycleNewTracker) throws IOException
+                                      LifecycleNewTracker lifecycleNewTracker,
+                                      long keyCount) throws IOException
     {
-        this(indexDescriptor, indices, lifecycleNewTracker, false);
+        this(indexDescriptor, indices, lifecycleNewTracker, keyCount, false);
     }
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker lifecycleNewTracker,
+                                      long keyCount,
                                       boolean perIndexComponentsOnly) throws IOException
     {
         this.indexDescriptor = indexDescriptor;
@@ -80,7 +81,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         this.rowMapping = RowMapping.create(lifecycleNewTracker.opType());
         this.perIndexWriters = indices.stream().map(i -> indexDescriptor.newPerIndexWriter(i,
                                                                                            lifecycleNewTracker,
-                                                                                           rowMapping))
+                                                                                           rowMapping,
+                                                                                           keyCount))
                                       .filter(Objects::nonNull) // a null here means the column had no data to flush
                                       .collect(Collectors.toList());
 
@@ -92,7 +94,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     @Override
     public void begin()
     {
-        logger.debug(indexDescriptor.logMessage("Starting partition iteration for storage attached index flush for SSTable {}..."), indexDescriptor.descriptor);
+        logger.trace(indexDescriptor.logMessage("Starting partition iteration for storage attached index flush for SSTable {}..."), indexDescriptor.descriptor);
         stopwatch.start();
     }
 
@@ -166,7 +168,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
         long start = stopwatch.elapsed(TimeUnit.MILLISECONDS);
 
-        logger.debug(indexDescriptor.logMessage("Completed partition iteration for index flush for SSTable {}. Elapsed time: {} ms"),
+        logger.trace(indexDescriptor.logMessage("Completed partition iteration for index flush for SSTable {}. Elapsed time: {} ms"),
                      indexDescriptor.descriptor,
                      start);
 
@@ -175,7 +177,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             perSSTableWriter.complete(stopwatch);
             tokenOffsetWriterCompleted = true;
             long elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
-            logger.debug(indexDescriptor.logMessage("Completed per-SSTable write for SSTable {}. Duration: {} ms. Total elapsed time: {} ms."),
+            logger.trace(indexDescriptor.logMessage("Completed per-SSTable write for SSTable {}. Duration: {} ms. Total elapsed time: {} ms."),
                          indexDescriptor.descriptor,
                          elapsed - start,
                          elapsed);
@@ -189,7 +191,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                 perIndexWriter.complete(stopwatch);
             }
             elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
-            logger.debug(indexDescriptor.logMessage("Completed per-index writes for SSTable {}. Duration: {} ms. Total elapsed time: {} ms."),
+            logger.trace(indexDescriptor.logMessage("Completed per-index writes for SSTable {}. Duration: {} ms. Total elapsed time: {} ms."),
                          indexDescriptor.descriptor,
                          elapsed - start,
                          elapsed);

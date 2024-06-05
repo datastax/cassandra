@@ -147,14 +147,14 @@ public class CassandraStreamWriter
     protected long write(ChannelProxy proxy, ChecksumValidator validator, AsyncStreamingOutputPlus output, long start, int transferOffset, int toTransfer, int bufferSize) throws IOException
     {
         // the count of bytes to read off disk
-        int minReadable = (int) Math.min(bufferSize, proxy.size() - start);
+        int minReadable = (int) Math.min(bufferSize, proxy.size() - (start - sstable.getDataFileSliceDescriptor().sliceStart));
 
         // this buffer will hold the data from disk. as it will be compressed on the fly by
         // AsyncChannelCompressedStreamWriter.write(ByteBuffer), we can release this buffer as soon as we can.
         ByteBuffer buffer = BufferPools.forNetworking().get(minReadable, BufferType.OFF_HEAP);
         try
         {
-            int readCount = proxy.read(buffer, start);
+            int readCount = proxy.read(buffer, start - sstable.getDataFileSliceDescriptor().sliceStart);
             assert readCount == minReadable : String.format("could not read required number of bytes from file to be streamed: read %d bytes, wanted %d bytes", readCount, minReadable);
             buffer.flip();
 

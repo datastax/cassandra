@@ -697,6 +697,24 @@ public class ColumnFamilyStoreTest
             }
 
             @Override
+            public long getEstimatedAverageRowSize()
+            {
+                return 0;
+            }
+
+            @Override
+            public DecoratedKey minPartitionKey()
+            {
+                return null;
+            }
+
+            @Override
+            public DecoratedKey maxPartitionKey()
+            {
+                return null;
+            }
+
+            @Override
             public void addMemoryUsageTo(Memtable.MemoryUsage usage)
             {
             }

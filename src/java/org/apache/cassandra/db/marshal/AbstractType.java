@@ -304,6 +304,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return isReversed() ? ((ReversedType<T>) this).baseType.unwrap() : this;
     }
 
+    public boolean isList()
+    {
+        return false;
+    }
+
+    public boolean isVector()
+    {
+        return false;
+    }
+
     public static AbstractType<?> parseDefaultParameters(AbstractType<?> baseType, TypeParser parser) throws SyntaxException
     {
         Map<String, String> parameters = parser.getKeyValueParameters();
@@ -510,8 +520,8 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     }
 
     /**
-     * The length of values for this type if all values are of fixed length, -1 otherwise. This has an impact on
-     * serialization.
+     * The length of values for this type, in bytes, if all values are of fixed length, -1 otherwise.
+     * This has an impact on serialization.
      * <lu>
      *  <li> see {@link #writeValue} </li>
      *  <li> see {@link #read} </li>
@@ -532,6 +542,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public final boolean isValueLengthFixed()
     {
         return valueLengthIfFixed() != VARIABLE_LENGTH;
+    }
+
+    public boolean isNull(ByteBuffer bb)
+    {
+        return isNull(bb, ByteBufferAccessor.instance);
+    }
+
+    public <V> boolean isNull(V buffer, ValueAccessor<V> accessor)
+    {
+        return getSerializer().isNull(buffer, accessor);
     }
 
     // This assumes that no empty values are passed

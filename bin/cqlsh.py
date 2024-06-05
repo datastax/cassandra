@@ -279,15 +279,22 @@ if os.path.exists(OLD_HISTORY):
     os.rename(OLD_HISTORY, HISTORY)
 # END history/config definition
 
-CQL_ERRORS = (
-    cassandra.AlreadyExists, cassandra.AuthenticationFailed, cassandra.CoordinationFailure,
-    cassandra.InvalidRequest, cassandra.Timeout, cassandra.Unauthorized, cassandra.OperationTimedOut,
-    cassandra.cluster.NoHostAvailable,
+CQL_TRACED_ERRORS = (
+    cassandra.CoordinationFailure,  # superclass of ReadFailure
+    cassandra.Timeout,              # superclass of ReadTimeout
+    cassandra.OperationTimedOut,
+    cassandra.protocol.InternalError,
+    cassandra.cluster.NoHostAvailable
+)
+CQL_ERRORS = CQL_TRACED_ERRORS + (
+    cassandra.AlreadyExists, cassandra.AuthenticationFailed,
+    cassandra.InvalidRequest, cassandra.Unauthorized,
     cassandra.connection.ConnectionBusy, cassandra.connection.ProtocolError, cassandra.connection.ConnectionException,
-    cassandra.protocol.ErrorMessage, cassandra.protocol.InternalError, cassandra.query.TraceUnavailable
+    cassandra.protocol.ErrorMessage, cassandra.query.TraceUnavailable
 )
 
 debug_completion = bool(os.environ.get('CQLSH_DEBUG_COMPLETION', '') == 'YES')
+trace_all_errors = bool(os.environ.get('CQLSH_TRACE_ALL_ERRORS', '') == 'YES')
 
 
 class NoKeyspaceError(Exception):
@@ -1111,13 +1118,20 @@ class Shell(cmd.Cmd):
         if not statement:
             return False, None
 
-        future = self.session.execute_async(statement, trace=self.tracing_enabled)
-        result = None
-        try:
-            result = future.result()
-        except CQL_ERRORS as err:
+        def print_cql_error(err):
             err_msg = ensure_text(err.message if hasattr(err, 'message') else str(err))
             self.printerr(str(err.__class__.__name__) + ": " + err_msg)
+
+        future = self.session.execute_async(statement, trace=self.tracing_enabled)
+        result = None
+        traced_err = None
+        try:
+            result = future.result()
+        except CQL_TRACED_ERRORS as err:
+            traced_err = err
+            print_cql_error(err)
+        except CQL_ERRORS as err:
+            print_cql_error(err)
         except Exception:
             import traceback
             self.printerr(traceback.format_exc())
@@ -1132,7 +1146,10 @@ class Shell(cmd.Cmd):
                 self.conn.refresh_schema_metadata(-1)
 
         if result is None:
-            return False, None
+            if traced_err or trace_all_errors:
+                return False, future
+            else:
+                return False, None
 
         if statement.query_string[:6].lower() == 'select':
             self.print_result(result, self.parse_for_select_meta(statement.query_string))

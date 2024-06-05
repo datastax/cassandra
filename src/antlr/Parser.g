@@ -255,7 +255,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
     @init {
         Term.Raw limit = null;
         Term.Raw perPartitionLimit = null;
-        Map<ColumnIdentifier, Boolean> orderings = new LinkedHashMap<>();
+        List<Ordering.Raw> orderings = new ArrayList<>();
         List<ColumnIdentifier> groups = new ArrayList<>();
         boolean allowFiltering = false;
         boolean isJson = false;
@@ -365,7 +365,7 @@ selectionTypeHint returns [Selectable.Raw s]
 
 selectionList returns [Selectable.Raw s]
     @init { List<Selectable.Raw> l = new ArrayList<>(); }
-    @after { $s = new Selectable.WithList.Raw(l); }
+    @after { $s = new Selectable.WithArrayLiteral.Raw(l); }
     : '[' ( t1=unaliasedSelector { l.add(t1); } ( ',' tn=unaliasedSelector { l.add(tn); } )* )? ']'
     ;
 
@@ -455,11 +455,17 @@ customIndexExpression [WhereClause.Builder clause]
     : 'expr(' idxName[name] ',' t=term ')' { clause.add(new CustomIndexExpression(name, t));}
     ;
 
-orderByClause[Map<ColumnIdentifier, Boolean> orderings]
+orderByClause[List<Ordering.Raw> orderings]
     @init{
-        boolean reversed = false;
+        Ordering.Direction direction = Ordering.Direction.ASC;
     }
-    : c=cident (K_ASC | K_DESC { reversed = true; })? { orderings.put(c, reversed); }
+    : c=cident (K_ANN_OF t=term)? (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
+    {
+        Ordering.Raw.Expression expr = (t == null)
+            ? new Ordering.Raw.SingleColumn(c)
+            : new Ordering.Raw.Ann(c, t);
+        orderings.add(new Ordering.Raw(expr, direction));
+    }
     ;
 
 groupByClause[List<ColumnIdentifier> groups]
@@ -1491,8 +1497,8 @@ collectionLiteral returns [Term.Raw value]
 
 listLiteral returns [Term.Raw value]
     @init {List<Term.Raw> l = new ArrayList<Term.Raw>();}
-    @after {$value = new Lists.Literal(l);}
-    : '[' ( t1=term { l.add(t1); } ( ',' tn=term { l.add(tn); } )* )? ']' { $value = new Lists.Literal(l); }
+    @after {$value = new ArrayLiteral(l);}
+    : '[' ( t1=term { l.add(t1); } ( ',' tn=term { l.add(tn); } )* )? ']'
     ;
 
 usertypeLiteral returns [UserTypes.Literal ut]
@@ -1535,6 +1541,7 @@ allowedFunctionName returns [String s]
     | f=QUOTED_NAME                 { $s = $f.text; }
     | u=unreserved_function_keyword { $s = u; }
     | K_TOKEN                       { $s = "token"; }
+    | K_GEO_DISTANCE                { $s = "GEO_DISTANCE"; }
     | K_COUNT                       { $s = "count"; }
     ;
 
@@ -1686,6 +1693,7 @@ relationType returns [Operator op]
     | '>'  { $op = Operator.GT; }
     | '>=' { $op = Operator.GTE; }
     | '!=' { $op = Operator.NEQ; }
+    | ':'  { $op = Operator.ANALYZER_MATCHES; }
     ;
 
 relation[WhereClause.Builder clauses]
@@ -1694,10 +1702,16 @@ relation[WhereClause.Builder clauses]
     | name=cident K_IS K_NOT K_NULL { $clauses.add(new SingleColumnRelation(name, Operator.IS_NOT, Constants.NULL_LITERAL)); }
     | K_TOKEN l=tupleOfIdentifiers type=relationType t=term
         { $clauses.add(new TokenRelation(l, type, t)); }
+    | K_GEO_DISTANCE '(' name=cident ',' point=term ')' type=relationType distance=term
+        { $clauses.add(new GeoDistanceRelation(name, point, type, distance)); }
     | name=cident K_IN marker=inMarker
         { $clauses.add(new SingleColumnRelation(name, Operator.IN, marker)); }
+    | name=cident K_NOT K_IN marker=inMarker
+        { $clauses.add(new SingleColumnRelation(name, Operator.NOT_IN, marker)); }
     | name=cident K_IN inValues=singleColumnInValues
         { $clauses.add(SingleColumnRelation.createInRelation($name.id, inValues)); }
+    | name=cident K_NOT K_IN inValues=singleColumnInValues
+            { $clauses.add(SingleColumnRelation.createNotInRelation($name.id, inValues)); }
     | name=cident rt=containsOperator t=term { $clauses.add(new SingleColumnRelation(name, rt, t)); }
     | name=cident '[' key=term ']' type=relationType t=term { $clauses.add(new SingleColumnRelation(name, key, type, t)); }
     | ids=tupleOfIdentifiers
@@ -1713,6 +1727,16 @@ relation[WhereClause.Builder clauses]
           | markers=tupleOfMarkersForTuples /* (a, b, c) IN (?, ?, ...) */
               { $clauses.add(MultiColumnRelation.createInRelation(ids, markers)); }
           )
+      | K_NOT K_IN
+          ( '(' ')'
+              { $clauses.add(MultiColumnRelation.createNotInRelation(ids, new ArrayList<Tuples.Literal>())); }
+          | tupleInMarker=inMarkerForTuple /* (a, b, c) NOT IN ? */
+              { $clauses.add(MultiColumnRelation.createSingleMarkerNotInRelation(ids, tupleInMarker)); }
+          | literals=tupleOfTupleLiterals /* (a, b, c) NOT IN ((1, 2, 3), (4, 5, 6), ...) */
+              { $clauses.add(MultiColumnRelation.createNotInRelation(ids, literals)); }
+          | markers=tupleOfMarkersForTuples /* (a, b, c) NOT IN (?, ?, ...) */
+              { $clauses.add(MultiColumnRelation.createNotInRelation(ids, markers)); }
+          )
       | type=relationType literal=tupleLiteral /* (a, b, c) > (1, 2, 3) or (a, b, c) > (?, ?, ?) */
           {
               $clauses.add(MultiColumnRelation.createNonInRelation(ids, type, literal));
@@ -1724,6 +1748,7 @@ relation[WhereClause.Builder clauses]
 
 containsOperator returns [Operator o]
     : K_CONTAINS { o = Operator.CONTAINS; } (K_KEY { o = Operator.CONTAINS_KEY; })?
+    | K_NOT K_CONTAINS { o = Operator.NOT_CONTAINS; } (K_KEY { o = Operator.NOT_CONTAINS_KEY; })?
     ;
 
 inMarker returns [AbstractMarker.INRaw marker]
@@ -1764,11 +1789,14 @@ inMarkerForTuple returns [Tuples.INRaw marker]
 comparatorTypeWithoutTuples returns [CQL3Type.Raw t]
     : n=native_type     { $t = CQL3Type.Raw.from(n); }
     | c=collection_type { $t = c; }
+    | vc=vector_type    { $t = vc; }
     | id=userTypeName   { $t = CQL3Type.Raw.userType(id); }
     | K_FROZEN '<' f=comparatorType '>'
       {
         try {
-            $t = f.freeze();
+            // antlr might try to recover and give a null for f. It will still properly error out in the end, but we want
+            // to avoid NPE in the call to #freeze() so we should bypass this or we'll have a weird user-facing error.
+            $t = f == null ? null : f.freeze();
         } catch (InvalidRequestException e) {
             addRecognitionError(e.getMessage());
         }
@@ -1834,6 +1862,11 @@ collection_type returns [CQL3Type.Raw pt]
 
 tuple_types returns [List<CQL3Type.Raw> types]
     : K_TUPLE '<' t1=comparatorType { $types = new ArrayList<>(); $types.add(t1); } (',' tn=comparatorType { $types.add(tn); })* '>'
+    ;
+
+vector_type returns [CQL3Type.Raw vt]
+    : K_VECTOR '<' t1=comparatorType ','  d=INTEGER '>'
+        { $vt = CQL3Type.Raw.vector(t1, Integer.parseInt($d.text)); }
     ;
 
 username
@@ -1902,6 +1935,7 @@ basic_unreserved_keyword returns [String str]
         | K_STATIC
         | K_FROZEN
         | K_TUPLE
+        | K_VECTOR
         | K_FUNCTION
         | K_FUNCTIONS
         | K_AGGREGATE
@@ -1931,5 +1965,6 @@ basic_unreserved_keyword returns [String str]
         | K_DROPPED
         | K_COLUMN
         | K_RECORD
+        | K_ANN_OF
         ) { $str = $k.text; }
     ;

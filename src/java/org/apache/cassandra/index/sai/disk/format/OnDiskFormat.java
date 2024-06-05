@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.Set;
 
 import org.apache.cassandra.db.ClusteringComparator;
@@ -30,7 +31,11 @@ import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
+import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
+import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -52,6 +57,10 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
  *     <li>Methods taking an {@link IndexComponent}. These methods only interact with a single component or
  *     set of components</li>
  *
+ * To add a new version,
+ * (1) Create a new class, e.g. VXOnDiskFormat, that extends the previous version and overrides
+ *     methods relating to the new format and functionality
+ * (2) Wire it up in Version to its version string
  * </ul>
  */
 public interface OnDiskFormat
@@ -70,23 +79,6 @@ public interface OnDiskFormat
      * @return the primary key factory
      */
     public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator);
-
-    /**
-     * Returns true if the per-sstable index components have been built and are valid.
-     *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable SAI index
-     * @return true if the per-sstable index components have been built and are complete
-     */
-    public boolean isPerSSTableBuildComplete(IndexDescriptor indexDescriptor);
-
-    /**
-     * Returns true if the per-index index components have been built and are valid.
-     *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable SAI Index
-     * @param indexContext The {@link IndexContext} for the index
-     * @return true if the per-index index components have been built and are complete
-     */
-    public boolean isPerIndexBuildComplete(IndexDescriptor indexDescriptor, IndexContext indexContext);
 
     /**
      * Returns a {@link PrimaryKeyMap.Factory} for the SSTable
@@ -108,6 +100,11 @@ public interface OnDiskFormat
      */
     public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext indexContext);
 
+    IndexSearcher newIndexSearcher(SSTableContext sstableContext,
+                                   IndexContext indexContext,
+                                   PerIndexFiles indexFiles,
+                                   SegmentMetadata segmentMetadata) throws IOException;
+
     /**
      * Create a new writer for the per-SSTable on-disk components of an index.
      *
@@ -120,19 +117,21 @@ public interface OnDiskFormat
     /**
      * Create a new writer for the per-index on-disk components of an index. The {@link LifecycleNewTracker}
      * is used to determine the type of index write about to happen this will either be an
-     * {@code OperationType.FLUSH} indicating that we are about to flush a {@link org.apache.cassandra.index.sai.memory.MemtableIndex}
+     * {@code OperationType.FLUSH} indicating that we are about to flush a {@link TrieMemtableIndex}
      * or one of the other operation types indicating that we will be writing from an existing SSTable
      *
-     * @param index The {@link StorageAttachedIndex} holding the current index build status
+     * @param index           The {@link StorageAttachedIndex} holding the current index build status
      * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
-     * @param tracker The {@link LifecycleNewTracker} for index build operation.
-     * @param rowMapping The {@link RowMapping} that is used to map rowID to {@code PrimaryKey} during the write
+     * @param tracker         The {@link LifecycleNewTracker} for index build operation.
+     * @param rowMapping      The {@link RowMapping} that is used to map rowID to {@code PrimaryKey} during the write
+     * @param keyCount
      * @return The {@link PerIndexWriter} that will write the per-index on-disk components
      */
     public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
                                             IndexDescriptor indexDescriptor,
                                             LifecycleNewTracker tracker,
-                                            RowMapping rowMapping);
+                                            RowMapping rowMapping,
+                                            long keyCount);
 
     /**
      * Validate all the per-SSTable on-disk components and throw if a component is not valid
@@ -147,13 +146,25 @@ public interface OnDiskFormat
     /**
      * Validate all the per-index on-disk components and throw if a component is not valid
      *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
-     * @param indexContext The {@link IndexContext} holding the per-index information for the index
+     * @param descriptor The {@link IndexDescriptor} for the SSTable
+     * @param context The {@link IndexContext} holding the per-index information for the index
      * @param checksum {@code true} if the checksum should be tested as part of the validation
      *
      * @return true if all the per-index components are valid
      */
-    public boolean validatePerIndexComponents(IndexDescriptor indexDescriptor, IndexContext indexContext, boolean checksum);
+    default boolean validatePerIndexComponents(IndexDescriptor descriptor, IndexContext context, boolean checksum)
+    {
+        for (IndexComponent component : perIndexComponents(context))
+        {
+            if (descriptor.isIndexEmpty(context))
+                continue;
+            if (!validateOneIndexComponent(component, descriptor, context, checksum))
+                return false;
+        }
+        return true;
+    }
+
+    boolean validateOneIndexComponent(IndexComponent component, IndexDescriptor descriptor, IndexContext context, boolean checksum);
 
     /**
      * Returns the set of {@link IndexComponent} for the per-SSTable part of an index.
@@ -192,4 +203,13 @@ public interface OnDiskFormat
      * @return The number of open per-index files
      */
     public int openFilesPerIndex(IndexContext indexContext);
+
+    /**
+     * Return the {@link ByteOrder} for the given {@link IndexComponent} and {@link IndexContext}.
+     *
+     * @param component - The {@link IndexComponent} for the index
+     * @param context - The {@link IndexContext} for the index
+     * @return The {@link ByteOrder} for the file associated with the {@link IndexComponent}
+     */
+    public ByteOrder byteOrderFor(IndexComponent component, IndexContext context);
 }

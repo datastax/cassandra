@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Stopwatch;
@@ -27,7 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -38,7 +39,7 @@ import org.apache.cassandra.utils.Throwables;
  * A range iterator based on {@link PostingList}.
  *
  * <ol>
- *   <li> fetch next segment row id from posting list or skip to specific segment row id if {@link #skipTo(PrimaryKey)} is called </li>
+ *   <li> fetch next unique segment row id from posting list or skip to specific segment row id if {@link #skipTo(PrimaryKey)} is called </li>
  *   <li> add segmentRowIdOffset to obtain the sstable row id </li>
  *   <li> produce a {@link PrimaryKey} from {@link PrimaryKeyMap#primaryKeyFromRowId(long)} which is used
  *       to avoid fetching duplicated keys due to partition-level indexing on wide partition schema.
@@ -56,16 +57,18 @@ public class PostingListRangeIterator extends RangeIterator
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final Stopwatch timeToExhaust = Stopwatch.createStarted();
-    private final SSTableQueryContext queryContext;
+    private final QueryContext queryContext;
 
     private final PostingList postingList;
     private final IndexContext indexContext;
     private final PrimaryKeyMap primaryKeyMap;
     private final IndexSearcherContext searcherContext;
 
+    private final AtomicBoolean isClosed = new AtomicBoolean(false);
+
     private boolean needsSkipping = false;
     private PrimaryKey skipToToken = null;
-
+    private long lastSegmentRowId = -1;
 
     /**
      * Create a direct PostingListRangeIterator where the underlying PostingList is materialised
@@ -87,7 +90,10 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        if (skipToToken != null && skipToToken.compareTo(nextKey) >= 0)
+        // If skipToToken is equal to nextKey, we take the nextKey because in practice, it is greater than or equal
+        // to the skipToToken. This is because token only PKs are considered equal to all PKs with the same token,
+        // and for a range query, we first skip on the token-only PK.
+        if (skipToToken != null && skipToToken.compareTo(nextKey) > 0)
             return;
 
         skipToToken = nextKey;
@@ -99,7 +105,7 @@ public class PostingListRangeIterator extends RangeIterator
     {
         try
         {
-            queryContext.queryContext.checkpoint();
+            queryContext.checkpoint();
 
             // just end the iterator if we don't have a postingList or current segment is skipped
             if (exhausted())
@@ -109,28 +115,43 @@ public class PostingListRangeIterator extends RangeIterator
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            return primaryKeyMap.primaryKeyFromRowId(rowId);
+            var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+            return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
         }
         catch (Throwable t)
         {
-            //TODO We aren't tidying up resources here
             if (!(t instanceof AbortedOperationException))
                 logger.error(indexContext.logMessage("Unable to provide next token!"), t);
 
+            closeOnException(t);
             throw Throwables.cleaned(t);
         }
+    }
+
+    private void closeOnException(Throwable t)
+    {
+        FileUtils.closeQuietly(this);
     }
 
     @Override
     public void close() throws IOException
     {
-        if (logger.isTraceEnabled())
+        if (isClosed.compareAndSet(false, true))
         {
-            final long exhaustedInMills = timeToExhaust.stop().elapsed(TimeUnit.MILLISECONDS);
-            logger.trace(indexContext.logMessage("PostinListRangeIterator exhausted after {} ms"), exhaustedInMills);
+            if (logger.isTraceEnabled())
+            {
+                // timeToExhaust.stop() throws on already stopped stopwatch
+                final long closedInMills = timeToExhaust.stop().elapsed(TimeUnit.MILLISECONDS);
+                logger.trace(indexContext.logMessage("PostinListRangeIterator exhausted after {} ms"), closedInMills);
+            }
+
+            FileUtils.closeQuietly(postingList, primaryKeyMap);
+        }
+        else {
+            logger.warn("PostingListRangeIterator is already closed",
+                        new IllegalStateException("PostingListRangeIterator is already closed"));
         }
 
-        FileUtils.closeQuietly(postingList, primaryKeyMap);
     }
 
     private boolean exhausted()
@@ -146,23 +167,36 @@ public class PostingListRangeIterator extends RangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetRowID = primaryKeyMap.rowIdFromPrimaryKey(skipToToken);
-            // skipToToken is larger than max token in token file
-            if (targetRowID < 0)
+            long targetRowID;
+            if (skipToToken instanceof PrimaryKeyWithSource
+                && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
             {
-                return PostingList.END_OF_STREAM;
+                targetRowID = ((PrimaryKeyWithSource) skipToToken).getSourceRowId();
+            }
+            else
+            {
+                targetRowID = primaryKeyMap.ceiling(skipToToken);
+                // skipToToken is larger than max token in token file
+                if (targetRowID < 0)
+                {
+                    return PostingList.END_OF_STREAM;
+                }
             }
 
-            segmentRowId = postingList.advance(targetRowID - searcherContext.segmentRowIdOffset);
+            segmentRowId = postingList.advance(targetRowID - searcherContext.getSegmentRowIdOffset());
             needsSkipping = false;
         }
         else
         {
-            segmentRowId = postingList.nextPosting();
+            do
+            {
+                segmentRowId = postingList.nextPosting();
+                // Do not produce a duplicate segment row id.
+            } while (segmentRowId == lastSegmentRowId && segmentRowId != PostingList.END_OF_STREAM);
         }
-
+        lastSegmentRowId = segmentRowId;
         return segmentRowId != PostingList.END_OF_STREAM
-               ? segmentRowId + searcherContext.segmentRowIdOffset
+               ? segmentRowId + searcherContext.getSegmentRowIdOffset()
                : PostingList.END_OF_STREAM;
     }
 }

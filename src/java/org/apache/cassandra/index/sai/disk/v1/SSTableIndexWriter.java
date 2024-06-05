@@ -30,6 +30,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -37,11 +38,14 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Column index writer that accumulates (on-heap) indexed data from a compacted SSTable as it's being flushed to disk.
@@ -50,7 +54,6 @@ import org.apache.cassandra.utils.NoSpamLogger;
 public class SSTableIndexWriter implements PerIndexWriter
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableIndexWriter.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     private final IndexDescriptor indexDescriptor;
     private final IndexContext indexContext;
@@ -58,6 +61,7 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexValid;
+    private final long keyCount;
 
     private boolean aborted = false;
 
@@ -66,13 +70,14 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final List<SegmentMetadata> segments = new ArrayList<>();
     private long maxSSTableRowId;
 
-    public SSTableIndexWriter(IndexDescriptor indexDescriptor, IndexContext indexContext, NamedMemoryLimiter limiter, BooleanSupplier isIndexValid)
+    public SSTableIndexWriter(IndexDescriptor indexDescriptor, IndexContext indexContext, NamedMemoryLimiter limiter, BooleanSupplier isIndexValid, long keyCount)
     {
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
         this.analyzer = indexContext.getAnalyzerFactory().create();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
+        this.keyCount = keyCount;
     }
 
     @Override
@@ -131,7 +136,6 @@ public class SSTableIndexWriter implements PerIndexWriter
                              indexDescriptor.descriptor,
                              elapsed - start,
                              elapsed);
-                start = elapsed;
             }
 
             // Even an empty segment may carry some fixed memory, so remove it:
@@ -175,7 +179,10 @@ public class SSTableIndexWriter implements PerIndexWriter
                          indexDescriptor.descriptor, FBUtilities.prettyPrintMemory(allocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
         }
 
-        indexDescriptor.deleteColumnIndex(indexContext);
+        if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+            indexDescriptor.deleteColumnIndex(indexContext);
+        else
+            logger.debug("Skipping delete of index components after failure on index build of {}.{}", indexDescriptor, indexContext);
     }
 
     /**
@@ -197,41 +204,24 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private void addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
     {
-        if (!indexContext.validateMaxTermSize(key.partitionKey(), term, false))
+        if (!indexContext.validateMaxTermSize(key.partitionKey(), term))
             return;
 
         if (currentBuilder == null)
         {
-            currentBuilder = newSegmentBuilder();
+            currentBuilder = newSegmentBuilder(sstableRowId);
         }
         else if (shouldFlush(sstableRowId))
         {
             flushSegment();
-            currentBuilder = newSegmentBuilder();
+            currentBuilder = newSegmentBuilder(sstableRowId);
         }
 
-        if (term.remaining() == 0) return;
+        if (term.remaining() == 0)
+            return;
 
-        if (!TypeUtil.isLiteral(type))
-        {
-            limiter.increment(currentBuilder.add(term, key, sstableRowId));
-        }
-        else
-        {
-            analyzer.reset(term);
-            try
-            {
-                while (analyzer.hasNext())
-                {
-                    ByteBuffer tokenTerm = analyzer.next();
-                    limiter.increment(currentBuilder.add(tokenTerm, key, sstableRowId));
-                }
-            }
-            finally
-            {
-                analyzer.end();
-            }
-        }
+        long allocated = currentBuilder.addAll(term, type, key, sstableRowId, analyzer, indexContext);
+        limiter.increment(allocated);
     }
 
     private boolean shouldFlush(long sstableRowId)
@@ -242,7 +232,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (reachMemoryLimit)
         {
             logger.debug(indexContext.logMessage("Global limit of {} and minimum flush size of {} exceeded. " +
-                                            "Current builder usage is {} for {} cells. Global Usage is {}. Flushing..."),
+                                                 "Current builder usage is {} for {} rows. Global Usage is {}. Flushing..."),
                          FBUtilities.prettyPrintMemory(limiter.limitBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.getMinimumFlushBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.totalBytesAllocated()),
@@ -250,13 +240,25 @@ public class SSTableIndexWriter implements PerIndexWriter
                          FBUtilities.prettyPrintMemory(limiter.currentBytesUsed()));
         }
 
-        return reachMemoryLimit || currentBuilder.exceedsSegmentLimit(sstableRowId);
+        return reachMemoryLimit || currentBuilder.exceedsSegmentLimit(sstableRowId) || currentBuilder.requiresFlush();
     }
 
     private void flushSegment() throws IOException
     {
-        long start = System.nanoTime();
+        currentBuilder.awaitAsyncAdditions();
+        if (currentBuilder.supportsAsyncAdd()
+            && currentBuilder.totalBytesAllocatedConcurrent.sum() > 1.1 * currentBuilder.totalBytesAllocated())
+        {
+            logger.warn("Concurrent memory usage is higher than estimated: {} vs {}",
+                        currentBuilder.totalBytesAllocatedConcurrent.sum(), currentBuilder.totalBytesAllocated());
+        }
 
+        // throw exceptions that occurred during async addInternal()
+        var ae = currentBuilder.getAsyncThrowable();
+        if (ae != null)
+            Throwables.throwAsUncheckedException(ae);
+
+        long start = System.nanoTime();
         try
         {
             long bytesAllocated = currentBuilder.totalBytesAllocated();
@@ -318,11 +320,29 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
     }
 
-    private SegmentBuilder newSegmentBuilder()
+    private SegmentBuilder newSegmentBuilder(long rowIdOffset)
     {
-        SegmentBuilder builder = TypeUtil.isLiteral(indexContext.getValidator())
-                                 ? new SegmentBuilder.RAMStringSegmentBuilder(indexContext.getValidator(), limiter)
-                                 : new SegmentBuilder.KDTreeSegmentBuilder(indexContext.getValidator(), limiter, indexContext.getIndexWriterConfig());
+        SegmentBuilder builder;
+
+        if (indexContext.isVector())
+        {
+            // if we have a PQ instance available, we can use it to build a CompactionGraph;
+            // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
+            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
+            if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION) {
+                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(indexDescriptor, indexContext, rowIdOffset, keyCount, limiter);
+            } else {
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(indexDescriptor, indexContext, rowIdOffset, keyCount, limiter, pqi.pq, pqi.unitVectors.get());
+            }
+        }
+        else if (indexContext.isLiteral())
+        {
+            builder = new SegmentBuilder.RAMStringSegmentBuilder(rowIdOffset, indexContext.getValidator(), limiter);
+        }
+        else
+        {
+            builder = new SegmentBuilder.KDTreeSegmentBuilder(rowIdOffset, indexContext.getValidator(), limiter, indexContext.getIndexWriterConfig());
+        }
 
         long globalBytesUsed = limiter.increment(builder.totalBytesAllocated());
         logger.debug(indexContext.logMessage("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {}."),

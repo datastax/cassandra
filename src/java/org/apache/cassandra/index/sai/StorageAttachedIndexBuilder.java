@@ -150,10 +150,11 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             // build the per-index components
             boolean perIndexComponentsOnly = perSSTableFileLock == null;
             // remove existing per column index files instead of overwriting
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
             indexes.forEach(index -> indexDescriptor.deleteColumnIndex(index.getIndexContext()));
 
-            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, indexes, txn, perIndexComponentsOnly);
+            long keyCount = SSTableReader.getApproximateKeyCount(Set.of(sstable));
+            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, indexes, txn, keyCount, perIndexComponentsOnly);
 
             long previousKeyPosition = 0;
             indexWriter.begin();
@@ -279,7 +280,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     private CountDownLatch shouldWritePerSSTableFiles(SSTableReader sstable)
     {
         // if per-table files are incomplete or checksum failed during full rebuild.
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+        IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
         if (!indexDescriptor.isPerSSTableBuildComplete() || isFullRebuild)
         {
             CountDownLatch latch = new CountDownLatch(1);

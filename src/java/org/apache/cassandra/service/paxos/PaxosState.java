@@ -31,14 +31,17 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteOptions;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.UUIDGen;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.LWT_LOCKS_PER_THREAD;
+
 public class PaxosState
 {
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
+    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * LWT_LOCKS_PER_THREAD.getInt());
 
     private final Commit promised;
     private final Commit accepted;
@@ -64,7 +67,7 @@ public class PaxosState
         long start = System.nanoTime();
         try
         {
-            Lock lock = LOCKS.get(toPrepare.update.partitionKey());
+            Lock lock = LOCKS.get(lockStripe(toPrepare.update));
             lock.lock();
             try
             {
@@ -105,7 +108,7 @@ public class PaxosState
         long start = System.nanoTime();
         try
         {
-            Lock lock = LOCKS.get(proposal.update.partitionKey());
+            Lock lock = LOCKS.get(lockStripe(proposal.update));
             lock.lock();
             try
             {
@@ -164,5 +167,10 @@ public class PaxosState
         {
             Keyspace.open(proposal.update.metadata().keyspace).getColumnFamilyStore(proposal.update.metadata().id).metric.casCommit.addNano(System.nanoTime() - start);
         }
+    }
+
+    private static int lockStripe(PartitionUpdate update)
+    {
+        return update.partitionKey().hashCode() ^ update.metadata().keyspace.hashCode();
     }
 }

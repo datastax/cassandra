@@ -22,8 +22,10 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Predicate;
@@ -32,7 +34,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -45,6 +46,8 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.utils.GeoUtil;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
@@ -53,6 +56,8 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.lucene.util.SloppyMath;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -69,6 +74,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNu
 public abstract class RowFilter implements Iterable<RowFilter.Expression>
 {
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     public static final Serializer serializer = new Serializer();
     public static final RowFilter NONE = CQLFilter.NONE;
@@ -87,7 +93,16 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public List<Expression> getExpressions()
     {
+        warnIfFilterIsATree();
         return root.expressions;
+    }
+
+    /**
+     * @return *all* the expressions from the RowFilter tree in pre-order.
+     */
+    public Stream<Expression> getExpressionsPreOrder()
+    {
+        return root.getExpressionsPreOrder();
     }
 
     /**
@@ -96,6 +111,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
+        warnIfFilterIsATree();
         for (Expression expression : root)
         {
             ColumnMetadata column = expression.column();
@@ -158,6 +174,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
     {
+        warnIfFilterIsATree();
         for (Expression e : root)
         {
             if (!e.column.isPartitionKey())
@@ -178,6 +195,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering<?> clustering)
     {
+        warnIfFilterIsATree();
         for (Expression e : root)
         {
             if (!e.column.isClusteringColumn())
@@ -197,6 +215,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public RowFilter without(Expression expression)
     {
+        warnIfFilterIsATree();
         assert root.contains(expression);
         if (root.size() == 1)
             return RowFilter.NONE;
@@ -221,6 +240,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public Iterator<Expression> iterator()
     {
+        warnIfFilterIsATree();
         return root.iterator();
     }
 
@@ -228,6 +248,14 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     public String toString()
     {
         return root.toString();
+    }
+
+    private void warnIfFilterIsATree()
+    {
+        if (!root.children.isEmpty())
+        {
+            noSpamLogger.warn("RowFilter is a tree, but we're using it as a list of top-levels expressions", new Exception("stacktrace of a potential misuse"));
+        }
     }
 
     public static Builder builder()
@@ -273,9 +301,44 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return expression;
         }
 
-        public void addMapEquality(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
+        public void addMapComparison(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
         {
-            add(new MapEqualityExpression(def, key, op, value));
+            add(new MapComparisonExpression(def, key, op, value));
+        }
+
+        public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
+        {
+            var primaryGeoDistanceExpression = new GeoDistanceExpression(def, point, op, distance);
+            // The following logic optionally adds a second search expression in the event that the query area
+            // crosses then antimeridian.
+            if (primaryGeoDistanceExpression.crossesAntimeridian())
+            {
+                // The primry GeoDistanceExpression includes points on/over the antimeridian. Since we search
+                // using the lat/lon coordinates, we must create a shifted expression that will collect
+                // results on the other side of the antimeridian.
+                var shiftedGeoDistanceExpression = primaryGeoDistanceExpression.buildShiftedExpression();
+                if (current.isDisjunction)
+                {
+                    // We can add both expressions to this level of the tree because it is a disjunction.
+                    add(primaryGeoDistanceExpression);
+                    add(shiftedGeoDistanceExpression);
+                }
+                else
+                {
+                    // We need to add a new level to the tree so that we can get all results that match the primary
+                    // or the shifted expressions.
+                    var builder = new FilterElement.Builder(true);
+                    primaryGeoDistanceExpression.validate();
+                    shiftedGeoDistanceExpression.validate();
+                    builder.expressions.add(primaryGeoDistanceExpression);
+                    builder.expressions.add(shiftedGeoDistanceExpression);
+                    current.children.add(builder.build());
+                }
+            }
+            else
+            {
+                add(primaryGeoDistanceExpression);
+            }
         }
 
         public void addCustomIndexExpression(TableMetadata metadata, IndexMetadata targetIndex, ByteBuffer value)
@@ -283,10 +346,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             add(CustomExpression.build(metadata, targetIndex, value));
         }
 
-        private void add(Expression expression)
+        public Builder add(Expression expression)
         {
             expression.validate();
             current.expressions.add(expression);
+            return this;
         }
 
         public void addUserExpression(UserExpression e)
@@ -432,6 +496,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return sb.toString();
         }
 
+        public Stream<Expression> getExpressionsPreOrder()
+        {
+            return Stream.concat(expressions.stream(),
+                                 children.stream().flatMap(FilterElement::getExpressionsPreOrder));
+        }
+
         public static class Builder
         {
             private boolean isDisjunction;
@@ -569,11 +639,30 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     {
         public static final Serializer serializer = new Serializer();
 
-        // Note: the order of this enum matter, it's used for serialization,
+        // Note: the val of this enum is used for serialization,
         // and this is why we have some UNUSEDX for values we don't use anymore
         // (we could clean those on a major protocol update, but it's not worth
         // the trouble for now)
-        protected enum Kind { SIMPLE, MAP_EQUALITY, UNUSED1, CUSTOM, USER }
+        // VECTOR
+        protected enum Kind {
+            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), VECTOR_RADIUS(100);
+            private final int val;
+            Kind(int v) { val = v; }
+            public int getVal() { return val; }
+            public static Kind fromVal(int val)
+            {
+                switch (val)
+                {
+                    case 0: return SIMPLE;
+                    case 1: return MAP_COMPARISON;
+                    case 2: return UNUSED1;
+                    case 3: return CUSTOM;
+                    case 4: return USER;
+                    case 100: return VECTOR_RADIUS;
+                    default: throw new IllegalArgumentException("Unknown index expression kind: " + val);
+                }
+            }
+        }
 
         protected abstract Kind kind();
         protected final ColumnMetadata column;
@@ -706,7 +795,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         {
             public void serialize(Expression expression, DataOutputPlus out, int version) throws IOException
             {
-                out.writeByte(expression.kind().ordinal());
+                out.writeByte(expression.kind().getVal());
 
                 // Custom expressions include neither a column or operator, but all
                 // other expressions do.
@@ -731,17 +820,23 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     case SIMPLE:
                         ByteBufferUtil.writeWithShortLength(expression.value, out);
                         break;
-                    case MAP_EQUALITY:
-                        MapEqualityExpression mexpr = (MapEqualityExpression)expression;
+                    case MAP_COMPARISON:
+                        MapComparisonExpression mexpr = (MapComparisonExpression)expression;
                         ByteBufferUtil.writeWithShortLength(mexpr.key, out);
                         ByteBufferUtil.writeWithShortLength(mexpr.value, out);
+                        break;
+                    case VECTOR_RADIUS:
+                        GeoDistanceExpression gexpr = (GeoDistanceExpression) expression;
+                        gexpr.distanceOperator.writeTo(out);
+                        ByteBufferUtil.writeWithShortLength(gexpr.distance, out);
+                        ByteBufferUtil.writeWithShortLength(gexpr.value, out);
                         break;
                 }
             }
 
             public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
             {
-                Kind kind = Kind.values()[in.readByte()];
+                Kind kind = Kind.fromVal(in.readByte());
 
                 // custom expressions (3.0+ only) do not contain a column or operator, only a value
                 if (kind == Kind.CUSTOM)
@@ -767,10 +862,15 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 {
                     case SIMPLE:
                         return new SimpleExpression(column, operator, ByteBufferUtil.readWithShortLength(in));
-                    case MAP_EQUALITY:
+                    case MAP_COMPARISON:
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
                         ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
-                        return new MapEqualityExpression(column, key, operator, value);
+                        return new MapComparisonExpression(column, key, operator, value);
+                    case VECTOR_RADIUS:
+                        Operator boundaryOperator = Operator.readFrom(in);
+                        ByteBuffer distance = ByteBufferUtil.readWithShortLength(in);
+                        ByteBuffer searchVector = ByteBufferUtil.readWithShortLength(in);
+                        return new GeoDistanceExpression(column, searchVector, boundaryOperator, distance);
                 }
                 throw new AssertionError();
             }
@@ -790,8 +890,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     case SIMPLE:
                         size += ByteBufferUtil.serializedSizeWithShortLength(((SimpleExpression)expression).value);
                         break;
-                    case MAP_EQUALITY:
-                        MapEqualityExpression mexpr = (MapEqualityExpression)expression;
+                    case MAP_COMPARISON:
+                        MapComparisonExpression mexpr = (MapComparisonExpression)expression;
                         size += ByteBufferUtil.serializedSizeWithShortLength(mexpr.key)
                               + ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
                         break;
@@ -801,6 +901,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                         break;
                     case USER:
                         size += UserExpression.serializedSize((UserExpression)expression, version);
+                        break;
+                    case VECTOR_RADIUS:
+                        GeoDistanceExpression geoDistanceRelation = (GeoDistanceExpression) expression;
+                        size += ByteBufferUtil.serializedSizeWithShortLength(geoDistanceRelation.distance)
+                                + ByteBufferUtil.serializedSizeWithShortLength(geoDistanceRelation.value)
+                                + geoDistanceRelation.distanceOperator.serializedSize();
                         break;
                 }
                 return size;
@@ -828,6 +934,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             {
                 case EQ:
                 case IN:
+                case NOT_IN:
                 case LT:
                 case LTE:
                 case GTE:
@@ -858,6 +965,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 case LIKE_SUFFIX:
                 case LIKE_CONTAINS:
                 case LIKE_MATCHES:
+                case ANN:
                     {
                         assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for 'complex' types";
                         ByteBuffer foundValue = getValue(metadata, partitionKey, row);
@@ -865,63 +973,77 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                         return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
                     }
                 case CONTAINS:
-                    assert column.type.isCollection();
-                    CollectionType<?> type = (CollectionType<?>)column.type;
-                    if (column.isComplex())
-                    {
-                        ComplexColumnData complexData = row.getComplexColumnData(column);
-                        if (complexData != null)
-                        {
-                            for (Cell<?> cell : complexData)
-                            {
-                                if (type.kind == CollectionType.Kind.SET)
-                                {
-                                    if (type.nameComparator().compare(cell.path().get(0), value) == 0)
-                                        return true;
-                                }
-                                else
-                                {
-                                    if (type.valueComparator().compare(cell.buffer(), value) == 0)
-                                        return true;
-                                }
-                            }
-                        }
-                        return false;
-                    }
-                    else
-                    {
-                        ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                        if (foundValue == null)
-                            return false;
-
-                        switch (type.kind)
-                        {
-                            case LIST:
-                                ListType<?> listType = (ListType<?>)type;
-                                return listType.compose(foundValue).contains(listType.getElementsType().compose(value));
-                            case SET:
-                                SetType<?> setType = (SetType<?>)type;
-                                return setType.compose(foundValue).contains(setType.getElementsType().compose(value));
-                            case MAP:
-                                MapType<?,?> mapType = (MapType<?, ?>)type;
-                                return mapType.compose(foundValue).containsValue(mapType.getValuesType().compose(value));
-                        }
-                        throw new AssertionError();
-                    }
+                    return contains(metadata, partitionKey, row);
                 case CONTAINS_KEY:
-                    assert column.type.isCollection() && column.type instanceof MapType;
-                    MapType<?, ?> mapType = (MapType<?, ?>)column.type;
-                    if (column.isComplex())
-                    {
-                         return row.getCell(column, CellPath.create(value)) != null;
-                    }
-                    else
-                    {
-                        ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                        return foundValue != null && mapType.getSerializer().getSerializedValue(foundValue, value, mapType.getKeysType()) != null;
-                    }
+                    return containsKey(metadata, partitionKey, row);
+                case NOT_CONTAINS:
+                    return !contains(metadata, partitionKey, row);
+                case NOT_CONTAINS_KEY:
+                    return !containsKey(metadata, partitionKey, row);
             }
-            throw new AssertionError();
+            throw new AssertionError("Unsupported operator: " + operator);
+        }
+
+        private boolean contains(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        {
+            assert column.type.isCollection();
+            CollectionType<?> type = (CollectionType<?>)column.type;
+            if (column.isComplex())
+            {
+                ComplexColumnData complexData = row.getComplexColumnData(column);
+                if (complexData != null)
+                {
+                    for (Cell<?> cell : complexData)
+                    {
+                        if (type.kind == CollectionType.Kind.SET)
+                        {
+                            if (type.nameComparator().compare(cell.path().get(0), value) == 0)
+                                return true;
+                        }
+                        else
+                        {
+                            if (type.valueComparator().compare(cell.buffer(), value) == 0)
+                                return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            else
+            {
+                ByteBuffer foundValue = getValue(metadata, partitionKey, row);
+                if (foundValue == null)
+                    return false;
+
+                switch (type.kind)
+                {
+                    case LIST:
+                        ListType<?> listType = (ListType<?>)type;
+                        return listType.compose(foundValue).contains(listType.getElementsType().compose(value));
+                    case SET:
+                        SetType<?> setType = (SetType<?>)type;
+                        return setType.compose(foundValue).contains(setType.getElementsType().compose(value));
+                    case MAP:
+                        MapType<?,?> mapType = (MapType<?, ?>)type;
+                        return mapType.compose(foundValue).containsValue(mapType.getValuesType().compose(value));
+                }
+                throw new AssertionError();
+            }
+        }
+
+        private boolean containsKey(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        {
+            assert column.type.isCollection() && column.type instanceof MapType;
+            MapType<?, ?> mapType = (MapType<?, ?>)column.type;
+            if (column.isComplex())
+            {
+                return row.getCell(column, CellPath.create(value)) != null;
+            }
+            else
+            {
+                ByteBuffer foundValue = getValue(metadata, partitionKey, row);
+                return foundValue != null && mapType.getSerializer().getSerializedValue(foundValue, value, mapType.getKeysType()) != null;
+            }
         }
 
         @Override
@@ -931,15 +1053,18 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             switch (operator)
             {
                 case CONTAINS:
+                case NOT_CONTAINS:
                     assert type instanceof CollectionType;
                     CollectionType<?> ct = (CollectionType<?>)type;
                     type = ct.kind == CollectionType.Kind.SET ? ct.nameComparator() : ct.valueComparator();
                     break;
                 case CONTAINS_KEY:
+                case NOT_CONTAINS_KEY:
                     assert type instanceof MapType;
                     type = ((MapType<?, ?>)type).nameComparator();
                     break;
                 case IN:
+                case NOT_IN:
                     type = ListType.getInstance(type, false);
                     break;
                 default:
@@ -956,17 +1081,19 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     /**
-     * An expression of the form 'column' ['key'] = 'value' (which is only
-     * supported when 'column' is a map).
+     * An expression of the form 'column' ['key'] OPERATOR 'value' (which is only
+     * supported when 'column' is a map) and where the operator can be {@link Operator#EQ}, {@link Operator#NEQ},
+     * {@link Operator#LT}, {@link Operator#LTE}, {@link Operator#GT}, or {@link Operator#GTE}.
      */
-    public static class MapEqualityExpression extends Expression
+    public static class MapComparisonExpression extends Expression
     {
         private final ByteBuffer key;
+        private ByteBuffer indexValue = null;
 
-        public MapEqualityExpression(ColumnMetadata column, ByteBuffer key, Operator operator, ByteBuffer value)
+        public MapComparisonExpression(ColumnMetadata column, ByteBuffer key, Operator operator, ByteBuffer value)
         {
             super(column, operator, value);
-            assert column.type instanceof MapType && operator == Operator.EQ;
+            assert column.type instanceof MapType && (operator == Operator.EQ || operator == Operator.NEQ || operator.isSlice());
             this.key = key;
         }
 
@@ -982,10 +1109,27 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         @Override
         public ByteBuffer getIndexValue()
         {
-            return CompositeType.build(ByteBufferAccessor.instance, key, value);
+            if (indexValue == null)
+                indexValue = CompositeType.build(ByteBufferAccessor.instance, key, value);
+            return indexValue;
         }
 
+        /**
+         * Returns whether the provided row satisfies this expression. For equality, it validates that the row contains
+         * the exact key/value pair. For inequalities, it validates that the row contains the key, then that the value
+         * satisfies the inequality.
+         * @param metadata
+         * @param partitionKey the partition key for row to check.
+         * @param row the row to check. It should *not* contain deleted cells
+         * (i.e. it should come from a RowIterator).
+         * @return whether the row is satisfied by this expression.
+         */
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        {
+            return isSatisfiedByEq(metadata, partitionKey, row) ^ (operator == Operator.NEQ);
+        }
+
+        private boolean isSatisfiedByEq(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             assert key != null;
             // We support null conditions for LWT (in ColumnCondition) but not for RowFilter.
@@ -995,11 +1139,14 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             if (row.isStatic() != column.isStatic())
                 return true;
 
+            int comp;
             MapType<?, ?> mt = (MapType<?, ?>)column.type;
             if (column.isComplex())
             {
                 Cell<?> cell = row.getCell(column, CellPath.create(key));
-                return cell != null && mt.valueComparator().compare(cell.buffer(), value) == 0;
+                if (cell == null)
+                    return false;
+                comp = mt.valueComparator().compare(cell.buffer(), value);
             }
             else
             {
@@ -1008,7 +1155,24 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     return false;
 
                 ByteBuffer foundValue = mt.getSerializer().getSerializedValue(serializedMap, key, mt.getKeysType());
-                return foundValue != null && mt.valueComparator().compare(foundValue, value) == 0;
+                if (foundValue == null)
+                    return false;
+                comp = mt.valueComparator().compare(foundValue, value);
+            }
+            switch (operator) {
+                case EQ:
+                case NEQ: // NEQ is inverted in calling method. We do this to simplify handling of null cells.
+                    return comp == 0;
+                case LT:
+                    return comp < 0;
+                case LTE:
+                    return comp <= 0;
+                case GT:
+                    return comp > 0;
+                case GTE:
+                    return comp >= 0;
+                default:
+                    throw new AssertionError("Unsupported operator: " + operator);
             }
         }
 
@@ -1016,7 +1180,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         public String toString()
         {
             MapType<?, ?> mt = (MapType<?, ?>)column.type;
-            return String.format("%s[%s] = %s", column.name, mt.nameComparator().getString(key), mt.valueComparator().getString(value));
+            return String.format("%s[%s] %s %s", column.name, mt.nameComparator().getString(key), operator, mt.valueComparator().getString(value));
         }
 
         @Override
@@ -1025,10 +1189,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             if (this == o)
                 return true;
 
-            if (!(o instanceof MapEqualityExpression))
+            if (!(o instanceof MapComparisonExpression))
                 return false;
 
-            MapEqualityExpression that = (MapEqualityExpression)o;
+            MapComparisonExpression that = (MapComparisonExpression)o;
 
             return Objects.equal(this.column.name, that.column.name)
                 && Objects.equal(this.operator, that.operator)
@@ -1045,7 +1209,179 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         @Override
         protected Kind kind()
         {
-            return Kind.MAP_EQUALITY;
+            return Kind.MAP_COMPARISON;
+        }
+
+        /**
+         * Get the lower bound for this expression. When the expression is EQ, GT, or GTE, the lower bound is the
+         * expression itself. When the expression is LT or LTE, the lower bound is the map's key becuase
+         * {@link ByteBuffer} comparisons will work correctly.
+         * @return the lower bound for this expression.
+         */
+        public ByteBuffer getLowerBound()
+        {
+            switch (operator) {
+                case EQ:
+                case GT:
+                case GTE:
+                    return this.getIndexValue();
+                case LT:
+                case LTE:
+                    return CompositeType.extractFirstComponentAsTrieSearchPrefix(getIndexValue(), true);
+                default:
+                    throw new AssertionError("Unsupported operator: " + operator);
+            }
+        }
+
+        /**
+         * Get the upper bound for this expression. When the expression is EQ, LT, or LTE, the upper bound is the
+         * expression itself. When the expression is GT or GTE, the upper bound is the map's key with the last byte
+         * set to 1 so that {@link ByteBuffer} comparisons will work correctly.
+         * @return the upper bound for this express
+         */
+        public ByteBuffer getUpperBound()
+        {
+            switch (operator) {
+                case GT:
+                case GTE:
+                    return CompositeType.extractFirstComponentAsTrieSearchPrefix(getIndexValue(), false);
+                case EQ:
+                case LT:
+                case LTE:
+                    return this.getIndexValue();
+                default:
+                    throw new AssertionError("Unsupported operator: " + operator);
+            }
+        }
+    }
+
+
+    public static class GeoDistanceExpression extends Expression
+    {
+        private final ByteBuffer distance;
+        private final Operator distanceOperator;
+        private final float searchRadiusMeters;
+        private final float searchLat;
+        private final float searchLon;
+        // Whether this is a shifted expression, which is used to handle crossing the antimeridian
+        private final boolean isShifted;
+
+        public GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance)
+        {
+            this(column, point, operator, distance, false);
+        }
+
+        private GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance, boolean isShifted)
+        {
+            super(column, Operator.BOUNDED_ANN, point);
+            assert column.type instanceof VectorType && (operator == Operator.LTE || operator == Operator.LT);
+            this.isShifted = isShifted;
+            this.distanceOperator = operator;
+            this.distance = distance;
+            searchRadiusMeters = FloatType.instance.compose(distance);
+            var pointVector = TypeUtil.decomposeVector(column.type, point);
+            // This is validated earlier in the parser because the column requires size 2, so only assert on it
+            assert pointVector.length == 2 : "GEO_DISTANCE requires search vector to have 2 dimensions.";
+            searchLat = pointVector[0];
+            searchLon = pointVector[1];
+        }
+
+        public boolean crossesAntimeridian()
+        {
+            return GeoUtil.crossesAntimeridian(searchLat, searchLon, searchRadiusMeters);
+        }
+
+        /**
+         * Build a new {@link GeoDistanceExpression} that is shifted by 360 degrees and can correctly search
+         * on the opposite side of the antimeridian.
+         * @return
+         */
+        public GeoDistanceExpression buildShiftedExpression()
+        {
+            float shiftedLon = searchLon > 0 ? searchLon - 360 : searchLon + 360;
+            var newPoint = VectorType.getInstance(FloatType.instance, 2)
+                                     .decompose(List.of(searchLat, shiftedLon));
+            return new GeoDistanceExpression(column, newPoint, distanceOperator, distance, true);
+        }
+
+        public Operator getDistanceOperator()
+        {
+            return distanceOperator;
+        }
+
+        public ByteBuffer getDistance()
+        {
+            return distance;
+        }
+
+        @Override
+        public void validate() throws InvalidRequestException
+        {
+            checkBindValueSet(distance, "Unsupported unset distance for column %s", column.name);
+            checkBindValueSet(value, "Unsupported unset vector value for column %s", column.name);
+
+            if (searchRadiusMeters <= 0)
+                throw new InvalidRequestException("GEO_DISTANCE radius must be positive, got " + searchRadiusMeters);
+
+            if (searchLat < -90 || searchLat > 90)
+                throw new InvalidRequestException("GEO_DISTANCE latitude must be between -90 and 90 degrees, got " + searchLat);
+            if (!isShifted && (searchLon < -180 || searchLon > 180))
+                throw new InvalidRequestException("GEO_DISTANCE longitude must be between -180 and 180 degrees, got " + searchLon);
+        }
+
+        @Override
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        {
+            ByteBuffer foundValue = getValue(metadata, partitionKey, row);
+            if (foundValue == null)
+                return false;
+            var foundVector = TypeUtil.decomposeVector(column.type, foundValue);
+            double haversineDistance = SloppyMath.haversinMeters(foundVector[0], foundVector[1], searchLat, searchLon);
+            switch (distanceOperator)
+            {
+                case LTE:
+                    return haversineDistance <= searchRadiusMeters;
+                case LT:
+                    return haversineDistance < searchRadiusMeters;
+                default:
+                    throw new AssertionError("Unsupported operator: " + operator);
+            }
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("GEO_DISTANCE(%s, %s) %s %s", column.name, column.type.getString(value),
+                                 distanceOperator, FloatType.instance.getString(distance));
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o)
+                return true;
+
+            if (!(o instanceof GeoDistanceExpression))
+                return false;
+
+            GeoDistanceExpression that = (GeoDistanceExpression)o;
+
+            return Objects.equal(this.column.name, that.column.name)
+                   && Objects.equal(this.distanceOperator, that.distanceOperator)
+                   && Objects.equal(this.distance, that.distance)
+                   && Objects.equal(this.value, that.value);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hashCode(column.name, distanceOperator, value, distance);
+        }
+
+        @Override
+        protected Kind kind()
+        {
+            return Kind.VECTOR_RADIUS;
         }
     }
 

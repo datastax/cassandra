@@ -99,6 +99,12 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
+        public Index findSupportingIndex(IndexRegistry indexRegistry)
+        {
+            return null;
+        }
+
+        @Override
         public boolean needsFiltering(Index.Group indexGroup)
         {
             return false;
@@ -276,6 +282,18 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
+        public Index findSupportingIndex(IndexRegistry indexRegistry)
+        {
+            for (SingleRestriction restriction : restrictionsMap.values())
+            {
+                Index index = restriction.findSupportingIndex(indexRegistry);
+                if (index != null)
+                    return index;
+            }
+            return null;
+        }
+
+        @Override
         public boolean needsFiltering(Index.Group indexGroup)
         {
             for (SingleRestriction restriction : restrictionsMap.values())
@@ -411,19 +429,11 @@ public abstract class RestrictionSet implements Restrictions
                 // new restriction
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
-                if (existingRestrictions.isEmpty())
-                {
-                    addRestrictionForColumns(columnDefs, restriction, false);
-                }
-                else
-                {
-                    for (SingleRestriction existing : existingRestrictions)
-                    {
-                        SingleRestriction newRestriction = existing.mergeWith(restriction);
+                SingleRestriction merged = restriction;
+                for (SingleRestriction existing : existingRestrictions)
+                    merged = existing.mergeWith(merged);
 
-                        addRestrictionForColumns(columnDefs, newRestriction, true);
-                    }
-                }
+                addRestrictionForColumns(merged.getColumnDefs(), merged, true);
             }
         }
 

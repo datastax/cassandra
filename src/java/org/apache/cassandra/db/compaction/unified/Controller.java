@@ -96,6 +96,8 @@ public abstract class Controller
      */
     @Deprecated
     static final String NUM_SHARDS_OPTION = "num_shards";
+    static final String L0_SHARDS_ENABLED_OPTION = "l0_shards_enabled";
+
 
     /**
      * The default number of shards defined via system property, see {@link #NUM_SHARDS_OPTION}.
@@ -159,7 +161,7 @@ public abstract class Controller
      * The target SSTable size. This is the size of the SSTables that the controller will try to create.
      */
     static final String TARGET_SSTABLE_SIZE_OPTION = "target_sstable_size";
-    public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + TARGET_SSTABLE_SIZE_OPTION, "1GiB"));
+    public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
 
@@ -189,7 +191,7 @@ public abstract class Controller
      * a growth value of 0.333, and 64 (~16GiB each) for a growth value of 0.5.
      */
     static final String SSTABLE_GROWTH_OPTION = "sstable_growth";
-    static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(System.getProperty(PREFIX + SSTABLE_GROWTH_OPTION, "0.333"));
+    static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(System.getProperty(PREFIX + SSTABLE_GROWTH_OPTION, "0.5"));
 
     /**
      * Number of reserved threads to keep for each compaction level. This is used to ensure that there are always
@@ -307,6 +309,8 @@ public abstract class Controller
 
     protected final Overlaps.InclusionMethod overlapInclusionMethod;
 
+    final boolean l0ShardsEnabled;
+
     Controller(MonotonicClock clock,
                Environment env,
                double[] survivalFactors,
@@ -340,6 +344,7 @@ public abstract class Controller
         this.reservedThreads = reservedThreads;
         this.reservationsType = reservationsType;
         this.maxSpaceOverhead = maxSpaceOverhead;
+        this.l0ShardsEnabled = Boolean.parseBoolean(System.getProperty(PREFIX + L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -421,6 +426,11 @@ public abstract class Controller
         return UnifiedCompactionStrategy.thresholdFromScalingParameter(getPreviousScalingParameter(index));
     }
 
+    public int getFlushShards(double density)
+    {
+        return areL0ShardsEnabled() ? getNumShards(density) : 1;
+    }
+
     /**
      * Calculate the number of shards to split the local token space in for the given sstable density.
      * This is calculated as a power-of-two multiple of baseShardCount, so that the expected size of resulting sstables
@@ -468,9 +478,10 @@ public abstract class Controller
         if (sstableGrowthModifier == 1)
         {
             shards = baseShardCount;
-            logger.debug("Shard count {} for density {} in fixed shards mode",
+            logger.debug("Shard count {} for density {} in fixed shards mode. SStableGrowthModifier {}",
                          shards,
-                         FBUtilities.prettyPrintBinary(localDensity, "B", " "));
+                         FBUtilities.prettyPrintBinary(localDensity, "B", " "),
+                         sstableGrowthModifier);
             return shards;
         }
         else if (sstableGrowthModifier == 0)
@@ -490,11 +501,12 @@ public abstract class Controller
             shards = baseShardCount * Integer.highestOneBit((int) count | 1);
 
             if (logger.isDebugEnabled())
-                logger.debug("Shard count {} for density {}, {} times target {}",
+                logger.debug("Shard count {} for density {}, {} times target {}. SStableGrowthModifier {}",
                              shards,
                              FBUtilities.prettyPrintBinary(localDensity, "B", " "),
                              localDensity / targetSSTableSize,
-                             FBUtilities.prettyPrintBinary(targetSSTableSize, "B", " "));
+                             FBUtilities.prettyPrintBinary(targetSSTableSize, "B", " "),
+                             sstableGrowthModifier);
             return shards;
         }
         else
@@ -522,14 +534,23 @@ public abstract class Controller
             if (logger.isDebugEnabled())
             {
                 long targetSize = (long) (targetSSTableSize * Math.exp(countLog * sstableGrowthModifier));
-                logger.debug("Shard count {} for density {}, {} times target {}",
+                logger.debug("Shard count {} for density {}, {} times target {}. SStableGrowthModifier {}",
                              shards,
                              FBUtilities.prettyPrintBinary(localDensity, "B", " "),
                              localDensity / targetSize,
-                             FBUtilities.prettyPrintBinary(targetSize, "B", " "));
+                             FBUtilities.prettyPrintBinary(targetSize, "B", " "),
+                             sstableGrowthModifier);
             }
             return shards;
         }
+    }
+
+    /**
+     * @return whether L0 should use shards
+     */
+    public boolean areL0ShardsEnabled()
+    {
+        return l0ShardsEnabled;
     }
 
     /**

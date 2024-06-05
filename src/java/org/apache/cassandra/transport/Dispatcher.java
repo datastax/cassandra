@@ -30,6 +30,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 import io.netty.util.AttributeKey;
 import org.apache.cassandra.concurrent.LocalAwareExecutorService;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.net.FrameEncoder;
 import org.apache.cassandra.service.ClientWarn;
@@ -41,16 +42,9 @@ import org.apache.cassandra.transport.messages.EventMessage;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
-import static org.apache.cassandra.concurrent.SharedExecutorPool.SHARED;
-
 public class Dispatcher
 {
     private static final Logger logger = LoggerFactory.getLogger(Dispatcher.class);
-    
-    private static final LocalAwareExecutorService requestExecutor = SHARED.newExecutor(DatabaseDescriptor.getNativeTransportMaxThreads(),
-                                                                                        DatabaseDescriptor::setNativeTransportMaxThreads,
-                                                                                        "transport",
-                                                                                        "Native-Transport-Requests");
 
     private static final ConcurrentMap<EventLoop, Flusher> flusherLookup = new ConcurrentHashMap<>();
     private final boolean useLegacyFlusher;
@@ -75,7 +69,7 @@ public class Dispatcher
 
     public void dispatch(Channel channel, Message.Request request, FlushItemConverter forFlusher, Overload backpressure)
     {
-        requestExecutor.submit(() -> processRequest(channel, request, forFlusher, backpressure));
+        Stage.NATIVE_TRANSPORT_REQUESTS.submit(() -> processRequest(channel, request, forFlusher, backpressure));
     }
 
     /**
@@ -161,14 +155,6 @@ public class Dispatcher
 
         flusher.enqueue(item);
         flusher.start();
-    }
-
-    public static void shutdown()
-    {
-        if (requestExecutor != null)
-        {
-            requestExecutor.shutdown();
-        }
     }
 
 

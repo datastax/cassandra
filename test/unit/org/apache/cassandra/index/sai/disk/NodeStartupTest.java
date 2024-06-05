@@ -317,13 +317,13 @@ public class NodeStartupTest extends SAITester
     private boolean isGroupIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
-        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.create(sstable).isPerSSTableBuildComplete());
+        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.createFrom(sstable).isPerSSTableBuildComplete());
     }
 
     private boolean isColumnIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
-        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.create(sstable).isPerIndexBuildComplete(indexContext));
+        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.createFrom(sstable).isPerIndexBuildComplete(indexContext));
     }
 
     private void setState(IndexStateOnRestart state)
@@ -333,8 +333,8 @@ public class NodeStartupTest extends SAITester
             case VALID:
                 break;
             case ALL_EMPTY:
-                Version.LATEST.onDiskFormat().perSSTableComponents().forEach(this::remove);
-                Version.LATEST.onDiskFormat().perIndexComponents(indexContext).forEach(c -> remove(c, indexContext));
+                Version.latest().onDiskFormat().perSSTableComponents().forEach(this::remove);
+                Version.latest().onDiskFormat().perIndexComponents(indexContext).forEach(c -> remove(c, indexContext));
                 break;
             case PER_SSTABLE_INCOMPLETE:
                 remove(IndexComponent.GROUP_COMPLETION_MARKER);

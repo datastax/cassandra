@@ -25,7 +25,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -33,6 +32,7 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -65,6 +65,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private final KeyFetcher keyFetcher;
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
+        private final SSTableId<?> sstableId;
 
         private FileHandle token = null;
         private FileHandle offset = null;
@@ -74,8 +75,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
             try
             {
                 this.metadata = MetadataSource.loadGroupMetadata(indexDescriptor);
-                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentName(IndexComponent.OFFSETS_VALUES)));
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
+                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentFileName(IndexComponent.OFFSETS_VALUES)));
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
 
                 token = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
                 offset = indexDescriptor.createPerSSTableFileHandle(IndexComponent.OFFSETS_VALUES);
@@ -85,6 +86,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.partitioner = indexDescriptor.partitioner;
                 this.keyFetcher = new KeyFetcher(sstable);
                 this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
+                this.sstableId = sstable.getId();
             }
             catch (Throwable t)
             {
@@ -93,12 +95,12 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         }
 
         @Override
-        public PrimaryKeyMap newPerSSTablePrimaryKeyMap(SSTableQueryContext context)
+        public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.openTokenReader(0, context));
+            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
             final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
 
-            return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory);
+            return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);
         }
 
         @Override
@@ -114,13 +116,15 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     private final KeyFetcher keyFetcher;
     private final RandomAccessReader reader;
     private final PrimaryKey.Factory primaryKeyFactory;
+    private final SSTableId<?> sstableId;
     private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
 
     private PartitionAwarePrimaryKeyMap(LongArray rowIdToToken,
                                         LongArray rowIdToOffset,
                                         IPartitioner partitioner,
                                         KeyFetcher keyFetcher,
-                                        PrimaryKey.Factory primaryKeyFactory)
+                                        PrimaryKey.Factory primaryKeyFactory,
+                                        SSTableId<?> sstableId)
     {
         this.rowIdToToken = rowIdToToken;
         this.rowIdToOffset = rowIdToOffset;
@@ -128,6 +132,13 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         this.keyFetcher = keyFetcher;
         this.reader = keyFetcher.createReader();
         this.primaryKeyFactory = primaryKeyFactory;
+        this.sstableId = sstableId;
+    }
+
+    @Override
+    public SSTableId<?> getSSTableId()
+    {
+        return sstableId;
     }
 
     @Override
@@ -139,9 +150,33 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
-    public long rowIdFromPrimaryKey(PrimaryKey key)
+    public long exactRowIdOrInvertedCeiling(PrimaryKey key)
     {
-        return rowIdToToken.findTokenRowID(key.token().getLongValue());
+        return rowIdToToken.indexOf(key.token().getLongValue());
+    }
+
+    @Override
+    public long ceiling(PrimaryKey key)
+    {
+        var rowId = exactRowIdOrInvertedCeiling(key);
+        if (rowId >= 0)
+            return rowId;
+        if (rowId == Long.MIN_VALUE)
+            return -1;
+        else
+            return -rowId - 1;
+    }
+
+    @Override
+    public long floor(PrimaryKey key)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long count()
+    {
+        return rowIdToToken.length();
     }
 
     @Override

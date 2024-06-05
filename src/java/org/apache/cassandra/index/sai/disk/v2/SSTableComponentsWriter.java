@@ -51,15 +51,15 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     {
         this.indexDescriptor = indexDescriptor;
         this.metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
-        this.tokenWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES),
+        this.tokenWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES),
                                                    indexDescriptor.openPerSSTableOutput(IndexComponent.TOKEN_VALUES),
                                                    metadataWriter, false);
         this.trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
         this.bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-        this.blockFPWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+        this.blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                      indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                      metadataWriter, true);
-        this.sortedTermsWriter = new SortedTermsWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS),
+        this.sortedTermsWriter = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                        metadataWriter,
                                                        bytesWriter,
                                                        blockFPWriter,
@@ -76,14 +76,8 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     @Override
     public void complete(Stopwatch stopwatch) throws IOException
     {
-        try
-        {
-            indexDescriptor.createComponentOnDisk(IndexComponent.GROUP_COMPLETION_MARKER);
-        }
-        finally
-        {
-            IOUtils.close(tokenWriter, sortedTermsWriter, metadataWriter);
-        }
+        IOUtils.close(tokenWriter, sortedTermsWriter, metadataWriter);
+        indexDescriptor.createComponentOnDisk(IndexComponent.GROUP_COMPLETION_MARKER);
     }
 
     @Override

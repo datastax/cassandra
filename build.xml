@@ -151,12 +151,16 @@
     <property name="bytebuddy.version" value="1.10.10"/>
     <property name="jflex.version" value="1.8.2"/>
 
-    <!-- https://mvnrepository.com/artifact/net.openhft/chronicle-bom/1.16.23 -->
-    <property name="chronicle-queue.version" value="5.20.123" />
-    <property name="chronicle-core.version" value="2.20.126" />
-    <property name="chronicle-bytes.version" value="2.20.111" />
-    <property name="chronicle-wire.version" value="2.20.117" />
-    <property name="chronicle-threads.version" value="2.20.111" />
+    <!-- https://mvnrepository.com/artifact/net.openhft/chronicle-bom/2.24ea87 -->
+    <!-- Chronicle is trying to monetize by only publishing stable releases to their subscription repo,
+         so here I've chosen the last ea release before they cut a stable one. As an alternative, we
+         could build our own from source. -->
+    <property name="chronicle-queue.version" value="5.24ea27" />
+    <property name="chronicle-core.version" value="2.24ea28" />
+    <property name="chronicle-bytes.version" value="2.24ea20" />
+    <property name="chronicle-wire.version" value="2.24ea27" />
+    <property name="chronicle-threads.version" value="2.24ea14" />
+    <property name="chronicle-map.version" value="3.24ea4" />
 
     <condition property="maven-ant-tasks.jar.exists">
       <available file="${build.dir}/maven-ant-tasks-${maven-ant-tasks.version}.jar" />
@@ -637,6 +641,7 @@
             <exclusion groupId="net.java.dev.jna" artifactId="jna" />
             <exclusion groupId="net.java.dev.jna" artifactId="jna-platform" />
           </dependency>
+          <dependency groupId="net.openhft" artifactId="chronicle-map" version="${chronicle-map.version}" />
           <dependency groupId="com.google.code.findbugs" artifactId="jsr305" version="2.0.2" scope="provided"/>
           <dependency groupId="com.clearspring.analytics" artifactId="stream" version="2.5.2">
             <exclusion groupId="it.unimi.dsi" artifactId="fastutil" />
@@ -666,7 +671,7 @@
           </dependency>
           <dependency groupId="de.huxhorn.sulky" artifactId="de.huxhorn.sulky.ulid" version="8.2.0"/>
           <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" version="2.4.0" />
-          <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="2.5.6" />
+          <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="3.1.8" />
           <dependency groupId="org.jctools" artifactId="jctools-core" version="3.1.0"/>
           <dependency groupId="org.ow2.asm" artifactId="asm" version="${asm.version}"/>
           <dependency groupId="org.ow2.asm" artifactId="asm-tree" version="${asm.version}" scope="test"/>
@@ -697,15 +702,17 @@
             <exclusion groupId="org.hamcrest" artifactId="hamcrest"/>
           </dependency>
           <dependency groupId="org.hamcrest" artifactId="hamcrest" version="2.2" scope="test"/>
-          <dependency groupId="org.agrona" artifactId="agrona" version="0.9.26" />
-          <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="7.5.0" />
+          <dependency groupId="org.agrona" artifactId="agrona" version="1.20.0" />
+          <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="9.8.0-5ea8bb4f21" />
+          <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common" version="9.8.0-5ea8bb4f21" />
+          <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs" version="9.8.0-5ea8bb4f21" />
+          <dependency groupId="io.github.jbellis" artifactId="jvector" version="3.0.0-beta.12" />
           <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.14" scope="test"/>
-          <dependency groupId="org.apache.lucene" artifactId="lucene-analyzers-common" version="7.5.0" />
 
           <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" scope="test">
             <exclusion groupId="junit" artifactId="junit"/>
           </dependency>
-            
+
           <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.5.5"/>
           <dependency groupId="org.latencyutils" artifactId="LatencyUtils" version="2.0.3"/>
         </dependencyManagement>
@@ -786,7 +793,9 @@
         <dependency groupId="org.apache.lucene" artifactId="lucene-core"/>
         <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.14" scope="test"/>
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" scope="test"/>
-        <dependency groupId="org.apache.lucene" artifactId="lucene-analyzers-common"/>
+        <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common"/>
+        <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs"/>
+        <dependency groupId="io.github.jbellis" artifactId="jvector"/>
       </artifact:pom>
 
       <!-- now the pom's for artifacts being deployed to Maven Central -->
@@ -851,6 +860,7 @@
         <dependency groupId="net.openhft" artifactId="chronicle-bytes"/>
         <dependency groupId="net.openhft" artifactId="chronicle-wire"/>
         <dependency groupId="net.openhft" artifactId="chronicle-threads"/>
+        <dependency groupId="net.openhft" artifactId="chronicle-map"/>
         <dependency groupId="org.fusesource" artifactId="sigar"/>
         <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
@@ -875,7 +885,9 @@
         <dependency groupId="org.agrona" artifactId="agrona"/>
         <dependency groupId="org.apache.lucene" artifactId="lucene-core"/>
         <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.23" scope="test"/>
-        <dependency groupId="org.apache.lucene" artifactId="lucene-analyzers-common"/>
+        <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common"/>
+        <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs"/>
+        <dependency groupId="io.github.jbellis" artifactId="jvector"/>
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" scope="test"/>
         <dependency groupId="org.hamcrest" artifactId="hamcrest" scope="test"/>
         <dependency groupId="com.esri.geometry" artifactId="esri-geometry-api"/>
@@ -1662,7 +1674,7 @@
     <attribute name="test.file.list" />
     <sequential>
         <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}"
-                         exclude="**/*.java" timeout="${test.timeout}" testtag="sai-legacy">
+                         exclude="**/*.java" timeout="${test.timeout}" >
             <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
             <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
             <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
@@ -1673,6 +1685,21 @@
         </testmacrohelper>
     </sequential>
   </macrodef>
+
+    <macrodef name="testlist-sai">
+        <attribute name="test.file.list" />
+        <sequential>
+            <testmacrohelper inputdir="\${test.unit.src}" filelist="@{test.file.list}"
+                             exclude="**/*.java" timeout="\${test.timeout}" testtag="sai-legacy">
+                <jvmarg value="-Dlegacy-sstable-root=\${test.data}/legacy-sstables"/>
+                <jvmarg value="-Dinvalid-legacy-sstable-root=\${test.data}/invalid-legacy-sstables"/>
+                <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
+                <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
+                <jvmarg value="-Dcassandra.skip_sync=true" />
+                <jvmarg value="-Dlogback.configurationFile=file://\${test.logback.configurationFile}"/>
+            </testmacrohelper>
+        </sequential>
+    </macrodef>
 
     <!--
       Run named ant task with jacoco, such as "ant jacoco-run -Dtaskname=test"
@@ -1774,6 +1801,14 @@
     <property name="all-test-classes" refid="all-test-classes-path"/>
     <testhelper testdelegate="testlist-sai-legacy" />
   </target>
+
+    <target name="test-sai" depends="build-test" description="Execute SAI unit tests">
+        <path id="all-test-classes-path">
+            <fileset dir="${test.unit.src}" includes="**/sai/**/${test.name}.java"/>
+        </path>
+        <property name="all-test-classes" refid="all-test-classes-path"/>
+        <testhelper testdelegate="testlist-sai-legacy" />
+    </target>
 
   <target name="msg-ser-gen-test" depends="maybe-build-test" description="Generates message serializations">
     <testmacro inputdir="${test.unit.src}"

@@ -156,6 +156,7 @@ public class LoadingMapTest
     @Test
     public void values() throws Exception
     {
+        CyclicBarrier b3 = new CyclicBarrier(2);
         map.computeIfAbsent(1, ignored -> "one");
         map.computeIfAbsent(2, ignored -> "two");
         map.computeIfAbsent(3, ignored -> "three");
@@ -164,11 +165,13 @@ public class LoadingMapTest
             return "2";
         }));
         executor.submit(() -> map.compute(3, (k, v) -> {
+            Throwables.maybeFail(b3::await);
             Throwables.maybeFail(b2::await);
             return null;
         }));
 
         Stream<String> s = map.valuesStream(); // we should not need to wait for the stream
+        b3.await(); // we need to make sure collect doesn't grab the value for key 3 before the update starts
         Future<Set<String>> f = executor.submit(() -> s.collect(Collectors.toSet()));
         assertThat(f).isNotDone();
         b1.await();

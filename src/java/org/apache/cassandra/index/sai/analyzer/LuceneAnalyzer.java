@@ -100,6 +100,8 @@ public class LuceneAnalyzer extends AbstractAnalyzer
     @Override
     public void end()
     {
+        if (tokenStream == null)
+            return;
         try
         {
             try

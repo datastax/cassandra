@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;

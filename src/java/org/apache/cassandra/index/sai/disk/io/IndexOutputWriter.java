@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteOrder;
 
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
@@ -27,7 +28,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
-import org.apache.lucene.store.IndexOutput;
 
 public class IndexOutputWriter extends IndexOutput
 {
@@ -36,9 +36,9 @@ public class IndexOutputWriter extends IndexOutput
     private final SequentialWriter out;
     private boolean closed;
 
-    public IndexOutputWriter(SequentialWriter out)
+    public IndexOutputWriter(SequentialWriter out, ByteOrder order)
     {
-        super(out.getFile().toString(), out.getFile().name());
+        super(out.getFile().toString(), out.getFile().name(), order);
         this.out = out;
     }
 
@@ -68,6 +68,56 @@ public class IndexOutputWriter extends IndexOutput
     public void writeBytes(byte[] bytes, int offset, int len) throws IOException
     {
         out.write(bytes, offset, len);
+    }
+
+    @Override
+    public void writeInt(int v) throws IOException
+    {
+        if (order == ByteOrder.BIG_ENDIAN)
+        {
+            writeByte((byte) (v >>> 24));
+            writeByte((byte) (v >>> 16));
+            writeByte((byte) (v >>> 8));
+            writeByte((byte) v);
+        }
+        else
+        {
+            super.writeInt(v);
+        }
+    }
+
+    @Override
+    public void writeShort(short v) throws IOException
+    {
+        if (order == ByteOrder.BIG_ENDIAN)
+        {
+            writeByte((byte)(v >>> 8));
+            writeByte((byte) v);
+        }
+        else
+        {
+            super.writeShort(v);
+        }
+    }
+
+    @Override
+    public void writeLong(long v) throws IOException
+    {
+        if (order == ByteOrder.BIG_ENDIAN)
+        {
+            writeByte((byte)(v >>> 56));
+            writeByte((byte)(v >>> 48));
+            writeByte((byte)(v >>> 40));
+            writeByte((byte)(v >>> 32));
+            writeByte((byte)(v >>> 24));
+            writeByte((byte)(v >>> 16));
+            writeByte((byte)(v >>>  8));
+            writeByte((byte) v);
+        }
+        else
+        {
+            super.writeLong(v);
+        }
     }
 
     @Override

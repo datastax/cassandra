@@ -42,22 +42,25 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.RANGE_READ_ENDPOINT_GROUPING_ENABLED;
+
 @VisibleForTesting
 public abstract class RangeCommandIterator extends AbstractIterator<RowIterator> implements PartitionIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(RangeCommandIterator.class);
+    private static final boolean ENDPOINT_GROUPING_ENABLED = RANGE_READ_ENDPOINT_GROUPING_ENABLED.getBoolean();
 
     @VisibleForTesting
     public final ClientRangeRequestMetrics rangeMetrics;
 
-    protected final CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans;
-    private final int totalRangeCount;
-    protected final PartitionRangeReadCommand command;
-    protected final boolean enforceStrictLiveness;
+    final CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans;
+    final int totalRangeCount;
+    final PartitionRangeReadCommand command;
+    final boolean enforceStrictLiveness;
 
     private final long startTime;
-    protected final long queryStartNanoTime;
-    protected DataLimits.Counter counter;
+    final long queryStartNanoTime;
+    DataLimits.Counter counter;
     private PartitionIterator sentQueryIterator;
     protected QueryInfoTracker.ReadTracker readTracker;
 
@@ -66,8 +69,8 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
     // The two following "metric" are maintained to improve the concurrencyFactor
     // when it was not good enough initially.
     private int liveReturned;
-    protected int rangesQueried;
-    protected int batchesRequested = 0;
+    int rangesQueried;
+    int batchesRequested = 0;
 
     @SuppressWarnings("resource")
     public static RangeCommandIterator create(CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans,
@@ -78,7 +81,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
                                               long queryStartNanoTime,
                                               QueryInfoTracker.ReadTracker readTracker)
     {
-        return supportsEndpointGrouping(command) ? new EndpointGroupingRangeCommandIterator(replicaPlans,
+        return ENDPOINT_GROUPING_ENABLED && supportsEndpointGrouping(command) ? new EndpointGroupingRangeCommandIterator(replicaPlans,
                                                                                             command,
                                                                                             concurrencyFactor,
                                                                                             maxConcurrencyFactor,
@@ -170,6 +173,8 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
         // With endpoint grouping, ranges executed on each endpoint are different, digest is unlikely to match.
         if (command.isDigestQuery())
             return false;
+
+
 
         // Endpoint grouping is currently only supported by SAI
         Index.QueryPlan queryPlan = command.indexQueryPlan();

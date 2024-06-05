@@ -19,6 +19,10 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 
 /**
  * Rebufferer for reading data by a RandomAccessReader.
@@ -48,6 +52,30 @@ public interface Rebufferer extends ReaderFileProxy
         ByteBuffer buffer();
 
         /**
+         * Return the order of the underlying {@link ByteBuffer} held by this class. This is only relevant for the
+         * {@link #floatBuffer()}, {@link #intBuffer()} and {@link #longBuffer()} methods because the caller cannot
+         * change the order of those returned buffer objects. Further, it is not generally relevant for calls to
+         * {@link #buffer()} since the call to {@link ByteBuffer#duplicate()} sets the byte order to
+         * {@link ByteOrder#BIG_ENDIAN} and the caller can change the order of the returned buffer.
+         */
+        ByteOrder order();
+
+        default FloatBuffer floatBuffer()
+        {
+            throw new UnsupportedOperationException("not implemented in " + this.getClass());
+        }
+
+        default IntBuffer intBuffer()
+        {
+            throw new UnsupportedOperationException("not implemented in " + this.getClass());
+        }
+
+        default LongBuffer longBuffer()
+        {
+            throw new UnsupportedOperationException("not implemented in " + this.getClass());
+        }
+
+        /**
          * Position in the file of the start of the buffer.
          */
         long offset();
@@ -70,6 +98,30 @@ public interface Rebufferer extends ReaderFileProxy
         }
 
         @Override
+        public ByteOrder order()
+        {
+            return EMPTY_BUFFER.order();
+        }
+
+        @Override
+        public FloatBuffer floatBuffer()
+        {
+            return EMPTY_BUFFER.asFloatBuffer();
+        }
+
+        @Override
+        public IntBuffer intBuffer()
+        {
+            return EMPTY_BUFFER.asIntBuffer();
+        }
+
+        @Override
+        public LongBuffer longBuffer()
+        {
+            return EMPTY_BUFFER.asLongBuffer();
+        }
+
+        @Override
         public long offset()
         {
             return 0;
@@ -81,4 +133,34 @@ public interface Rebufferer extends ReaderFileProxy
             // nothing to do
         }
     };
+
+    static BufferHolder emptyBufferHolderAt(long offset)
+    {
+        return new BufferHolder()
+        {
+            @Override
+            public ByteBuffer buffer()
+            {
+                return EMPTY.buffer();
+            }
+
+            @Override
+            public ByteOrder order()
+            {
+                return EMPTY.order();
+            }
+
+            @Override
+            public long offset()
+            {
+                return offset;
+            }
+
+            @Override
+            public void release()
+            {
+                // nothing to do
+            }
+        };
+    }
 }

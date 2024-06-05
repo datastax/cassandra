@@ -70,13 +70,13 @@ import static org.junit.Assert.fail;
 public class SegmentFlushTest
 {
     private static long segmentRowIdOffset;
-    private static int posting1;
-    private static int posting2;
+    private static int minSegmentRowId;
+    private static int maxSegmentRowId;
     private static PrimaryKey minKey;
     private static PrimaryKey maxKey;
     private static ByteBuffer minTerm;
     private static ByteBuffer maxTerm;
-    private static int numRows;
+    private static int numRowsPerSegment;
 
     @BeforeClass
     public static void init()
@@ -112,9 +112,9 @@ public class SegmentFlushTest
     private void testFlushBetweenRowIds(long sstableRowId1, long sstableRowId2, int segments) throws Exception
     {
         Path tmpDir = Files.createTempDirectory("SegmentFlushTest");
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(new File(tmpDir.toFile()), "ks", "cf", new SequenceBasedSSTableId(1)),
-                                                                 Murmur3Partitioner.instance,
-                                                                 SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(new Descriptor(new File(tmpDir.toFile()), "ks", "cf", new SequenceBasedSSTableId(1)),
+                                                                    Murmur3Partitioner.instance,
+                                                                    SAITester.EMPTY_COMPARATOR);
 
         ColumnMetadata column = ColumnMetadata.regularColumn("sai", "internal", "column", UTF8Type.instance);
         IndexMetadata config = IndexMetadata.fromSchemaMetadata("index_name", IndexMetadata.Kind.CUSTOM, null);
@@ -129,7 +129,7 @@ public class SegmentFlushTest
                                                      config,
                                                      MockSchema.newCFS("ks"));
 
-        SSTableIndexWriter writer = new SSTableIndexWriter(indexDescriptor, indexContext, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> true);
+        SSTableIndexWriter writer = new SSTableIndexWriter(indexDescriptor, indexContext, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> true, 2);
 
         List<DecoratedKey> keys = Arrays.asList(dk("1"), dk("2"));
         Collections.sort(keys);
@@ -156,14 +156,14 @@ public class SegmentFlushTest
         // verify segment metadata
         SegmentMetadata segmentMetadata = segmentMetadatas.get(0);
         segmentRowIdOffset = sstableRowId1;
-        posting1 = 0;
-        posting2 = segments == 1 ? (int) (sstableRowId2 - segmentRowIdOffset) : 0;
+        minSegmentRowId = 0;
+        maxSegmentRowId = segments == 1 ? (int) (sstableRowId2 - segmentRowIdOffset) : 0;
         minKey = SAITester.TEST_FACTORY.createTokenOnly(key1.getToken());
         DecoratedKey maxDecoratedKey = segments == 1 ? key2 : key1;
         maxKey = SAITester.TEST_FACTORY.createTokenOnly(maxDecoratedKey.getToken());
         minTerm = term1;
         maxTerm = segments == 1 ? term2 : term1;
-        numRows = segments == 1 ? 2 : 1;
+        numRowsPerSegment = segments == 1 ? 2 : 1;
         verifySegmentMetadata(segmentMetadata);
         verifyStringIndex(indexDescriptor, indexContext, segmentMetadata);
 
@@ -171,13 +171,13 @@ public class SegmentFlushTest
         {
             Preconditions.checkState(segments == 2);
             segmentRowIdOffset = sstableRowId2;
-            posting1 = 0;
-            posting2 = 0;
+            minSegmentRowId = 0;
+            maxSegmentRowId = 0;
             minKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());
             maxKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());;
             minTerm = term2;
             maxTerm = term2;
-            numRows = 1;
+            numRowsPerSegment = 1;
 
             segmentMetadata = segmentMetadatas.get(1);
             verifySegmentMetadata(segmentMetadata);
@@ -202,11 +202,11 @@ public class SegmentFlushTest
             assertEquals(minTerm, iterator.getMinTerm());
             assertEquals(maxTerm, iterator.getMaxTerm());
 
-            verifyTermPostings(iterator, minTerm, posting1, posting1);
+            verifyTermPostings(iterator, minTerm, minSegmentRowId, minSegmentRowId);
 
-            if (numRows > 1)
+            if (numRowsPerSegment > 1)
             {
-                verifyTermPostings(iterator, maxTerm, posting2, posting2);
+                verifyTermPostings(iterator, maxTerm, maxSegmentRowId, maxSegmentRowId);
             }
 
             assertFalse(iterator.hasNext());
@@ -224,12 +224,12 @@ public class SegmentFlushTest
 
     private void verifySegmentMetadata(SegmentMetadata segmentMetadata)
     {
-        assertEquals(segmentRowIdOffset, segmentMetadata.segmentRowIdOffset);
+        assertEquals(segmentRowIdOffset, segmentMetadata.minSSTableRowId);
         assertEquals(minKey, segmentMetadata.minKey);
         assertEquals(maxKey, segmentMetadata.maxKey);
         assertEquals(minTerm, segmentMetadata.minTerm);
         assertEquals(maxTerm, segmentMetadata.maxTerm);
-        assertEquals(numRows, segmentMetadata.numRows);
+        assertEquals(numRowsPerSegment, segmentMetadata.numRows);
     }
 
     private Row createRow(ColumnMetadata column, ByteBuffer value)

@@ -31,14 +31,18 @@ import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
@@ -52,6 +56,10 @@ import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MIN_TERM
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.START_TOKEN;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.TABLE_NAME;
 
+/**
+ * A version specific implementation of the {@link SearchableIndex} where the
+ * index is segmented
+ */
 public class V1SearchableIndex implements SearchableIndex
 {
     private final IndexContext indexContext;
@@ -63,7 +71,6 @@ public class V1SearchableIndex implements SearchableIndex
     private final ByteBuffer maxTerm;
     private final long minSSTableRowId, maxSSTableRowId;
     private final long numRows;
-
     private PerIndexFiles indexFiles;
 
     public V1SearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
@@ -155,22 +162,57 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<RangeIterator> search(Expression expression,
-                                      AbstractBounds<PartitionPosition> keyRange,
-                                      SSTableQueryContext context,
-                                      boolean defer) throws IOException
+    public RangeIterator search(Expression expression,
+                                AbstractBounds<PartitionPosition> keyRange,
+                                QueryContext context,
+                                boolean defer,
+                                int limit) throws IOException
     {
-        List<RangeIterator> iterators = new ArrayList<>();
+        RangeConcatIterator.Builder rangeConcatIteratorBuilder = RangeConcatIterator.builder(segments.size());
 
         for (Segment segment : segments)
         {
             if (segment.intersects(keyRange))
             {
-                iterators.add(segment.search(expression, context, defer));
+                rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer, limit));
+            }
+        }
+
+        return rangeConcatIteratorBuilder.build();
+    }
+
+    @Override
+    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
+                                                             AbstractBounds<PartitionPosition> keyRange,
+                                                             QueryContext context,
+                                                             int limit) throws IOException
+    {
+        var iterators = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(segments.size());
+        for (Segment segment : segments)
+        {
+            if (segment.intersects(keyRange))
+            {
+                iterators.add(segment.orderBy(expression, keyRange, context, limit));
             }
         }
 
         return iterators;
+    }
+
+    @Override
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    {
+        List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>(segments.size());
+        for (Segment segment : segments)
+            results.add(segment.orderResultsBy(context, keys, exp, limit));
+
+        return results;
+    }
+
+    @Override
+    public List<Segment> getSegments()
+    {
+        return segments;
     }
 
     @Override
@@ -180,6 +222,9 @@ public class V1SearchableIndex implements SearchableIndex
 
         for (SegmentMetadata metadata : metadatas)
         {
+            String minTerm = indexContext.isVector() ? "N/A" : indexContext.getValidator().getSerializer().deserialize(metadata.minTerm).toString();
+            String maxTerm = indexContext.isVector() ? "N/A" : indexContext.getValidator().getSerializer().deserialize(metadata.maxTerm).toString();
+
             dataset.row(sstable.metadata().keyspace, indexContext.getIndexName(), sstable.getFilename(), metadata.segmentRowIdOffset)
                    .column(TABLE_NAME, sstable.descriptor.cfname)
                    .column(COLUMN_NAME, indexContext.getColumnName())
@@ -188,8 +233,8 @@ public class V1SearchableIndex implements SearchableIndex
                    .column(MAX_SSTABLE_ROW_ID, metadata.maxSSTableRowId)
                    .column(START_TOKEN, tokenFactory.toString(metadata.minKey.partitionKey().getToken()))
                    .column(END_TOKEN, tokenFactory.toString(metadata.maxKey.partitionKey().getToken()))
-                   .column(MIN_TERM, indexContext.getValidator().getSerializer().deserialize(metadata.minTerm).toString())
-                   .column(MAX_TERM, indexContext.getValidator().getSerializer().deserialize(metadata.maxTerm).toString())
+                   .column(MIN_TERM, minTerm)
+                   .column(MAX_TERM, maxTerm)
                    .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());
         }
     }

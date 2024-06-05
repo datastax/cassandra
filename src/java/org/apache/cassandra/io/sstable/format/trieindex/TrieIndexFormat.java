@@ -26,6 +26,10 @@ import java.util.UUID;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -197,8 +201,8 @@ public class TrieIndexFormat implements SSTableFormat
 
                 try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
                      FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
-                     FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc).compressed(compressedData);
-                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
+                     FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc, stats.zeroCopyMetadata).compressed(compressedData);
+                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, stats.zeroCopyMetadata);
                      FileHandle dFile = dBuilder.complete();
                      FileHandle riFile = riBuilder.complete())
                 {
@@ -289,7 +293,15 @@ public class TrieIndexFormat implements SSTableFormat
     //
     static class TrieIndexVersion extends Version
     {
-        public static final String current_version = "cb";
+        private static final Logger logger = LoggerFactory.getLogger(TrieIndexVersion.class);
+
+        public static final String current_version = CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getString();
+
+        static
+        {
+            logger.info("Trie index format current version: {}", current_version);
+        }
+
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format

@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
-import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -31,6 +30,49 @@ import static org.junit.Assert.assertEquals;
 
 public class ComplexQueryTest extends SAITester
 {
+    @Test
+    public void partialUpdateTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c1 text, c2 text, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, c1, c2) VALUES (?, ?, ?)", 1, "a", "a");
+        flush();
+        execute("UPDATE %s SET c1 = ? WHERE pk = ?", "b", 1);
+        flush();
+        execute("UPDATE %s SET c2 = ? WHERE pk = ?", "c", 1);
+        flush();
+
+        UntypedResultSet resultSet = execute("SELECT pk FROM %s WHERE c1 = 'b' AND c2='c'");
+        assertRows(resultSet, row(1));
+    }
+
+    @Test
+    public void splitRowsWithBooleanLogic() throws Throwable
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        disableCompaction(KEYSPACE);
+
+        // flush a sstable with 2 partial rows
+        execute("INSERT INTO %s (pk, str_val) VALUES (3, 'A')");
+        execute("INSERT INTO %s (pk, val) VALUES (1, 'A')");
+        flush();
+
+        // flush another sstable with 2 more partial rows, where PK 3 is now a complete row
+        execute("INSERT INTO %s (pk, val) VALUES (3, 'A')");
+        execute("INSERT INTO %s (pk, str_val) VALUES (2, 'A')");
+        flush();
+
+        // pk 3 should match
+        var result = execute("SELECT pk FROM %s WHERE str_val = 'A' AND val = 'A'");
+        assertRows(result, row(3));
+    }
+
     @Test
     public void basicOrTest() throws Throwable
     {
@@ -85,9 +127,15 @@ public class ComplexQueryTest extends SAITester
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 8, 8, 4, 3, 3);
 
 
-        UntypedResultSet resultSet = execute("SELECT pk FROM %s WHERE (a = 1 AND c = 1) OR (b IN (3, 4) AND d = 2)");
 
-        assertRowsIgnoringOrder(resultSet, row(1), row(6), row(7) );
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE (a = 1 AND c = 1) OR (b IN (3, 4) AND d = 2)"), row(1), row(7), row(6));
+            // Shows that IN with an empty list produces no rows
+            assertRows(execute("SELECT pk FROM %s WHERE (a = 1 AND c = 1) OR (b IN () AND d = 2)"), row(1));
+            assertRows(execute("SELECT pk FROM %s WHERE b IN () AND d = 2"));
+            assertRows(execute("SELECT pk FROM %s WHERE b NOT IN () AND d = 2"), row(7), row(6));
+        });
+
     }
 
     @Test
@@ -223,5 +271,25 @@ public class ComplexQueryTest extends SAITester
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE a = 1 or a = 2 ALLOW FILTERING")).isInstanceOf(InvalidRequestException.class)
                                                                                                    .hasMessage(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION);
+    }
+
+    @Test
+    public void complexQueryWithMultipleNEQ() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY(pk, ck))");
+        createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 1, 1, 5);
+        execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 2, 2, 6);
+        execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 3, 3, 7);
+        execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 4, 4, 8);
+        execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 5, null, null);
+
+        assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a != 2 AND b != 7"), row(1), row(4));
+        assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a != 2 AND a != 3"), row(1), row(4));
+        assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a NOT IN (2, 3)"), row(1), row(4));
+        assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a NOT IN (2, 3) AND b NOT IN (7, 8)"), row(1));
     }
 }

@@ -233,6 +233,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
             part = p.getRemainingPart();
 
             ByteBuffer component = type.fromString(unescape(part));
+            type.validate(component);
             totalLength += p.getComparatorSerializedSize() + 2 + component.remaining() + 1;
             components.add(component);
             comparators.add(p);
@@ -290,7 +291,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
 
             if (accessor.sizeFromOffset(input, offset) < 2)
                 throw new MarshalException("Not enough bytes to read value size of component " + i);
-            int length = accessor.getShort(input, offset);
+            int length = accessor.getUnsignedShort(input, offset);
             offset += 2;
 
             if (accessor.sizeFromOffset(input, offset) < length)
@@ -312,11 +313,6 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
     }
 
     public abstract ByteBuffer decompose(Object... objects);
-
-    public TypeSerializer<ByteBuffer> getSerializer()
-    {
-        return BytesSerializer.instance;
-    }
 
     abstract protected <V> int getComparatorSize(V value, ValueAccessor<V> accessor, int offset);
     /**

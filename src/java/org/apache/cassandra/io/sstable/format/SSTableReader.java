@@ -30,6 +30,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,6 +48,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
@@ -61,6 +63,7 @@ import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBoundOrBoundary;
@@ -122,6 +125,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.Schema;
@@ -137,6 +141,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
@@ -258,7 +263,26 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     // indexfile and datafile: might be null before a call to load()
     protected final FileHandle ifile;
     protected final FileHandle dfile;
-    protected final IFilter bf;
+
+    // Unlike readMeter, which is global and tracks access to data files, this meter
+    // is incremented as soon as the partition index is accessed with SinglePartitionReadCommand EQ. This includes
+    // the case where the sstable does not contain the partition the query was looking for.
+    // we use a restorable meter to gain access to the moving averages, we don't
+    // really restore it from disk
+    private final Optional<RestorableMeter> partitionIndexReadMeter = BloomFilter.lazyLoading()
+                                                                      ? Optional.of(BloomFilter.lazyLoadingWindow() > 0
+                                                                                    // when window > 0, use rate at given window
+                                                                                    ? RestorableMeter.builder().withWindow(BloomFilter.lazyLoadingWindow()).build()
+                                                                                    // when window <= 0, it only cares about absolute count
+                                                                                    : RestorableMeter.builder().build())
+                                                                      : Optional.empty();
+
+    protected volatile IFilter bf;
+    private final AtomicBoolean bfDeserializationStarted = new AtomicBoolean(false);
+    private final boolean bloomFilterLazyLoading = BloomFilter.lazyLoading();
+    private final int bloomFilterLazyLoadingWindow = BloomFilter.lazyLoadingWindow();
+    private final long bloomFilterLazyLoadingThreshold = BloomFilter.lazyLoadingThreshold();
+
     public final IndexSummary indexSummary;
 
     protected InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> keyCache;
@@ -779,6 +803,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         selfRef = new Ref<>(this, tidy);
     }
 
+    public SliceDescriptor getDataFileSliceDescriptor()
+    {
+        return dfile.sliceDescriptor;
+    }
+
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
 
     /**
@@ -1140,6 +1169,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return readMeter;
     }
 
+    @VisibleForTesting
+    @Nullable
+    public RestorableMeter getPartitionIndexReadMeter()
+    {
+        return partitionIndexReadMeter.orElse(null);
+    }
+
     /**
      * Called by {@link org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy} and other compaction
      * strategies to determine the read hotness of this sstables, this method returna a "read hotness" which is
@@ -1497,9 +1533,89 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public boolean couldContain(DecoratedKey dk)
     {
+        maybeDeserializeLazyBloomFilter();
         return !(bf instanceof AlwaysPresentFilter)
                ? bf.isPresent(dk)
                : checkEntryExists(dk, Operator.EQ, false);
+    }
+
+    protected boolean inBloomFilter(DecoratedKey dk)
+    {
+        maybeDeserializeLazyBloomFilter();
+        return bf.isPresent(dk);
+    }
+
+    /**
+     * Defer BF deserialization when enabled to reduce memory pressure in use case where many sstables are not accessed frequently
+     *
+     * @return true if BF deserialization is attempted; false otherwise.
+     */
+    @VisibleForTesting
+    boolean maybeDeserializeLazyBloomFilter()
+    {
+        if (!bloomFilterLazyLoading || bf != FilterFactory.AlwaysPresentForLazyLoading)
+            return false;
+
+        Preconditions.checkState(partitionIndexReadMeter.isPresent(), "Read index meter should have been available");
+
+        boolean loadBloomFilter = false;
+
+        // If the threshold was set to zero we always want to deserialize
+        if (bloomFilterLazyLoadingThreshold == 0)
+            loadBloomFilter = true;
+            // otherwise, if window is <= 0 we use the threshold as an absolute count
+        else if (bloomFilterLazyLoadingWindow <= 0 && partitionIndexReadMeter.get().count() >= bloomFilterLazyLoadingThreshold)
+            loadBloomFilter = true;
+            // otherwise we look at the count in the specified window
+        else if (bloomFilterLazyLoadingWindow > 0 && partitionIndexReadMeter.get().rate(bloomFilterLazyLoadingWindow) >= bloomFilterLazyLoadingThreshold)
+            loadBloomFilter = true;
+
+        if (!loadBloomFilter)
+            return false;
+
+        // concurrent reads should only trigger async bloom filter deserialization once
+        if (!bfDeserializationStarted.compareAndSet(false, true))
+            return false;
+
+        Stage.IO.execute(() ->
+                         {
+                             logger.debug("Deserializing lazy bloom filter for {}", descriptor.baseFileURI());
+
+                             // hold sstable reference to prevent sstable being released before bloom filter deserialization completes
+                             Ref<SSTableReader> ref = tryRef();
+                             if (ref == null)
+                             {
+                                 logger.error("Unable to reference sstable, will use pass-through bloom filter");
+                                 bf = FilterFactory.AlwaysPresent;
+                             }
+                             else
+                             {
+                                 try
+                                 {
+                                     // the only recoverable BF deserialization error is remote storage timeout; but it should be
+                                     // fine to continue with pass-through filter and wait for compaction to replace current sstable.
+                                     IFilter loaded = SSTableReaderBuilder.doLoadBloomFilter(descriptor.fileFor(Component.FILTER), descriptor.version.hasOldBfFormat());
+                                     if (loaded == null)
+                                     {
+                                         bf = FilterFactory.AlwaysPresent;
+                                         logger.error("Failed to deserialize lazy bloom filter, will use pass-through bloom filter");
+                                     }
+                                     else
+                                     {
+                                         logger.debug("Successfuly loaded lazy bloom filter for {}", descriptor.baseFileURI());
+
+                                         bf = loaded;
+                                         tidy.addCloseable(loaded); // close newly created bloom filter on sstable close
+                                     }
+                                 }
+                                 finally
+                                 {
+                                     ref.release();
+                                 }
+                             }
+                         });
+
+        return true;
     }
 
     /**
@@ -2146,6 +2262,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             readMeter.mark();
     }
 
+    /**
+     * Increment the total read count and read rate for accessing partition index.
+     */
+    public void incrementIndexReadCount()
+    {
+        partitionIndexReadMeter.ifPresent(RestorableMeter::mark);
+    }
+
     public EncodingStats stats()
     {
         // We could return sstable.header.stats(), but this may not be as accurate than the actual sstable stats (see
@@ -2224,7 +2348,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         private volatile boolean setup;
 
-        public void setup(SSTableReader reader, boolean trackHotness, List<AutoCloseable> closables)
+        public void setup(SSTableReader reader, boolean trackHotness)
         {
             this.setup = true;
             // get a new reference to the shared descriptor-type tidy
@@ -2232,13 +2356,19 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             this.global = globalRef.get();
             if (trackHotness)
                 global.ensureReadMeter();
-            this.closables = closables;
+            this.closables = new ArrayList<>();
         }
 
         InstanceTidier(Descriptor descriptor, TableId tableId)
         {
             this.descriptor = descriptor;
             this.tableId = tableId;
+        }
+
+        public void addCloseable(AutoCloseable closeable)
+        {
+            if (closeable != null)
+                closables.add(closeable); // Last added is first to be closed.
         }
 
         public void tidy()
@@ -2373,7 +2503,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
             if (!DatabaseDescriptor.supportsSSTableReadMeter())
             {
-                readMeter = new RestorableMeter();
+                readMeter = RestorableMeter.createWithDefaultRates();
                 readMeterSyncFuture = NULL;
                 return;
             }

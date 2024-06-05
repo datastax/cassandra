@@ -41,10 +41,12 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.KDTreeIndexSearcher;
@@ -54,6 +56,8 @@ import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -62,6 +66,8 @@ import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class KDTreeIndexBuilder
 {
@@ -70,18 +76,42 @@ public class KDTreeIndexBuilder
         private final PrimaryKey.Factory primaryKeyFactory = new PartitionAwarePrimaryKeyFactory();
 
         @Override
+        public SSTableId<?> getSSTableId()
+        {
+            return new SequenceBasedSSTableId(0);
+        }
+
+        @Override
         public PrimaryKey primaryKeyFromRowId(long sstableRowId)
         {
             return primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(sstableRowId));
         }
 
         @Override
-        public long rowIdFromPrimaryKey(PrimaryKey key)
+        public long exactRowIdOrInvertedCeiling(PrimaryKey key)
         {
             return key.token().getLongValue();
         }
+
+        @Override
+        public long ceiling(PrimaryKey key)
+        {
+            return key.token().getLongValue();
+        }
+
+        @Override
+        public long floor(PrimaryKey key)
+        {
+            return key.token().getLongValue();
+        }
+
+        @Override
+        public long count()
+        {
+            return Long.MAX_VALUE;
+        }
     };
-    public static final PrimaryKeyMap.Factory TEST_PRIMARY_KEY_MAP_FACTORY = (context) -> TEST_PRIMARY_KEY_MAP;
+    public static final PrimaryKeyMap.Factory TEST_PRIMARY_KEY_MAP_FACTORY = () -> TEST_PRIMARY_KEY_MAP;
 
 
     private static final BigDecimal ONE_TENTH = BigDecimal.valueOf(1, 1);
@@ -115,9 +145,9 @@ public class KDTreeIndexBuilder
 
         final SegmentMetadata metadata;
 
-        IndexContext columnContext = SAITester.createIndexContext("test", Int32Type.instance);
+        IndexContext indexContext = SAITester.createIndexContext("test", Int32Type.instance);
         try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                columnContext,
+                                                                indexContext,
                                                                 TypeUtil.fixedSizeOf(type),
                                                                 maxSegmentRowId,
                                                                 size,
@@ -138,7 +168,11 @@ public class KDTreeIndexBuilder
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(indexDescriptor, SAITester.createIndexContext("test", Int32Type.instance)))
         {
-            IndexSearcher searcher = IndexSearcher.open(TEST_PRIMARY_KEY_MAP_FACTORY, indexFiles, metadata, indexDescriptor, columnContext);
+            SSTableContext sstableContext = mock(SSTableContext.class);
+            when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
+            when(sstableContext.indexDescriptor()).thenReturn(indexDescriptor);
+
+            IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
             assertThat(searcher, is(instanceOf(KDTreeIndexSearcher.class)));
             return (KDTreeIndexSearcher) searcher;
         }

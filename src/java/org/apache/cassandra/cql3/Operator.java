@@ -160,6 +160,7 @@ public enum Operator
             return map.containsKey(mapType.getKeysType().getSerializer().deserialize(rightOperand));
         }
     },
+
     NEQ(8)
     {
         @Override
@@ -250,6 +251,174 @@ public enum Operator
         public String toString()
         {
             return "LIKE";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException();
+        }
+    },
+    ANN(15)
+    {
+        @Override
+        public String toString()
+        {
+            return "ANN";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return true;
+        }
+    },
+    NOT_IN(16)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT IN";
+        }
+
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !IN.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_CONTAINS(17)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT CONTAINS";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+
+    },
+    NOT_CONTAINS_KEY(18)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT CONTAINS KEY";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !CONTAINS_KEY.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_PREFIX(19)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '<term>%'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_PREFIX.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_SUFFIX(20)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '%<term>'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_SUFFIX.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_CONTAINS(21)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '%<term>%'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_MATCHES(22)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '<term>'";
+        }
+
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_MATCHES.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE(23)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+
+    /**
+     * An operator that only performs matching against analyzed columns.
+     */
+    ANALYZER_MATCHES(100)
+    {
+        @Override
+        public String toString()
+        {
+            return ":";
+        }
+
+        /**
+         * This method is not supported for this operator. The operator itself does not have the context to know
+         * the correct result because an analyzed column can be analyzed in different ways. Therefore, this operator
+         * relies on the index implementation to perform to determine satisfaction.
+         */
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException(": operation can only be computed by an indexed column with a configured analyzer");
+        }
+    },
+    /**
+     * An operator that performs a distance bounded approximate nearest neighbor search against a vector column such
+     * that all result vectors are within a given distance of the query vector. The notable difference between this
+     * operator and {@link #ANN} is that it does not introduce an arbitrary limit on the number of results returned,
+     * and as a consequence, it can be logically combined with other predicates and even unioned with other
+     * {@link #BOUNDED_ANN} predicates.
+     */
+    BOUNDED_ANN(101)
+    {
+        @Override
+        public String toString()
+        {
+            return "BOUNDED_ANN";
         }
 
         @Override

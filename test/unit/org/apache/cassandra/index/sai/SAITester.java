@@ -66,16 +66,13 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Component;
@@ -130,7 +127,7 @@ public class SAITester extends CQLTester
 
     public static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
-    public static final PrimaryKey.Factory TEST_FACTORY = Version.LATEST.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
+    public static final PrimaryKey.Factory TEST_FACTORY = Version.latest().onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
 
 
     static
@@ -249,6 +246,14 @@ public class SAITester extends CQLTester
                                 MockSchema.newCFS("test_ks"));
     }
 
+    public static Vector<Float> vector(float... v)
+    {
+        var v2 = new Float[v.length];
+        for (int i = 0; i < v.length; i++)
+            v2[i] = v[i];
+        return new Vector<>(v2);
+    }
+
     protected void simulateNodeRestart()
     {
         simulateNodeRestart(true);
@@ -274,7 +279,7 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            File file = IndexDescriptor.create(sstable).fileFor(indexComponent);
+            File file = IndexDescriptor.createFrom(sstable).fileFor(indexComponent);
             corruptionType.corrupt(file);
         }
     }
@@ -285,7 +290,7 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            File file = IndexDescriptor.create(sstable).fileFor(indexComponent, indexContext);
+            File file = IndexDescriptor.createFrom(sstable).fileFor(indexComponent, indexContext);
             corruptionType.corrupt(file);
         }
     }
@@ -334,7 +339,9 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
+            if (indexDescriptor.isIndexEmpty(context))
+                continue;
             if (!indexDescriptor.validatePerSSTableComponentsChecksum() || !indexDescriptor.validatePerIndexComponentsChecksum(context))
                 return false;
         }
@@ -380,9 +387,18 @@ public class SAITester extends CQLTester
         waitForIndexQueryable(KEYSPACE, currentTable());
     }
 
-    public void waitForIndexQueryable(String keyspace, String table)
+    public void waitForIndexQueryable(int seconds)
     {
-        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), 60, TimeUnit.SECONDS);
+        waitForIndexQueryable(KEYSPACE, currentTable(), seconds);
+    }
+
+    public void waitForIndexQueryable(String keyspace, String table) {
+        waitForIndexQueryable(keyspace, table, 60);
+    }
+
+    public void waitForIndexQueryable(String keyspace, String table, int seconds)
+    {
+        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), seconds, TimeUnit.SECONDS);
     }
 
     protected void startCompaction() throws Throwable
@@ -510,19 +526,19 @@ public class SAITester extends CQLTester
     {
         Set<File> indexFiles = indexFiles();
 
-        for (IndexComponent indexComponent : Version.LATEST.onDiskFormat().perSSTableComponents())
+        for (IndexComponent indexComponent : Version.latest().onDiskFormat().perSSTableComponents())
         {
-            Set<File> tableFiles = componentFiles(indexFiles, new Component(Component.Type.CUSTOM, Version.LATEST.fileNameFormatter().format(indexComponent, null)));
+            Set<File> tableFiles = componentFiles(indexFiles, new Component(Component.Type.CUSTOM, Version.latest().fileNameFormatter().format(indexComponent, null)));
             assertEquals(tableFiles.toString(), perSSTableFiles, tableFiles.size());
         }
 
         if (literalIndexContext != null)
         {
-            for (IndexComponent indexComponent : Version.LATEST.onDiskFormat().perIndexComponents(literalIndexContext))
+            for (IndexComponent indexComponent : Version.latest().onDiskFormat().perIndexComponents(literalIndexContext))
             {
                 Set<File> stringIndexFiles = componentFiles(indexFiles,
                                                             new Component(Component.Type.CUSTOM,
-                                                                          Version.LATEST.fileNameFormatter().format(indexComponent,
+                                                                          Version.latest().fileNameFormatter().format(indexComponent,
                                                                                                                     literalIndexContext)));
                 if (isBuildCompletionMarker(indexComponent))
                     assertEquals(literalCompletionMarkers, stringIndexFiles.size());
@@ -533,11 +549,11 @@ public class SAITester extends CQLTester
 
         if (numericIndexContext != null)
         {
-            for (IndexComponent indexComponent : Version.LATEST.onDiskFormat().perIndexComponents(numericIndexContext))
+            for (IndexComponent indexComponent : Version.latest().onDiskFormat().perIndexComponents(numericIndexContext))
             {
                 Set<File> numericIndexFiles = componentFiles(indexFiles,
                                                              new Component(Component.Type.CUSTOM,
-                                                                           Version.LATEST.fileNameFormatter().format(indexComponent,
+                                                                           Version.latest().fileNameFormatter().format(indexComponent,
                                                                                                                      numericIndexContext)));
                 if (isBuildCompletionMarker(indexComponent))
                     assertEquals(numericCompletionMarkers, numericIndexFiles.size());
@@ -774,7 +790,7 @@ public class SAITester extends CQLTester
 
     protected Set<File> componentFiles(Collection<File> indexFiles, IndexComponent indexComponent, IndexContext indexContext)
     {
-        String componentName = Version.LATEST.fileNameFormatter().format(indexComponent, indexContext);
+        String componentName = Version.latest().fileNameFormatter().format(indexComponent, indexContext);
         return indexFiles.stream().filter(c -> c.name().endsWith(componentName)).collect(Collectors.toSet());
     }
 

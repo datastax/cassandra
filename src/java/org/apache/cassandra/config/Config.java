@@ -752,7 +752,7 @@ public class Config
 
     public static void log(Config config)
     {
-        logger.info("Node configuration:[{}]", config.toDebugString(false));
+        logger.debug("Node configuration:[{}]", config.toDebugString(false));
     }
 
     public String toDebugString(boolean json)

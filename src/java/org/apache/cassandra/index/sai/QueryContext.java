@@ -18,53 +18,55 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+
+import static java.lang.Math.max;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
- *
- * Fields here are non-volatile, as they are accessed from a single thread.
  */
 @NotThreadSafe
 public class QueryContext
 {
     private static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
 
-    private final long queryStartTimeNanos;
+    protected final long queryStartTimeNanos;
 
     public final long executionQuotaNano;
 
-    public long sstablesHit = 0;
-    public long segmentsHit = 0;
-    public long partitionsRead = 0;
-    public long rowsFiltered = 0;
+    private final LongAdder sstablesHit = new LongAdder();
+    private final LongAdder segmentsHit = new LongAdder();
+    private final LongAdder partitionsRead = new LongAdder();
+    private final LongAdder rowsPreFiltered = new LongAdder();
+    private final LongAdder rowsFiltered = new LongAdder();
+    private final LongAdder trieSegmentsHit = new LongAdder();
 
-    public long trieSegmentsHit = 0;
+    private final LongAdder bkdPostingListsHit = new LongAdder();
+    private final LongAdder bkdSegmentsHit = new LongAdder();
 
-    public long bkdPostingListsHit = 0;
-    public long bkdSegmentsHit = 0;
+    private final LongAdder bkdPostingsSkips = new LongAdder();
+    private final LongAdder bkdPostingsDecodes = new LongAdder();
 
-    public long bkdPostingsSkips = 0;
-    public long bkdPostingsDecodes = 0;
+    private final LongAdder triePostingsSkips = new LongAdder();
+    private final LongAdder triePostingsDecodes = new LongAdder();
 
-    public long triePostingsSkips = 0;
-    public long triePostingsDecodes = 0;
+    private final LongAdder queryTimeouts = new LongAdder();
 
-    public long tokenSkippingCacheHits = 0;
-    public long tokenSkippingLookups = 0;
+    private final LongAdder annNodesVisited = new LongAdder();
+    private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
-    public long queryTimeouts = 0;
+    private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
-    private final Map<SSTableReader, SSTableQueryContext> sstableQueryContexts = new HashMap<>();
+    // Determines the order of using indexes for filtering and sorting.
+    // Null means the query execution order hasn't been decided yet.
+    private FilterSortOrder filterSortOrder = null;
 
     @VisibleForTesting
     public QueryContext()
@@ -75,7 +77,7 @@ public class QueryContext
     public QueryContext(long executionQuotaMs)
     {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
-        queryStartTimeNanos = System.nanoTime();
+        this.queryStartTimeNanos = System.nanoTime();
     }
 
     public long totalQueryTimeNs()
@@ -83,22 +85,174 @@ public class QueryContext
         return System.nanoTime() - queryStartTimeNanos;
     }
 
-    public void incSstablesHit()
+    // setters
+    public void addSstablesHit(long val)
     {
-        sstablesHit++;
+        sstablesHit.add(val);
+    }
+    public void addSegmentsHit(long val) {
+        segmentsHit.add(val);
+    }
+    public void addPartitionsRead(long val)
+    {
+        partitionsRead.add(val);
+    }
+    public void addRowsFiltered(long val)
+    {
+        rowsFiltered.add(val);
+    }
+    public void addRowsPreFiltered(long val)
+    {
+        rowsPreFiltered.add(val);
+    }
+    public void addTrieSegmentsHit(long val)
+    {
+        trieSegmentsHit.add(val);
+    }
+    public void addBkdPostingListsHit(long val)
+    {
+        bkdPostingListsHit.add(val);
+    }
+    public void addBkdSegmentsHit(long val)
+    {
+        bkdSegmentsHit.add(val);
+    }
+    public void addBkdPostingsSkips(long val)
+    {
+        bkdPostingsSkips.add(val);
+    }
+    public void addBkdPostingsDecodes(long val)
+    {
+        bkdPostingsDecodes.add(val);
+    }
+    public void addTriePostingsSkips(long val)
+    {
+        triePostingsSkips.add(val);
+    }
+    public void addTriePostingsDecodes(long val)
+    {
+        triePostingsDecodes.add(val);
+    }
+    public void addQueryTimeouts(long val)
+    {
+        queryTimeouts.add(val);
+    }
+    public void addAnnNodesVisited(long val)
+    {
+        annNodesVisited.add(val);
     }
 
-    public SSTableQueryContext getSSTableQueryContext(SSTableReader reader)
+    public void setFilterSortOrder(FilterSortOrder filterSortOrder)
     {
-        return sstableQueryContexts.computeIfAbsent(reader, k -> new SSTableQueryContext(this));
+        this.filterSortOrder = filterSortOrder;
+    }
+
+    // getters
+
+    public long sstablesHit()
+    {
+        return sstablesHit.longValue();
+    }
+    public long segmentsHit() {
+        return segmentsHit.longValue();
+    }
+    public long partitionsRead()
+    {
+        return partitionsRead.longValue();
+    }
+    public long rowsFiltered()
+    {
+        return rowsFiltered.longValue();
+    }
+    public long rowsPreFiltered()
+    {
+        return rowsPreFiltered.longValue();
+    }
+    public long trieSegmentsHit()
+    {
+        return trieSegmentsHit.longValue();
+    }
+    public long bkdPostingListsHit()
+    {
+        return bkdPostingListsHit.longValue();
+    }
+    public long bkdSegmentsHit()
+    {
+        return bkdSegmentsHit.longValue();
+    }
+    public long bkdPostingsSkips()
+    {
+        return bkdPostingsSkips.longValue();
+    }
+    public long bkdPostingsDecodes()
+    {
+        return bkdPostingsDecodes.longValue();
+    }
+    public long triePostingsSkips()
+    {
+        return triePostingsSkips.longValue();
+    }
+    public long triePostingsDecodes()
+    {
+        return triePostingsDecodes.longValue();
+    }
+    public long queryTimeouts()
+    {
+        return queryTimeouts.longValue();
+    }
+    public long annNodesVisited()
+    {
+        return annNodesVisited.longValue();
+    }
+
+    public FilterSortOrder filterSortOrder()
+    {
+        return filterSortOrder;
     }
 
     public void checkpoint()
     {
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
         {
-            queryTimeouts++;
+            addQueryTimeouts(1);
             throw new AbortedOperationException();
         }
+    }
+
+    public void addShadowed(long count)
+    {
+        shadowedPrimaryKeyCount.add(count);
+    }
+
+    /**
+     * @return shadowed primary keys, in ascending order
+     */
+    public long getShadowedPrimaryKeyCount()
+    {
+        return shadowedPrimaryKeyCount.longValue();
+    }
+
+    public float getAnnRerankFloor()
+    {
+        return annRerankFloor;
+    }
+
+    public void updateAnnRerankFloor(float observedFloor)
+    {
+        if (observedFloor < Float.POSITIVE_INFINITY)
+            annRerankFloor = max(annRerankFloor, observedFloor);
+    }
+
+    /**
+     * Determines the order of filtering and sorting operations.
+     * Currently used only by vector search.
+     */
+    public enum FilterSortOrder
+    {
+        /** First get the matching keys from the non-vector indexes, then use vector index to sort them */
+        FILTER_THEN_SORT,
+
+        /** First get the candidates in ANN order from the vector index, then fetch the rows and post-filter them */
+        SORT_THEN_FILTER
     }
 }

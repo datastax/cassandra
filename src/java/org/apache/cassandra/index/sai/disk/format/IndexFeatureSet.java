@@ -20,11 +20,11 @@ package org.apache.cassandra.index.sai.disk.format;
 
 /**
  * The {@code IndexFeatureSet} represents the set of features available that are available
- * to an {@code OnDiskFormat}. The baseline features included in the V1 on-disk format are
- * not included in the feature set.
+ * to an {@code OnDiskFormat}.
  *
- * V1 on-disk format features should only be added if support for them is dropped in future
- * version.
+ * The baseline features included in the V1 on-disk format are not included in the feature set.
+ * Thus, V1 on-disk format features should only be added here if support for them is dropped in
+ * a future version.
  */
 public interface IndexFeatureSet
 {
@@ -36,6 +36,11 @@ public interface IndexFeatureSet
      * @return true if the index supports row-awareness
      */
     boolean isRowAware();
+
+    /**
+     * @return true if vector index files include a checksum at the end
+     */
+    boolean hasVectorIndexChecksum();
 
     /**
      * The {@code Accumulator} is used to accumulate the {@code IndexFeatureSet} responses from
@@ -50,6 +55,7 @@ public interface IndexFeatureSet
     public static class Accumulator
     {
         boolean isRowAware = true;
+        boolean hasVectorIndexChecksum = true;
         boolean complete = false;
 
         /**
@@ -62,6 +68,8 @@ public interface IndexFeatureSet
             assert !complete : "Cannot accumulate after complete has been called";
             if (!indexFeatureSet.isRowAware())
                 isRowAware = false;
+            if (!indexFeatureSet.hasVectorIndexChecksum())
+                hasVectorIndexChecksum = false;
         }
 
         /**
@@ -73,14 +81,7 @@ public interface IndexFeatureSet
         public IndexFeatureSet complete()
         {
             complete = true;
-            return new IndexFeatureSet()
-            {
-                @Override
-                public boolean isRowAware()
-                {
-                    return isRowAware;
-                }
-            };
+            return Version.latest().onDiskFormat().indexFeatureSet();
         }
     }
 }

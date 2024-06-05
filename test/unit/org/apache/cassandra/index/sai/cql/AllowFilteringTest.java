@@ -42,7 +42,7 @@ public class AllowFilteringTest extends SAITester
         test("SELECT * FROM %s WHERE c1=0", false);
         test("SELECT * FROM %s WHERE c1>0", false);
         test("SELECT * FROM %s WHERE c1>0 AND c1<1", false);
-        
+
         // with additional simple filtering restrictions
         test("SELECT * FROM %s WHERE c1=0 AND k1=0", true);
         test("SELECT * FROM %s WHERE c1=0 AND k2=0", true);
@@ -87,7 +87,8 @@ public class AllowFilteringTest extends SAITester
         test("SELECT * FROM %s WHERE c3=0", false);
         test("SELECT * FROM %s WHERE c3>0", false);
         test("SELECT * FROM %s WHERE c3>0 AND c3<1", false);
-        
+        test("SELECT * FROM %s WHERE c3!=0", false);
+
         // with additional simple filtering restrictions
         test("SELECT * FROM %s WHERE c3=0 AND k1=0", true);
         test("SELECT * FROM %s WHERE c3=0 AND k2=0", true);
@@ -128,7 +129,7 @@ public class AllowFilteringTest extends SAITester
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c2) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c4) USING '%s'", StorageAttachedIndex.class.getName()));
         waitForIndexQueryable();
-        
+
         // with only index restrictions
         test("SELECT * FROM %s WHERE c2=0 AND c4=0", false);
         test("SELECT * FROM %s WHERE c2=0 AND c4>0", false);
@@ -137,6 +138,7 @@ public class AllowFilteringTest extends SAITester
         test("SELECT * FROM %s WHERE c2>0 AND c2<1 AND c4=0", false);
         test("SELECT * FROM %s WHERE c2>0 AND c4>0", false);
         test("SELECT * FROM %s WHERE c2>0 AND c2<1 AND c4>0 AND c4<1", false);
+        test("SELECT * FROM %s WHERE c2!=0 AND c4!=1", false);
 
         // with additional simple filtering restrictions
         test("SELECT * FROM %s WHERE c2=0 AND c4=0 AND k1=0", true);
@@ -179,6 +181,7 @@ public class AllowFilteringTest extends SAITester
         test("SELECT * FROM %s WHERE v1=0", false);
         test("SELECT * FROM %s WHERE v1>0", false);
         test("SELECT * FROM %s WHERE v1>0 AND v1<1", false);
+        test("SELECT * FROM %s WHERE v1!=0", false);
 
         // with additional simple filtering restrictions
         test("SELECT * FROM %s WHERE v1=0 AND k1=0", true);
@@ -226,6 +229,7 @@ public class AllowFilteringTest extends SAITester
         test("SELECT * FROM %s WHERE v1=0 AND v2>0", false);
         test("SELECT * FROM %s WHERE v1=0 AND v2>0 AND v2<1", false);
         test("SELECT * FROM %s WHERE v1>0 AND v1<1 AND v2>0 AND v2<1", false);
+        test("SELECT * FROM %s WHERE v1!=0 AND v2!=0", false);
 
         // with additional simple filtering restrictions
         test("SELECT * FROM %s WHERE v1=0 AND v2=0 AND k1=0", true);
@@ -272,12 +276,14 @@ public class AllowFilteringTest extends SAITester
         test("SELECT * FROM %s WHERE c2=0 AND c4=0 AND v1=0 AND v2=0", false);
         test("SELECT * FROM %s WHERE c2>0 AND c4>0 AND v1>0 AND v2>0", false);
         test("SELECT * FROM %s WHERE c2>0 AND c2<1 AND c4>0 AND c4<1 AND v1>0 AND v1<0 AND v2>0 AND v2<1", false);
-        
+        test("SELECT * FROM %s WHERE c2!=0 AND c4!=1 AND v1!=0 AND v2!=0", false);
+
         // with additional simple filtering restrictions
         test("SELECT * FROM %s WHERE c2=0 AND c4=0 AND v1=0 AND v2=0 AND k1=0", true);
         test("SELECT * FROM %s WHERE c2=0 AND c4=0 AND v1=0 AND v2=0 AND k2=0", true);
         test("SELECT * FROM %s WHERE c2=0 AND c4=0 AND v1=0 AND v2=0 AND c3=0", true);
         test("SELECT * FROM %s WHERE c2=0 AND c4=0 AND v1=0 AND v2=0 AND v3=0", true);
+        test("SELECT * FROM %s WHERE c2!=0 AND c4!=0 AND v1!=0 AND v2!=0 AND v3=0", true);
 
         // with token restrictions
         test("SELECT * FROM %s WHERE c2=0 AND c4=0 AND v1=0 AND v2=0 AND token(k1, k2) = token(0, 0)", false);
@@ -421,5 +427,102 @@ public class AllowFilteringTest extends SAITester
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "b"), "SELECT * FROM %s WHERE b LIKE 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "c"), "SELECT * FROM %s WHERE c LIKE 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "d"), "SELECT * FROM %s WHERE d LIKE 'Test'");
+    }
+
+    @Test
+    public void testIndexedColumnDoesNotSupportAnalyzerRestriction() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a text, b text, c text, d text, PRIMARY KEY (a, b))");
+        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", StorageAttachedIndex.class.getName()));
+        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", StorageAttachedIndex.class.getName()));
+        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
+
+        // Analyzer restriction
+        assertInvalidMessage(String.format(": restriction is only supported on properly indexed columns. a : 'Test' is not valid."), "SELECT * FROM %s WHERE a : 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'b'), "SELECT * FROM %s WHERE b : 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'c'), "SELECT * FROM %s WHERE c : 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'd'), "SELECT * FROM %s WHERE d : 'Test'");
+    }
+
+    @Test
+    public void testQueryRequiresFilteringButHasANNRestriction() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk text, i int, j int, k int, vec vector<float, 3>, PRIMARY KEY((pk, i), j))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Should not fail because allow filtering is set but not required
+        assertRows(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,1,1] LIMIT 10 ALLOW FILTERING;"));
+
+        // Do not recommend ALLOW FILTERING for non primary key, non clustering column restrictions
+        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT * FROM %s WHERE k > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
+
+        // Do not let ALLOW FILTERING to lead to query execution for non primary key, non clustering column restrictions
+        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT * FROM %s WHERE k > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;");
+
+        // Do not recommend ALLOW FILTERING for clustering column restrictions
+        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT * FROM %s WHERE j > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
+
+        // Do not let ALLOW FILTERING lead to query execution for clustering column restrictions
+        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT * FROM %s WHERE j > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;");
+
+        // Do not recommend ALLOW FILTERING for partial partition key restrictions
+        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT * FROM %s WHERE pk > 'A' AND pk < 'C' ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
+
+        // Do not let ALLOW FILTERING lead to query execution for partial partition key restrictions
+        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT * FROM %s WHERE pk > 'A' AND pk < 'C' ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;");
+
+        // Do not recommend ALLOW FILTERING for complete partition key restrictions
+        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT * FROM %s WHERE pk > 'A' AND pk < 'C' AND i > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
+
+        // Do not let ALLOW FILTERING lead to query execution for complete partition key restrictions
+        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT * FROM %s WHERE pk > 'A' AND pk < 'C' AND i > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;");
+    }
+
+    @Test
+    public void testMapRangeQueries() throws Throwable
+    {
+        createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(keys(item_cost)) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(values(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Insert data for later
+        execute("INSERT INTO %s (partition, item_cost) VALUES (0, {'apple': 2, 'orange': 1})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': 3})");
+        flush();
+        execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 4, 'orange': 2})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 3, 'orange': 1})");
+
+        // Gen an ALLOW FILTERING recommendation.
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "item_cost"),
+                             "SELECT partition FROM %s WHERE item_cost['apple'] < 6");
+
+        // Show that filtering works correctly
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 1 ALLOW FILTERING"),
+                   row(0), row(2), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] >= 1 ALLOW FILTERING"),
+                   row(1), row(0), row(2), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 ALLOW FILTERING"),
+                   row(1), row(0));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 3 ALLOW FILTERING"),
+                   row(1), row(0), row(3));
+
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 AND item_cost['apple'] > 1 ALLOW FILTERING"), row(0));
+
+
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Show that we're now able to execute the query.
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 AND item_cost['apple'] > 1"), row(0));
     }
 }

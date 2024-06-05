@@ -24,15 +24,23 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.INativeLibrary;
-import org.apache.cassandra.utils.NativeLibrary;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_STORAGE_PROVIDER;
 
@@ -118,6 +126,76 @@ public interface StorageProvider
      */
     void invalidateFileSystemCache(File file);
 
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given sstable component.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor descriptor for the sstable whose handler is built.
+     * @param component sstable component for which to build the handler.
+     * @return a new {@link FileHandle.Builder} for the provided sstable component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given sstable component.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor descriptor for the sstable whose handler is built.
+     * @param component sstable component for which to build the handler.
+     * @param zeroCopyMetadata zero copy metadata for the sstable
+     * @return a new {@link FileHandle.Builder} for the provided sstable component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component, ZeroCopyMetadata zeroCopyMetadata);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given SAI component (for index with per-sstable files).
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor descriptor for the index file whose handler is built.
+     * @param component index component for which to build the handler.
+     * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files).
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor descriptor for the index file whose handler is built.
+     * @param component index component for which to build the handler.
+     * @param context index context for which to build the handler.
+     * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files),
+     * that is suitable for reading the component "at flush time", that is typcally for when we need to access the
+     * component to complete the writing of another related component.
+     * <p>
+     * Other the fact that this method will be called a different time, it's requirements are the same than for
+     * {@link #fileHandleBuilderFor(IndexDescriptor, IndexComponent, IndexContext)}.
+     *
+     * @param descriptor descriptor for the index file whose handler is built.
+     * @param component index component for which to build the handler.
+     * @param context index context for which to build the handler.
+     * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder flushTimeFileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context);
+
     class DefaultProvider implements StorageProvider
     {
         @Override
@@ -157,6 +235,72 @@ public interface StorageProvider
         public void invalidateFileSystemCache(File file)
         {
             INativeLibrary.instance.trySkipCache(file, 0, 0);
+        }
+
+        protected Config.DiskAccessMode accessMode(Component component)
+        {
+            switch (component.type)
+            {
+                case PRIMARY_INDEX:
+                case PARTITION_INDEX:
+                case ROW_INDEX:
+                    return DatabaseDescriptor.getIndexAccessMode();
+                default:
+                    return DatabaseDescriptor.getDiskAccessMode();
+            }
+        }
+
+        @Override
+        @SuppressWarnings("resource")
+        public FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component)
+        {
+            return new FileHandle.Builder(descriptor.fileFor(component))
+                   .mmapped(accessMode(component) == Config.DiskAccessMode.mmap)
+                   .withChunkCache(ChunkCache.instance);
+        }
+
+        @Override
+        @SuppressWarnings("resource")
+        public FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component, ZeroCopyMetadata zeroCopyMetadata)
+        {
+            return new FileHandle.Builder(descriptor.fileFor(Component.DATA))
+                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
+                   .withChunkCache(ChunkCache.instance)
+                   .slice(zeroCopyMetadata);
+        }
+
+        @Override
+        @SuppressWarnings("resource")
+        public FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component)
+        {
+            File file = descriptor.fileFor(component);
+            if (logger.isTraceEnabled())
+            {
+                logger.trace(descriptor.logMessage("Opening {} file handle for {} ({})"),
+                             file, FBUtilities.prettyPrintMemory(file.length()));
+            }
+            return new FileHandle.Builder(file).mmapped(true);
+        }
+
+        @Override
+        @SuppressWarnings("resource")
+        public FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context)
+        {
+            File file = descriptor.fileFor(component, context);
+            if (logger.isTraceEnabled())
+            {
+                logger.trace(descriptor.logMessage("Opening {} file handle for {} ({})"),
+                             file, FBUtilities.prettyPrintMemory(file.length()));
+            }
+            return new FileHandle.Builder(file).mmapped(true);
+        }
+
+        @Override
+        public FileHandle.Builder flushTimeFileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context)
+        {
+            // By default, no difference between accesses "at flush time" and "at query time", but subclasses may need
+            // to differenciate both.
+            return fileHandleBuilderFor(descriptor, component, context);
         }
     }
 }

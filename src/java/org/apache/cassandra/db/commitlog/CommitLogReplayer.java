@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -294,6 +295,11 @@ public class CommitLogReplayer implements CommitLogReadHandler
     @VisibleForTesting
     public static class MutationInitiator
     {
+        protected void onInvalidMutation(TableId id)
+        {
+            logger.debug("Invalid mutation detected for table id {}", id);
+        }
+
         protected Future<Integer> initiateMutation(final Mutation mutation,
                                                    final long segmentId,
                                                    final int serializedSize,
@@ -540,6 +546,16 @@ public class CommitLogReplayer implements CommitLogReadHandler
                 return true;
         }
         return false;
+    }
+
+    public Set<String> getSegmentsWithInvalidMutations()
+    {
+        return commitLogReader.getSegmentsWithInvalidMutations();
+    }
+
+    public void handleInvalidMutation(TableId id)
+    {
+        mutationInitiator.onInvalidMutation(id);
     }
 
     public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)

@@ -33,7 +33,7 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
     private static final long EMPTY_SIZE = ObjectSizes.measure(new PrimaryKeys());
 
     // from https://github.com/gaul/java-collection-overhead
-    long SET_ENTRY_OVERHEAD = 36;
+    private static final long SET_ENTRY_OVERHEAD = 36;
 
     private final ConcurrentSkipListSet<PrimaryKey> keys = new ConcurrentSkipListSet<>();
 
@@ -45,6 +45,12 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
     public long add(PrimaryKey key)
     {
         return keys.add(key) ? SET_ENTRY_OVERHEAD : 0;
+    }
+
+    public void addAll(Iterable<PrimaryKey> keys)
+    {
+        for (var key : keys)
+            add(key);
     }
 
     public SortedSet<PrimaryKey> keys()

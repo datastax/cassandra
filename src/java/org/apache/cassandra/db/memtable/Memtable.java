@@ -215,6 +215,9 @@ public interface Memtable extends Comparable<Memtable>
     /** Size of the data not accounting for any metadata / mapping overheads */
     long getLiveDataSize();
 
+    /** Average size of the data of each row */
+    long getEstimatedAverageRowSize();
+
     /**
      * Number of "operations" (in the sense defined in {@link PartitionUpdate#operationCount()}) the memtable has
      * executed.
@@ -223,6 +226,12 @@ public interface Memtable extends Comparable<Memtable>
 
     /** Minimum timestamp of all stored data */
     long getMinTimestamp();
+
+    /** Min partition key inserted so far. */
+    DecoratedKey minPartitionKey();
+
+    /** Max partition key inserted so far. */
+    DecoratedKey maxPartitionKey();
 
     /**
      * The table's definition metadata.

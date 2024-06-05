@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
 /** A class that extracts system properties for the cassandra node it runs within. */
 public enum CassandraRelevantProperties
@@ -307,6 +308,9 @@ public enum CassandraRelevantProperties
     /** Set this property to true in order to switch to micrometer metrics */
     USE_MICROMETER("cassandra.use_micrometer_metrics", "false"),
 
+    /** Set this property to true in order to use DSE-like histogram bucket boundaries and behaviour */
+    USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES("cassandra.use_dse_compatible_histogram_boundaries", "false"),
+
     /** Which class to use for coordinator client request metrics */
     CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY("cassandra.custom_client_request_metrics_provider_class"),
 
@@ -328,6 +332,29 @@ public enum CassandraRelevantProperties
 
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
+
+    /** Controls the maximum top-k limit for vector search */
+    SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
+
+    /**
+     * Controls the maximum number of PrimaryKeys that will be read into memory at one time when ordering/limiting
+     * the results of an ANN query constrained by non-ANN predicates.
+     */
+    SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE("cassandra.sai.vector_search.order_chunk_size", "100000"),
+
+    /** Controls the hnsw vector cache size, in bytes, per index segment. 0 to disable */
+    SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
+
+    /** Whether to allow the user to specify custom options to the hnsw index */
+    SAI_HNSW_ALLOW_CUSTOM_PARAMETERS("cassandra.sai.hnsw.allow_custom_parameters", "false"),
+
+    /** Whether to validate terms that will be SAI indexed at the coordinator */
+    SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
+
+    /** Whether vector type only allows float vectors. True by default. **/
+    VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
+    /** Enables use of vector type. True by default. **/
+    VECTOR_TYPE_ALLOWED("cassandra.vector_type_allowed", "true"),
 
     /**
      * Whether to disable auto-compaction
@@ -372,6 +399,7 @@ public enum CassandraRelevantProperties
     TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION("cassandra.table_metrics_default_histograms_aggregation", TableMetrics.MetricsAggregation.INDIVIDUAL.name()),
     // Determines if table metrics should be also exported to shared global metric
     TABLE_METRICS_EXPORT_GLOBALS("cassandra.table_metrics_export_globals", "true"),
+    FILE_CACHE_SIZE_IN_MB("cassandra.file_cache_size_in_mb", "2048"),
     CUSTOM_HINTS_RATE_LIMITER_FACTORY("cassandra.custom_hints_rate_limiter_factory"),
 
     CUSTOM_INDEX_BUILD_DECIDER("cassandra.custom_index_build_decider"),
@@ -382,11 +410,35 @@ public enum CassandraRelevantProperties
     SYSTEM_VIEWS_INCLUDE_LOCAL_AND_PEERS("cassandra.system_view.include_local_and_peers"),
     //This only applies if include all is false
     SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes"),
-    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
-    CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
-    CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
 
-    // Allows skipping advising the OS to free cached pages associated with commitlog flushing
+    // Allow disabling deletions of corrupt index components for troubleshooting
+    DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
+
+    // Enables parallel index read.
+    USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
+    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
+
+    // bloom filter lazy loading
+    /**
+     * true if non-local table's bloom filter should be deserialized on read instead of when opening sstable
+     */
+    BLOOM_FILTER_LAZY_LOADING("cassandra.bloom_filter_lazy_loading", "false"),
+
+    /**
+     * sstable primary index hits per second to determine if a sstable is hot. 0 means BF should be loaded immediately on read.
+     *
+     * Note that when WINDOW <= 0, this is used as absolute primary index access count.
+     */
+    BLOOM_FILTER_LAZY_LOADING_THRESHOLD("cassandra.bloom_filter_lazy_loading.threshold", "0"),
+
+    /**
+     * Window of time by minute, available: 1 (default), 5, 15, 120.
+     *
+     * Note that if <= 0 then we use threshold as the absolute count
+     */
+    BLOOM_FILTER_LAZY_LOADING_WINDOW("cassandra.bloom_filter_lazy_loading.window", "1"),
+
+    // Allows skipping advising the OS to free cached pages associated commitlog flushing
     COMMITLOG_SKIP_FILE_ADVICE("cassandra.commitlog.skip_file_advice"),
 
     // Changes the semantic of the "THREE" consistency level to mean "all but one"
@@ -396,7 +448,21 @@ public enum CassandraRelevantProperties
      * Allows to set a custom response messages handler for verbs {@link org.apache.cassandra.net.Verb#REQUEST_RSP} and
      * {@link org.apache.cassandra.net.Verb#FAILURE_RSP}.
      */
-    CUSTOM_RESPONSE_VERB_HANDLER_PROVIDER("cassandra.custom_response_verb_handler_provider_class"),;
+    CUSTOM_RESPONSE_VERB_HANDLER_PROVIDER("cassandra.custom_response_verb_handler_provider_class"),
+    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
+    CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
+
+    LWT_LOCKS_PER_THREAD("cassandra.lwt_locks_per_thread", "1024"),
+
+    CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
+    /**
+     * Whether to enable the use of {@link EndpointGroupingRangeCommandIterator}
+     */
+    RANGE_READ_ENDPOINT_GROUPING_ENABLED("cassandra.range_read_endpoint_grouping_enabled", "true"),
+    /**
+     * Allows to set custom current trie index format. This node will produce sstables in this format.
+     */
+    TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cc");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

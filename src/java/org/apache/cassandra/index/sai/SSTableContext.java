@@ -23,7 +23,6 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -66,7 +65,7 @@ public class SSTableContext extends SharedCloseableImpl
         Ref<? extends SSTableReader> sstableRef = null;
         PrimaryKeyMap.Factory primaryKeyMapFactory = null;
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+        IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
         try
         {
             sstableRef = sstable.tryRef();
@@ -112,18 +111,14 @@ public class SSTableContext extends SharedCloseableImpl
         return sstable;
     }
 
-    /**
-     * @return disk usage of per-sstable index files
-     */
-    public long diskUsage()
+    public IndexDescriptor indexDescriptor()
     {
-        return indexDescriptor.version.onDiskFormat()
-                                      .perSSTableComponents()
-                                      .stream()
-                                      .map(indexDescriptor::fileFor)
-                                      .filter(File::exists)
-                                      .mapToLong(File::length)
-                                      .sum();
+        return indexDescriptor;
+    }
+
+    public PrimaryKeyMap.Factory primaryKeyMapFactory()
+    {
+        return primaryKeyMapFactory;
     }
 
     /**
@@ -131,7 +126,7 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public int openFilesPerSSTable()
     {
-        return indexDescriptor.version.onDiskFormat().openFilesPerSSTable();
+        return indexDescriptor.getVersion().onDiskFormat().openFilesPerSSTable();
     }
 
     @Override
