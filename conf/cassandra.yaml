@@ -1596,3 +1596,9 @@ enable_drop_compact_storage: false
   # Default -1 to disable and use the physically available disk size of data directories during calculations.
   # may differ if emulate_dbaas_defaults is enabled
   # disk_usage_max_disk_size_in_gb: -1
+
+  # Guardrail to warn or fail when using LIMIT/OFFSET paging skipping more rows than threshold.
+  # Default offset_rows_warn_threshold is 10000, may differ if emulate_dbaas_defaults is enabled
+  # Default offset_rows_failure_threshold is 20000, may differ if emulate_dbaas_defaults is enabled
+  # offset_rows_warn_threshold: 10000
+  # offset_rows_failure_threshold: 20000
