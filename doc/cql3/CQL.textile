@@ -1071,7 +1071,7 @@ bc(syntax)..
                   ( GROUP BY <group-by>)?
                   ( ORDER BY <order-by> )?
                   ( PER PARTITION LIMIT <integer> )?
-                  ( LIMIT <integer> )?
+                  ( LIMIT <integer> ( OFFSET <integer> )? )?
                   ( ALLOW FILTERING )?
 
 <select-clause> ::= DISTINCT? <selection-list>
@@ -1206,9 +1206,9 @@ Aggregate functions will produce a separate value for each group. If no @GROUP B
 
 If a column is selected without an aggregate function, in a statement with a @GROUP BY@, the first value encounter in each group will be returned.
 
-h4(#selectLimit). @LIMIT@ and @PER PARTITION LIMIT@
+h4(#selectLimit). @LIMIT@, @OFFSET@ and @PER PARTITION LIMIT@
 
-The @LIMIT@ option to a @SELECT@ statement limits the number of rows returned by a query, while the @PER PARTITION LIMIT@ option limits the number of rows returned for a given partition by the query. Note that both type of limit can used in the same statement.
+The @LIMIT@ option in a @SELECT@ statement limits the number of rows returned by a query. The @LIMIT@ option can include an @OFFSET@ option to skip the first rows of the query result. The @PER PARTITION LIMIT@ option limits the number of rows returned for a given partition by the query. Note that both type of limit can used in the same statement.
 
 h4(#selectAllowFiltering). @ALLOW FILTERING@
 
