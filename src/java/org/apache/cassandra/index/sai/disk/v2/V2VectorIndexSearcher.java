@@ -304,7 +304,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         var approximateScores = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size(),
                                                                                                    (a, b) -> Float.compare(b.getApproximateScore(), a.getApproximateScore()));
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-        var scoreFunction = cv.scoreFunctionFor(queryVector, similarityFunction);
+        var scoreFunction = cv.precomputedScoreFunctionFor(queryVector, similarityFunction);
 
         try (var ordinalsView = graph.getOrdinalsView())
         {
