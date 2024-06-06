@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
@@ -116,6 +117,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private final Selection selection;
     private final Term limit;
     private final Term perPartitionLimit;
+    private final Term offset;
 
     private final StatementRestrictions restrictions;
 
@@ -148,7 +150,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                            AggregationSpecification aggregationSpec,
                            ColumnComparator<List<ByteBuffer>> orderingComparator,
                            Term limit,
-                           Term perPartitionLimit)
+                           Term perPartitionLimit,
+                           Term offset)
     {
         this.rawCQLStatement = queryString;
         this.table = table;
@@ -161,6 +164,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         this.parameters = parameters;
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
+        this.offset = offset;
     }
 
     @Override
@@ -225,6 +229,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    null,
                                    null,
                                    null,
+                                   null,
                                    null);
     }
 
@@ -274,7 +279,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    aggregationSpec,
                                    orderingComparator,
                                    limit,
-                                   perPartitionLimit);
+                                   perPartitionLimit,
+                                   offset);
     }
 
     /**
@@ -295,7 +301,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    aggregationSpec,
                                    orderingComparator,
                                    limit,
-                                   perPartitionLimit);
+                                   perPartitionLimit,
+                                   offset);
     }
 
     private void validateQueryOptions(QueryState queryState, QueryOptions options)
@@ -331,10 +338,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         int nowInSec = options.getNowInSeconds(queryState);
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
+        int userOffset = getOffset(options);
         PageSize pageSize = options.getPageSize();
 
         Selectors selectors = selection.newSelectors(options);
-        ReadQuery query = getQuery(queryState, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        ReadQuery query = getQuery(queryState, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, userOffset);
 
         // Handle additional validation for topK queries
         if (query.isTopK()) {
@@ -358,16 +366,17 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             throw new InvalidRequestException("Paging in bytes cannot be specified for aggregation queries");
 
         if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))
-            return execute(query, options, queryState, selectors, nowInSec, userLimit, queryStartNanoTime);
+            return execute(query, options, queryState, selectors, nowInSec, userLimit, userOffset, queryStartNanoTime);
 
         QueryPager pager = getPager(query, options);
 
-        return execute(Pager.forDistributedQuery(pager, cl, queryState),
+        return execute(Pager.forDistributedQuery(pager, userOffset, cl, queryState),
                        options,
                        selectors,
                        pageSize,
                        nowInSec,
                        userLimit,
+                       userOffset,
                        queryStartNanoTime);
     }
 
@@ -380,7 +389,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                         nowInSec,
                         getLimit(options),
                         getPerPartitionLimit(options),
-                        options.getPageSize());
+                        getOffset(options));
     }
 
     public ReadQuery getQuery(QueryState queryState,
@@ -389,11 +398,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               int nowInSec,
                               int userLimit,
                               int perPartitionLimit,
-                              PageSize pageSize)
+                              int userOffset)
     {
         boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
 
-        DataLimits limit = getDataLimits(queryState, userLimit, perPartitionLimit);
+        DataLimits limit = getDataLimits(queryState, userLimit, perPartitionLimit, userOffset);
 
         if (isPartitionRangeQuery)
             return getRangeCommand(options, columnFilter, limit, nowInSec, queryState);
@@ -406,11 +415,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        QueryState queryState,
                                        Selectors selectors,
                                        int nowInSec,
-                                       int userLimit, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+                                       int userLimit,
+                                       int userOffset,
+                                       long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
-            return processResults(data, options, selectors, nowInSec, userLimit);
+            return processResults(data, options, selectors, nowInSec, userLimit, userOffset);
         }
     }
 
@@ -430,14 +441,19 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             this.pager = pager;
         }
 
-        public static Pager forInternalQuery(QueryPager pager, ReadExecutionController executionController)
+        public static Pager forInternalQuery(QueryPager pager, int offset, ReadExecutionController executionController)
         {
-            return new InternalPager(pager, executionController);
+            return forOffest(new InternalPager(pager, executionController), offset);
         }
 
-        public static Pager forDistributedQuery(QueryPager pager, ConsistencyLevel consistency, QueryState queryState)
+        public static Pager forDistributedQuery(QueryPager pager, int offset, ConsistencyLevel consistency, QueryState queryState)
         {
-            return new NormalPager(pager, consistency, queryState);
+            return forOffest(new NormalPager(pager, consistency, queryState), offset);
+        }
+
+        public static Pager forOffest(Pager pager, int offset)
+        {
+            return offset > 0 ? new OffsetPager(pager) : pager;
         }
 
         public boolean isExhausted()
@@ -485,6 +501,23 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 return pager.fetchPageInternal(pageSize, executionController);
             }
         }
+
+        public static class OffsetPager extends Pager
+        {
+            private final Pager pager;
+
+            private OffsetPager(Pager pager)
+            {
+                super(pager.pager);
+                this.pager = pager;
+            }
+
+            @Override
+            public PartitionIterator fetchPage(PageSize pageSize, long queryStartNanoTime)
+            {
+                return new PagerExhaustingIterator(pager, pageSize, queryStartNanoTime);
+            }
+        }
     }
 
     private ResultMessage.Rows execute(Pager pager,
@@ -493,6 +526,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        PageSize pageSize,
                                        int nowInSec,
                                        int userLimit,
+                                       int userOffset,
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         if (aggregationSpec != null)
@@ -520,7 +554,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         ResultMessage.Rows msg;
         try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
         {
-            msg = processResults(page, options, selectors, nowInSec, userLimit);
+            msg = processResults(page, options, selectors, nowInSec, userLimit, userOffset);
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
@@ -541,9 +575,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                               QueryOptions options,
                                               Selectors selectors,
                                               int nowInSec,
-                                              int userLimit) throws RequestValidationException
+                                              int userLimit,
+                                              int userOffset) throws RequestValidationException
     {
-        ResultSet rset = process(partitions, options, selectors, nowInSec, userLimit);
+        ResultSet rset = process(partitions, options, selectors, nowInSec, userLimit, userOffset);
         return new ResultMessage.Rows(rset);
     }
 
@@ -556,10 +591,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
+        int userOffset = getOffset(options);
         PageSize pageSize = options.getPageSize();
 
         Selectors selectors = selection.newSelectors(options);
-        ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, userOffset);
 
         try (ReadExecutionController executionController = query.executionController())
         {
@@ -567,18 +603,19 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return processResults(data, options, selectors, nowInSec, userLimit);
+                    return processResults(data, options, selectors, nowInSec, userLimit, userOffset);
                 }
             }
 
             QueryPager pager = getPager(query, options);
 
-            return execute(Pager.forInternalQuery(pager, executionController),
+            return execute(Pager.forInternalQuery(pager, userOffset, executionController),
                            options,
                            selectors,
                            pageSize,
                            nowInSec,
                            userLimit,
+                           userOffset,
                            queryStartNanoTime);
         }
     }
@@ -598,7 +635,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         QueryOptions options = QueryOptions.DEFAULT;
         Selectors selectors = selection.newSelectors(options);
-        return process(partitions, options, selectors, nowInSec, getLimit(options));
+        return process(partitions, options, selectors, nowInSec, getLimit(options), getOffset(options));
     }
 
     @Override
@@ -794,8 +831,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return builder.build();
     }
 
-    private DataLimits getDataLimits(QueryState queryState, int userLimit, int perPartitionLimit)
+    private DataLimits getDataLimits(QueryState queryState, int userLimit, int perPartitionLimit, int userOffset)
     {
+        assert userOffset == 0 || userLimit != NO_LIMIT : "Cannot use OFFSET without LIMIT";
+
+        int fetchLimit = userLimit == NO_LIMIT ? userLimit : userLimit + userOffset;
         int cqlRowLimit = NO_LIMIT;
         int cqlPerPartitionLimit = NO_LIMIT;
 
@@ -803,7 +843,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
         {
             if (!needsToSkipUserLimit())
-                cqlRowLimit = userLimit;
+                cqlRowLimit = fetchLimit;
             cqlPerPartitionLimit = perPartitionLimit;
         }
 
@@ -891,6 +931,31 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return userLimit;
     }
 
+    private int getOffset(QueryOptions options)
+    {
+        int userOffset = 0;
+
+        if (offset != null)
+        {
+            ByteBuffer b = checkNotNull(offset.bindAndGet(options), "Invalid null value of offset");
+            // treat UNSET limit value as zero
+            if (b != UNSET_BYTE_BUFFER)
+            {
+                try
+                {
+                    Int32Type.instance.validate(b);
+                    userOffset = Int32Type.instance.compose(b);
+                    checkTrue(userOffset >= 0, "Offset must be positive");
+                }
+                catch (MarshalException e)
+                {
+                    throw new InvalidRequestException("Invalid offset value");
+                }
+            }
+        }
+        return userOffset;
+    }
+
     private NavigableSet<Clustering<?>> getRequestedRows(QueryOptions options, QueryState queryState) throws InvalidRequestException
     {
         // Note: getRequestedColumns don't handle static columns, but due to CASSANDRA-5762
@@ -912,10 +977,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               QueryOptions options,
                               Selectors selectors,
                               int nowInSec,
-                              int userLimit) throws InvalidRequestException
+                              int userLimit,
+                              int userOffset) throws InvalidRequestException
     {
+        Consumer<ResultSet> sorter = orderingComparator == null ? null : rs -> orderResults(rs, options);
         GroupMaker groupMaker = aggregationSpec == null ? null : aggregationSpec.newGroupMaker();
-        ResultSetBuilder result = new ResultSetBuilder(getResultMetadata(), selectors, groupMaker);
+        ResultSetBuilder result = new ResultSetBuilder(getResultMetadata(), selectors, groupMaker, sorter, userLimit, userOffset);
 
         while (partitions.hasNext())
         {
@@ -925,36 +992,16 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             }
         }
 
-        ResultSet cqlRows = result.build();
-
         ColumnFamilyStore store = cfs();
         if (store != null)
-            store.metric.coordinatorReadSize.update(calculateSize(cqlRows.rows));
+            store.metric.coordinatorReadSize.update(result.readRowsSize());
 
-        orderResults(cqlRows, options);
-
-        cqlRows.trim(userLimit);
-
-        return cqlRows;
+        return result.build();
     }
 
     public ColumnFamilyStore cfs()
     {
         return Schema.instance.getColumnFamilyStoreInstance(table.id);
-    }
-
-    private int calculateSize(List<List<ByteBuffer>> rows)
-    {
-        int size = 0;
-        for (List<ByteBuffer> row : rows)
-        {
-            for (int i = 0, isize = row.size(); i < isize; i++)
-            {
-                ByteBuffer value = row.get(i);
-                size += value != null ? value.remaining() : 0;
-            }
-        }
-        return size;
     }
 
     public static ByteBuffer[] getComponents(TableMetadata metadata, DecoratedKey dk)
@@ -1100,13 +1147,15 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         public final WhereClause whereClause;
         public final Term.Raw limit;
         public final Term.Raw perPartitionLimit;
+        public final Term.Raw offset;
 
         public RawStatement(QualifiedName cfName,
                             Parameters parameters,
                             List<RawSelector> selectClause,
                             WhereClause whereClause,
                             Term.Raw limit,
-                            Term.Raw perPartitionLimit)
+                            Term.Raw perPartitionLimit,
+                            Term.Raw offset)
         {
             super(cfName);
             this.parameters = parameters;
@@ -1114,6 +1163,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             this.whereClause = whereClause;
             this.limit = limit;
             this.perPartitionLimit = perPartitionLimit;
+            this.offset = offset;
         }
 
         @Override
@@ -1187,7 +1237,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        aggregationSpec,
                                        orderingComparator,
                                        prepareLimit(bindVariables, limit, ks, limitReceiver()),
-                                       prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()));
+                                       prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()),
+                                       prepareLimit(bindVariables, offset, ks, offsetReceiver()));
         }
 
         private Set<ColumnMetadata> getResultSetOrdering(StatementRestrictions restrictions, Map<ColumnMetadata, Ordering> orderingColumns)
@@ -1515,6 +1566,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return new ColumnSpecification(keyspace(), name(), new ColumnIdentifier("[per_partition_limit]", true), Int32Type.instance);
         }
 
+        private ColumnSpecification offsetReceiver()
+        {
+            return new ColumnSpecification(keyspace(), name(), new ColumnIdentifier("[offset]", true), Int32Type.instance);
+        }
+
         @Override
         public String toString()
         {
@@ -1669,5 +1725,59 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     public String toString()
     {
         return ToStringBuilder.reflectionToString(this, ToStringStyle.SHORT_PREFIX_STYLE);
+    }
+
+    private static class PagerExhaustingIterator implements PartitionIterator
+    {
+        private final Pager pager;
+        private final PageSize pageSize;
+        private final long queryStartNanoTime;
+        PartitionIterator current;
+
+        public PagerExhaustingIterator(Pager pager, PageSize pageSize, long queryStartNanoTime)
+        {
+            this.pager = pager;
+            this.pageSize = pageSize;
+            this.queryStartNanoTime = queryStartNanoTime;
+        }
+
+        @Override
+        public void close()
+        {
+            if (current != null)
+            {
+                current.close();
+                current = null;
+            }
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            maybeFetch();
+            return current != null && current.hasNext();
+        }
+
+        @Override
+        public RowIterator next()
+        {
+            maybeFetch();
+            return current.next();
+        }
+
+        private void maybeFetch()
+        {
+            if (current == null || !current.hasNext())
+            {
+                if (current != null)
+                {
+                    current.close();
+                    current = null;
+                }
+
+                if (!pager.isExhausted())
+                    current = pager.fetchPage(pageSize, queryStartNanoTime);
+            }
+        }
     }
 }

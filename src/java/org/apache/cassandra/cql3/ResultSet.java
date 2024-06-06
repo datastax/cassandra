@@ -94,8 +94,11 @@ public class ResultSet
         Collections.reverse(rows);
     }
 
-    public void trim(int limit)
+    public void trim(int limit, int offset)
     {
+        while (offset-- > 0 && !rows.isEmpty())
+            rows.remove(0);
+
         int toRemove = rows.size() - limit;
         if (toRemove > 0)
         {

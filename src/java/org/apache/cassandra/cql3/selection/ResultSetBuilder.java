@@ -21,6 +21,9 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Consumer;
+
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.ResultSet.ResultMetadata;
@@ -59,16 +62,30 @@ public final class ResultSetBuilder
     final long[] timestamps;
     final int[] ttls;
 
+    private final Consumer<ResultSet> sorter;
+    private final int limit;
+    private int offset;
+    private boolean hasResults = false;
+    private int readRowsSize = 0;
+
     public ResultSetBuilder(ResultMetadata metadata, Selectors selectors)
     {
-        this(metadata, selectors, null);
+        this(metadata, selectors, null, null, Integer.MAX_VALUE, 0);
     }
 
-    public ResultSetBuilder(ResultMetadata metadata, Selectors selectors, GroupMaker groupMaker)
+    public ResultSetBuilder(ResultMetadata metadata,
+                            Selectors selectors,
+                            GroupMaker groupMaker,
+                            @Nullable Consumer<ResultSet> sorter,
+                            int limit,
+                            int offset)
     {
-        this.resultSet = new ResultSet(metadata.copy(), new ArrayList<List<ByteBuffer>>());
+        this.resultSet = new ResultSet(metadata.copy(), new ArrayList<>());
         this.selectors = selectors;
         this.groupMaker = groupMaker;
+        this.sorter = sorter;
+        this.limit = limit;
+        this.offset = offset;
         this.timestamps = selectors.collectTimestamps() ? new long[selectors.numberOfFetchedColumns()] : null;
         this.ttls = selectors.collectTTLs() ? new int[selectors.numberOfFetchedColumns()] : null;
 
@@ -132,8 +149,7 @@ public final class ResultSetBuilder
             selectors.addInputRow(this);
             if (isNewAggregate)
             {
-                resultSet.addRow(getOutputRow());
-                selectors.reset();
+                addRow();
             }
         }
         current = new ArrayList<>(selectors.numberOfFetchedColumns());
@@ -153,19 +169,49 @@ public final class ResultSetBuilder
         if (current != null)
         {
             selectors.addInputRow(this);
-            resultSet.addRow(getOutputRow());
-            selectors.reset();
+            addRow();
             current = null;
         }
 
         // For aggregates we need to return a row even it no records have been found
-        if (resultSet.isEmpty() && groupMaker != null && groupMaker.returnAtLeastOneRow())
-            resultSet.addRow(getOutputRow());
+        if (!hasResults && groupMaker != null && groupMaker.returnAtLeastOneRow())
+            addRow();
+
+        if (sorter != null)
+        {
+            sorter.accept(resultSet);
+            resultSet.trim(limit, offset);
+        }
+
         return resultSet;
+    }
+
+    public int readRowsSize()
+    {
+        return readRowsSize;
     }
 
     private List<ByteBuffer> getOutputRow()
     {
         return selectors.getOutputRow();
+    }
+
+    private void addRow()
+    {
+        List<ByteBuffer> row = getOutputRow();
+        selectors.reset();
+
+        hasResults = true;
+        for (int i = 0, isize = row.size(); i < isize; i++)
+        {
+            ByteBuffer value = row.get(i);
+            readRowsSize += value != null ? value.remaining() : 0;
+        }
+
+        // Only add the row if it's within the limit and offset, unless there is an order, in which case we'll trim
+        // later, after applying that order to the full results.
+        // TODO: there might be an opportunity to reduce memory usage by using insertion sort
+        if (sorter != null || offset-- <= 0 && resultSet.size() < limit)
+            resultSet.addRow(row);
     }
 }
