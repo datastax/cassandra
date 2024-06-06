@@ -151,9 +151,9 @@
     <property name="jacoco.partials.dir" value="${jacoco.export.dir}/partials" />
     <property name="jacoco.partialexecfile" value="${jacoco.partials.dir}/partial.exec" />
     <property name="jacoco.finalexecfile" value="${jacoco.export.dir}/jacoco.exec" />
-    <property name="jacoco.version" value="0.8.8"/>
+    <property name="jacoco.version" value="0.8.7"/>
 
-    <property name="byteman.version" value="4.0.20"/>
+    <property name="byteman.version" value="4.0.14"/>
     <property name="jamm.version" value="0.3.2"/>
     <property name="ecj.version" value="4.6.1"/>
     <property name="ohc.version" value="0.5.1"/>
@@ -580,24 +580,24 @@
           <dependency groupId="org.antlr" artifactId="antlr-runtime" version="3.5.2">
             <exclusion groupId="org.antlr" artifactId="stringtemplate"/>
           </dependency>
-          <dependency groupId="org.slf4j" artifactId="slf4j-api" version="1.7.25"/>
-          <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j" version="1.7.25"/>
-          <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j" version="1.7.25" />
-          <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.2.9"/>
-          <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.2.9"/>
-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.13.2"/>
-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.13.2.2"/>
-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations" version="2.13.2"/>
+          <dependency groupId="org.slf4j" artifactId="slf4j-api" version="1.7.30"/>
+          <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j" version="1.7.30"/>
+          <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j" version="2.0.9" />
+          <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.2.12"/>
+          <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.2.12"/>
+          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.14.2"/>
+          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.14.2"/>
+          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations" version="2.14.2"/>
           <dependency groupId="org.msgpack" artifactId="jackson-dataformat-msgpack" version="0.8.16"/>
 
           <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
           <dependency groupId="com.boundary" artifactId="high-scale-lib" version="1.0.6"/>
           <dependency groupId="com.github.jbellis" artifactId="jamm" version="${jamm.version}"/>
-          <dependency groupId="org.yaml" artifactId="snakeyaml" version="1.32"/>
+          <dependency groupId="org.yaml" artifactId="snakeyaml" version="1.33"/>
           <dependency groupId="junit" artifactId="junit" version="4.13" scope="test">
             <exclusion groupId="org.hamcrest" artifactId="hamcrest-core"/>
           </dependency>
-          <dependency groupId="org.mockito" artifactId="mockito-core" version="3.2.4" scope="test"/>
+          <dependency groupId="org.mockito" artifactId="mockito-core" version="3.5.0" scope="test"/>
           <dependency groupId="org.quicktheories" artifactId="quicktheories" version="0.26" scope="test"/>
           <dependency groupId="com.google.code.java-allocation-instrumenter" artifactId="java-allocation-instrumenter" version="${allocation-instrumenter.version}" scope="test">
             <exclusion groupId="com.google.guava" artifactId="guava"/>
@@ -637,9 +637,9 @@
           <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.10.12" scope="test"/>
 
           <dependency groupId="com.datastax.dse" artifactId="dse-db-all" version="${version}" />
-          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-core" version="3.1.5" />
-          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-jvm" version="3.1.5" />
-          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-logback" version="3.1.5" />
+          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-core" version="3.2.6" />
+          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-jvm" version="3.2.6" />
+          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-logback" version="3.2.6" />
           <dependency groupId="com.addthis.metrics" artifactId="reporter-config3" version="3.0.3">
             <exclusion groupId="org.hibernate" artifactId="hibernate-validator" />
            </dependency>
@@ -648,7 +648,7 @@
             <exclusion groupId="com.google.code.findbugs" artifactId="jsr305" />
            </dependency>
           <dependency groupId="io.netty" artifactId="netty-bom" version="4.1.58.Final" type="pom" scope="provided"/>
-          <dependency groupId="io.netty" artifactId="netty-all" version="4.1.58.Final" />
+          <dependency groupId="io.netty" artifactId="netty-all" version="4.1.94.Final" />
           <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static" version="2.0.36.Final"/>
           <dependency groupId="net.openhft" artifactId="chronicle-queue" version="${chronicle-queue.version}">
             <exclusion groupId="com.sun" artifactId="tools" />
@@ -670,12 +670,12 @@
             <exclusion groupId="net.java.dev.jna" artifactId="jna-platform" />
           </dependency>
           <dependency groupId="net.openhft" artifactId="chronicle-map" version="${chronicle-map.version}" />
-          <dependency groupId="com.google.code.findbugs" artifactId="jsr305" version="2.0.2" scope="provided"/>
+          <dependency groupId="com.google.code.findbugs" artifactId="jsr305" version="3.0.0" scope="provided"/>
           <dependency groupId="com.clearspring.analytics" artifactId="stream" version="2.5.2">
             <exclusion groupId="it.unimi.dsi" artifactId="fastutil" />
           </dependency>
           <dependency groupId="com.esri.geometry" artifactId="esri-geometry-api" version="2.2.4"/>
-          <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" version="3.11.0" classifier="shaded">
+          <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" version="4.17.0" classifier="shaded">
             <exclusion groupId="io.netty" artifactId="netty-buffer"/>
             <exclusion groupId="io.netty" artifactId="netty-codec"/>
             <exclusion groupId="io.netty" artifactId="netty-handler"/>
@@ -699,8 +699,8 @@
           </dependency>
           <dependency groupId="de.huxhorn.sulky" artifactId="de.huxhorn.sulky.ulid" version="8.2.0"/>
           <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" version="2.4.0" />
-          <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="3.1.8" />
-          <dependency groupId="org.jctools" artifactId="jctools-core" version="3.1.0"/>
+          <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="2.6.2" />
+          <dependency groupId="org.jctools" artifactId="jctools-core" version="3.3.0"/>
           <dependency groupId="org.ow2.asm" artifactId="asm" version="${asm.version}"/>
           <dependency groupId="org.ow2.asm" artifactId="asm-tree" version="${asm.version}" scope="test"/>
           <dependency groupId="org.ow2.asm" artifactId="asm-commons" version="${asm.version}" scope="test"/>
@@ -725,7 +725,7 @@
              this that the new assertj's `assertj-parent-pom` depends on. -->
           <dependency groupId="org.junit" artifactId="junit-bom" type="pom" scope="test"/>
           <!-- when updating assertj, make sure to also update the corresponding junit-bom dependency -->
-          <dependency groupId="org.assertj" artifactId="assertj-core" version="3.15.0" scope="provided"/>
+          <dependency groupId="org.assertj" artifactId="assertj-core" version="3.21.0" scope="provided"/>
           <dependency groupId="org.awaitility" artifactId="awaitility" version="4.0.3"  scope="test">
             <exclusion groupId="org.hamcrest" artifactId="hamcrest"/>
           </dependency>
@@ -741,7 +741,7 @@
             <exclusion groupId="junit" artifactId="junit"/>
           </dependency>
 
-          <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.5.5"/>
+          <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.7.12"/>
           <dependency groupId="org.latencyutils" artifactId="LatencyUtils" version="2.0.3"/>
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
