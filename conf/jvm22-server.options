@@ -87,6 +87,9 @@
 
 --add-opens java.base/java.lang.reflect=ALL-UNNAMED
 
+# required for org.apache.cassandra.Util.getSupportedMTimeGranularity
+--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED
+
 
 ### GC logging options -- uncomment to enable
 
