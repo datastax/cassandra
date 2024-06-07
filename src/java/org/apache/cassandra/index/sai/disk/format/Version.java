@@ -25,6 +25,7 @@ import com.google.common.collect.Lists;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
@@ -152,4 +153,10 @@ public class Version
         return stringBuilder.toString();
     }
 
+    public ByteComparable.Version byteComparableVersionFor(IndexComponent component, org.apache.cassandra.io.sstable.format.Version sstableFormatVersion)
+    {
+        return this == AA && component == IndexComponent.TERMS_DATA
+               ? sstableFormatVersion.getByteComparableVersion()
+               : ByteComparable.Version.OSS41;
+    }
 }
