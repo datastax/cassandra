@@ -190,7 +190,8 @@ public class SegmentFlushTest
 
         long termsFooterPointer = Long.parseLong(segmentMetadata.componentMetadatas.get(IndexComponent.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 
-        try (TermsReader reader = new TermsReader(indexContext,
+        try (TermsReader reader = new TermsReader(indexDescriptor,
+                                                  indexContext,
                                                   termsData,
                                                   postingLists,
                                                   segmentMetadata.componentMetadatas.get(IndexComponent.TERMS_DATA).root,
