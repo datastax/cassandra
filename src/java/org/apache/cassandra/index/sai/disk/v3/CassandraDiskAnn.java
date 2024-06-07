@@ -240,7 +240,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
                      ? VectorSimilarityFunction.COSINE
                      : similarityFunction;
-            var asf = compressedVectors.scoreFunctionFor(queryVector, sf);
+            var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
             var rr = view.rerankerFor(queryVector, sf);
             ssp = new SearchScoreProvider(asf, rr);
         }
