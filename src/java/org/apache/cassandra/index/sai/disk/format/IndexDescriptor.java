@@ -55,6 +55,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.util.IOUtils;
 
@@ -599,5 +600,10 @@ public class IndexDescriptor
     private void registerPerSSTableComponent(IndexComponent component)
     {
         components.get(null).add(component);
+    }
+
+    public ByteComparable.Version getEncodingVersion(IndexComponent indexComponent)
+    {
+        return getVersion().byteComparableVersionFor(indexComponent, descriptor.version);
     }
 }

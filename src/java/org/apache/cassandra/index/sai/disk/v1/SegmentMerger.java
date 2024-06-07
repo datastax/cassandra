@@ -43,7 +43,7 @@ import static org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter.M
  */
 public interface SegmentMerger extends Closeable
 {
-    void addSegment(IndexContext context, SegmentMetadata segment, PerIndexFiles indexFiles) throws IOException;
+    void addSegment(IndexDescriptor indexDescriptor, IndexContext context, SegmentMetadata segment, PerIndexFiles indexFiles) throws IOException;
 
     boolean isEmpty();
 
@@ -65,9 +65,9 @@ public interface SegmentMerger extends Closeable
         final List<TermsIterator> segmentTermsIterators = new ArrayList<>();
 
         @Override
-        public void addSegment(IndexContext indexContext, SegmentMetadata segment, PerIndexFiles indexFiles) throws IOException
+        public void addSegment(IndexDescriptor indexDescriptor, IndexContext indexContext, SegmentMetadata segment, PerIndexFiles indexFiles) throws IOException
         {
-            segmentTermsIterators.add(createTermsIterator(indexContext, segment, indexFiles));
+            segmentTermsIterators.add(createTermsIterator(indexDescriptor, indexContext, segment, indexFiles));
         }
 
         @Override
@@ -113,7 +113,7 @@ public interface SegmentMerger extends Closeable
         }
 
         @SuppressWarnings("resource")
-        private TermsIterator createTermsIterator(IndexContext indexContext, SegmentMetadata segment, PerIndexFiles indexFiles) throws IOException
+        private TermsIterator createTermsIterator(IndexDescriptor indexDescriptor, IndexContext indexContext, SegmentMetadata segment, PerIndexFiles indexFiles) throws IOException
         {
             final long root = segment.getIndexRoot(IndexComponent.TERMS_DATA);
             assert root >= 0;
@@ -122,7 +122,8 @@ public interface SegmentMerger extends Closeable
             final String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
             final long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
-            final TermsReader termsReader = new TermsReader(indexContext,
+            final TermsReader termsReader = new TermsReader(indexDescriptor,
+                                                            indexContext,
                                                             indexFiles.termsData(),
                                                             indexFiles.postingLists(),
                                                             root,
@@ -140,7 +141,7 @@ public interface SegmentMerger extends Closeable
         ByteBuffer minTerm = null, maxTerm = null;
 
         @Override
-        public void addSegment(IndexContext context, SegmentMetadata segment, PerIndexFiles indexFiles) throws IOException
+        public void addSegment(IndexDescriptor indexDescriptor, IndexContext context, SegmentMetadata segment, PerIndexFiles indexFiles) throws IOException
         {
             minTerm = TypeUtil.min(segment.minTerm, minTerm, context.getValidator());
             maxTerm = TypeUtil.max(segment.maxTerm, maxTerm, context.getValidator());
