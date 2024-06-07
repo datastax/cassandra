@@ -183,7 +183,8 @@ public class LegacyOnDiskFormatTest
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
         long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
-        TermsReader termsReader = new TermsReader(indexContext,
+        TermsReader termsReader = new TermsReader(indexDescriptor,
+                                                  indexContext,
                                                   indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext),
                                                   indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext),
                                                   root,
