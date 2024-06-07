@@ -305,6 +305,9 @@
         <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
         <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
 
+        <!-- required for org.apache.cassandra.Util.getSupportedMTimeGranularity-->
+        <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
+
         <!-- below was added in Cassandra only; check for what and whether we need it here
             add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED-->
     </resources>
