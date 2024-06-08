@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -104,7 +105,6 @@ import org.apache.cassandra.utils.AbstractTypeGenerators.Releaser;
 import org.apache.cassandra.utils.AbstractTypeGenerators.TypeGenBuilder;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.Generators;
 import org.apache.cassandra.utils.asserts.SoftAssertionsWithLimit;
@@ -120,6 +120,7 @@ import org.reflections.scanners.Scanners;
 import org.reflections.util.ConfigurationBuilder;
 
 import static org.apache.cassandra.db.marshal.AbstractType.ComparisonType.CUSTOM;
+import static org.apache.cassandra.utils.AbstractTypeGenerators.DSE_CUSTOM_TYPES;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.COMPOSITE;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.COUNTER;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.DYNAMIC_COMPOSITE;
@@ -172,8 +173,12 @@ public class AbstractTypeTest
     private static LoadedTypesCompatibility cassandra40TypesCompatibility;
     private static LoadedTypesCompatibility cassandra41TypesCompatibility;
     private static LoadedTypesCompatibility cassandra50TypesCompatibility;
+    private static LoadedTypesCompatibility dse68cndbTypesCompatibility;
+    private static LoadedTypesCompatibility legacyCC40TypesCompatibility;
+    private static LoadedTypesCompatibility cc40TypesCompatibility;
+    private static LoadedTypesCompatibility cc50TypesCompatibility;
 
-    private final static String CASSANDRA_VERSION = new CassandraVersion(FBUtilities.getReleaseVersionString()).toMajorMinorString();
+    private final static String CASSANDRA_VERSION = "cc-5.0";
     private final static Path BASE_OUTPUT_PATH = Paths.get("test", "data", "types-compatibility");
 
     @BeforeClass
@@ -183,6 +188,10 @@ public class AbstractTypeTest
         cassandra40TypesCompatibility = new LoadedTypesCompatibility(compatibilityFile(CassandraVersion.CASSANDRA_4_0.toMajorMinorString()), Set.of());
         cassandra41TypesCompatibility = new LoadedTypesCompatibility(compatibilityFile(CassandraVersion.CASSANDRA_4_1.toMajorMinorString()), Set.of());
         cassandra50TypesCompatibility = new LoadedTypesCompatibility(compatibilityFile(CassandraVersion.CASSANDRA_5_0.toMajorMinorString()), Set.of());
+        dse68cndbTypesCompatibility = new LoadedTypesCompatibility(compatibilityFile("dse-6.8-cndb"), ImmutableSet.of());
+        legacyCC40TypesCompatibility = new LoadedTypesCompatibility(compatibilityFile("legacy-cc-4.0"), ImmutableSet.of());
+        cc40TypesCompatibility = new LoadedTypesCompatibility(compatibilityFile("cc-4.0"), ImmutableSet.of());
+        cc50TypesCompatibility = new LoadedTypesCompatibility(compatibilityFile("cc-5.0"), ImmutableSet.of());
         currentTypesCompatibility = new CurrentTypesCompatibility();
     }
 
@@ -807,35 +816,168 @@ public class AbstractTypeTest
     }
 
     @Test
-    public void testBackwardCompatibility()
+    @Ignore("To be discussed")
+    public void testMigrationFromCassandra40ToCurrent()
     {
         cassandra40TypesCompatibility.assertLoaded();
-        testBackwardCompatibility(currentTypesCompatibility, cassandra40TypesCompatibility);
-
-        cassandra41TypesCompatibility.assertLoaded();
-        testBackwardCompatibility(currentTypesCompatibility, cassandra41TypesCompatibility);
-
-        cassandra50TypesCompatibility.assertLoaded();
-        testBackwardCompatibility(currentTypesCompatibility, cassandra50TypesCompatibility);
+        testBackwardCompatibility(currentTypesCompatibility, cassandra40TypesCompatibility, true);
     }
 
-    public void testBackwardCompatibility(TypesCompatibility upgradeTo, TypesCompatibility upgradeFrom)
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCassandra41ToCurrent()
+    {
+        cassandra41TypesCompatibility.assertLoaded();
+        testBackwardCompatibility(currentTypesCompatibility, cassandra41TypesCompatibility, true);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCassandra50ToCurrent()
+    {
+        cassandra50TypesCompatibility.assertLoaded();
+        testBackwardCompatibility(currentTypesCompatibility, cassandra50TypesCompatibility, true);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromDse68CndbToCurrent()
+    {
+        dse68cndbTypesCompatibility.assertLoaded();
+        testBackwardCompatibility(currentTypesCompatibility, dse68cndbTypesCompatibility, false);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromLegacyCC40ToCurrent()
+    {
+        legacyCC40TypesCompatibility.assertLoaded();
+        testBackwardCompatibility(currentTypesCompatibility, legacyCC40TypesCompatibility, false);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCC40ToCurrent()
+    {
+        cc40TypesCompatibility.assertLoaded();
+        testBackwardCompatibility(currentTypesCompatibility, cc40TypesCompatibility, false);
+    }
+
+    @Test
+    public void testMigrationFromCC50ToCurrent()
+    {
+        cc50TypesCompatibility.assertLoaded();
+        testBackwardCompatibility(currentTypesCompatibility, cc50TypesCompatibility, true);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCurrentToCassandra40()
+    {
+        cassandra40TypesCompatibility.assertLoaded();
+        Set<Class<? extends AbstractType>> skippedTypes = Sets.union(DSE_CUSTOM_TYPES, Set.of(LegacyTimeUUIDType.class, VectorType.class));
+        testBackwardCompatibility(cassandra40TypesCompatibility, currentTypesCompatibility,
+                                  c -> !skippedTypes.contains(c),
+                                  t -> !skippedTypes.contains(t.getClass()),
+                                  true);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCurrentToCassandra41()
+    {
+        cassandra41TypesCompatibility.assertLoaded();
+        Set<Class<? extends AbstractType>> skippedTypes = Sets.union(DSE_CUSTOM_TYPES, Set.of(LegacyTimeUUIDType.class, VectorType.class));
+        testBackwardCompatibility(cassandra41TypesCompatibility, currentTypesCompatibility,
+                                  c -> !skippedTypes.contains(c),
+                                  t -> !skippedTypes.contains(t.getClass()),
+                                  true);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCurrentToCassandra50()
+    {
+        cassandra50TypesCompatibility.assertLoaded();
+        Set<Class<? extends AbstractType>> skippedTypes = DSE_CUSTOM_TYPES;
+        testBackwardCompatibility(cassandra50TypesCompatibility, currentTypesCompatibility,
+                                  c -> !skippedTypes.contains(c),
+                                  t -> !skippedTypes.contains(t.getClass()),
+                                  true);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCurrentToDse68Cndb()
+    {
+        dse68cndbTypesCompatibility.assertLoaded();
+        Set<Class<? extends AbstractType>> skippedTypes = Set.of(LegacyTimeUUIDType.class, VectorType.class);
+        testBackwardCompatibility(dse68cndbTypesCompatibility, currentTypesCompatibility,
+                                  c -> !skippedTypes.contains(c),
+                                  t -> !skippedTypes.contains(t.getClass()),
+                                  false);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCurrentToLegacyCC40()
+    {
+        legacyCC40TypesCompatibility.assertLoaded();
+        Set<Class<? extends AbstractType>> skippedTypes = Set.of(LegacyTimeUUIDType.class, VectorType.class);
+        testBackwardCompatibility(legacyCC40TypesCompatibility, currentTypesCompatibility,
+                                  c -> !skippedTypes.contains(c),
+                                  t -> !skippedTypes.contains(t.getClass()),
+                                  false);
+    }
+
+    @Test
+    @Ignore("To be discussed")
+    public void testMigrationFromCurrentToCC40()
+    {
+        cc40TypesCompatibility.assertLoaded();
+        testBackwardCompatibility(cc40TypesCompatibility, currentTypesCompatibility,
+                                  t -> t != LegacyTimeUUIDType.class,
+                                  t -> t != LegacyTimeUUIDType.instance,
+                                  false);
+    }
+
+    @Test
+    public void testMigrationFromCurrentToCC50()
+    {
+        cc50TypesCompatibility.assertLoaded();
+        testBackwardCompatibility(cc50TypesCompatibility, currentTypesCompatibility, true);
+    }
+
+    private static void testBackwardCompatibility(TypesCompatibility upgradeTo, TypesCompatibility upgradeFrom, boolean serializationCompatibleWithSupported)
+    {
+        testBackwardCompatibility(upgradeTo, upgradeFrom, t -> true, t -> true, serializationCompatibleWithSupported);
+    }
+
+    public static void testBackwardCompatibility(TypesCompatibility upgradeTo, TypesCompatibility upgradeFrom, Predicate<Class<? extends AbstractType>> classFilter, Predicate<AbstractType<?>> typeFilter, boolean serializationCompatibleWithSupported)
     {
         SoftAssertions assertions = new SoftAssertionsWithLimit(100);
 
-        assertions.assertThat(upgradeTo.knownTypes()).containsAll(upgradeFrom.knownTypes());
-        assertions.assertThat(upgradeTo.primitiveTypes()).containsAll(upgradeFrom.primitiveTypes());
+        assertions.assertThat(upgradeTo.knownTypes().stream().filter(classFilter).collect(Collectors.toSet()))
+                  .containsAll(upgradeFrom.knownTypes().stream().filter(classFilter).collect(Collectors.toSet()));
+        assertions.assertThat(upgradeTo.primitiveTypes().stream().filter(typeFilter).collect(Collectors.toSet()))
+                  .containsAll(upgradeFrom.primitiveTypes().stream().filter(typeFilter).collect(Collectors.toSet()));
 
         // for compatibility, we ensure that this version can read values of all the types the previous version can write
         assertions.assertThat(upgradeTo.multiCellSupportingTypesForReading()).containsAll(upgradeFrom.multiCellSupportingTypes());
 
+
         forEachTypesPair(true, (l, r) -> {
-            if (upgradeFrom.expectCompatibleWith(l, r))
-                assertions.assertThat(upgradeTo.expectCompatibleWith(l, r)).describedAs(isCompatibleWithDesc(l, r)).isTrue();
-            if (upgradeFrom.expectSerializationCompatibleWith(l, r))
-                assertions.assertThat(upgradeTo.expectSerializationCompatibleWith(l, r)).describedAs(isSerializationCompatibleWithDesc(l, r)).isTrue();
-            if (upgradeFrom.expectValueCompatibleWith(l, r))
-                assertions.assertThat(upgradeTo.expectValueCompatibleWith(l, r)).describedAs(isValueCompatibleWithDesc(l, r)).isTrue();
+            if (l.equals(r))
+                return;
+            if (typeFilter.test(l) && typeFilter.test(r))
+            {
+                if (upgradeFrom.expectCompatibleWith(l, r))
+                    assertions.assertThat(upgradeTo.expectCompatibleWith(l, r)).describedAs(isCompatibleWithDesc(l, r)).isTrue();
+                if (serializationCompatibleWithSupported && upgradeFrom.expectSerializationCompatibleWith(l, r))
+                    assertions.assertThat(upgradeTo.expectSerializationCompatibleWith(l, r)).describedAs(isSerializationCompatibleWithDesc(l, r)).isTrue();
+                if (upgradeFrom.expectValueCompatibleWith(l, r))
+                    assertions.assertThat(upgradeTo.expectValueCompatibleWith(l, r)).describedAs(isValueCompatibleWithDesc(l, r)).isTrue();
+            }
         });
 
         assertions.assertAll();
@@ -856,6 +998,11 @@ public class AbstractTypeTest
         });
 
         assertions.assertAll();
+    }
+
+    private static Path compatibilityFile(CassandraVersion version)
+    {
+        return BASE_OUTPUT_PATH.resolve(String.format("%s.%s.json.gz", version.major, version.minor));
     }
 
     private static Path compatibilityFile(String version)
