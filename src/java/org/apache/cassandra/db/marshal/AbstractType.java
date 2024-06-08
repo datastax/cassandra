@@ -312,6 +312,12 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return compare(v1, v2);
     }
 
+    /**
+     * Returns the serializer for this type.
+     * Note that the method must return a different instance of serializer for different types even if the types
+     * use the same serializer - in this case, the method should return separate instances for which equals() returns
+     * false.
+     */
     public abstract TypeSerializer<T> getSerializer();
 
     /**
