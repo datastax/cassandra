@@ -127,7 +127,7 @@ public final class AbstractTypeGenerators
                                                                                                 .put(FrozenType.class, "Fake class only used during parsing... the parsing creates this and the real type under it, then this gets swapped for the real type")
                                                                                                 .build();
 
-    private static final Set<Class<? extends AbstractType>> DSE_CUSTOM_TYPES = ImmutableSet.<Class<? extends AbstractType>>builder()
+    public static final Set<Class<? extends AbstractType>> DSE_CUSTOM_TYPES = ImmutableSet.<Class<? extends AbstractType>>builder()
                                                                                       .add(DateRangeType.class)
                                                                                       .add(LineStringType.class)
                                                                                       .add(PolygonType.class)
