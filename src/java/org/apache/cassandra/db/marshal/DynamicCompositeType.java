@@ -77,8 +77,10 @@ public class DynamicCompositeType extends AbstractCompositeType
     private static final ByteSource[] EMPTY_BYTE_SOURCE_ARRAY = new ByteSource[0];
     private static final String REVERSED_TYPE = ReversedType.class.getSimpleName();
 
-    private final Map<Byte, AbstractType<?>> aliases;
-    private final Map<AbstractType<?>, Byte> inverseMapping;
+    @VisibleForTesting
+    public final Map<Byte, AbstractType<?>> aliases;
+    @VisibleForTesting
+    public final Map<AbstractType<?>, Byte> inverseMapping;
 
     // interning instances
     private static final ConcurrentHashMap<Map<Byte, AbstractType<?>>, DynamicCompositeType> instances = new ConcurrentHashMap<>();
@@ -608,7 +610,8 @@ public class DynamicCompositeType extends AbstractCompositeType
      * A comparator that always sorts it's first argument before the second
      * one.
      */
-    private static class FixedValueComparator extends AbstractType<Void>
+    @VisibleForTesting
+    public static class FixedValueComparator extends AbstractType<Void>
     {
         public static final FixedValueComparator alwaysLesserThan = new FixedValueComparator(-1);
         public static final FixedValueComparator alwaysGreaterThan = new FixedValueComparator(1);
