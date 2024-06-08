@@ -405,14 +405,14 @@ public class VectorDistributedTest extends TestBaseImpl
     private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
     {
         Object[][] result = execute("SELECT val FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
-        assertThat(result).hasSize(expectedSize);
+        assertThat(result).hasNumberOfRows(expectedSize);
         return getVectors(result);
     }
 
     private Object[][] searchWithLimit(float[] queryVector, int limit)
     {
         Object[][] result = execute("SELECT val FROM %s ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT " + limit);
-        assertThat(result).hasSize(limit);
+        assertThat(result).hasNumberOfRows(limit);
         return result;
     }
 
@@ -425,7 +425,7 @@ public class VectorDistributedTest extends TestBaseImpl
     private void searchByKeyWithLimit(int key, float[] queryVector, int limit, List<float[]> vectors)
     {
         Object[][] result = execute("SELECT val FROM %s WHERE pk = " + key + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT " + limit);
-        assertThat(result).hasSize(1);
+        assertThat(result).hasNumberOfRows(1);
         float[] output = getVectors(result).get(0);
         assertThat(output).isEqualTo(vectors.get(key));
     }

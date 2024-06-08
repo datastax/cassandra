@@ -21,11 +21,12 @@ package org.apache.cassandra.index.sai.disk.v2.hnsw;
 import java.io.IOException;
 import java.util.Arrays;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.util.hnsw.HnswGraph;
-import org.assertj.core.util.VisibleForTesting;
 
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 

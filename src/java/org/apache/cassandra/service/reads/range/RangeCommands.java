@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service.reads.range;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +32,6 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.assertj.core.util.VisibleForTesting;
 
 public class RangeCommands
 {
