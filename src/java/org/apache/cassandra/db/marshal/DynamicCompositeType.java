@@ -110,7 +110,8 @@ public class DynamicCompositeType extends AbstractCompositeType
 
     @VisibleForTesting
     public final Map<Byte, AbstractType<?>> aliases;
-    private final Map<AbstractType<?>, Byte> inverseMapping;
+    @VisibleForTesting
+    public final Map<AbstractType<?>, Byte> inverseMapping;
     private final Serializer serializer;
 
     // interning instances

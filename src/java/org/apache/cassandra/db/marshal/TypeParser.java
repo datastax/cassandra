@@ -21,7 +21,12 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableMap;
@@ -30,7 +35,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.FieldIdentifier;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexSSTableReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -251,7 +257,7 @@ public class TypeParser
 
             String alias = readNextIdentifier();
             if (alias.length() != 1)
-                throwSyntaxError("An alias should be a single character");
+                throwSyntaxError("An alias should be a single character: '" + alias + "', string: " + str);
             char aliasChar = alias.charAt(0);
             if (aliasChar < 33 || aliasChar > 127)
                 throwSyntaxError("An alias should be a single character in [0..9a..bA..B-+._&]");
