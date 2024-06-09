@@ -44,22 +44,31 @@ public class PendingRangeCalculatorService
 
     // the executor will only run a single range calculation at a time while keeping at most one task queued in order
     // to trigger an update only after the most recent state change and not for each update individually
-    private final JMXEnabledThreadPoolExecutor executor = new JMXEnabledThreadPoolExecutor(1, Integer.MAX_VALUE, TimeUnit.SECONDS,
-            new LinkedBlockingQueue<>(1), new NamedThreadFactory("PendingRangeCalculator"), "internal");
+    private final JMXEnabledThreadPoolExecutor executor;
+
+    private final Schema schema;
 
     private AtomicInteger updateJobs = new AtomicInteger(0);
 
     public PendingRangeCalculatorService()
     {
-        executor.setRejectedExecutionHandler((r, e) ->
-            {
-                PendingRangeCalculatorServiceDiagnostics.taskRejected(instance, updateJobs);
-                PendingRangeCalculatorService.instance.finishUpdate();
-            }
-        );
+        this("PendingRangeCalculator", Schema.instance);
     }
 
-    private static class PendingRangeTask implements Runnable
+    @VisibleForTesting
+    public PendingRangeCalculatorService(String executorName, Schema schema)
+    {
+        this.executor = new JMXEnabledThreadPoolExecutor(1, Integer.MAX_VALUE, TimeUnit.SECONDS,
+                                                         new LinkedBlockingQueue<>(1), new NamedThreadFactory(executorName), "internal");
+        this.executor.setRejectedExecutionHandler((r, e) ->
+                                                  {
+                                                      PendingRangeCalculatorServiceDiagnostics.taskRejected(this, updateJobs);
+                                                      finishUpdate();
+                                                  });
+        this.schema = schema;
+    }
+
+    private class PendingRangeTask implements Runnable
     {
         private final AtomicInteger updateJobs;
         private final Predicate<String> filter;
@@ -74,19 +83,24 @@ public class PendingRangeCalculatorService
         {
             try
             {
-                PendingRangeCalculatorServiceDiagnostics.taskStarted(instance, updateJobs);
+                PendingRangeCalculatorServiceDiagnostics.taskStarted(PendingRangeCalculatorService.this, updateJobs);
                 long start = System.currentTimeMillis();
-                Collection<String> keyspaces = Schema.instance.getNonLocalStrategyKeyspaces().names();
+                Collection<String> keyspaces = schema.getNonLocalStrategyKeyspaces().names();
                 long updated = keyspaces.stream().filter(filter)
-                        .peek(keyspaceName -> calculatePendingRanges(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName))
+                        .peek(PendingRangeCalculatorService.this::calculatePendingRanges)
                         .count();
                 if (logger.isTraceEnabled())
                     logger.trace("Finished PendingRangeTask for {} keyspaces in {}ms", updated, System.currentTimeMillis() - start);
-                PendingRangeCalculatorServiceDiagnostics.taskFinished(instance, updateJobs);
+                PendingRangeCalculatorServiceDiagnostics.taskFinished(PendingRangeCalculatorService.this, updateJobs);
+            }
+            catch (RuntimeException | Error e)
+            {
+                logger.warn("Error while calculating pending ranges", e);
+                throw e;
             }
             finally
             {
-                PendingRangeCalculatorService.instance.finishUpdate();
+                finishUpdate();
             }
         }
     }
@@ -94,7 +108,7 @@ public class PendingRangeCalculatorService
     private void finishUpdate()
     {
         int jobs = updateJobs.decrementAndGet();
-        PendingRangeCalculatorServiceDiagnostics.taskCountChanged(instance, jobs);
+        PendingRangeCalculatorServiceDiagnostics.taskCountChanged(this, jobs);
     }
 
     public void update()
@@ -105,7 +119,7 @@ public class PendingRangeCalculatorService
     public void update(Predicate<String> filter)
     {
         int jobs = updateJobs.incrementAndGet();
-        PendingRangeCalculatorServiceDiagnostics.taskCountChanged(instance, jobs);
+        PendingRangeCalculatorServiceDiagnostics.taskCountChanged(this, jobs);
         executor.execute(new PendingRangeTask(updateJobs, filter));
     }
 
@@ -125,9 +139,12 @@ public class PendingRangeCalculatorService
         }
     }
 
+    public void calculatePendingRanges(String keyspaceName)
+    {
+        calculatePendingRanges(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName);
+    }
 
-    // public & static for testing purposes
-    public static void calculatePendingRanges(AbstractReplicationStrategy strategy, String keyspaceName)
+    public void calculatePendingRanges(AbstractReplicationStrategy strategy, String keyspaceName)
     {
         StorageService.instance.getTokenMetadataForKeyspace(keyspaceName).calculatePendingRanges(strategy, keyspaceName);
     }
