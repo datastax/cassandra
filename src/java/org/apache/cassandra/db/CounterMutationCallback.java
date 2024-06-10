@@ -22,13 +22,14 @@ import java.util.Collection;
 import java.util.Optional;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
@@ -40,12 +41,14 @@ public class CounterMutationCallback implements Runnable
 {
     private final Message<CounterMutation> requestMessage;
     private final InetAddressAndPort respondToAddress;
+    private final RequestSensors sensors;
     private int replicaCount = 0;
 
-    public CounterMutationCallback(Message<CounterMutation> requestMessage, InetAddressAndPort respondToAddress)
+    public CounterMutationCallback(Message<CounterMutation> requestMessage, InetAddressAndPort respondToAddress, @Nullable RequestSensors sensors)
     {
         this.requestMessage = requestMessage;
         this.respondToAddress = respondToAddress;
+        this.sensors = sensors;
     }
 
     /**
@@ -67,16 +70,19 @@ public class CounterMutationCallback implements Runnable
         MessagingService.instance().send(responseBuilder.build(), respondToAddress);
     }
 
-    private static void addSensorsToResponse(Message.Builder<NoPayload> response, Mutation mutation, int replicaMultiplier)
+    private void addSensorsToResponse(Message.Builder<NoPayload> response, Mutation mutation, int replicaMultiplier)
     {
+        if (this.sensors == null)
+            return;
+
         int tables = mutation.getTableIds().size();
 
         // Add internode bytes sensors to the response after updating each per-table sensor with the current response
         // message size: this is missing the sensor values, but it's a good enough approximation
-        Collection<Sensor> requestSensors = RequestTracker.instance.get().getSensors(Type.INTERNODE_BYTES);
+        Collection<Sensor> requestSensors = this.sensors.getSensors(Type.INTERNODE_BYTES);
         int perSensorSize = response.currentPayloadSize(MessagingService.current_version) / tables;
-        requestSensors.forEach(sensor -> RequestTracker.instance.get().incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
-        RequestTracker.instance.get().syncAllSensors();
+        requestSensors.forEach(sensor -> this.sensors.incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
+        this.sensors.syncAllSensors();
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInInternodeBytesRequestParam;
         Function<String, String> tableParam = SensorsCustomParams::encodeTableInInternodeBytesTableParam;
         addSensorsToResponse(requestSensors, requestParam, tableParam, response, replicaMultiplier);
@@ -84,7 +90,7 @@ public class CounterMutationCallback implements Runnable
         // Add write bytes sensors to the response
         requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
         tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
-        requestSensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
+        requestSensors = this.sensors.getSensors(Type.WRITE_BYTES);
         addSensorsToResponse(requestSensors, requestParam, tableParam, response, replicaMultiplier);
     }
 

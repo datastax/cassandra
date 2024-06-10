@@ -20,6 +20,7 @@ package org.apache.cassandra.sensors;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Optional;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -31,6 +32,25 @@ import org.apache.cassandra.net.MessagingService;
 
 public final class SensorsTestUtil
 {
+    /**
+     * Returns request sensors for all keyspaces
+     */
+    public static class AllKeyspacesRequestSensorsFactory implements RequestSensorsFactory
+    {
+        @Override
+        public Optional<RequestSensors> create(String ignored)
+        {
+            return Optional.of(new RequestSensors());
+        }
+    }
+
+    /**
+     * Returns the default implementation of the {@link RequestSensorsFactory}
+     */
+    public static class DefaultRequestSensorsFactory implements RequestSensorsFactory
+    {
+    }
+    
     private SensorsTestUtil()
     {
     }

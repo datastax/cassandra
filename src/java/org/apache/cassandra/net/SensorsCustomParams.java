@@ -139,6 +139,9 @@ public final class SensorsCustomParams
      */
     public static <T> void addWriteSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
     {
+        if (sensors == null || context == null)
+            return;
+
         addSensorToResponse(response, sensors, context, Type.WRITE_BYTES,
                             (sensor) -> SensorsCustomParams.encodeTableInWriteBytesRequestParam(sensor.getContext().getTable()),
                             (sensor) -> SensorsCustomParams.encodeTableInWriteBytesTableParam(sensor.getContext().getTable()));
@@ -149,6 +152,9 @@ public final class SensorsCustomParams
      */
     public static <T> void addReadSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
     {
+        if (sensors == null || context == null)
+            return;
+
         addSensorToResponse(response, sensors, context, Type.READ_BYTES,
                             (ignored) -> SensorsCustomParams.READ_BYTES_REQUEST,
                             (ignored) -> SensorsCustomParams.READ_BYTES_TABLE);
