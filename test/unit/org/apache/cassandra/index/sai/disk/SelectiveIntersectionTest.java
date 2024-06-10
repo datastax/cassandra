@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.utils.ReflectionUtils;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.junit.Assert.assertEquals;
@@ -159,7 +160,7 @@ public class SelectiveIntersectionTest extends SAITester
     {
         Field selectivity = RangeIntersectionIterator.class.getDeclaredField("INTERSECTION_CLAUSE_LIMIT");
         selectivity.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
+        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
         modifiersField.setAccessible(true);
         modifiersField.setInt(selectivity, selectivity.getModifiers() & ~Modifier.FINAL);
         selectivity.set(null, selectivityLimit);

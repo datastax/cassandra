@@ -25,6 +25,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.utils.ReflectionUtils;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -989,7 +990,7 @@ public class VectorUpdateDeleteTest extends VectorTester
     {
         Field selectivity = QueryController.class.getDeclaredField("ORDER_CHUNK_SIZE");
         selectivity.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
+        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
         modifiersField.setAccessible(true);
         modifiersField.setInt(selectivity, selectivity.getModifiers() & ~Modifier.FINAL);
         selectivity.set(null, selectivityLimit);
