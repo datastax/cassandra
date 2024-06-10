@@ -600,7 +600,7 @@
           <dependency groupId="junit" artifactId="junit" version="4.13" scope="test">
             <exclusion groupId="org.hamcrest" artifactId="hamcrest-core"/>
           </dependency>
-          <dependency groupId="org.mockito" artifactId="mockito-core" version="3.5.0" scope="test"/>
+          <dependency groupId="org.mockito" artifactId="mockito-core" version="5.12.0" scope="test"/>
           <dependency groupId="org.quicktheories" artifactId="quicktheories" version="0.26" scope="test"/>
           <dependency groupId="com.google.code.java-allocation-instrumenter" artifactId="java-allocation-instrumenter" version="${allocation-instrumenter.version}" scope="test">
             <exclusion groupId="com.google.guava" artifactId="guava"/>
