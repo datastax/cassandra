@@ -220,7 +220,7 @@ public class SensorsRegistryTest
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
 
-        RequestSensors requestSensors = new RequestSensors(() -> SensorsRegistry.instance);
+        RequestSensors requestSensors = new ActiveRequestSensors(() -> SensorsRegistry.instance);
         requestSensors.registerSensor(context1, type1);
 
         requestSensors.incrementSensor(context1, type1, 1.0);

@@ -28,6 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -64,6 +65,8 @@ public class SensorsIndexWriteTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
+        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(ActiveRequestSensorsFactory.class.getName());
+
         SchemaLoader.prepareServer();
 
         // build SAI indexes
