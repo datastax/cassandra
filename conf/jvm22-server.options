@@ -84,7 +84,7 @@
 --add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED
 --add-opens java.base/java.nio.file.spi=ALL-UNNAMED
 --add-opens java.base/java.net=ALL-UNNAMED
-
+--add-opens java.base/jdk.internal.math=ALL-UNNAMED
 --add-opens java.base/java.lang.reflect=ALL-UNNAMED
 
 # required for org.apache.cassandra.Util.getSupportedMTimeGranularity
