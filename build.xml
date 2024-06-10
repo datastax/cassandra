@@ -291,6 +291,7 @@
         <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.math=ALL-UNNAMED</string>
         <string>--add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED</string>
         <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
         <string>--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED</string>
