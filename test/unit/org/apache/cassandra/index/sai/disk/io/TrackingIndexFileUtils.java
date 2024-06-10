@@ -30,6 +30,7 @@ import com.google.common.base.Throwables;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.utils.ReflectionUtils;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
@@ -83,7 +84,7 @@ public class TrackingIndexFileUtils extends IndexFileUtils
         {
             Field writerOption = IndexFileUtils.class.getDeclaredField("writerOption");
             writerOption.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
             modifiersField.setAccessible(true);
             modifiersField.setInt(writerOption, writerOption.getModifiers() & ~Modifier.FINAL);
             writerOption.set(null, option);

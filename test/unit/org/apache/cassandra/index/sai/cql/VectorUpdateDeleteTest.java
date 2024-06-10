@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.utils.ReflectionUtils;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
