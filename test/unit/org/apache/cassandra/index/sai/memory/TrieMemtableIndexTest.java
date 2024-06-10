@@ -67,6 +67,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -363,7 +364,7 @@ public class TrieMemtableIndexTest extends SAITester
     {
         Field bufferType = TrieMemtable.class.getDeclaredField("BUFFER_TYPE");
         bufferType.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
+        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
         modifiersField.setAccessible(true);
         modifiersField.setInt(bufferType, bufferType.getModifiers() & ~Modifier.FINAL);
         bufferType.set(null, newBufferType);
