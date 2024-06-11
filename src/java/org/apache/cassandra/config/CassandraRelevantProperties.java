@@ -69,6 +69,7 @@ public enum CassandraRelevantProperties
     /** Platform word size sun.arch.data.model. Examples: "32", "64", "unknown"*/
     SUN_ARCH_DATA_MODEL ("sun.arch.data.model"),
 
+    CHRONICLE_ANALYTICS_DISABLE("chronicle.analytics.disable"),
     //JMX properties
     /**
      * The value of this property represents the host name string

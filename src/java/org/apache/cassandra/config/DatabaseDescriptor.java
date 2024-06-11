@@ -82,11 +82,13 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 import static org.apache.cassandra.io.util.FileUtils.ONE_GB;
 import static org.apache.cassandra.io.util.FileUtils.ONE_MB;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CHRONICLE_ANALYTICS_DISABLE;
 
 public class DatabaseDescriptor
 {
     static
     {
+        CHRONICLE_ANALYTICS_DISABLE.setBoolean(true);
         // This static block covers most usages
         FBUtilities.preventIllegalAccessWarnings();
         System.setProperty("io.netty.transport.estimateSizeOnSubmit", "false");

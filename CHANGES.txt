@@ -1,6 +1,7 @@
 Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 Merged from 5.0:
+ * Disable chronicle analytics (CASSANDRA-19656)
  * Remove mocking in InternalNodeProbe spying on StorageServiceMBean (CASSANDRA-18152)
  * Fix ClassCastException  from jdk GaloisCounterMode when using JDK17 provider (CASSANDRA-18180)
  * Prevent InaccessibleObjectException when the Leak Detector is traversing objects (CASSANDRA-18708)
