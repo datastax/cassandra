@@ -463,7 +463,7 @@ public enum CassandraRelevantProperties
      * Allows to set custom current trie index format. This node will produce sstables in this format.
      */
     TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cc"),
-    REQUEST_SENSORS_FACTORY("cassandra.requests_sensors_factory_class");
+    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
