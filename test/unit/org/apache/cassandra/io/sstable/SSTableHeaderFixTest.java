@@ -596,7 +596,7 @@ public class SSTableHeaderFixTest
         SerializationHeader.Component header = readHeader(sstable);
         assertTrue(header.getKeyType() instanceof CompositeType);
         CompositeType keyType = (CompositeType) header.getKeyType();
-        assertEquals(Arrays.asList(UTF8Type.instance, udtPK), keyType.getComponents());
+        assertEquals(Arrays.asList(UTF8Type.instance, udtPK), keyType.subTypes());
 
         SSTableHeaderFix headerFix = builder().withPath(sstable.toPath())
                                               .build();
@@ -609,7 +609,7 @@ public class SSTableHeaderFixTest
         header = readHeader(sstable);
         assertTrue(header.getKeyType() instanceof CompositeType);
         keyType = (CompositeType) header.getKeyType();
-        assertEquals(Arrays.asList(UTF8Type.instance, udtPK.freeze()), keyType.getComponents());
+        assertEquals(Arrays.asList(UTF8Type.instance, udtPK.freeze()), keyType.subTypes());
     }
 
     @Test
