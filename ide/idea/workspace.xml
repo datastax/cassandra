@@ -150,6 +150,7 @@
                                           -Dcassandra.storagedir=$PROJECT_DIR$/data
                                           -Djava.library.path=$PROJECT_DIR$/lib/sigar-bin
                                           -Dlogback.configurationFile=file://$PROJECT_DIR$/conf/logback.xml
+                                          -Dnet.bytebuddy.experimental=true
                                           -ea" />
       <option name="PROGRAM_PARAMETERS" value="" />
       <option name="WORKING_DIRECTORY" value="" />
@@ -199,6 +200,7 @@
                                           -Dmigration-sstable-root=$PROJECT_DIR$/test/data/migration-sstables
                                           -XX:ActiveProcessorCount=4
                                           -XX:SoftRefLRUPolicyMSPerMB=0
+                                          -Dnet.bytebuddy.experimental=true
                                           -ea
                                           -noverify" />
       <option name="PARAMETERS" value="" />
@@ -229,6 +231,7 @@
                                           -Djava.library.path=$PROJECT_DIR$/lib/sigar-bin
                                           -Dlogback.configurationFile=file://$PROJECT_DIR$/conf/logback.xml
                                           -Xmx1G
+                                          -Dnet.bytebuddy.experimental=true
                                           -ea" />
       <option name="PROGRAM_PARAMETERS" value="" />
       <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />
