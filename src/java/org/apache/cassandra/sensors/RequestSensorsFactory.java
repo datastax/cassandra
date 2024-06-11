@@ -36,7 +36,7 @@ public interface RequestSensorsFactory
                                    FBUtilities.construct(CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.getString(), "requests sensors factory");
 
     /**
-     * Creates a {@link RequestSensors} for the given keyspace.
+     * Creates a {@link RequestSensors} for the given keyspace. Implementation of this methods should be very efficient because this method is potentially on each vern handler serving a user request.
      *
      * @param keyspace the keyspace of the request
      * @return a {@link RequestSensors} instance or an empty optional if no sensors should be tracked for the given keyspace
