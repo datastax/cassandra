@@ -1591,7 +1591,7 @@ public class TableMetadata implements SchemaElement
 
         if (partitionKeyType instanceof CompositeType)
         {
-            List<AbstractType<?>> components = partitionKeyType.getComponents();
+            List<AbstractType<?>> components = partitionKeyType.subTypes();
             int size = components.size();
             literals = new String[size + clusteringSize];
             ByteBuffer[] values = ((CompositeType) partitionKeyType).split(partitionKey);
