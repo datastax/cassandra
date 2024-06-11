@@ -46,7 +46,7 @@ public class LoadingBuilderTest extends CQLTester
     @Test
     @BMRule(name = "Save preload argument of PartitionIndex initialization",
             targetClass = "org.apache.cassandra.io.sstable.format.bti.PartitionIndex",
-            targetMethod = "load(org.apache.cassandra.io.util.FileHandle, org.apache.cassandra.dht.IPartitioner, boolean)",
+            targetMethod = "load(org.apache.cassandra.io.util.FileHandle, org.apache.cassandra.dht.IPartitioner, boolean, org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata, org.apache.cassandra.utils.bytecomparable.ByteComparable$Version)",
             action = "org.apache.cassandra.io.sstable.format.bti.LoadingBuilderTest.preloadsMap.put($1.path(), $3)")
     public void testPreloadFlag()
     {
