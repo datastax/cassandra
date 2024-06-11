@@ -152,6 +152,7 @@
                                           -Djava.library.path=$PROJECT_DIR$/lib/sigar-bin
                                           -Dlogback.configurationFile=file://$PROJECT_DIR$/conf/logback.xml
                                           -XX:HeapDumpPath=build/test
+                                          -Dnet.bytebuddy.experimental=true
                                           -ea" />
       <option name="PROGRAM_PARAMETERS" value="" />
       <option name="WORKING_DIRECTORY" value="" />
@@ -204,7 +205,8 @@
                                           -XX:MaxMetaspaceSize=2G
                                           -XX:SoftRefLRUPolicyMSPerMB=0
                                           -Xmx4G
-                                          -ea" />
+                                          -ea
+                                          -Dnet.bytebuddy.experimental=true" />
       <option name="PARAMETERS" value="" />
       <fork_mode value="class" />
       <option name="WORKING_DIRECTORY" value="" />
@@ -236,6 +238,7 @@
                                           -Dlogback.configurationFile=file://$PROJECT_DIR$/conf/logback.xml
                                           -XX:HeapDumpPath=build/test
                                           -Xmx1G
+                                          -Dnet.bytebuddy.experimental=true
                                           -ea" />
       <option name="PROGRAM_PARAMETERS" value="" />
       <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />

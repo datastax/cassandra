@@ -607,6 +607,7 @@
         <jvmarg value="-Dstorage-config=${test.conf}"/>
         <jvmarg value="-Dcassandra.reads.thresholds.coordinator.defensive_checks_enabled=true" /> <!-- enable defensive checks -->
         <jvmarg value="-javaagent:${build.dir.lib}/jars/jamm-${jamm.version}.jar" />
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <jvmarg value="-ea"/>
         <jvmarg line="${java-jvmargs}"/>
       </java>
@@ -1288,6 +1289,7 @@
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=${cassandra.use_nix_recursive_delete}"/>
         <jvmarg value="-Dio.netty.allocator.useCacheForAllThreads=true"/>
         <jvmarg value="-Dio.netty.allocator.maxOrder=11"/>
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <jvmarg line="${java-jvmargs}"/>
         <!-- disable shrinks in quicktheories CASSANDRA-15554 -->
         <jvmarg value="-DQT_SHRINKS=0"/>
@@ -1339,6 +1341,7 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
     <fileset dir="${test.unit.src}" />
   </target>
@@ -1357,6 +1360,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
         <jvmarg value="-Xmx${maxMemory}"/>
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1381,6 +1385,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${compressed_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1402,6 +1407,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${cdc_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1447,6 +1453,7 @@
         <jvmarg value="-Dcassandra.config=file:///${scm_none_yaml}"/>
         <jvmarg value="-Dcassandra.test.storage_compatibility_mode=NONE"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1464,6 +1471,7 @@
                 <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
                 <jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
                 <jvmarg value="-Dcassandra.skip_sync=true" />
+                <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
                 <jvmarg value="-Dcassandra.allow_cursor_compaction=false" />
                 <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
             </testmacrohelper>
@@ -1486,6 +1494,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${system_keyspaces_directory_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1502,6 +1511,7 @@
             <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
             <jvmarg value="-Dcassandra.sai.latest.version=aa"/>
             <jvmarg value="-Dcassandra.skip_sync=true" />
+            <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
             <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
         </testmacrohelper>
     </sequential>
@@ -1517,6 +1527,7 @@
               <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
               <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
               <jvmarg value="-Dcassandra.skip_sync=true" />
+              <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
               <jvmarg value="-Dlogback.configurationFile=file://\${test.logback.configurationFile}"/>
           </testmacrohelper>
       </sequential>
@@ -1547,6 +1558,7 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
@@ -1560,6 +1572,7 @@
       <test if="withoutMethods" name="${test.name}" todir="${build.test.dir}/output/" outfile="TEST-${test.name}"/>
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
@@ -1572,6 +1585,7 @@
       <test if="withMethods" name="${test.name}" methods="${test.methods}" todir="${build.test.dir}/output/" outfile="TEST-${test.name}-${test.methods}"/>
       <test if="withoutMethods" name="${test.name}" todir="${build.test.dir}/output/" outfile="TEST-${test.name}"/>
       <jvmarg value="-Dlogback.configurationFile=test/conf/logback-burntest.xml"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
@@ -1652,18 +1666,21 @@
     <testmacro inputdir="${test.unit.src}"
         timeout="${test.timeout}" filter="**/SerializationsTest.java">
       <jvmarg value="-Dcassandra.test-serialization-writes=True"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
   <target name="msg-ser-test" depends="maybe-build-test" description="Tests message serializations">
       <testmacro inputdir="${test.unit.src}" timeout="${test.timeout}"
                filter="**/SerializationsTest.java"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
   </target>
 
   <target name="msg-ser-test-7" depends="maybe-build-test" description="Generates message serializations">
     <testmacro inputdir="${test.unit.src}"
         timeout="${test.timeout}" filter="**/SerializationsTest.java">
       <jvmarg value="-Dcassandra.version=0.7"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
@@ -1671,6 +1688,7 @@
     <testmacro inputdir="${test.unit.src}"
         timeout="${test.timeout}" filter="**/SerializationsTest.java">
       <jvmarg value="-Dcassandra.version=1.0"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
@@ -1685,6 +1703,7 @@
                timeout="${test.long.timeout}">
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
@@ -1692,6 +1711,7 @@
       <testmacro inputdir="${test.memory.src}"
                  timeout="${test.memory.timeout}">
           <jvmarg value="-javaagent:${build.dir}/test/lib/jars/java-allocation-instrumenter-${allocation-instrumenter.version}.jar"/>
+          <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
       </testmacro>
   </target>
 
@@ -1710,6 +1730,7 @@
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <classpath>
           <path refid="cassandra.classpath.test" />
           <pathelement location="${test.classes}"/>
@@ -1756,6 +1777,7 @@
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
         <classpath>
           <path refid="cassandra.classpath.test" />
           <pathelement location="${test.classes}"/>
@@ -1990,6 +2012,7 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=10000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
@@ -2027,6 +2050,7 @@
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
       <jvmarg value="-Xmx8G"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
@@ -2043,6 +2067,7 @@
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
       <jvmarg value="-Xmx8G"/>
+      <jvmarg value="-Dnet.bytebuddy.experimental=true"/>
     </testmacro>
   </target>
 
