@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.HashMap;
+
 import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -25,6 +27,8 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
@@ -39,10 +43,13 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
@@ -63,6 +70,7 @@ public class DisabledSensorsTest
 {
     public static final String KEYSPACE1 = "SensorsReadTest";
     public static final String CF_STANDARD = "Standard";
+    public static final String CF_STANDARD_SAI = "StandardSAI";
     private static final String CF_COUTNER = "Counter";
 
     private ColumnFamilyStore store;
@@ -72,21 +80,34 @@ public class DisabledSensorsTest
     {
         CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(SensorsTestUtil.DefaultRequestSensorsFactory.class.getName());
 
+        // build SAI indexes
+        Indexes.Builder saiIndexes = Indexes.builder();
+        saiIndexes.add(IndexMetadata.fromSchemaMetadata(CF_STANDARD_SAI + "_val", IndexMetadata.Kind.CUSTOM, new HashMap<>()
+        {{
+            put(IndexTarget.CUSTOM_INDEX_OPTION_NAME, StorageAttachedIndex.class.getName());
+            put(IndexTarget.TARGET_OPTION_NAME, "val");
+        }}));
+
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD,
                                                               1, AsciiType.instance, AsciiType.instance, null),
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_SAI,
+                                                              1, AsciiType.instance, AsciiType.instance, null)
+                                                .partitioner(Murmur3Partitioner.instance)
+                                                .indexes(saiIndexes.build()),
                                     SchemaLoader.counterCFMD(KEYSPACE1, CF_COUTNER));
 
         CompactionManager.instance.disableAutoCompaction();
-        MessagingService.instance().listen();
+        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
     }
 
     @After
     public void afterTest()
     {
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
+        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_SAI).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).truncateBlocking();
     }
 
@@ -121,6 +142,17 @@ public class DisabledSensorsTest
     }
 
     @Test
+    public void testSensorsForMutationVerbHandlerWithSAIDisabled()
+    {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
+        Mutation saiMutation = new RowUpdateBuilder(store.metadata(), 0, "0")
+                               .add("val", "hi there")
+                               .build();
+        handleMutation(saiMutation);
+        assertSensorsAreNotTracked();
+    }
+
+    @Test
     public void testSensorsForCounterMutationVerbHandlerDisabled() throws WriteTimeoutException
     {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_COUTNER);
@@ -140,7 +172,6 @@ public class DisabledSensorsTest
     @Test
     public void testLWTSensorsDisabled() {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
-        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
         PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
                                  .add("val", "0")
                                  .buildUpdate();

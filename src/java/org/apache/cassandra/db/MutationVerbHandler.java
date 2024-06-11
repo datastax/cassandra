@@ -67,21 +67,21 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         // Add write bytes sensors to the response
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
         Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
-        Collection<Sensor> requestSensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
+        Collection<Sensor> requestSensors = sensors.getSensors(Type.WRITE_BYTES);
         addSensorsToResponse(requestSensors, requestParam, tableParam, response);
 
         // Add index write bytes sensors to the response
         requestParam = SensorsCustomParams::encodeTableInIndexWriteBytesRequestParam;
         tableParam = SensorsCustomParams::encodeTableInIndexWriteBytesTableParam;
-        requestSensors = RequestTracker.instance.get().getSensors(Type.INDEX_WRITE_BYTES);
+        requestSensors = sensors.getSensors(Type.INDEX_WRITE_BYTES);
         addSensorsToResponse(requestSensors, requestParam, tableParam, response);
 
         // Add internode bytes sensors to the response after updating each per-table sensor with the current response
         // message size: this is missing the sensor values, but it's a good enough approximation
         int perSensorSize = response.currentPayloadSize(MessagingService.current_version) / tables;
-        requestSensors = RequestTracker.instance.get().getSensors(Type.INTERNODE_BYTES);
-        requestSensors.forEach(sensor -> RequestTracker.instance.get().incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
-        RequestTracker.instance.get().syncAllSensors();
+        requestSensors = sensors.getSensors(Type.INTERNODE_BYTES);
+        requestSensors.forEach(sensor -> sensors.incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
+        sensors.syncAllSensors();
         requestParam = SensorsCustomParams::encodeTableInInternodeBytesRequestParam;
         tableParam = SensorsCustomParams::encodeTableInInternodeBytesTableParam;
         addSensorsToResponse(requestSensors, requestParam, tableParam, response);
