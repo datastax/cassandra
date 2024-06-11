@@ -130,8 +130,7 @@ public interface OnDiskFormat
     public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
                                             IndexDescriptor indexDescriptor,
                                             LifecycleNewTracker tracker,
-                                            RowMapping rowMapping,
-                                            long keyCount);
+                                            RowMapping rowMapping, long keyCount);
 
     /**
      * Validate all the per-SSTable on-disk components and throw if a component is not valid

@@ -61,7 +61,7 @@ public interface SingleRestriction extends Restriction
         return false;
     }
 
-    public default boolean isAnn()
+    public default boolean isIndexBasedOrdering()
     {
         return false;
     }

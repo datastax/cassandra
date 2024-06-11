@@ -36,7 +36,14 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.apache.cassandra.index.sai.disk.v1.kdtree.BKDQueries.bkdQueryFrom;
 
@@ -101,6 +108,12 @@ public class KDTreeIndexSearcher extends IndexSearcher
         }
     }
 
+    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    {
+        var iter = new RowIdIterator(bkdReader.iteratorState(orderer.isAscending()));
+        return toMetaSortedIterator(iter, queryContext);
+    }
+
     @Override
     public String toString()
     {
@@ -116,5 +129,35 @@ public class KDTreeIndexSearcher extends IndexSearcher
     public void close()
     {
         bkdReader.close();
+    }
+
+    private static class RowIdIterator extends AbstractIterator<RowIdWithByteComparable> implements CloseableIterator<RowIdWithByteComparable>
+    {
+        private final BKDReader.IteratorState iterator;
+        RowIdIterator(BKDReader.IteratorState iterator)
+        {
+            this.iterator = iterator;
+        }
+
+        @Override
+        public RowIdWithByteComparable computeNext()
+        {
+            if (!iterator.hasNext())
+                return endOfData();
+
+            var segmentRowId = iterator.next();
+            // We have to copy scratch to prevent it from being overwritten by the next call to computeNext()
+            var indexValue = new byte[iterator.scratch.length];
+            System.arraycopy(iterator.scratch, 0, indexValue, 0, iterator.scratch.length);
+            // We store the indexValue in an already encoded format, so we use the fixedLength method here
+            // to avoid re-encoding it.
+            return new RowIdWithByteComparable(Math.toIntExact(segmentRowId), (v) -> ByteSource.fixedLength(indexValue));
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(iterator);
+        }
     }
 }

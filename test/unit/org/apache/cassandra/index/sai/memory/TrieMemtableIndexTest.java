@@ -129,7 +129,7 @@ public class TrieMemtableIndexTest extends SAITester
     public void onHeapAllocation() throws Exception
     {
         setTrieMemtableBufferType(BufferType.ON_HEAP);
-        memtableIndex = new TrieMemtableIndex(indexContext);
+        memtableIndex = new TrieMemtableIndex(indexContext, memtable);
         assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
 
         assertTrue(memtable.getAllocator().onHeap().owns() == 0);
@@ -148,7 +148,7 @@ public class TrieMemtableIndexTest extends SAITester
     public void offHeapAllocation() throws Exception
     {
         setTrieMemtableBufferType(BufferType.OFF_HEAP);
-        memtableIndex = new TrieMemtableIndex(indexContext);
+        memtableIndex = new TrieMemtableIndex(indexContext, memtable);
         assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
 
         assertTrue(memtable.getAllocator().onHeap().owns() == 0);
@@ -166,7 +166,7 @@ public class TrieMemtableIndexTest extends SAITester
     @Test
     public void randomQueryTest() throws Exception
     {
-        memtableIndex = new TrieMemtableIndex(indexContext);
+        memtableIndex = new TrieMemtableIndex(indexContext, memtable);
         assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
 
         for (int row = 0; row < getRandom().nextIntBetween(1000, 5000); row++)
@@ -213,7 +213,7 @@ public class TrieMemtableIndexTest extends SAITester
     @Test
     public void indexIteratorTest()
     {
-        memtableIndex = new TrieMemtableIndex(indexContext);
+        memtableIndex = new TrieMemtableIndex(indexContext, memtable);
 
         Map<Integer, Set<DecoratedKey>> terms = buildTermMap();
 

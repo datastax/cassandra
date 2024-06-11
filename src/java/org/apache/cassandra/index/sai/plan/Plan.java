@@ -982,10 +982,10 @@ abstract public class Plan
     static class AnnSort extends KeysIteration
     {
         private final KeysIteration source;
-        final RowFilter.Expression ordering;
+        final Orderer ordering;
 
 
-        protected AnnSort(Factory factory, int id, KeysIteration source, RowFilter.Expression ordering)
+        protected AnnSort(Factory factory, int id, KeysIteration source, Orderer ordering)
         {
             super(factory, id);
             this.source = source;
@@ -1022,7 +1022,7 @@ abstract public class Plan
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
-            return executor.getTopKRows((RangeIterator) source.execute(executor), ordering);
+            return executor.getTopKRows((RangeIterator) source.execute(executor));
         }
 
     }
@@ -1033,9 +1033,9 @@ abstract public class Plan
      */
     static class AnnScan extends Leaf
     {
-        final RowFilter.Expression ordering;
+        final Orderer ordering;
 
-        protected AnnScan(Factory factory, int id, RowFilter.Expression ordering)
+        protected AnnScan(Factory factory, int id, Orderer ordering)
         {
             super(factory, id);
             this.ordering = ordering;
@@ -1059,7 +1059,7 @@ abstract public class Plan
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
-            return executor.getTopKRows(ordering);
+            return executor.getTopKRows();
         }
     }
 
@@ -1350,12 +1350,13 @@ abstract public class Plan
         /**
          * Constructs a node that sorts keys using DiskANN index
          */
-        public KeysIteration annSort(KeysIteration source, RowFilter.Expression ordering)
+        public KeysIteration sort(KeysIteration source, Orderer ordering)
         {
+            // VSTODO use different calculations depending on the column type being ordered.
             return annSort(source, ordering, nextId++);
         }
 
-        private KeysIteration annSort(@Nonnull KeysIteration source, @Nonnull RowFilter.Expression ordering, int id)
+        private KeysIteration annSort(@Nonnull KeysIteration source, @Nonnull Orderer ordering, int id)
         {
             return (source instanceof Everything)
                 ? new AnnScan(this, id, ordering)
@@ -1365,7 +1366,7 @@ abstract public class Plan
         /**
          * Constructs a node that scans the DiskANN index and returns key in ANN order
          */
-        public KeysIteration annScan(@Nonnull RowFilter.Expression ordering)
+        public KeysIteration annScan(@Nonnull Orderer ordering)
         {
             return new AnnScan(this, nextId++, ordering);
         }
@@ -1445,8 +1446,8 @@ abstract public class Plan
     public interface Executor
     {
         Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
-        Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering);
-        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering);
+        Iterator<? extends PrimaryKey> getTopKRows();
+        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys);
     }
 
     /**

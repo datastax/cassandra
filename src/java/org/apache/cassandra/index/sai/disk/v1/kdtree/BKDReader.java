@@ -95,10 +95,15 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         long oldToNew(long rowID);
     }
 
+    public IteratorState iteratorState(boolean isAscending) throws IOException
+    {
+        return new IteratorState(rowID -> rowID, isAscending);
+    }
+
     @VisibleForTesting
     public IteratorState iteratorState() throws IOException
     {
-        return new IteratorState(rowID -> rowID);
+        return iteratorState(true);
     }
 
     public IteratorState iteratorState(DocMapper docMapper) throws IOException
@@ -122,9 +127,17 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         private int leafPointCount;
         private int leafPointIndex = -1;
 
+        private boolean ascending;
+
         public IteratorState(DocMapper docMapper) throws IOException
         {
+            this(docMapper, true);
+        }
+
+        public IteratorState(DocMapper docMapper, boolean isAscending) throws IOException
+        {
             this.docMapper = docMapper;
+            this.ascending = isAscending;
 
             scratch = new byte[packedBytesLength];
 
@@ -133,7 +146,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             bkdPostingsInput = IndexFileUtils.instance.openInput(postingsFile);
             bkdInput.seek(firstLeafFilePointer);
 
-            final Map<Long,Integer> leafNodeToLeafFP = getLeafOffsets();
+            var leafNodeToLeafFP = isAscending ? getLeafOffsets() : getLeafOffsets().descendingMap();
 
             // init the first leaf
             iterator = leafNodeToLeafFP.entrySet().iterator();
@@ -186,15 +199,17 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 }
 
                 leafPointIndex++;
+                // If we're ascending, we need to read the leaf from the start, otherwise we need to read it from the end
+                int pointer = ascending ? leafPointIndex : leafPointCount - leafPointIndex - 1;
 
-                System.arraycopy(packedValues, leafPointIndex * packedBytesLength, scratch, 0, packedBytesLength);
-                return docMapper.oldToNew(postings[leafPointIndex]);
+                System.arraycopy(packedValues, pointer * packedBytesLength, scratch, 0, packedBytesLength);
+                return docMapper.oldToNew(postings[pointer]);
             }
         }
 
-        private Map<Long,Integer> getLeafOffsets()
+        private TreeMap<Long,Integer> getLeafOffsets()
         {
-            final Map<Long,Integer> map = new TreeMap<>();
+            final TreeMap<Long,Integer> map = new TreeMap<>();
             final PackedIndexTree index = new PackedIndexTree();
             getLeafOffsets(index, map);
             return map;
