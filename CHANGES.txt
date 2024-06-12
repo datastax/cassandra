@@ -2,6 +2,8 @@ Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 
 
+Merged from 5.1:
+ * Expose current compaction throughput in nodetool (CASSANDRA-13890)
 5.0.2
  * Use SinglePartitionReadCommand for index queries that use strict filtering (CASSANDRA-19968)
  * Always write local expiration time as an int to LivenessInfo digest (CASSANDRA-19989)
