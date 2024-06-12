@@ -141,6 +141,10 @@ public class GuardrailsConfig
 
     public volatile Integer partition_size_warn_threshold_in_mb;
 
+    // Limit the offset used in SELECT queries
+    public volatile Integer offset_rows_warn_threshold;
+    public volatile Integer offset_rows_failure_threshold;
+
     /**
      * If {@link DatabaseDescriptor#isEmulateDbaasDefaults()} is true, apply cloud defaults to guardrails settings that
      * are not specified in yaml; otherwise, apply on-prem defaults to guardrails settings that are not specified in yaml;
@@ -227,6 +231,9 @@ public class GuardrailsConfig
         if (overrideTotalFailureThreshold != UNSET)
             sai_indexes_total_failure_threshold = overrideTotalFailureThreshold;
         enforceDefault(sai_indexes_total_failure_threshold, v -> sai_indexes_total_failure_threshold = v, DEFAULT_INDEXES_TOTAL_THRESHOLD, DEFAULT_INDEXES_TOTAL_THRESHOLD);
+
+        enforceDefault(offset_rows_warn_threshold, v -> offset_rows_warn_threshold = v, 10000, 10000);
+        enforceDefault(offset_rows_failure_threshold, v -> offset_rows_failure_threshold = v, 20000, 20000);
     }
 
     /**
@@ -289,6 +296,10 @@ public class GuardrailsConfig
                                                         + "'%s' does not parse as a Consistency Level", rawCL));
             }
         }
+
+        validateStrictlyPositiveInteger(offset_rows_warn_threshold, "offset_rows_warn_threshold");
+        validateStrictlyPositiveInteger(offset_rows_failure_threshold, "offset_rows_failure_threshold");
+        validateWarnLowerThanFail(offset_rows_warn_threshold, offset_rows_failure_threshold, "offset_rows_threshold");
     }
 
     /**

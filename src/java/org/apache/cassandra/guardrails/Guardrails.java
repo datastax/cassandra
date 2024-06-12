@@ -254,6 +254,17 @@ public abstract class Guardrails
                                                     "atomicity, or asynchronous writes for performance.",
                                                     v, what.contains(", ") ? "s" : "", what));
 
+    /**
+     * Guardrail on the number of rows that a SELECT query with LIMIT/OFFSET can skip.
+     */
+    public static final Threshold offsetRows =
+    factory.threshold("offset_rows",
+                      () -> config.offset_rows_warn_threshold,
+                      () -> config.offset_rows_failure_threshold,
+                      (isWarning, what, value, threshold) ->
+                      format("%s requested to skip %s rows, this exceeds the %s threshold of %s.",
+                             what, value, isWarning ? "warning" : "failure", threshold));
+
     private static String formatSize(long size)
     {
         return Units.toString(size, SizeUnit.BYTES);

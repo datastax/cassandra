@@ -835,6 +835,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         assert userOffset == 0 || userLimit != NO_LIMIT : "Cannot use OFFSET without LIMIT";
 
+        if (userOffset > 0)
+            Guardrails.offsetRows.guard(userOffset, "Select query", false, queryState);
+
         int fetchLimit = userLimit == NO_LIMIT ? userLimit : userLimit + userOffset;
         int cqlRowLimit = NO_LIMIT;
         int cqlPerPartitionLimit = NO_LIMIT;
