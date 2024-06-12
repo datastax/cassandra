@@ -88,6 +88,8 @@ public class AbstractTypeTest
 {
     static
     {
+        CassandraRelevantProperties.VECTOR_FLOAT_ONLY.setBoolean(false);
+        
         // make sure blob is always the same
         CassandraRelevantProperties.TEST_BLOB_SHARED_SEED.setInt(42);
     }
