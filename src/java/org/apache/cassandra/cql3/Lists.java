@@ -160,7 +160,7 @@ public abstract class Lists
     {
         Set<AbstractType<?>> types = items.stream().map(mapper).filter(Objects::nonNull).collect(Collectors.toSet());
         AbstractType<?> type = AssignmentTestable.getCompatibleTypeIfKnown(types);
-        return type == null ? null : ListType.getInstance(type, false);
+        return type == null ? null : ListType.getInstance(type.freeze(), false);
     }
 
     public static class Literal extends Term.Raw

@@ -1259,7 +1259,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                     break;
                 case IN:
                 case NOT_IN:
-                    type = ListType.getInstance(type, false);
+                    type = ListType.getInstance(type.freeze(), false);
                     break;
                 default:
                     break;
