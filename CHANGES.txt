@@ -1,5 +1,7 @@
 Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
+Merged from 5.1:
+ * Expose current compaction throughput in nodetool (CASSANDRA-13890)
 Merged from 5.0:
  * Use ParameterizedClass for all auth-related implementations (CASSANDRA-19946 and partially CASSANDRA-18554)
  * Enables IAuthenticator's to return own AuthenticateMessage (CASSANDRA-19984)
