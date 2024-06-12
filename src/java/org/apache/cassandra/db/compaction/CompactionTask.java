@@ -68,7 +68,6 @@ import org.apache.cassandra.utils.concurrent.Refs;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COMPACTION_HISTORY_ENABLED;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_CURSOR_COMPACTION;
 import static org.apache.cassandra.db.compaction.CompactionHistoryTabularData.COMPACTION_TYPE_PROPERTY;
-import static org.apache.cassandra.db.compaction.CompactionManager.compactionRateLimiterAcquire;
 import static org.apache.cassandra.utils.FBUtilities.now;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemoryPerSecond;
@@ -723,7 +722,7 @@ public class CompactionTask extends AbstractCompactionTask
                 long bytesScanned = compactionIterator.bytesRead();
 
                 // Rate limit the scanners, and account for compression
-                if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
+                if (CompactionManager.instance.compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
                     lastBytesScanned = bytesScanned;
 
                 maybeStopOrUpdateState();
