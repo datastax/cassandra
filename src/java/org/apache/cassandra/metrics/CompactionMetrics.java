@@ -69,6 +69,8 @@ public class CompactionMetrics
     public final Counter bytesCompacted;
     /** Time spent redistributing index summaries */
     public final Timer indexSummaryRedistributionTime;
+    /** Recent/current throughput of compactions take */
+    public final Meter bytesCompactedThroughput;
 
     /**
      * The compaction strategy information for each table. Cached, because its computation might be fairly expensive.
@@ -195,6 +197,7 @@ public class CompactionMetrics
         totalCompactionsCompleted = Metrics.meter(factory.createMetricName("TotalCompactionsCompleted"));
         totalCompactionsFailed = Metrics.counter(factory.createMetricName("FailedCompactions"));
         bytesCompacted = Metrics.counter(factory.createMetricName("BytesCompacted"));
+        bytesCompactedThroughput = Metrics.meter(factory.createMetricName("BytesCompactedThroughput"));
 
         // compaction failure metrics
         compactionsReduced = Metrics.counter(factory.createMetricName("CompactionsReduced"));
