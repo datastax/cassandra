@@ -49,6 +49,7 @@ import static java.lang.String.format;
 public final class TableAttributes extends PropertyDefinitions
 {
     public static final String ID = "id";
+    public static final String READ_QUERIED_COLUMNS = "read_only_queried";
     public static final Set<String> validKeywords;
     private static final Set<String> obsoleteKeywords = ImmutableSet.of(
         "nodesync",
@@ -69,6 +70,7 @@ public final class TableAttributes extends PropertyDefinitions
         for (Option option : Option.values())
             validBuilder.add(option.toString());
         validBuilder.add(ID);
+        validBuilder.add(READ_QUERIED_COLUMNS);
         validKeywords = validBuilder.build();
     }
 
