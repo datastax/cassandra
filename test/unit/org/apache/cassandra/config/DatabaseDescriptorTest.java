@@ -48,6 +48,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
@@ -339,6 +340,26 @@ public class DatabaseDescriptorTest
             fail("Should have received a ConfigurationException batch_size_warn_threshold_in_kb = 2GiB");
         }
         catch (ConfigurationException ignored) { }
+
+        // batch size with pk fail threshold should be positive
+        assertThrows("Should have received a ConfigurationException as batch_size_with_pk_warn_threshold_in_kb is negative",
+                    ConfigurationException.class, () -> DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWithPKWarnThresholdInKB(-2));
+        // batch size with pk warn threshold should be positive
+        assertThrows("Should have received a ConfigurationException as batch_size_with_pk_fail_threshold_in_kb is negative",
+                    ConfigurationException.class, () -> DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWithPKFailThresholdInKB(-2));
+        // batch size with pk warn threshold should be less than fail threshold
+        int batchSizeWithPKFailThreshold = DatabaseDescriptor.getGuardrailsConfig().getBatchSizeWithPKFailThreshold();
+        try
+        {
+            DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWithPKFailThresholdInKB(1024 * 1024);
+            assertThrows("Should have received a ConfigurationException as batch_size_with_pk_warn_threshold_in_kb > batch_size_with_pk_fail_threshold_in_kb",
+                    ConfigurationException.class, () -> DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWithPKWarnThresholdInKB(2 * 1024 * 1024));
+        }
+        finally
+        {
+            DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWithPKFailThresholdInKB(batchSizeWithPKFailThreshold);
+        }
+
         Assert.assertEquals(4096, DatabaseDescriptor.getColumnIndexSize());
     }
 
