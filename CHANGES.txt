@@ -66,6 +66,10 @@ Merged from 4.0:
  * Fix Dropwizard Meter causes timeouts when infrequently used (CASSANDRA-19332)
 
 
+Merged from 5.1:
+ * Expose current compaction throughput in nodetool (CASSANDRA-13890)
+
+
 5.0.4
  * Update netty to 4.1.119.Final and netty-tcnative to 2.0.70.Final (CASSANDRA-20314)
  * Serialization can lose complex deletions in a mutation with multiple collections in a row (CASSANDRA-20449)
