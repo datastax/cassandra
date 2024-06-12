@@ -23,6 +23,7 @@ import java.util.List;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -129,7 +130,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
 
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))" +
                                       " with compression = {'enabled': false}" +
-                                      " and memtable = { 'class': '" + memtableClass + "'}");
+                                      " and memtable = '" + memtableClass + "'");
         execute("use " + keyspace + ';');
 
         forcePreparedValues();
@@ -227,7 +228,8 @@ public abstract class MemtableSizeTestBase extends CQLTester
     @Test
     public void testRowCountInTrieMemtable() throws Throwable
     {
-        buildAndFillTable("TrieMemtable");
+        Assume.assumeTrue(memtableClass.equals("trie"));
+        buildAndFillTable(memtableClass);
 
         String writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
 
