@@ -59,7 +59,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import com.codahale.metrics.Meter;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.ExecutorFactory;
@@ -317,6 +317,11 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
             compactionRateLimiter.setRate(throughput);
     }
 
+    public Meter getCompactionThroughput()
+    {
+        return metrics.bytesCompactedThroughput;
+    }
+
     /**
      * Call this whenever a compaction might be needed on the given column family store.
      * It's okay to over-call (within reason) if a call is unnecessary, it will
@@ -341,7 +346,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     {
         return backgroundCompactionRunner.startCompactionTasks(cfs, tasks);
     }
-    
+
     public int getOngoingBackgroundUpgradesCount()
     {
         return backgroundCompactionRunner.getOngoingUpgradesCount();
@@ -1492,7 +1497,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
     }
 
-    static boolean compactionRateLimiterAcquire(RateLimiter limiter, long bytesScanned, long lastBytesScanned, double compressionRatio)
+    protected boolean compactionRateLimiterAcquire(RateLimiter limiter, long bytesScanned, long lastBytesScanned, double compressionRatio)
     {
         if (DatabaseDescriptor.getCompactionThroughputMebibytesPerSecAsInt() == 0)
             return false;
@@ -1505,8 +1510,9 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         return actuallyAcquire(limiter, lengthRead);
     }
 
-    private static boolean actuallyAcquire(RateLimiter limiter, long lengthRead)
+    private boolean actuallyAcquire(RateLimiter limiter, long lengthRead)
     {
+        metrics.bytesCompactedThroughput.mark(lengthRead);
         while (lengthRead >= Integer.MAX_VALUE)
         {
             limiter.acquire(Integer.MAX_VALUE);
