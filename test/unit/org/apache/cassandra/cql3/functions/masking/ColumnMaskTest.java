@@ -37,10 +37,13 @@ import org.apache.cassandra.cql3.functions.NativeFunction;
 import org.apache.cassandra.cql3.functions.NativeFunctions;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static java.lang.String.format;
 import static java.util.Collections.emptyList;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_RELEVANT_PROPERTIES;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 import static org.apache.cassandra.cql3.functions.masking.ColumnMask.DISABLED_ERROR_MESSAGE;
 
 /**
@@ -112,17 +115,20 @@ public class ColumnMaskTest extends ColumnMaskTester
     @Test
     public void testVectors() throws Throwable
     {
-        // Create table with mask
-        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<int, 3> MASKED WITH DEFAULT)");
-        assertColumnIsMasked(table, "v", "mask_default", emptyList(), emptyList());
+        try (WithProperties properties = new WithProperties().set(VECTOR_FLOAT_ONLY, false))
+        {
+            // Create table with mask
+            String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<int, 3> MASKED WITH DEFAULT)");
+            assertColumnIsMasked(table, "v", "mask_default", emptyList(), emptyList());
 
-        // Alter column mask
-        alterTable("ALTER TABLE %s ALTER v MASKED WITH mask_null()");
-        assertColumnIsMasked(table, "v", "mask_null", emptyList(), emptyList());
+            // Alter column mask
+            alterTable("ALTER TABLE %s ALTER v MASKED WITH mask_null()");
+            assertColumnIsMasked(table, "v", "mask_null", emptyList(), emptyList());
 
-        // Drop mask
-        alterTable("ALTER TABLE %s ALTER v DROP MASKED");
-        assertTableColumnsAreNotMasked("v");
+            // Drop mask
+            alterTable("ALTER TABLE %s ALTER v DROP MASKED");
+            assertTableColumnsAreNotMasked("v");
+        }
     }
 
     @Test
