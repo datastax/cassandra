@@ -87,6 +87,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DURATION_IN_MAPS_COMPATIBILITY_MODE;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 import static org.apache.cassandra.schema.SchemaKeyspaceTables.AGGREGATES;
@@ -1044,7 +1045,7 @@ public final class SchemaKeyspace
                                             boolean isCounterTable,
                                             boolean isDroppedColumn)
     {
-        type.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, false);
+        type.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, false, DURATION_IN_MAPS_COMPATIBILITY_MODE.getBoolean());
         return type;
     }
 

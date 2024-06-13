@@ -584,8 +584,8 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
      *
      * @param isCounterTable whether the table the column is part of is a counter table.
      */
-    public void validate(boolean isCounterTable)
+    public void validate(boolean isCounterTable, boolean durationLegacyMode)
     {
-        type.validateForColumn(name.bytes, kind.isPrimaryKeyKind(), isCounterTable, isDropped, false);
+        type.validateForColumn(name.bytes, kind.isPrimaryKeyKind(), isCounterTable, isDropped, false, durationLegacyMode);
     }
 }

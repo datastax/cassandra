@@ -368,12 +368,6 @@ public class UserType extends TupleType implements SchemaElement
     }
 
     @Override
-    public boolean referencesDuration()
-    {
-        return fieldTypes().stream().anyMatch(AbstractType::referencesDuration);
-    }
-
-    @Override
     protected String stringifyTypeParameters(boolean ignoreFreezing)
     {
         return TypeParser.stringifyUserTypeParameters(keyspace, name, fieldNames, subTypes, ignoreFreezing || !isMultiCell());
