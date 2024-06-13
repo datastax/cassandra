@@ -41,7 +41,7 @@ public class CounterMutationCallback implements Runnable
 {
     private final Message<CounterMutation> requestMessage;
     private final InetAddressAndPort respondToAddress;
-    private final RequestSensors sensors;
+    @Nullable private final RequestSensors sensors;
     private int replicaCount = 0;
 
     public CounterMutationCallback(Message<CounterMutation> requestMessage, InetAddressAndPort respondToAddress, @Nullable RequestSensors sensors)
