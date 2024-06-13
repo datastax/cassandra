@@ -28,6 +28,8 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.VectorType;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
+
 /**
  * {@link ColumnMaskQueryTester} for {@link DefaultMaskingFunction}.
  */
@@ -36,6 +38,8 @@ public class ColumnMaskQueryWithDefaultTest extends ColumnMaskQueryTester
     @Parameterized.Parameters(name = "order={0}, mask={1}, type={2}, value={3}")
     public static Collection<Object[]> options()
     {
+        VECTOR_FLOAT_ONLY.setBoolean(false);
+
         List<Object[]> options = new ArrayList<>();
         for (String order : Arrays.asList("ASC", "DESC"))
         {

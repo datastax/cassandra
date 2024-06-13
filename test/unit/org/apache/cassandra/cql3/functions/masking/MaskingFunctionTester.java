@@ -28,6 +28,7 @@ import java.util.UUID;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQL3Type;
@@ -51,6 +52,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 
 /**
  * Abstract class for testing a specific implementation of {@link MaskingFunction}.
@@ -60,6 +62,12 @@ import static java.lang.String.format;
  */
 public abstract class MaskingFunctionTester extends CQLTester
 {
+    @BeforeClass
+    public static void setup()
+    {
+        VECTOR_FLOAT_ONLY.setBoolean(false);
+    }
+
     /**
      * Tests the native masking function for all CQL native data types.
      */
