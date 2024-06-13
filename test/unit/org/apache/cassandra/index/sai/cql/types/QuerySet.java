@@ -28,6 +28,7 @@ import java.util.Map;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 import static org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport.NUMBER_OF_VALUES;
 
@@ -42,6 +43,11 @@ public abstract class QuerySet extends CQLTester
 
     public abstract void runQueries(SAITester tester, Object[][] allRows) throws Throwable;
 
+    protected static boolean isOrderBySupported()
+    {
+        return Version.latest().onOrAfter(Version.BA);
+    }
+
     public static class NumericQuerySet extends QuerySet
     {
         private final boolean testOrderBy;
@@ -49,12 +55,13 @@ public abstract class QuerySet extends CQLTester
 
         NumericQuerySet(DataSet<?> dataset)
         {
-            this(dataset, true);
+            this(dataset, isOrderBySupported());
         }
 
         NumericQuerySet(DataSet<?> dataset, boolean testOrderBy)
         {
             super(dataset);
+            assert !testOrderBy || isOrderBySupported() : "ORDER BY not supported";
             this.testOrderBy = testOrderBy;
             this.comparator = Comparator.comparing(o -> (Comparable) o[2]);
         }
@@ -62,6 +69,7 @@ public abstract class QuerySet extends CQLTester
         @Override
         public void runQueries(SAITester tester, Object[][] allRows) throws Throwable
         {
+
             // Query each value for all operators
             for (int index = 0; index < allRows.length; index++)
             {
@@ -189,18 +197,19 @@ public abstract class QuerySet extends CQLTester
         LiteralQuerySet(DataSet<?> dataSet, Comparator<Object[]> comparator)
         {
             super(dataSet);
-            this.testOrderBy = true;
+            this.testOrderBy = isOrderBySupported();
             this.comparator = comparator;
         }
 
         LiteralQuerySet(DataSet<?> dataSet)
         {
-            this(dataSet, true);
+            this(dataSet, isOrderBySupported());
         }
 
         LiteralQuerySet(DataSet<?> dataSet, boolean testOrderBy)
         {
             super(dataSet);
+            assert !testOrderBy || isOrderBySupported() : "ORDER BY not supported by AA (V1) indexes";
             this.testOrderBy = testOrderBy;
             this.comparator = Comparator.comparing(o -> (Comparable) o[2]);
         }
