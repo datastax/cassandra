@@ -449,8 +449,7 @@ public class IndexDescriptor
      */
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
-        Version version = getVersion(context);
-        return version == Version.AA
+        return getVersion(context) == Version.AA
                ? new EndiannessReverserChecksumIndexInput(indexInput)
                : new BufferedChecksumIndexInput(indexInput);
     }
