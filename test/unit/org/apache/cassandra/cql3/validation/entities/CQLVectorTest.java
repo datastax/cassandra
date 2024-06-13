@@ -28,6 +28,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.functions.Arguments;
+import org.apache.cassandra.cql3.functions.FunctionArguments;
 import org.apache.cassandra.cql3.functions.NativeFunctions;
 import org.apache.cassandra.cql3.functions.NativeScalarFunction;
 import org.apache.cassandra.db.marshal.FloatType;
@@ -35,6 +36,7 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
 
@@ -328,6 +330,12 @@ public class CQLVectorTest extends CQLTester
             {
                 return arguments.get(0);
             }
+            
+            @Override
+            public Arguments newArguments(ProtocolVersion version)
+            {
+                return FunctionArguments.newNoopInstance(version, 1);
+            }
         });
 
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<int, 2>)");
@@ -348,13 +356,21 @@ public class CQLVectorTest extends CQLTester
             @Override
             public ByteBuffer execute(Arguments arguments) throws InvalidRequestException
             {
-                float[] left = type.composeAsFloat(arguments.get(0));
-                float[] right = type.composeAsFloat(arguments.get(1));
+                float[] left = arguments.get(0);
+                float[] right = arguments.get(1);
                 int size = Math.min(left.length, right.length);
                 float[] sum = new float[size];
                 for (int i = 0; i < size; i++)
                     sum[i] = left[i] + right[i];
                 return type.getSerializer().serializeFloatArray(sum);
+            }
+
+            @Override
+            public Arguments newArguments(ProtocolVersion version)
+            {
+                return new FunctionArguments(version,
+                                             (v, b) -> type.composeAsFloat(b),
+                                             (v, b) -> type.composeAsFloat(b));
             }
         });
 
