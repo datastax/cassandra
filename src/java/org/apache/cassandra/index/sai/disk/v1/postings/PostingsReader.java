@@ -81,10 +81,12 @@ public class PostingsReader implements OrdinalPostingList
         this(input, summary, listener, () -> {
             try
             {
+                // FIXME closeed 2nd time here
                 input.close();
             }
             finally
             {
+                // FIXME closeed 2nd time here
                 summary.close();
             }
         });
@@ -92,7 +94,8 @@ public class PostingsReader implements OrdinalPostingList
 
     public PostingsReader(IndexInput input, BlocksSummary summary, QueryEventListener.PostingListEventListener listener, InputCloser runOnClose) throws IOException
     {
-        assert input instanceof IndexInputReader;
+        // FIXME temporary commented to demonstrate the issue
+//        assert input instanceof IndexInputReader;
         logger.trace("Opening postings reader for {}", input);
         this.input = input;
         this.seekingInput = new SeekingRandomAccessInput(input);

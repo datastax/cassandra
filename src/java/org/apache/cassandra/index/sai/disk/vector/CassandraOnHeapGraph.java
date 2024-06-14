@@ -358,8 +358,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             termsOffset += indexFile.length();
         var pqOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.PQ, context);
         var postingsOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.POSTING_LISTS, context);
-        try (var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, context), pqOrder, true);
-             var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), postingsOrder, true);
+        try (var pqOutput = IndexFileUtils.instance().openOutput(descriptor.fileFor(IndexComponent.PQ, context), pqOrder, true);
+             var postingsOutput = IndexFileUtils.instance().openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), postingsOrder, true);
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
                                .withVersion(JVECTOR_2_VERSION) // always write old-version format since we're not using the new features
                                .withMap(finalOrdinalMap)

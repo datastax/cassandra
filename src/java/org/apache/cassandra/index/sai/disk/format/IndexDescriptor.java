@@ -407,7 +407,7 @@ public class IndexDescriptor
 
     public IndexInput openPerSSTableInput(IndexComponent component)
     {
-        return IndexFileUtils.instance.openBlockingInput(createPerSSTableFileHandle(component));
+        return IndexFileUtils.instance().openBlockingInput(createPerSSTableFileHandle(component));
     }
 
     public ChecksumIndexInput openCheckSummedPerSSTableInput(IndexComponent component)
@@ -418,7 +418,7 @@ public class IndexDescriptor
 
     public IndexInput openPerIndexInput(IndexComponent component, IndexContext context)
     {
-        return IndexFileUtils.instance.openBlockingInput(createPerIndexFileHandle(component, context));
+        return IndexFileUtils.instance().openBlockingInput(createPerIndexFileHandle(component, context));
     }
 
     public ChecksumIndexInput openCheckSummedPerIndexInput(IndexComponent component, IndexContext context)
@@ -459,7 +459,7 @@ public class IndexDescriptor
                          component,
                          file);
 
-        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, getVersion().onDiskFormat().byteOrderFor(component, null), append);
+        IndexOutputWriter writer = IndexFileUtils.instance().openOutput(file, getVersion().onDiskFormat().byteOrderFor(component, null), append);
 
         registerPerSSTableComponent(component);
 
@@ -480,7 +480,7 @@ public class IndexDescriptor
                          component,
                          file);
 
-        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, getVersion().onDiskFormat().byteOrderFor(component, context), append);
+        IndexOutputWriter writer = IndexFileUtils.instance().openOutput(file, getVersion().onDiskFormat().byteOrderFor(component, context), append);
 
         registerPerSSTableComponent(component);
 

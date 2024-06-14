@@ -264,8 +264,8 @@ public class CompactionGraph implements Closeable, Accountable
 
         var pqOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.PQ, context);
         var postingsOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.POSTING_LISTS, context);
-        try (var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), postingsOrder, true);
-             var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, context), pqOrder, true))
+        try (var postingsOutput = IndexFileUtils.instance().openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), postingsOrder, true);
+             var pqOutput = IndexFileUtils.instance().openOutput(descriptor.fileFor(IndexComponent.PQ, context), pqOrder, true))
         {
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(pqOutput);

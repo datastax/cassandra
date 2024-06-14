@@ -53,10 +53,24 @@ public class IndexFileUtils
                                                                                               .finishOnClose(true)
                                                                                               .build();
 
-    public static final IndexFileUtils instance = new IndexFileUtils();
+    private static final IndexFileUtils instance = new IndexFileUtils();
 
     private static final SequentialWriterOption writerOption = defaultWriterOption;
 
+    private static IndexFileUtils overrideInstance = null;
+    public static synchronized void setOverrideInstance(IndexFileUtils overrideInstance)
+    {
+        IndexFileUtils.overrideInstance = overrideInstance;
+    }
+
+    public static IndexFileUtils instance()
+    {
+        if (overrideInstance == null)
+            return instance;
+        else
+            return overrideInstance;
+    }
+    
     @VisibleForTesting
     protected IndexFileUtils()
     {}

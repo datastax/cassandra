@@ -87,7 +87,7 @@ public class TermsReader implements Closeable
         termDictionaryRoot = root;
         this.encodingVersion = indexDescriptor.getEncodingVersion(IndexComponent.TERMS_DATA);
 
-        try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile))
+        try (final IndexInput indexInput = IndexFileUtils.instance().openInput(termDictionaryFile))
         {
             // if the pointer is -1 then this is a previous version of the index
             // use the old way to validate the footer
@@ -102,7 +102,7 @@ public class TermsReader implements Closeable
             }
         }
 
-        try (final IndexInput indexInput = IndexFileUtils.instance.openInput(postingsFile))
+        try (final IndexInput indexInput = IndexFileUtils.instance().openInput(postingsFile))
         {
             validate(indexInput);
         }
@@ -153,8 +153,8 @@ public class TermsReader implements Closeable
         TermQuery(ByteComparable term, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
             this.listener = listener;
-            postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-            postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+            postingsInput = IndexFileUtils.instance().openInput(postingsFile);
+            postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
             this.term = term;
             lookupStartTime = System.nanoTime();
             this.context = context;
@@ -277,8 +277,8 @@ public class TermsReader implements Closeable
             ArrayList<PostingList.PeekablePostingList> postingLists = new ArrayList<>();
 
             // index inputs will be closed with the onClose method of the returned merged posting list
-            IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-            IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+            IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
+            IndexInput postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
 
             do
             {
@@ -328,7 +328,7 @@ public class TermsReader implements Closeable
         public PostingList postings() throws IOException
         {
             assert entry != null;
-            final IndexInput input = IndexFileUtils.instance.openInput(postingsFile);
+            final IndexInput input = IndexFileUtils.instance().openInput(postingsFile);
             return new OffsetPostingList(segmentOffset, new ScanningPostingsReader(input, new PostingsReader.BlocksSummary(input, entry.right)));
         }
 
