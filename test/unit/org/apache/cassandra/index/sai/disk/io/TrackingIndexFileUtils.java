@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.disk.io;
 
-import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -41,7 +40,7 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     @Override
     public IndexInput openInput(FileHandle handle)
     {
-        TrackingIndexInput input = new TrackingIndexInput(super.openInput(handle));
+        TrackingIndexInput input = new TrackingIndexInput((IndexInputReader) super.openInput(handle));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Input created")));
         return input;
     }
@@ -49,7 +48,7 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     @Override
     public IndexInput openBlockingInput(FileHandle fileHandle)
     {
-        TrackingIndexInput input = new TrackingIndexInput(super.openBlockingInput(fileHandle));
+        TrackingIndexInput input = new TrackingIndexInput((IndexInputReader) super.openBlockingInput(fileHandle));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Blocking input created")));
         return input;
     }
@@ -61,17 +60,63 @@ public class TrackingIndexFileUtils extends IndexFileUtils
 
     public class TrackingIndexInput extends FilterIndexInput
     {
-        TrackingIndexInput(IndexInput delegate)
+        TrackingIndexInput(IndexInputReader delegate)
         {
             super(delegate);
         }
 
         @Override
-        public void close() throws IOException
+        public void close()
         {
             super.close();
             final String creationStackTrace = openInputs.remove(this);
-            Assert.assertNotNull("Closed unregistered input: " + this, creationStackTrace);
+
+            if (closedInputs.add(this) && creationStackTrace == null)
+            {
+                Assert.fail("Closed unregistered input: " + this);
+            }
+        }
+
+        @Override
+        public long getFilePointer()
+        {
+            return delegate.getFilePointer();
+        }
+
+        @Override
+        public void seek(long pos)
+        {
+            delegate.seek(pos);
+        }
+
+        @Override
+        public long length()
+        {
+            return delegate.length();
+        }
+
+        @Override
+        public IndexInput slice(String sliceDescription, long offset, long length)
+        {
+            return delegate.slice(sliceDescription, offset, length);
+        }
+
+        @Override
+        public byte readByte() throws IOException
+        {
+            return delegate.readByte();
+        }
+
+        @Override
+        public void readBytes(byte[] b, int offset, int len) throws IOException
+        {
+            delegate.readBytes(b, offset, len);
+        }
+
+        @Override
+        public String toString()
+        {
+            return delegate.toString();
         }
     }
 
