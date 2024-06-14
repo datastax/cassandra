@@ -61,10 +61,9 @@ import org.apache.cassandra.utils.UUIDGen;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests that sensors are not tracked when disabled. Please note that sensor tracking is and opt-in feature so any non-sensors related tests is indirectly leveraged and would surface
- * functionality regression (e.g. NPEs). Here we make sure the sensors are indeed not tracked and for that it suffices to cover each verb handler that has sensor related implementation
- * and asserting that indeed no sensors (of any type) are tracked. Ideally we would run all existing sensor tests with flag disabled but that would be an overkill.
- *
+ * Tests that sensors are not tracked when disabled. Please note that sensor tracking is and opt-in feature so any existing
+ * test that exercise the {@link org.apache.cassandra.net.IVerbHandler#doVerb(Message)} would surface functionality regression (e.g. NPEs).
+ * Here we make sure that sensors are indeed not tracked when disabled and for that it suffices to cover a happy case verb handler invocation scenario.
  */
 public class DisabledSensorsTest
 {
@@ -170,7 +169,8 @@ public class DisabledSensorsTest
     }
 
     @Test
-    public void testLWTSensors() {
+    public void testLWTSensors()
+    {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
                                  .add("val", "0")
