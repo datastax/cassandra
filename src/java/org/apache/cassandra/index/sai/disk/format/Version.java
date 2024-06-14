@@ -167,11 +167,4 @@ public class Version
 
         return stringBuilder.toString();
     }
-
-    public ByteComparable.Version byteComparableVersionFor(IndexComponent component, org.apache.cassandra.io.sstable.format.Version sstableFormatVersion)
-    {
-        return this == AA && component == IndexComponent.TERMS_DATA
-               ? sstableFormatVersion.getByteComparableVersion()
-               : ByteComparable.Version.OSS41;
-    }
 }

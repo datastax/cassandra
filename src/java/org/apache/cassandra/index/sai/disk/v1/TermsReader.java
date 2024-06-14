@@ -85,7 +85,7 @@ public class TermsReader implements Closeable
         termDictionaryFile = termsData;
         postingsFile = postingLists;
         termDictionaryRoot = root;
-        this.encodingVersion = indexDescriptor.getEncodingVersion(IndexComponent.TERMS_DATA);
+        this.encodingVersion = indexDescriptor.byteComparableVersionFor(IndexComponent.TERMS_DATA);
 
         try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile))
         {

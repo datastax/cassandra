@@ -617,9 +617,4 @@ public class IndexDescriptor
     {
         components.get(null).add(component);
     }
-
-    public ByteComparable.Version getEncodingVersion(IndexComponent indexComponent)
-    {
-        return getVersion().byteComparableVersionFor(indexComponent, descriptor.version);
-    }
 }
