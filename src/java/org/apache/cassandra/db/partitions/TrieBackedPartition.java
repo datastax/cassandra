@@ -45,6 +45,7 @@ import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.ColumnData;
@@ -65,7 +66,8 @@ import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.memory.HeapCloner;
+import org.apache.cassandra.utils.memory.Cloner;
+import org.apache.cassandra.utils.memory.EnsureOnHeap;
 
 /**
  * In-memory partition backed by a trie. The rows of the partition are values in the leaves of the trie, where the key
@@ -117,12 +119,6 @@ public class TrieBackedPartition implements Partition
                                    columnsBTree);
         }
 
-        Row copyToOnHeapRow(Clustering clustering)
-        {
-            // TODO: maybe avoid the first row object
-            return toRow(clustering).clone(HeapCloner.instance);
-        }
-
         public int dataSize()
         {
             int dataSize = livenessInfo.dataSize() + deletion.dataSize();
@@ -143,6 +139,12 @@ public class TrieBackedPartition implements Partition
         public String toString()
         {
             return "row " + livenessInfo + " size " + dataSize();
+        }
+
+        public RowData clone(Cloner cloner)
+        {
+            Object[] tree = BTree.<ColumnData, ColumnData>transform(columnsBTree, c -> c.clone(cloner));
+            return new RowData(tree, livenessInfo, deletion);
         }
     }
 
@@ -168,7 +170,9 @@ public class TrieBackedPartition implements Partition
         this.columns = columns;
         this.stats = stats;
         this.canHaveShadowedData = canHaveShadowedData;
-        assert deletionInfo() != null; // There must be always be deletion info metadata
+        // There must always be deletion info metadata.
+        // Note: we can't use deletionInfo() because WithEnsureOnHeap's override is not yet set up.
+        assert trie.get(ByteComparable.EMPTY) != null;
         assert stats != null;
     }
 
@@ -199,6 +203,22 @@ public class TrieBackedPartition implements Partition
         {
             throw new AssertionError(e);
         }
+    }
+
+    /**
+     * Create a row with the given properties and content, making sure to copy all off-heap data to keep it alive when
+     * the given access mode requires it.
+     */
+    public static TrieBackedPartition create(DecoratedKey partitionKey,
+                                             RegularAndStaticColumns columnMetadata,
+                                             EncodingStats encodingStats,
+                                             Trie<Object> trie,
+                                             TableMetadata metadata,
+                                             EnsureOnHeap ensureOnHeap)
+    {
+        return ensureOnHeap == EnsureOnHeap.NOOP
+               ? new TrieBackedPartition(partitionKey, columnMetadata, encodingStats, trie, metadata, true)
+               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, trie, metadata, true, ensureOnHeap);
     }
 
     private static Iterator<Map.Entry<ByteComparable, RowData>> rowDataIterator(Trie<Object> trie, Direction direction)
@@ -550,6 +570,41 @@ public class TrieBackedPartition implements Partition
 
                 currentSlice = null;
             }
+        }
+    }
+
+
+    /**
+     * An snapshot of the current TrieBackedPartition data, copied on heap when retrieved.
+     */
+    private static final class WithEnsureOnHeap extends TrieBackedPartition
+    {
+        final DeletionInfo onHeapDeletion;
+        EnsureOnHeap ensureOnHeap;
+
+        public WithEnsureOnHeap(DecoratedKey partitionKey,
+                                RegularAndStaticColumns columns,
+                                EncodingStats stats,
+                                Trie<Object> trie,
+                                TableMetadata metadata,
+                                boolean canHaveShadowedData,
+                                EnsureOnHeap ensureOnHeap)
+        {
+            super(partitionKey, columns, stats, trie, metadata, canHaveShadowedData);
+            this.ensureOnHeap = ensureOnHeap;
+            this.onHeapDeletion = ensureOnHeap.applyToDeletionInfo(super.deletionInfo());
+        }
+
+        @Override
+        public Row toRow(RowData data, Clustering clustering)
+        {
+            return ensureOnHeap.applyToRow(super.toRow(data, clustering));
+        }
+
+        @Override
+        public DeletionInfo deletionInfo()
+        {
+            return onHeapDeletion;
         }
     }
 

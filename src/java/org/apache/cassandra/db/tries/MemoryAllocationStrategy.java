@@ -69,6 +69,13 @@ public interface MemoryAllocationStrategy
      */
     long indexCountInPipeline();
 
+    /**
+     * Constructs a list of all the indexes that are in the recycling pipeline.
+     * Used to test available and unreachable indexes are the same thing.
+     */
+    @VisibleForTesting
+    IntArrayList indexesInPipeline();
+
     interface Allocator extends ListAllocator
     {
         int allocate() throws TrieSpaceExhaustedException;
@@ -118,6 +125,12 @@ public interface MemoryAllocationStrategy
         {
             // No indexes recycled
             return 0;
+        }
+
+        @Override
+        public IntArrayList indexesInPipeline()
+        {
+            return new IntArrayList();
         }
     }
 
@@ -298,12 +311,8 @@ public interface MemoryAllocationStrategy
             return count;
         }
 
-        /**
-         * Constructs a list of all the cells that are in the recycling pipeline.
-         * Used to test available and unreachable cells are the same thing.
-         */
-        @VisibleForTesting
-        IntArrayList indexesInPipeline()
+        @Override
+        public IntArrayList indexesInPipeline()
         {
             IntArrayList res = new IntArrayList((int) indexCountInPipeline(), -1);
             for (IndexList list = justReleased; list != null; list = list.nextList)

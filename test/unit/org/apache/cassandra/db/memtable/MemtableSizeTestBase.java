@@ -73,6 +73,8 @@ public abstract class MemtableSizeTestBase extends CQLTester
     // Must be within 3% of the real usage. We are actually more precise than this, but the threshold is set higher to
     // avoid flakes. For on-heap allocators we allow for extra overheads below.
     final int MAX_DIFFERENCE_PERCENT = 3;
+    // Slab overhead, added when the memtable uses heap_buffers.
+    final int SLAB_OVERHEAD = 1024 * 1024;
     // Extra leniency for unslabbed buffers. We are not as precise there, and it's not a mode in real use.
     final int UNSLABBED_EXTRA_PERCENT = 2;
 
@@ -174,21 +176,25 @@ public abstract class MemtableSizeTestBase extends CQLTester
                                              FBUtilities.prettyPrintMemory(memtable.getLiveDataSize()),
                                              usage));
 
+            if (memtable instanceof TrieMemtable)
+                ((TrieMemtable) memtable).releaseReferencesUnsafe();
+
+//            System.out.println("Take jmap -histo:live <pid>");
+//            Thread.sleep(10000);
+
             long deepSizeAfter = meter.measureDeep(memtable);
             System.out.println("Memtable deep size " +
                                FBUtilities.prettyPrintMemory(deepSizeAfter));
 
             long actualHeap = deepSizeAfter - deepSizeBefore;
             long maxDifference = MAX_DIFFERENCE_PERCENT * actualHeap / 100;
-            long trieOverhead = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).unusedReservedOnHeapMemory() : 0;
-            calculatedHeap += trieOverhead;    // adjust trie memory with unused buffer space if on-heap
+            if (memtable instanceof TrieMemtable)
+                calculatedHeap += ((TrieMemtable) memtable).unusedReservedOnHeapMemory();
+
             switch (DatabaseDescriptor.getMemtableAllocationType())
             {
                 case heap_buffers:
-                    // MemoryUsage only counts the memory actually used by cells,
-                    // so add in the slab overhead to match what MemoryMeter sees
-                    int slabCount = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).getShardCount() : 1;
-                    maxDifference += (long) SlabAllocator.REGION_SIZE * slabCount;
+                    maxDifference += SLAB_OVERHEAD;
                     break;
                 case unslabbed_heap_buffers:
                     // add a hardcoded slack factor

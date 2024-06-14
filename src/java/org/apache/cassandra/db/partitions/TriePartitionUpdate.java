@@ -251,6 +251,11 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         }
     }
 
+    public static Trie<Object> asMergableTrie(PartitionUpdate update)
+    {
+        return asTrieUpdate(update).trie.prefix(update.partitionKey());
+    }
+
     /**
      * Merges the provided updates, yielding a new update that incorporates all those updates.
      *

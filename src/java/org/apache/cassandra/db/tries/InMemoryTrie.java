@@ -1622,6 +1622,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                REFERENCE_ARRAY_ON_HEAP_SIZE * getChunkIdx(allocatedPos, BUF_START_SHIFT, BUF_START_SIZE);
     }
 
+    @VisibleForTesting
     public long unusedReservedOnHeapMemory()
     {
         int bufferOverhead = 0;
@@ -1643,5 +1644,19 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         contentOverhead *= MemoryLayoutSpecification.SPEC.getReferenceSize();
 
         return bufferOverhead + contentOverhead;
+    }
+
+    /**
+     * Release all recycled content references, including the ones waiting in still incomplete recycling lists.
+     * This is a test method and can cause null pointer exceptions if used on a live trie.
+     *
+     * If similar functionality is required for non-test purposes, a version of this should be developed that only
+     * releases references on barrier-complete lists.
+     */
+    @VisibleForTesting
+    public void releaseReferencesUnsafe()
+    {
+        for (int idx : objectAllocator.indexesInPipeline())
+            setContent(~idx, null);
     }
 }

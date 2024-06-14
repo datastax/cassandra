@@ -34,7 +34,7 @@ import org.apache.cassandra.utils.memory.ByteBufferCloner;
  */
 public class MutableDeletionInfo implements DeletionInfo
 {
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new MutableDeletionInfo(0, 0));
+    protected static final long EMPTY_SIZE = ObjectSizes.measure(new MutableDeletionInfo(0, 0));
 
     /**
      * This represents a deletion of the entire partition. We can't represent this within the RangeTombstoneList, so it's
