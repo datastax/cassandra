@@ -22,8 +22,10 @@ import java.io.IOException;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.DataInput;
 
 /**
@@ -42,8 +44,8 @@ public class IndexInputReader extends IndexInput
      * because we only use `readFully` and `readByte` methods. IndexInput calls these
      * (via DataInput) with methods that enforce LittleEndian-ness.
     */
-    private final RandomAccessReader input;
-    private final Runnable doOnClose;
+    protected final RandomAccessReader input;
+    protected final Runnable doOnClose;
 
     /** Absolute offset in the underlying file that this input's position 0 refers to. */
     private final long offset;
@@ -51,7 +53,7 @@ public class IndexInputReader extends IndexInput
     /** Bounded length of this input, in bytes. */
     private final long length;
 
-    private IndexInputReader(RandomAccessReader input, Runnable doOnClose, long offset, long length)
+    protected IndexInputReader(RandomAccessReader input, Runnable doOnClose, long offset, long length)
     {
         super(input.getFile().toString(), input.order());
         this.input = input;
