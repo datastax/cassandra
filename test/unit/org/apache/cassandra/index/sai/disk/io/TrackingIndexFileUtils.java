@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.disk.io;
 
-import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -41,7 +40,7 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     @Override
     public IndexInput openInput(FileHandle handle)
     {
-        TrackingIndexInput input = new TrackingIndexInput(super.openInput(handle));
+        TrackingIndexInput input = new TrackingIndexInput((IndexInputReader) super.openInput(handle));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Input created")));
         return input;
     }
@@ -49,7 +48,7 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     @Override
     public IndexInput openBlockingInput(FileHandle fileHandle)
     {
-        TrackingIndexInput input = new TrackingIndexInput(super.openBlockingInput(fileHandle));
+        TrackingIndexInput input = new TrackingIndexInput((IndexInputReader) super.openBlockingInput(fileHandle));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Blocking input created")));
         return input;
     }
@@ -61,13 +60,13 @@ public class TrackingIndexFileUtils extends IndexFileUtils
 
     public class TrackingIndexInput extends FilterIndexInput
     {
-        TrackingIndexInput(IndexInput delegate)
+        TrackingIndexInput(IndexInputReader delegate)
         {
             super(delegate);
         }
 
         @Override
-        public void close() throws IOException
+        public void close()
         {
             super.close();
             final String creationStackTrace = openInputs.remove(this);
