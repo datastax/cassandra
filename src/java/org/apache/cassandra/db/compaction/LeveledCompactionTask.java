@@ -65,7 +65,7 @@ public class LeveledCompactionTask extends CompactionTask
     @Override
     protected boolean partialCompactionsAcceptable()
     {
-        // LCS allows removing L0 sstable from compaction for limited disk space. It's handled in #reduceScopeForLimitedSpace
+        // LCS allows removing L0 sstable from L0/L1 compaction task for limited disk space. It's handled in #reduceScopeForLimitedSpace
         return level <= 1;
     }
 
