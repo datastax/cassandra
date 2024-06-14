@@ -55,7 +55,7 @@ public class IndexFileUtils
                                                                                              .finishOnClose(true)
                                                                                              .build();
 
-    public static final IndexFileUtils instance = new IndexFileUtils(DEFAULT_WRITER_OPTION);
+    private static final IndexFileUtils instance = new IndexFileUtils(DEFAULT_WRITER_OPTION);
     private static final Supplier<Checksum> CHECKSUM_FACTORY = CRC32C::new;
     private static final Supplier<Checksum> LEGACY_CHECKSUM_FACTORY = CRC32::new;
     private static IndexFileUtils overrideInstance = null;
