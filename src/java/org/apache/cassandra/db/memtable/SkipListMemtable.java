@@ -41,6 +41,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.AtomicBTreePartition;
 import org.apache.cassandra.db.partitions.BTreePartitionData;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -169,7 +170,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             }
         }
 
-        BTreePartitionUpdater updater = previous.addAll(update, cloner, opGroup, indexer);
+        BTreePartitionUpdater updater = previous.addAll(BTreePartitionUpdate.asBTreeUpdate(update), cloner, opGroup, indexer);
         updateMin(minTimestamp, previous.stats().minTimestamp);
         liveDataSize.addAndGet(initialSize + updater.dataSize);
         columnsCollector.update(update.columns());

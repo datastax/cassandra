@@ -47,6 +47,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.BTreePartitionData;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
@@ -568,7 +569,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                     try
                     {
                         data.putSingleton(key,
-                                          update,
+                                          BTreePartitionUpdate.asBTreeUpdate(update),
                                           updater::mergePartitions,
                                           key.getKeyLength() < MAX_RECURSIVE_KEY_LENGTH);
                     }

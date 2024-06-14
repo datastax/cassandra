@@ -36,6 +36,7 @@ import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.SchemaElement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -713,6 +714,11 @@ public class TableMetadata implements SchemaElement
     protected void except(String format, Object... args)
     {
         throw new ConfigurationException(keyspace + "." + name + ": " + format(format, args));
+    }
+
+    public PartitionUpdate.Factory partitionUpdateFactory()
+    {
+        return params.memtable.factory.partitionUpdateFactory();
     }
 
     @Override

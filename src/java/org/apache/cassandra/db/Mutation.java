@@ -228,7 +228,8 @@ public class Mutation implements IMutation
             if (updates.isEmpty())
                 continue;
 
-            modifications.put(table, updates.size() == 1 ? updates.get(0) : PartitionUpdate.merge(updates));
+            PartitionUpdate first = updates.get(0);
+            modifications.put(table, updates.size() == 1 ? first : first.merge(updates));
             updates.clear();
         }
         return new Mutation(ks, key, modifications.build(), approxTime.now());

@@ -393,7 +393,7 @@ public class RowAndDeletionMergeIteratorTest
 
     private Iterator<Row> createRowIterator()
     {
-        PartitionUpdate.Builder update = new PartitionUpdate.Builder(cfm, dk, cfm.regularAndStaticColumns(), 1);
+        PartitionUpdate.Builder update = PartitionUpdate.builder(cfm, dk, cfm.regularAndStaticColumns(), 1);
         for (int i = 0; i < 5; i++)
             addRow(update, i, i);
 

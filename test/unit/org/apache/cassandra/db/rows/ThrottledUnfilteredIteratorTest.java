@@ -54,7 +54,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -653,7 +653,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
                 while (throttled.hasNext())
                 {
                     UnfilteredRowIterator next = throttled.next();
-                    ImmutableBTreePartition materializedPartition = ImmutableBTreePartition.create(next);
+                    TrieBackedPartition materializedPartition = TrieBackedPartition.create(next);
                     int unfilteredCount = Iterators.size(materializedPartition.unfilteredIterator());
 
                     System.out.println("batchsize " + batchSize + " unfilteredCount " + unfilteredCount + " materializedPartition " + materializedPartition);
@@ -682,7 +682,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
             }
 
             // Verify throttled data after merge
-            Partition partition = ImmutableBTreePartition.create(UnfilteredRowIterators.merge(unfilteredRowIterators));
+            Partition partition = TrieBackedPartition.create(UnfilteredRowIterators.merge(unfilteredRowIterators));
 
             int nowInSec = FBUtilities.nowInSeconds();
 

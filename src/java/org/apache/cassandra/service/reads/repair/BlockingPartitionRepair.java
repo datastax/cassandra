@@ -135,7 +135,7 @@ public class BlockingPartitionRepair
     {
         // recombinate the updates
         List<PartitionUpdate> updates = Lists.newArrayList(Iterables.transform(pendingRepairs.values(), BlockingPartitionRepair::extractUpdate));
-        return updates.isEmpty() ? null : PartitionUpdate.merge(updates);
+        return updates.isEmpty() ? null : updates.get(0).merge(updates);
     }
 
     @VisibleForTesting

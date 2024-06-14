@@ -75,4 +75,6 @@ public interface DeletionInfo extends IMeasurableMemory
     public MutableDeletionInfo mutableCopy();
 
     public DeletionInfo clone(ByteBufferCloner cloner);
+
+    public RangeTombstoneList copyRanges(ByteBufferCloner cloner);
 }

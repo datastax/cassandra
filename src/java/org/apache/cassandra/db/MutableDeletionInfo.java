@@ -88,11 +88,16 @@ public class MutableDeletionInfo implements DeletionInfo
     @Override
     public MutableDeletionInfo clone(ByteBufferCloner cloner)
     {
+        return new MutableDeletionInfo(partitionDeletion, copyRanges(cloner));
+    }
+
+    @Override
+    public RangeTombstoneList copyRanges(ByteBufferCloner cloner)
+    {
         RangeTombstoneList rangesCopy = null;
         if (ranges != null)
-             rangesCopy = ranges.clone(cloner);
-
-        return new MutableDeletionInfo(partitionDeletion, rangesCopy);
+            rangesCopy = ranges.clone(cloner);
+        return rangesCopy;
     }
 
     /**

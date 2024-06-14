@@ -595,7 +595,7 @@ public final class SystemKeyspace
         UntypedResultSet.Row row = results.one();
 
         Commit promised = row.has("in_progress_ballot")
-                        ? new Commit(row.getUUID("in_progress_ballot"), new PartitionUpdate.Builder(metadata, key, metadata.regularAndStaticColumns(), 1).build())
+                        ? new Commit(row.getUUID("in_progress_ballot"), PartitionUpdate.builder(metadata, key, metadata.regularAndStaticColumns(), 1).build())
                         : Commit.emptyCommit(key, metadata);
         // either we have both a recently accepted ballot and update or we have neither
         Commit accepted = row.has("proposal_version") && row.has("proposal")
@@ -726,7 +726,7 @@ public final class SystemKeyspace
     {
         long timestamp = FBUtilities.timestampMicros();
         int nowInSec = FBUtilities.nowInSeconds();
-        PartitionUpdate.Builder update = new PartitionUpdate.Builder(LegacySizeEstimates, UTF8Type.instance.decompose(keyspace), LegacySizeEstimates.regularAndStaticColumns(), estimates.size());
+        PartitionUpdate.Builder update = PartitionUpdate.builder(LegacySizeEstimates, UTF8Type.instance.decompose(keyspace), LegacySizeEstimates.regularAndStaticColumns(), estimates.size());
         // delete all previous values with a single range tombstone.
         update.add(new RangeTombstone(Slice.make(LegacySizeEstimates.comparator, table), new DeletionTime(timestamp - 1, nowInSec)));
 
@@ -751,7 +751,7 @@ public final class SystemKeyspace
     {
         long timestamp = FBUtilities.timestampMicros();
         int nowInSec = FBUtilities.nowInSeconds();
-        PartitionUpdate.Builder update = new PartitionUpdate.Builder(TableEstimates, UTF8Type.instance.decompose(keyspace), TableEstimates.regularAndStaticColumns(), estimates.size());
+        PartitionUpdate.Builder update = PartitionUpdate.builder(TableEstimates, UTF8Type.instance.decompose(keyspace), TableEstimates.regularAndStaticColumns(), estimates.size());
 
         // delete all previous values with a single range tombstone.
         update.add(new RangeTombstone(Slice.make(TableEstimates.comparator, table, type), new DeletionTime(timestamp - 1, nowInSec)));

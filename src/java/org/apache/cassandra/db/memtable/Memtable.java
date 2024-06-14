@@ -30,6 +30,7 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -144,6 +145,14 @@ public interface Memtable extends Comparable<Memtable>
         default TableMetrics.ReleasableMetric createMemtableMetrics(TableMetadataRef metadataRef)
         {
             return null;
+        }
+
+        /**
+         * Override this method to provide a custom partition update factory for more efficient merging of updates.
+         */
+        default PartitionUpdate.Factory partitionUpdateFactory()
+        {
+            return BTreePartitionUpdate.FACTORY;
         }
     }
 
