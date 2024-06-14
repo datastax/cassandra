@@ -22,8 +22,6 @@ import java.util.Collection;
 import java.util.Optional;
 import java.util.function.Function;
 
-import javax.annotation.Nullable;
-
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -41,10 +39,10 @@ public class CounterMutationCallback implements Runnable
 {
     private final Message<CounterMutation> requestMessage;
     private final InetAddressAndPort respondToAddress;
-    @Nullable private final RequestSensors sensors;
+    private final RequestSensors sensors;
     private int replicaCount = 0;
 
-    public CounterMutationCallback(Message<CounterMutation> requestMessage, InetAddressAndPort respondToAddress, @Nullable RequestSensors sensors)
+    public CounterMutationCallback(Message<CounterMutation> requestMessage, InetAddressAndPort respondToAddress, RequestSensors sensors)
     {
         this.requestMessage = requestMessage;
         this.respondToAddress = respondToAddress;
@@ -72,9 +70,6 @@ public class CounterMutationCallback implements Runnable
 
     private void addSensorsToResponse(Message.Builder<NoPayload> response, Mutation mutation, int replicaMultiplier)
     {
-        if (this.sensors == null)
-            return;
-
         int tables = mutation.getTableIds().size();
 
         // Add internode bytes sensors to the response after updating each per-table sensor with the current response

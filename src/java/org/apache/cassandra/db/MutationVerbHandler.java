@@ -37,7 +37,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestSensorsFactory;
-import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
@@ -59,9 +58,6 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
     private void addSensorsToResponse(Message.Builder<NoPayload> response, RequestSensors sensors, Mutation mutation)
     {
-        if (sensors == null)
-            return;
-
         int tables = mutation.getTableIds().size();
 
         // Add write bytes sensors to the response
@@ -129,20 +125,17 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         try
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName()).orElse(null);
-            if (sensors != null)
-            {
-                ExecutorLocals locals = ExecutorLocals.create(sensors);
-                ExecutorLocals.set(locals);
+            RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
+            ExecutorLocals locals = ExecutorLocals.create(sensors);
+            ExecutorLocals.set(locals);
 
-                // Initialize internode bytes with the inbound message size:
-                Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
-                for (TableMetadata tm : tables)
-                {
-                    Context context = Context.from(tm);
-                    sensors.registerSensor(context, Type.INTERNODE_BYTES);
-                    sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
-                }
+            // Initialize internode bytes with the inbound message size:
+            Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
+            for (TableMetadata tm : tables)
+            {
+                Context context = Context.from(tm);
+                sensors.registerSensor(context, Type.INTERNODE_BYTES);
+                sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
             }
 
             message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(message, sensors, respondToAddress)).exceptionally(wto -> {

@@ -49,20 +49,17 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         logger.trace("Applying forwarded {}", cm);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName()).orElse(null);
-        if (sensors != null)
-        {
-            Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
-            ExecutorLocals locals = ExecutorLocals.create(sensors);
-            ExecutorLocals.set(locals);
+        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
+        Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
 
-            // Initialize internode bytes with the inbound message size:
-            for (TableMetadata tm : tables)
-            {
-                Context context = Context.from(tm);
-                sensors.registerSensor(context, Type.INTERNODE_BYTES);
-                sensors.incrementSensor(context, Type.INTERNODE_BYTES, (double) message.payloadSize(MessagingService.current_version) / tables.size());
-            }
+        // Initialize internode bytes with the inbound message size:
+        for (TableMetadata tm : tables)
+        {
+            Context context = Context.from(tm);
+            sensors.registerSensor(context, Type.INTERNODE_BYTES);
+            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
         }
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();

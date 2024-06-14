@@ -19,21 +19,44 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Optional;
+import java.util.Set;
 
-import org.junit.Test;
+import com.google.common.collect.ImmutableSet;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-
-public class RequestSensorsFactoryTest
+/**
+ * No-op implementation of {@link RequestSensors}. This is used when sensors are disabled.
+ */
+public class NoOpRequestSensors implements RequestSensors
 {
-    @Test
-    public void testCreate()
+    public static final NoOpRequestSensors instance = new NoOpRequestSensors();
+
+    @Override
+    public void registerSensor(Context context, Type type)
     {
-        RequestSensorsFactory factory = new RequestSensorsFactory() {};
-        RequestSensors sensors = factory.create("ks1");
-        assertThat(sensors).isInstanceOf(NoOpRequestSensors.class);
-        RequestSensors anotherSensors = factory.create("k2");
-        assertThat(anotherSensors).isSameAs(sensors);
+
+    }
+
+    @Override
+    public Optional<Sensor> getSensor(Context context, Type type)
+    {
+        return Optional.empty();
+    }
+
+    @Override
+    public Set<Sensor> getSensors(Type type)
+    {
+        return ImmutableSet.of();
+    }
+
+    @Override
+    public void incrementSensor(Context context, Type type, double value)
+    {
+
+    }
+
+    @Override
+    public void syncAllSensors()
+    {
+
     }
 }

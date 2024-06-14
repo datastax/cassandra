@@ -41,17 +41,14 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
     public void doVerb(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.update.metadata().keyspace).orElse(null);
-        Context context = null;
-        if (sensors != null)
-        {
-            context = Context.from(message.payload.update.metadata());
-            // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor
-            sensors.registerSensor(context, Type.READ_BYTES);
-            sensors.registerSensor(context, Type.WRITE_BYTES);
-            ExecutorLocals locals = ExecutorLocals.create(sensors);
-            ExecutorLocals.set(locals);
-        }
+        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.update.metadata().keyspace);
+        Context context = Context.from(message.payload.update.metadata());
+
+        // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
 
         Message.Builder<Boolean> reply = message.responseWithBuilder(doPropose(message.payload));
         SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);

@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.sensors;
 
-import java.util.Optional;
-
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -28,7 +26,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.REQUEST_SE
 /**
  * Provides a customizable factory to create a {@link RequestSensors} to track sensors per user request.
  */
-
 public interface RequestSensorsFactory
 {
     RequestSensorsFactory instance = REQUEST_SENSORS_FACTORY.getString() == null ?
@@ -36,13 +33,13 @@ public interface RequestSensorsFactory
                                    FBUtilities.construct(CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.getString(), "requests sensors factory");
 
     /**
-     * Creates a {@link RequestSensors} for the given keyspace. Implementation of this methods should be very efficient because this method is potentially on each vern handler serving a user request.
+     * Creates a {@link RequestSensors} for the given keyspace. Implementations should be very efficient because this method is potentially invoked on each verb handler serving a user request.
      *
      * @param keyspace the keyspace of the request
-     * @return a {@link RequestSensors} instance or an empty optional if no sensors should be tracked for the given keyspace
+     * @return a {@link RequestSensors} instance. The default implementation returns a singleton no-op instance.
      */
-    default Optional<RequestSensors> create(String keyspace)
+    default RequestSensors create(String keyspace)
     {
-        return Optional.empty();
+        return NoOpRequestSensors.instance;
     }
 }

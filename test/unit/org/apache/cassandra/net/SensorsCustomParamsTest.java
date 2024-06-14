@@ -31,6 +31,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.DefaultRequestSensors;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
@@ -156,7 +157,7 @@ public class SensorsCustomParamsTest
 
     private void testAddSensorToResponse(Type sensorType, Function<Context, String> requestParamSupplier, Function<Context, String> tableParamSupplier)
     {
-        RequestSensors sensors = new RequestSensors();
+        RequestSensors sensors = DefaultRequestSensors.create();
         UUID tableId = UUID.randomUUID();
         KeyspaceMetadata ksm = KeyspaceMetadata.create("ks1", null);
         TableMetadata tm = TableMetadata.builder("ks1", "t1", TableId.fromString(tableId.toString()))

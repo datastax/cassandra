@@ -40,15 +40,11 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
     public void doVerb(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.update.metadata().keyspace).orElse(null);
-        Context context = null;
-        if (sensors != null)
-        {
-            context = Context.from(message.payload.update.metadata());
-            sensors.registerSensor(context, Type.WRITE_BYTES);
-            ExecutorLocals locals = ExecutorLocals.create(sensors);
-            ExecutorLocals.set(locals);
-        }
+        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.update.metadata().keyspace);
+        Context context = Context.from(message.payload.update.metadata());
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
 
         PaxosState.commit(message.payload, p -> MutatorProvider.getCustomOrDefault().onAppliedProposal(p));
 

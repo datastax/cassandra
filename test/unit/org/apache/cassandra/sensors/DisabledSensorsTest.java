@@ -112,7 +112,7 @@ public class DisabledSensorsTest
     }
 
     @Test
-    public void testSensorsForReadVerbHandlerDisabled()
+    public void testSensorsForReadVerbHandler()
     {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
 
@@ -129,7 +129,7 @@ public class DisabledSensorsTest
     }
 
     @Test
-    public void testSensorsForMutationVerbHandlerDisabled()
+    public void testSensorsForMutationVerbHandler()
     {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
 
@@ -142,7 +142,7 @@ public class DisabledSensorsTest
     }
 
     @Test
-    public void testSensorsForMutationVerbHandlerWithSAIDisabled()
+    public void testSensorsForMutationVerbHandlerWithSAI()
     {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
         Mutation saiMutation = new RowUpdateBuilder(store.metadata(), 0, "0")
@@ -153,7 +153,7 @@ public class DisabledSensorsTest
     }
 
     @Test
-    public void testSensorsForCounterMutationVerbHandlerDisabled() throws WriteTimeoutException
+    public void testSensorsForCounterMutationVerbHandler() throws WriteTimeoutException
     {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_COUTNER);
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER);
@@ -170,7 +170,7 @@ public class DisabledSensorsTest
     }
 
     @Test
-    public void testLWTSensorsDisabled() {
+    public void testLWTSensors() {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
                                  .add("val", "0")
@@ -215,7 +215,7 @@ public class DisabledSensorsTest
 
     private static void assertSensorsAreNotTracked()
     {
-        assertThat(RequestTracker.instance.get()).isNull();
+        assertThat(RequestTracker.instance.get()).isInstanceOf(NoOpRequestSensors.class);
         for (Type type : Type.values())
         {
             assertThat(SensorsRegistry.instance.getSensorsByType(type)).isEmpty();

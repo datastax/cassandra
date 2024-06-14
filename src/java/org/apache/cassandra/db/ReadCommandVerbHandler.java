@@ -60,19 +60,16 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         validateTransientStatus(message);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = RequestSensorsFactory.instance.create(command.metadata().keyspace).orElse(null);
-        Context context = null;
-        if (sensors != null)
-        {
-            context = Context.from(command);
-            sensors.registerSensor(context, Type.READ_BYTES);
-            ExecutorLocals locals = ExecutorLocals.create(sensors);
-            ExecutorLocals.set(locals);
+        RequestSensors sensors = RequestSensorsFactory.instance.create(command.metadata().keyspace);
+        Context context = Context.from(command);
+        sensors.registerSensor(context, Type.READ_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
 
-            // Initialize internode bytes with the inbound message size:
-            sensors.registerSensor(context, Type.INTERNODE_BYTES);
-            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
-        }
+        // Initialize internode bytes with the inbound message size:
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
         command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
@@ -102,9 +99,6 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
     private void addInternodeSensorToResponse(Message.Builder<ReadResponse> reply, RequestSensors sensors, Context context)
     {
-        if (sensors == null)
-            return;
-
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
         sensors.syncAllSensors();
