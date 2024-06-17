@@ -54,9 +54,8 @@ import org.apache.cassandra.utils.concurrent.Timer;
  * </ul>
  * The returned sensors are global, meaning that their value spans across requests/responses, but cannot be modified either
  * directly or indirectly via this class (whose update methods are package protected). In order to modify a sensor value,
- * it must be registered to a request/response via {@link RequestSensors#registerSensor(Context, Type)} and incremented via
- * {@link RequestSensors#incrementSensor(Context, Type, double)}, then synced via {@link RequestSensors#syncAllSensors()}, which
- * will update the related global sensors.
+ * it must be registered to a request/response via {@link RequestSensors#registerSensor(Context, Type)} and incremented then synced via
+ * {@link RequestSensors#incrementThenSyncSensor(Context, Type, double)}.
  * <br/><br/>
  * Given sensors are tied to a context, that is to a given keyspace and table, their global instance will be deleted
  * if the related keyspace/table is dropped.
@@ -145,7 +144,7 @@ public class SensorsRegistry implements SchemaChangeListener
         }
     }
 
-    protected void incrementSensor(Context context, Type type, double value)
+    public void incrementSensor(Context context, Type type, double value)
     {
         getOrCreateSensor(context, type).ifPresent(s -> s.increment(value));
     }

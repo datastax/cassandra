@@ -60,7 +60,7 @@ public class TrackingRowIterator extends Transformation<UnfilteredRowIterator>
     {
         RequestSensors sensors = requestTracker.get();
         if (sensors != null && row.isRow())
-            sensors.incrementSensor(context, Type.READ_BYTES, row.dataSize());
+            sensors.incrementThenSyncSensor(context, Type.READ_BYTES, row.dataSize());
 
         return row;
     }
@@ -69,9 +69,5 @@ public class TrackingRowIterator extends Transformation<UnfilteredRowIterator>
     protected void onClose()
     {
         super.onClose();
-
-        RequestSensors sensors = requestTracker.get();
-        if (sensors != null)
-            sensors.syncAllSensors();
     }
 }

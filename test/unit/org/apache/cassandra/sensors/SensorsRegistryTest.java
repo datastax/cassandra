@@ -215,7 +215,7 @@ public class SensorsRegistryTest
     }
 
     @Test
-    public void testUpdateAndSyncSensorViaRequestSensors()
+    public void testIncrementThenSyncSensorViaRequestSensors()
     {
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
@@ -223,15 +223,12 @@ public class SensorsRegistryTest
         RequestSensors requestSensors = new RequestSensors(() -> SensorsRegistry.instance);
         requestSensors.registerSensor(context1, type1);
 
-        requestSensors.incrementSensor(context1, type1, 1.0);
-        requestSensors.syncAllSensors();
+        requestSensors.incrementThenSyncSensor(context1, type1, 1.0);
         assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
 
-        requestSensors.incrementSensor(context1, type1, 1.0);
-        requestSensors.syncAllSensors();
+        requestSensors.incrementThenSyncSensor(context1, type1, 1.0);
         assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(2.0));
 
-        requestSensors.syncAllSensors();
         assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(2.0));
     }
 }

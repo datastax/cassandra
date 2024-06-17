@@ -19,9 +19,9 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.DoubleAdder;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.AtomicDouble;
 
 /**
  * Tracks the {@link #value} for a given measurement of a given {@link Type} and {@link Context}, during any
@@ -31,7 +31,7 @@ import com.google.common.util.concurrent.AtomicDouble;
  * and values are managed by the {@link RequestSensors} and {@link SensorsRegistry} classes, more specifically:
  * <ul>
  *     <li>In order to track a given measurement for a given request/response, register a sensor of the related type via
- *     {@link RequestSensors#registerSensor(Type)}.</li>
+ *     {@link RequestSensors#registerSensor(Context, Type)} (Type)}.</li>
  *     <li>Once registered, the sensor lifecycle spans across multiple request/response cycles, and its "global"
  *     value can be accessed via {@link SensorsRegistry}.</li>
  * </ul>
@@ -40,18 +40,18 @@ public class Sensor
 {
     private final Context context;
     private final Type type;
-    private final AtomicDouble value;
+    private final DoubleAdder value; // Compared to AtomicDouble, DoubleAdder is more efficient for concurrent updates
 
     protected Sensor(Context context, Type type)
     {
         this.context = context;
         this.type = type;
-        this.value = new AtomicDouble();
+        this.value = new DoubleAdder();
     }
 
     protected void increment(double value)
     {
-        this.value.addAndGet(value);
+        this.value.add(value);
     }
 
     public Context getContext()
@@ -72,7 +72,7 @@ public class Sensor
     @VisibleForTesting
     public void reset()
     {
-        value.set(0);
+        value.reset();
     }
 
     @Override

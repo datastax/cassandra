@@ -57,8 +57,6 @@ import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-import static java.util.function.Function.identity;
-
 public class TrieMemtableIndex implements MemtableIndex
 {
     private final ShardBoundaries boundaries;
@@ -163,13 +161,13 @@ public class TrieMemtableIndex implements MemtableIndex
                                                              memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
                                                              estimatedOnHeapMemoryUsed.add(allocatedBytes);
                                                              if (sensors != null)
-                                                                 sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
+                                                                 sensors.incrementThenSyncSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
                                                          },
                                                          allocatedBytes -> {
                                                              memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
                                                              estimatedOffHeapMemoryUsed.add(allocatedBytes);
                                                              if (sensors != null)
-                                                                 sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
+                                                                 sensors.incrementThenSyncSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
                                                          });
         writeCount.increment();
     }

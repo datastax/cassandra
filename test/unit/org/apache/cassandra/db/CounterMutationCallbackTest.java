@@ -136,8 +136,7 @@ public class CounterMutationCallbackTest
         Context context = Context.from(Keyspace.open(KEYSPACE1).getMetadata().tables.get(CF_COUTNER).get());
         requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
-        requestSensors.incrementSensor(context, Type.WRITE_BYTES, COUNTER_MUTATION_BYTES); // mimic a counter mutation of size 56 bytes on the leader node
-        requestSensors.syncAllSensors();
+        requestSensors.incrementThenSyncSensor(context, Type.WRITE_BYTES, COUNTER_MUTATION_BYTES); // mimic a counter mutation of size 56 bytes on the leader node
         CounterMutationCallback callback = new CounterMutationCallback(msg, FBUtilities.getLocalAddressAndPort());
         Integer replicaCount = replicaCountAndExpectedSensorValue.left;
         callback.setReplicaCount(replicaCount);

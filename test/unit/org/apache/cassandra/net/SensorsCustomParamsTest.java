@@ -167,8 +167,7 @@ public class SensorsCustomParamsTest
 
         Context context = new Context("ks1", "t1", tableId.toString());
         sensors.registerSensor(context, sensorType);
-        sensors.incrementSensor(context, sensorType, 17.0);
-        sensors.syncAllSensors();
+        sensors.incrementThenSyncSensor(context, sensorType, 17.0);
 
         Message.Builder<NoPayload> builder =
         Message.builder(Verb._TEST_1, noPayload)
