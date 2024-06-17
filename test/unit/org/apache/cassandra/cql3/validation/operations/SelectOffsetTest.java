@@ -16,6 +16,7 @@
 package org.apache.cassandra.cql3.validation.operations;
 
 import java.util.Arrays;
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 import org.junit.Assert;
@@ -325,13 +326,13 @@ public class SelectOffsetTest extends CQLTester
         {
             for (int offset = 0; offset <= rows.length + 1; offset++)
             {
-                testLimitAndOffset(select, offset, limit, rows);
+                testLimitAndOffset(select, limit, offset, rows);
             }
-            testLimitAndOffset(select, null, limit, rows);
+            testLimitAndOffset(select, limit, null, rows);
         }
     }
 
-    private void testLimitAndOffset(String query, Integer offset, int limit, Object[]... rows) throws Throwable
+    private void testLimitAndOffset(String query, int limit, @Nullable Integer offset, Object[]... rows) throws Throwable
     {
         // append the specified limit and offset to the unrestricted query
         StringBuilder sb = new StringBuilder(query);
@@ -339,20 +340,20 @@ public class SelectOffsetTest extends CQLTester
         if (offset != null)
             sb.append(" OFFSET ").append(offset);
         sb.append(" ALLOW FILTERING");
-        query = sb.toString();
+        String queryWithLimitAndOffset = sb.toString();
 
         // trim the unrestricted query results according to the specified limit and offset
-        rows = trimRows(offset, limit, rows);
+        rows = trimRows(limit, offset, rows);
 
         // test without paging
-        assertRows(execute(query), rows);
+        assertRows(execute(queryWithLimitAndOffset), rows);
 
         // test with paging
         int numRows = rows.length;
         for (int pageSize : ImmutableSet.of(Integer.MAX_VALUE, numRows + 1, numRows, numRows - 1, 1))
         {
             logger.debug("Executing test query with page size {}: {}", pageSize, query);
-            ResultSet rs = executeNetWithPaging(query, pageSize);
+            ResultSet rs = executeNetWithPaging(queryWithLimitAndOffset, pageSize);
 
             // key-based paging should be disabled when limit/offset paging is used
             if (offset != null && offset > 0)
@@ -363,9 +364,21 @@ public class SelectOffsetTest extends CQLTester
 
             assertRowsNet(rs, rows);
         }
+
+        // test with bind markers
+        sb = new StringBuilder(query);
+        sb.append(" LIMIT ?");
+        if (offset != null)
+            sb.append(" OFFSET ?");
+        sb.append(" ALLOW FILTERING");
+        String queryWithBindMarkers = sb.toString();
+        assertRows(offset == null
+                   ? execute(queryWithBindMarkers, limit)
+                   : execute(queryWithBindMarkers, limit, offset),
+                   rows);
     }
 
-    private static Object[][] trimRows(Integer offset, Integer limit, Object[]... rows)
+    private static Object[][] trimRows(Integer limit, @Nullable Integer offset, Object[]... rows)
     {
         offset = offset == null ? 0 : offset;
         limit = limit == null ? rows.length : limit;
