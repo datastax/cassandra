@@ -48,8 +48,6 @@ public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
     private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Sensor, Double> latestSyncedValuePerSensor = new ConcurrentHashMap<>();
-    private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
 
     public RequestSensors()
     {
@@ -78,36 +76,18 @@ public class RequestSensors
 
     public void incrementSensor(Context context, Type type, double value)
     {
-        updateLock.readLock().lock();
-        try
-        {
-            Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
-        }
-        finally
-        {
-            updateLock.readLock().unlock();
-        }
+        Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
     }
 
     public void syncAllSensors()
     {
-        updateLock.writeLock().lock();
-        try
-        {
-            sensors.values().forEach(sensor -> {
-                double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
-                double update = sensor.getValue() - current;
-                if (update == 0d)
-                    return;
+        sensors.values().forEach(sensor -> {
+            double update = sensor.getAndResetValueToSync();
+            if (update == 0d)
+                return;
 
-                latestSyncedValuePerSensor.put(sensor, sensor.getValue());
-                sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
-            });
-        }
-        finally
-        {
-            updateLock.writeLock().unlock();
-        }
+            sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
+        });
     }
 
     @Override
