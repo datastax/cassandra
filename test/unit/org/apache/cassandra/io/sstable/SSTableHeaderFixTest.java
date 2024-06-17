@@ -435,14 +435,14 @@ public class SSTableHeaderFixTest
                                     true),
                         // 'frozen<udt>' / dropped
                         new ColSpec("frozen_udt_as_frozen_udt_dropped",
-                                    makeUDT2("frozen_udt_as_frozen_udt_dropped", true).freezeNestedMulticellTypes().freeze().expandUserTypes(),
+                                    makeUDT2("frozen_udt_as_frozen_udt_dropped", true).freeze().expandUserTypes(),
                                     makeUDT2("frozen_udt_as_frozen_udt_dropped", false),
                                     makeUDT2("frozen_udt_as_frozen_udt_dropped", false),
                                     true,
                                     false),
                         // 'frozen<udt>' / dropped / as 'udt'
                         new ColSpec("frozen_udt_as_unfrozen_udt_dropped",
-                                    makeUDT2("frozen_udt_as_unfrozen_udt_dropped", true).freezeNestedMulticellTypes().freeze().expandUserTypes(),
+                                    makeUDT2("frozen_udt_as_unfrozen_udt_dropped", true).freeze().expandUserTypes(),
                                     makeUDT2("frozen_udt_as_unfrozen_udt_dropped", true),
                                     makeUDT2("frozen_udt_as_unfrozen_udt_dropped", false),
                                     true,
