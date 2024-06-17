@@ -19,6 +19,7 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.DoubleAdder;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.AtomicDouble;
@@ -42,16 +43,23 @@ public class Sensor
     private final Type type;
     private final AtomicDouble value;
 
+    /**
+     * Keeps track of the value to sync to the {@link SensorsRegistry} at the end of the request/response cycle for performance optimization reasons.
+     */
+    private final AtomicDouble valueToSync;
+
     protected Sensor(Context context, Type type)
     {
         this.context = context;
         this.type = type;
         this.value = new AtomicDouble();
+        this.valueToSync = new AtomicDouble();
     }
 
     protected void increment(double value)
     {
         this.value.addAndGet(value);
+        this.valueToSync.addAndGet(value);
     }
 
     public Context getContext()
@@ -67,6 +75,15 @@ public class Sensor
     public double getValue()
     {
         return value.doubleValue();
+    }
+
+    /**
+     * Returns the value to sync to the {@link SensorsRegistry} and resets it to 0. Note that sensor values that result
+     * from concurrent calls to {@link Sensor#increment(double)} might not be incorporated in the returned value to sync.
+     */
+    public double getAndResetValueToSync()
+    {
+        return valueToSync.getAndSet(0);
     }
 
     @VisibleForTesting
