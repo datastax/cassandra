@@ -53,32 +53,15 @@ public class DefaultRequestSensors implements RequestSensors
     private final ConcurrentMap<Sensor, Double> latestSyncedValuePerSensor = new ConcurrentHashMap<>();
     private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
 
-    private DefaultRequestSensors()
+    DefaultRequestSensors()
     {
         this(() -> SensorsRegistry.instance);
     }
 
-    private DefaultRequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
+    @VisibleForTesting
+    DefaultRequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
     {
         this.sensorsRegistry = sensorsRegistry;
-    }
-
-    /**
-     * Create a new {@link RequestSensors} instance. This is the main entry point to create and modify sensors and
-     * should be only be called by implementations of {@link RequestSensorsFactory} to ensure request
-     * sensors are consistently enabled/disabled across the board.
-     *
-     * @return a new {@link RequestSensors} instance
-     */
-    public static RequestSensors create()
-    {
-        return new DefaultRequestSensors();
-    }
-
-    @VisibleForTesting
-    static RequestSensors create(SensorsRegistry sensorsRegistry)
-    {
-        return new DefaultRequestSensors(() -> sensorsRegistry);
     }
 
     public void registerSensor(Context context, Type type)

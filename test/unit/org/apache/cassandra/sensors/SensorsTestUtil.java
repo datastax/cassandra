@@ -32,21 +32,9 @@ import org.apache.cassandra.net.MessagingService;
 public final class SensorsTestUtil
 {
     /**
-     * Returns request sensors for all keyspaces
-     */
-    public static class AllKeyspacesRequestSensorsFactory implements RequestSensorsFactory
-    {
-        @Override
-        public RequestSensors create(String ignored)
-        {
-            return DefaultRequestSensors.create();
-        }
-    }
-
-    /**
      * Returns the default implementation of the {@link RequestSensorsFactory}
      */
-    public static class DefaultRequestSensorsFactory implements RequestSensorsFactory
+    public static class NoOpRequestSensorsFactory implements RequestSensorsFactory
     {
     }
     

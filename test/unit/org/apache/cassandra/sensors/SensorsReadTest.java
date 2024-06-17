@@ -75,7 +75,7 @@ public class SensorsReadTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
-        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(SensorsTestUtil.AllKeyspacesRequestSensorsFactory.class.getName());
+        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(DefaultRequestSensorsFactory.class.getName());
 
         // build SAI indexes
         Indexes.Builder saiIndexes = Indexes.builder();

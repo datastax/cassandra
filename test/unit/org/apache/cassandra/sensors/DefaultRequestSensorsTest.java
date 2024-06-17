@@ -51,9 +51,9 @@ public class DefaultRequestSensorsTest
         context2 = new Context("ks2", "t2", "id2");
         type2 = Type.WRITE_BYTES;
 
-        context1Sensors = DefaultRequestSensors.create(sensorsRegistry);
-        context2Sensors = DefaultRequestSensors.create(sensorsRegistry);
-        sensors = DefaultRequestSensors.create(sensorsRegistry);
+        context1Sensors = new DefaultRequestSensors(() -> sensorsRegistry);
+        context2Sensors = new DefaultRequestSensors(() -> sensorsRegistry);
+        sensors = new DefaultRequestSensors(() -> sensorsRegistry);
     }
 
     @Test
