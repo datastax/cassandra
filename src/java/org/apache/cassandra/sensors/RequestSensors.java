@@ -32,7 +32,8 @@ import java.util.stream.Collectors;
 import org.apache.cassandra.utils.Pair;
 
 /**
- * Interface to manage sensors associated to a given request/response and related {@link Context}.
+ * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
+ * point to create and modify sensors. Actual implementations can be created via {@link RequestSensorsFactory}.
  */
 public interface RequestSensors
 {

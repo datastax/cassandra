@@ -141,6 +141,7 @@ public final class SensorsCustomParams
      */
     public static <T> void addWriteSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
     {
+        Preconditions.checkNotNull(response);
         Preconditions.checkNotNull(sensors);
         Preconditions.checkNotNull(context);
 
@@ -154,6 +155,7 @@ public final class SensorsCustomParams
      */
     public static <T> void addReadSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
     {
+        Preconditions.checkNotNull(response);
         Preconditions.checkNotNull(sensors);
         Preconditions.checkNotNull(context);
 
