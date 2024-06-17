@@ -195,7 +195,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // not restricted
             if (RangeUtil.coversFullRing(keyRange))
-                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
+                return graph.search(queryVector, rerankK, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
@@ -211,7 +211,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             // if it covers entire segment, skip bit set
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
-                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
+                return graph.search(queryVector, rerankK, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
 
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
@@ -257,7 +257,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             if (cardinality == 0)
                 return CloseableIterator.emptyIterator();
 
-            return graph.search(queryVector, limit, rerankK, threshold, bits, context, visited -> {
+            return graph.search(queryVector, rerankK, rerankK, threshold, bits, context, visited -> {
                 betterCostEstimate.updateStatistics(visited);
                 context.addAnnNodesVisited(visited);
             });
@@ -503,7 +503,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
         // else ask the index to perform a search limited to the bits we created
         var queryVector = vts.createFloatVector(exp.lower.value.vector);
-        var results = graph.search(queryVector, limit, rerankK, 0, bits, context, cost::updateStatistics);
+        var results = graph.search(queryVector, rerankK, rerankK, 0, bits, context, cost::updateStatistics);
         return toScoreOrderedIterator(results, context);
     }
 

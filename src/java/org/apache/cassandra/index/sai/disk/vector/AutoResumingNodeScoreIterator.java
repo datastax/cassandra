@@ -74,7 +74,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         if (nodeScores.hasNext())
             return nodeScores.next();
 
-        var nextResult = searcher.resume(limit, rerankK);
+        var nextResult = searcher.resume(rerankK, rerankK);
         maybeLogTrace(nextResult);
         cumulativeNodesVisited += nextResult.getVisitedCount();
         // If the next result is empty, we are done searching.
