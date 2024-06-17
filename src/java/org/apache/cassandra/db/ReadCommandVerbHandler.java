@@ -72,7 +72,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         // Initialize internode bytes with the inbound message size:
         tables.forEach(tm -> {
             requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+            requestSensors.incrementThenSyncSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
         });
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
@@ -94,8 +94,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
         int size = reply.currentPayloadSize(MessagingService.current_version);
-        RequestTracker.instance.get().incrementSensor(context, Type.INTERNODE_BYTES, size);
-        RequestTracker.instance.get().syncAllSensors();
+        RequestTracker.instance.get().incrementThenSyncSensor(context, Type.INTERNODE_BYTES, size);
 
         addInternodeSensorToResponse(reply, context);
         SensorsCustomParams.addReadSensorToResponse(reply, requestSensors, context);

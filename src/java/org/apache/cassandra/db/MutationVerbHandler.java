@@ -76,8 +76,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         // message size: this is missing the sensor values, but it's a good enough approximation
         int perSensorSize = response.currentPayloadSize(MessagingService.current_version) / tables;
         requestSensors = RequestTracker.instance.get().getSensors(Type.INTERNODE_BYTES);
-        requestSensors.forEach(sensor -> RequestTracker.instance.get().incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
-        RequestTracker.instance.get().syncAllSensors();
+        requestSensors.forEach(sensor -> RequestTracker.instance.get().incrementThenSyncSensor(sensor.getContext(), sensor.getType(), perSensorSize));
         requestParam = SensorsCustomParams::encodeTableInInternodeBytesRequestParam;
         tableParam = SensorsCustomParams::encodeTableInInternodeBytesTableParam;
         addSensorsToResponse(requestSensors, requestParam, tableParam, response);
@@ -134,7 +133,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             tables.forEach(tm -> {
                 Context context = Context.from(tm);
                 requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-                requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+                requestSensors.incrementThenSyncSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
             });
 
             message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(message, respondToAddress)).exceptionally(wto -> {

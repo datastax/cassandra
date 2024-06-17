@@ -241,20 +241,12 @@ public class Mutation implements IMutation
     public CompletableFuture<?> applyFuture(WriteOptions writeOptions)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
-        return ks.applyFuture(this, writeOptions, true).thenRun(() -> {
-            RequestSensors sensors = requestTracker.get();
-            if (sensors != null)
-                sensors.syncAllSensors();
-        });
+        return ks.applyFuture(this, writeOptions, true);
     }
 
     public void apply(WriteOptions writeOptions)
     {
         Keyspace.open(keyspaceName).apply(this, writeOptions);
-
-        RequestSensors sensors = requestTracker.get();
-        if (sensors != null)
-            sensors.syncAllSensors();
     }
 
     /*

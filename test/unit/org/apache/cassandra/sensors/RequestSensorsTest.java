@@ -116,48 +116,23 @@ public class RequestSensorsTest
     }
 
     @Test
-    public void testIncrement()
+    public void testIncrementThenSync()
     {
         context1Sensors.registerSensor(context1, type1);
-        context1Sensors.incrementSensor(context1, type1, 1.0);
+        context1Sensors.incrementThenSyncSensor(context1, type1, 1.0);
         assertThat(context1Sensors.getSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
     }
 
     @Test
     public void testIncrementWithMultipleContexts()
     {
         sensors.registerSensor(context1, type1);
-        sensors.incrementSensor(context1, type1, 1.0);
+        sensors.incrementThenSyncSensor(context1, type1, 1.0);
         sensors.registerSensor(context2, type1);
-        sensors.incrementSensor(context2, type1, 2.0);
+        sensors.incrementThenSyncSensor(context2, type1, 2.0);
         assertThat(sensors.getSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
         assertThat(sensors.getSensor(context2, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(2.0));
-    }
-
-    @Test
-    public void testSyncAll()
-    {
-        context1Sensors.registerSensor(context1, type1);
-        context1Sensors.registerSensor(context1, type2);
-
-        context1Sensors.incrementSensor(context1, type1, 1.0);
-        context1Sensors.incrementSensor(context1, type2, 1.0);
-
-        context1Sensors.syncAllSensors();
-        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
-        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type2), eq(1.0));
-
-        // Syncing again doesn't update the sensor
-        context1Sensors.syncAllSensors();
-        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
-        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type2), eq(1.0));
-
-        // Unless updated:
-        context1Sensors.incrementSensor(context1, type1, 1.0);
-        context1Sensors.incrementSensor(context1, type2, 1.0);
-        context1Sensors.syncAllSensors();
-        verify(sensorsRegistry, times(2)).incrementSensor(eq(context1), eq(type1), eq(1.0));
-        verify(sensorsRegistry, times(2)).incrementSensor(eq(context1), eq(type2), eq(1.0));
     }
 
     @Test
@@ -168,12 +143,11 @@ public class RequestSensorsTest
         sensors.registerSensor(context2, type1);
         sensors.registerSensor(context2, type2);
 
-        sensors.incrementSensor(context1, type1, 1.0);
-        sensors.incrementSensor(context1, type2, 1.0);
-        sensors.incrementSensor(context2, type1, 1.0);
-        sensors.incrementSensor(context2, type2, 1.0);
+        sensors.incrementThenSyncSensor(context1, type1, 1.0);
+        sensors.incrementThenSyncSensor(context1, type2, 1.0);
+        sensors.incrementThenSyncSensor(context2, type1, 1.0);
+        sensors.incrementThenSyncSensor(context2, type2, 1.0);
 
-        sensors.syncAllSensors();
         verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
         verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type2), eq(1.0));
         verify(sensorsRegistry, times(1)).incrementSensor(eq(context2), eq(type1), eq(1.0));

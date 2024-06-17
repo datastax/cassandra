@@ -35,21 +35,17 @@ import org.apache.cassandra.utils.Pair;
  * point to create and modify sensors. More specifically:
  * <ul>
  *     <li>Create a new sensor associated to the request/response via {@link #registerSensor(Context, Type)}.</li>
- *     <li>Increment the sensor value for the request/response via {@link #incrementSensor(Context, Type, double)}.</li>
- *     <li>Sync this request/response sensor value to the {@link SensorsRegistry} via {@link #syncAllSensors()}.</li>
+ *     <li>Increment the sensor value for the request/response and sync it to {@link SensorsRegistry} via {@link #incrementThenSyncSensor(Context, Type, double)}.</li>
  * </ul>
  * Sensor values related to a given request/response are isolated from other sensors, and the "same" sensor
- * (for a given context and type) registered to different requests/responses will have a different value: in other words,
- * there is no automatic synchronization or coordination across sensor values belonging to different
- * {@link RequestSensors} objects, hence {@link #syncAllSensors()} MUST be invoked to propagate the sensors values
- * at a global level to the {@link SensorsRegistry}.
+ * (for a given context and type) registered to different requests/responses will have a different value. However,
+ * the sensor values are automatically propagated to the global {@link SensorsRegistry} via {@link #incrementThenSyncSensor(Context, Type, double)}.
+ * to alleviate the overhead of synchronization at the global to the {@link SensorsRegistry} in a separate call.
  */
 public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
     private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Sensor, Double> latestSyncedValuePerSensor = new ConcurrentHashMap<>();
-    private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
 
     public RequestSensors()
     {
@@ -76,38 +72,13 @@ public class RequestSensors
         return sensors.values().stream().filter(s -> s.getType() == type).collect(Collectors.toSet());
     }
 
-    public void incrementSensor(Context context, Type type, double value)
+    public void incrementThenSyncSensor(Context context, Type type, double value)
     {
-        updateLock.readLock().lock();
-        try
-        {
-            Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
-        }
-        finally
-        {
-            updateLock.readLock().unlock();
-        }
-    }
-
-    public void syncAllSensors()
-    {
-        updateLock.writeLock().lock();
-        try
-        {
-            sensors.values().forEach(sensor -> {
-                double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
-                double update = sensor.getValue() - current;
-                if (update == 0d)
-                    return;
-
-                latestSyncedValuePerSensor.put(sensor, sensor.getValue());
-                sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
-            });
-        }
-        finally
-        {
-            updateLock.writeLock().unlock();
-        }
+        Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> {
+            s.increment(value);
+            // automatically sync the sensor value to the global registry
+            sensorsRegistry.get().incrementSensor(s.getContext(), s.getType(), value);
+        });
     }
 
     @Override

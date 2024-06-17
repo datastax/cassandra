@@ -695,8 +695,7 @@ public final class SystemKeyspace
         RequestSensors sensors = RequestTracker.instance.get();
         if (sensors != null)
             sensors.getSensor(PaxosContext, type).ifPresent(paxosSensor -> {
-                sensors.incrementSensor(Context.from(targetSensorMetadata), type, paxosSensor.getValue());
-                sensors.syncAllSensors();
+                sensors.incrementThenSyncSensor(Context.from(targetSensorMetadata), type, paxosSensor.getValue());
             });
     }
 

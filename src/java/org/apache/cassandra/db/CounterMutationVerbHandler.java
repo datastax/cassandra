@@ -57,7 +57,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         tables.forEach(tm -> {
             Context context = Context.from(tm);
             requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+            requestSensors.incrementThenSyncSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
         });
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();

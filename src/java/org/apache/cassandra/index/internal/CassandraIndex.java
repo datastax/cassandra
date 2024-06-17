@@ -452,7 +452,7 @@ public abstract class CassandraIndex implements Index
                 {
                     sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
                     // estimate the size of the index entry as the data size of the cell before indexing
-                    sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, cell.dataSize());
+                    sensors.incrementThenSyncSensor(sensorContext, Type.INDEX_WRITE_BYTES, cell.dataSize());
                 }
             }
 
