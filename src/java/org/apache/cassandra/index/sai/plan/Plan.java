@@ -31,6 +31,9 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -103,6 +106,8 @@ import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
  */
 abstract public class Plan
 {
+    private static final Logger logger = LoggerFactory.getLogger(Plan.class);
+
     /**
      * Identifier of the plan tree node.
      * Used to identify the nodes of the plan.
@@ -274,6 +279,9 @@ abstract public class Plan
      */
     public final Plan optimize()
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Optimizing plan:\n{}", this.toStringRecursive());
+
         Plan bestPlanSoFar = this;
         List<Leaf> leaves = nodesOfType(Leaf.class);
 
@@ -282,9 +290,15 @@ abstract public class Plan
         for (Leaf leaf : leaves)
         {
             Plan candidate = bestPlanSoFar.remove(leaf.id);
+            if (logger.isTraceEnabled())
+                logger.trace("Candidate query plan:\n{}", candidate.toStringRecursive());
+
             if (candidate.fullCost() <= bestPlanSoFar.fullCost())
                 bestPlanSoFar = candidate;
         }
+
+        if (logger.isTraceEnabled())
+            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toStringRecursive());
         return bestPlanSoFar;
     }
 
