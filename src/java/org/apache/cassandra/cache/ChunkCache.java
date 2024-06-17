@@ -267,6 +267,7 @@ public class ChunkCache
     private Buffer load(Key key)
     {
         ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
+        logger.debug("Loading chunk at key position: {} for file path: {} size {}", key.position, key.file.channel().filePath(), key.file.chunkSize(), new Exception("here").fillInStackTrace());
         assert buffer != null;
         try
         {
