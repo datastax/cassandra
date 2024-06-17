@@ -17,6 +17,7 @@ package org.apache.cassandra.cql3.validation.operations;
 
 import java.util.Arrays;
 
+import com.google.common.collect.ImmutableSet;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -348,7 +349,7 @@ public class SelectOffsetTest extends CQLTester
 
         // test with paging
         int numRows = rows.length;
-        for (int pageSize : new int[]{ Integer.MAX_VALUE, numRows + 1, numRows, numRows - 1, 1 })
+        for (int pageSize : ImmutableSet.of(Integer.MAX_VALUE, numRows + 1, numRows, numRows - 1, 1))
         {
             logger.debug("Executing test query with page size {}: {}", pageSize, query);
             ResultSet rs = executeNetWithPaging(query, pageSize);
