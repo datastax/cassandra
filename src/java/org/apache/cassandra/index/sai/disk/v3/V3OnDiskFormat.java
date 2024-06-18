@@ -41,7 +41,8 @@ import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
  */
 public class V3OnDiskFormat extends V2OnDiskFormat
 {
-    public static final boolean REDUCE_TOPK_ACROSS_SSTABLES = Boolean.parseBoolean(System.getProperty("cassandra.sai.reduce_topk_across_sstables", "true"));
+    // Default is set to false because it is not yet ready for production (see https://github.com/riptano/cndb/issues/9681)
+    public static final boolean REDUCE_TOPK_ACROSS_SSTABLES = Boolean.parseBoolean(System.getProperty("cassandra.sai.reduce_topk_across_sstables", "false"));
     public static final boolean ENABLE_RERANK_FLOOR = Boolean.parseBoolean(System.getProperty("cassandra.sai.rerank_floor", "true"));
     public static final boolean ENABLE_EDGES_CACHE = Boolean.parseBoolean(System.getProperty("cassandra.sai.enable_edges_cache", "false"));
 
