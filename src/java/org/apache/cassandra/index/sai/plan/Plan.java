@@ -1168,6 +1168,19 @@ abstract public class Plan
             this.targetSelectivity = targetSelectivity;
         }
 
+        /**
+         * Returns the probability of accepting a source row by this filter.
+         * In other words, it returns the expected ratio of the number of output rows to the number of input rows
+         * fed to this filter node. This value may be higher than the global {@link this#selectivity()} because it
+         * does not include any filtering that happened below this node.
+         */
+        public double relativeSelectivity()
+        {
+            return source.selectivity() != 0
+                   ? selectivity() / source.selectivity()
+                   : 0.0;
+        }
+
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
         {
@@ -1195,6 +1208,7 @@ abstract public class Plan
         {
             return filter.toString();
         }
+
     }
 
     /**
