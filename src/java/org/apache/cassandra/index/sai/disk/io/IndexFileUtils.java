@@ -36,6 +36,7 @@ import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -243,6 +244,53 @@ public class IndexFileUtils
                 while (count > 0) super.writeByte((int) (bytes >>> (8 * --count)));
             else
                 while (count > 0) super.writeByte((int) (bytes >>> (8 * (origCount - count--))));
+        }
+
+        @Override
+        public void writeMostSignificantBytes(long register, int bytes) throws IOException
+        {
+            super.writeMostSignificantBytes(register, bytes);
+            addMsbToChecksum(register, bytes);
+        }
+
+        /**
+         * Based on {@link DataOutputPlus#writeMostSignificantBytes(long, int)}
+         */
+        private void addMsbToChecksum(long register, int bytes)
+        {
+            long msbValue = 0;
+            switch (bytes)
+            {
+                case 0:
+                    break;
+                case 1:
+                    msbValue = (int) (register >>> 56);
+                    break;
+                case 2:
+                    msbValue = (int) (register >> 48);
+                    break;
+                case 3:
+                    msbValue = (int) (register >> 40);
+                    break;
+                case 4:
+                    msbValue = (int) (register >> 32);
+                    break;
+                case 5:
+                    msbValue = (int) (register >> 24);
+                    break;
+                case 6:
+                    msbValue = (int) (register >> 16);
+                    break;
+                case 7:
+                    msbValue = (int) (register >> 8);
+                    break;
+                case 8:
+                    msbValue = register;
+                    break;
+                default:
+                    throw new IllegalArgumentException();
+            }
+            addTochecksum(msbValue, bytes);
         }
 
         private void addTochecksum(long bytes, int count)
