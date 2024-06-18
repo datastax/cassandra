@@ -430,19 +430,19 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering)
+            public Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering)
+            public Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
         };
 
-        RangeIterator iterator = (RangeIterator) plan.execute(executor);
+        RangeIterator iterator = (RangeIterator) plan.execute(executor, Integer.MAX_VALUE);
         assertEquals(LongIterator.convert(1L, 2L, 100L), LongIterator.convert(iterator));
     }
 

@@ -545,7 +545,16 @@ abstract public class Plan
          */
         protected abstract double estimateCostPerSkip(double distance);
 
-        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor);
+        /**
+         * Executes the operation represented by this node.
+         * The node itself isn't supposed for doing the actual work, but rather serves as a director which
+         * delegates the work to the query controller through the passed Executor.
+         *
+         * @param executor  does all the hard work like fetching keys from the indexes or ANN sort
+         * @param softLimit the number of keys likely to be requested from the returned iterator;
+         *                  this is a hint only - it does not change the result set, but may change performance
+         */
+        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit);
 
 
         final double expectedKeys()
@@ -608,7 +617,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             return RangeIterator.empty();
         }
@@ -645,7 +654,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             // Not supported because it doesn't make a lot of sense.
             // A direct scan of table data would be certainly faster.
@@ -737,7 +746,7 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
             return executor.getKeysFromIndex(predicate);
         }
@@ -823,13 +832,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             RangeIterator.Builder builder = RangeUnionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplans)
-                    builder.add((RangeIterator) plan.execute(executor));
+                    builder.add((RangeIterator) plan.execute(executor, softLimit));
                 return builder.build();
             }
             catch (Throwable t)
@@ -936,13 +945,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             RangeIterator.Builder builder = RangeIntersectionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplans)
-                    builder.add((RangeIterator) plan.execute(executor));
+                    builder.add((RangeIterator) plan.execute(executor, softLimit));
 
                 return builder.build();
             }
@@ -1020,9 +1029,12 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
-            return executor.getTopKRows((RangeIterator) source.execute(executor), ordering);
+            // soft limit for fetching the keys from source is MAX_VALUE because we need to know
+            // all keys to pick the top K.
+            RangeIterator sourceKeys = (RangeIterator) this.source.execute(executor, Integer.MAX_VALUE);
+            return executor.getTopKRows(sourceKeys, ordering, softLimit);
         }
 
     }
@@ -1057,9 +1069,9 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
-            return executor.getTopKRows(ordering);
+            return executor.getTopKRows(ordering, softLimit);
         }
     }
 
@@ -1192,9 +1204,9 @@ abstract public class Plan
     static class Limit extends RowsIteration
     {
         private final RowsIteration source;
-        private final long limit;
+        public final int limit;
 
-        private Limit(Factory factory, int id, RowsIteration source, long limit)
+        private Limit(Factory factory, int id, RowsIteration source, int limit)
         {
             super(factory, id);
             this.source = source;
@@ -1417,7 +1429,7 @@ abstract public class Plan
          * Constructs a plan node that fetches only a limited number of rows.
          * It is likely going to have lower fullCost than the fullCost of its input.
          */
-        public RowsIteration limit(@Nonnull RowsIteration source, long limit)
+        public RowsIteration limit(@Nonnull RowsIteration source, int limit)
         {
             return new Limit(this, nextId++, source, limit);
         }
@@ -1445,8 +1457,8 @@ abstract public class Plan
     public interface Executor
     {
         Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
-        Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering);
-        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering);
+        Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering, int softLimit);
+        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit);
     }
 
     /**

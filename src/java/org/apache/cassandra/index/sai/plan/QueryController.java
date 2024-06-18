@@ -74,6 +74,7 @@ import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.MergeScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -107,7 +108,6 @@ public class QueryController implements Plan.Executor
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
-    private final int limit;
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
     private final IndexFeatureSet indexFeatureSet;
@@ -150,7 +150,6 @@ public class QueryController implements Plan.Executor
         this.cfs = cfs;
         this.command = command;
         this.queryContext = queryContext;
-        this.limit = command.limits().count();
         this.tableQueryMetrics = tableQueryMetrics;
         this.indexFeatureSet = indexFeatureSet;
         this.ranges = dataRanges(command);
@@ -260,7 +259,7 @@ public class QueryController implements Plan.Executor
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
         Plan.RowsIteration rowsIteration = planFactory.fetch(keysIterationPlan);
         rowsIteration = planFactory.recheckFilter(command.rowFilter(), rowsIteration);
-        rowsIteration = planFactory.limit(rowsIteration, limit);
+        rowsIteration = planFactory.limit(rowsIteration, command.limits().rows());
 
         Plan optimizedPlan;
         optimizedPlan = QUERY_OPT_LEVEL > 0
@@ -323,7 +322,22 @@ public class QueryController implements Plan.Executor
             Plan plan = buildPlan();
             Plan.KeysIteration keysIteration = plan.firstNodeOfType(Plan.KeysIteration.class);
             assert keysIteration != null : "No index scan found";
-            return keysIteration.execute(this);
+
+            // We need to estimate how much keys we'll be fetching for better performance.
+            // Some indexes may make a good use of knowing the number of requested keys in advance,
+            // because incremental re-requesting for more keys may be more expensive than getting them
+            // all at once.
+            Plan.Limit limit = plan.firstNodeOfType(Plan.Limit.class);
+            int hardLimit = limit != null ? limit.limit : Integer.MAX_VALUE;
+
+            // If there is filtering in the plan, we may need to fetch more keys
+            // from the index, so we need to reflect that in the limit.
+            Plan.Filter filter = plan.firstNodeOfType(Plan.Filter.class);
+            int softLimit = (filter != null)
+                ? SoftLimitUtil.softLimit(hardLimit, 0.95, filter.selectivity())
+                : hardLimit;
+
+            return keysIteration.execute(this, softLimit);
         }
         finally
         {
@@ -426,20 +440,20 @@ public class QueryController implements Plan.Executor
 
     // This is an ANN only query
     @Override
-    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression)
+    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression, int softLimit)
     {
         assert expression.operator() == Operator.ANN;
         var planExpression = new Expression(getContext(expression))
                              .add(Operator.ANN, expression.getIndexValue().duplicate());
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        var memtableResults = getContext(expression).orderMemtable(queryContext, planExpression, mergeRange, limit);
+        var memtableResults = getContext(expression).orderMemtable(queryContext, planExpression, mergeRange, softLimit);
 
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
         {
-            var sstableResults = orderSstables(queryView, Collections.emptyList());
+            var sstableResults = orderSstables(queryView, Collections.emptyList(), softLimit);
             sstableResults.addAll(memtableResults);
             return new MergeScoredPrimaryKeyIterator(sstableResults, queryView.referencedIndexes);
         }
@@ -453,7 +467,8 @@ public class QueryController implements Plan.Executor
     }
 
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
-    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RangeIterator source, RowFilter.Expression expression)
+    @Override
+    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RangeIterator source, RowFilter.Expression expression, int softLimit)
     {
         List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
         List<SSTableIndex> indexesToRelease = new ArrayList<>();
@@ -463,7 +478,10 @@ public class QueryController implements Plan.Executor
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
             // that might not be needed until a deeper search into the ordering index, which happens after
             // we exit this block.
-            iter = new OrderingFilterRangeIterator<>(source, ORDER_CHUNK_SIZE, queryContext, list -> this.getTopKRows(list, expression));
+            iter = new OrderingFilterRangeIterator<>(source,
+                                                     ORDER_CHUNK_SIZE,
+                                                     queryContext,
+                                                     list -> this.getTopKRows(list, expression, softLimit));
             while (iter.hasNext())
             {
                 var next = iter.next();
@@ -481,7 +499,7 @@ public class QueryController implements Plan.Executor
         }
     }
 
-    private IteratorsAndIndexes getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
+    private IteratorsAndIndexes getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
 
@@ -493,12 +511,12 @@ public class QueryController implements Plan.Executor
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
         var memtableResults = this.getContext(expression)
-                                  .orderResultsBy(queryContext, sourceKeys, planExpression, limit);
+                                  .orderResultsBy(queryContext, sourceKeys, planExpression, softLimit);
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
         {
-            var sstableScoredPrimaryKeyIterators = orderSstables(queryView, sourceKeys);
+            var sstableScoredPrimaryKeyIterators = orderSstables(queryView, sourceKeys, softLimit);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             if (sstableScoredPrimaryKeyIterators.isEmpty())
             {
@@ -526,7 +544,7 @@ public class QueryController implements Plan.Executor
      * @param sourceKeys The source keys to use to create the iterators. Use an empty list to search all keys.
      * @return The list of iterators over {@link ScoredPrimaryKey}.
      */
-    private List<CloseableIterator<ScoredPrimaryKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys)
+    private List<CloseableIterator<ScoredPrimaryKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys, int softLimit)
     {
         List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>();
         long totalRows = queryView.view.keySet().stream().mapToLong(sstable -> sstable.getTotalRows()).sum();
@@ -535,8 +553,8 @@ public class QueryController implements Plan.Executor
             // We expect the number of top results found in each sstable to be proportional to its number of rows
             // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
             int sstableLimit = V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
-                               ? max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)))
-                               : limit;
+                               ? max(1, (int) (softLimit * ((double) sstable.getTotalRows() / totalRows)))
+                               : softLimit;
 
             QueryViewBuilder.IndexExpression annIndexExpression = null;
             try
