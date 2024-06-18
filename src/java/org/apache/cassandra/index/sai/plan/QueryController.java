@@ -338,7 +338,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             // from the index, so we need to reflect that in the limit.
             Plan.Filter filter = plan.firstNodeOfType(Plan.Filter.class);
             int softLimit = (filter != null)
-                ? SoftLimitUtil.softLimit(hardLimit, 0.95, filter.selectivity())
+                ? SoftLimitUtil.softLimit(hardLimit, 0.9, filter.relativeSelectivity())
                 : hardLimit;
 
             return keysIteration.execute(this, softLimit);
