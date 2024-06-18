@@ -376,9 +376,9 @@ public class ViewFiltering1Test extends ViewAbstractParameterizedTest
                 createView(badStatement);
                 Assert.fail("Create MV statement should have failed due to missing IS NOT NULL restriction: " + badStatement);
             }
-            catch (RuntimeException e)
+            catch (InvalidRequestException e)
             {
-                Assert.assertSame(InvalidRequestException.class, e.getCause().getClass());
+                // expected
             }
         }
 
