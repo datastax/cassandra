@@ -95,7 +95,7 @@ public class ViewTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Assert.assertTrue(e.getCause() instanceof InvalidRequestException);
+            Assert.assertTrue(e instanceof InvalidRequestException);
         }
 
         try
@@ -105,7 +105,7 @@ public class ViewTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Assert.assertTrue(e.getCause() instanceof InvalidRequestException);
+            Assert.assertTrue(e instanceof InvalidRequestException);
         }
 
         try
@@ -115,7 +115,7 @@ public class ViewTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Assert.assertTrue(e.getCause() instanceof InvalidRequestException);
+            Assert.assertTrue(e instanceof InvalidRequestException);
         }
 
         createView("CREATE MATERIALIZED VIEW %s AS SELECT val,k,c FROM %s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val,k,c)");
@@ -182,7 +182,7 @@ public class ViewTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Assert.assertTrue(e.getCause() instanceof InvalidRequestException);
+            Assert.assertTrue(e instanceof InvalidRequestException);
         }
     }
 
@@ -200,8 +200,7 @@ public class ViewTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Throwable cause = e.getCause();
-            Assert.assertEquals("duration type is not supported for PRIMARY KEY column 'result'", cause.getMessage());
+            Assert.assertEquals("duration type is not supported for PRIMARY KEY column 'result'", e.getMessage());
         }
     }
 
@@ -522,9 +521,8 @@ public class ViewTest extends ViewAbstractTest
         }
         catch (RuntimeException e)
         {
-            Throwable cause = e.getCause();
-            Assertions.assertThat(cause).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(cause.getMessage()).contains("Materialized views are disabled");
+            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
+            Assertions.assertThat(e.getMessage()).contains("Materialized views are disabled");
         }
         finally
         {
