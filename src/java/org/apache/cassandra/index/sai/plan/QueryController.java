@@ -77,6 +77,7 @@ import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.MergeScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -325,7 +326,22 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             Plan plan = buildPlan();
             Plan.KeysIteration keysIteration = plan.firstNodeOfType(Plan.KeysIteration.class);
             assert keysIteration != null : "No index scan found";
-            return keysIteration.execute(this);
+
+            // We need to estimate how much keys we'll be fetching for better performance.
+            // Some indexes may make a good use of knowing the number of requested keys in advance,
+            // because incremental re-requesting for more keys may be more expensive than getting them
+            // all at once.
+            Plan.Limit limit = plan.firstNodeOfType(Plan.Limit.class);
+            int hardLimit = limit != null ? limit.limit : Integer.MAX_VALUE;
+
+            // If there is filtering in the plan, we may need to fetch more keys
+            // from the index, so we need to reflect that in the limit.
+            Plan.Filter filter = plan.firstNodeOfType(Plan.Filter.class);
+            int softLimit = (filter != null)
+                ? SoftLimitUtil.softLimit(hardLimit, 0.95, filter.selectivity())
+                : hardLimit;
+
+            return keysIteration.execute(this, softLimit);
         }
         finally
         {

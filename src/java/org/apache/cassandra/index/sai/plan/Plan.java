@@ -548,10 +548,31 @@ abstract public class Plan
 
         protected abstract KeysIterationCost estimateCost();
 
-        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor);
+        /**
+         * Estimates the cost of advancing the key set iterator to a different key.
+         * This has to be a function, because the skipping cost may depend on the amount of data
+         * and the distance of the skip.
+         *
+         * @param distance distance of the skip expressed as the fraction of the whole key set;
+         *                 the distance of 1.0 means jumping to the end of the key stream,
+         *                 the distance of 1.0 / expectedKeys() means jumping to the next key.
+         * @return estimated cost
+         */
+        protected abstract double estimateCostPerSkip(double distance);
+
+        /**
+         * Executes the operation represented by this node.
+         * The node itself isn't supposed for doing the actual work, but rather serves as a director which
+         * delegates the work to the query controller through the passed Executor.
+         *
+         * @param executor  does all the hard work like fetching keys from the indexes or ANN sort
+         * @param softLimit the number of keys likely to be requested from the returned iterator;
+         *                  this is a hint only - it does not change the result set, but may change performance
+         */
+        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit);
 
         protected abstract KeysIteration withAccess(Access patterns);
-        
+
         final double expectedKeys()
         {
             return cost().expectedKeys;
@@ -612,7 +633,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             return RangeIterator.empty();
         }
@@ -657,7 +678,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             // Not supported because it doesn't make a lot of sense.
             // A direct scan of table data would be certainly faster.
@@ -763,7 +784,7 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
             return executor.getKeysFromIndex(predicate);
         }
@@ -913,13 +934,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             RangeIterator.Builder builder = RangeUnionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((RangeIterator) plan.execute(executor));
+                    builder.add((RangeIterator) plan.execute(executor, softLimit));
                 return builder.build();
             }
             catch (Throwable t)
@@ -1046,13 +1067,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             RangeIterator.Builder builder = RangeIntersectionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((RangeIterator) plan.execute(executor));
+                    builder.add((RangeIterator) plan.execute(executor, softLimit));
 
                 return builder.build();
             }
@@ -1123,10 +1144,11 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
-            RangeIterator sourceIterator = (RangeIterator) source.execute(executor);
-            int softLimit = Math.round((float) access.totalCount);
+            // soft limit for fetching the keys from source is MAX_VALUE because we need to know
+            // all keys to pick the top K.
+            RangeIterator sourceIterator = (RangeIterator) source.execute(executor, Integer.MAX_VALUE);
             return executor.getTopKRows(sourceIterator, ordering, softLimit);
         }
 
@@ -1167,13 +1189,13 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
             // Divide soft limit by 2, so we can terminate search earlier if it
             // occurs that we collected enough rows. keysCount() gives us the
             // average expected number of rows that will be needed but
             // many queries will need fewer than that.
-            return executor.getTopKRows(ordering, max(1, keysCount() / 2));
+            return executor.getTopKRows(ordering, max(1, softLimit / 2));
         }
 
         @Override
@@ -1620,7 +1642,7 @@ abstract public class Plan
          * Constructs a plan node that fetches only a limited number of rows.
          * It is likely going to have lower fullCost than the fullCost of its input.
          */
-        public RowsIteration limit(@Nonnull RowsIteration source, long limit)
+        public RowsIteration limit(@Nonnull RowsIteration source, int limit)
         {
             return new Limit(this, nextId++, source, limit, defaultAccess);
         }
@@ -1764,7 +1786,7 @@ abstract public class Plan
         double hitRate = ChunkCache.instance == null ? 1.0 : ChunkCache.instance.metrics.hitRate();
         return 0.25 * (Double.isFinite(hitRate) ? max(0.1, hitRate) : 1.0);
     }
-    
+
     /**
      * Describes the usage pattern of the result of the plan node.
      * Modelled by the number of accesses and the distribution of skip distances.
