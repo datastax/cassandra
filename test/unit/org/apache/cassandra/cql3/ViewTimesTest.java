@@ -271,9 +271,8 @@ public class ViewTimesTest extends ViewAbstractTest
         }
         catch (RuntimeException e)
         {
-            Throwable cause = e.getCause();
-            Assertions.assertThat(cause).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(cause.getMessage()).contains("Cannot set default_time_to_live for a materialized view");
+            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
+            Assertions.assertThat(e.getMessage()).contains("Cannot set default_time_to_live for a materialized view");
         }
     }
 
