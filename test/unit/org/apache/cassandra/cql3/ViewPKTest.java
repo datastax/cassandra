@@ -24,8 +24,8 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
+import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -126,9 +126,8 @@ public class ViewPKTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Throwable cause = e.getCause();
-            Assertions.assertThat(cause).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(cause.getMessage()).contains("Primary key columns k must be restricted");
+            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
+            Assertions.assertThat(e.getMessage()).contains("Primary key columns k must be restricted");
         }
 
         dropTable("DROP TABLE %s");
@@ -160,9 +159,8 @@ public class ViewPKTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Throwable cause = e.getCause();
-            Assertions.assertThat(cause).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(cause.getMessage()).contains("Primary key columns k must be restricted");
+            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
+            Assertions.assertThat(e.getMessage()).contains("Primary key columns k must be restricted");
         }
     }
 
@@ -235,9 +233,13 @@ public class ViewPKTest extends ViewAbstractTest
 
                 Assert.fail("Should fail on duplicate name");
             }
+            catch (InvalidRequestException e)
+            {
+                // expected
+            }
             catch (Exception e)
             {
-                Assertions.assertThat(e.getCause()).isInstanceOf(RequestValidationException.class);
+                Assertions.assertThat(e.getCause()).isInstanceOf(AlreadyExistsException.class);
             }
 
             try
@@ -249,7 +251,7 @@ public class ViewPKTest extends ViewAbstractTest
             }
             catch (Exception e)
             {
-                Assertions.assertThat(e.getCause()).isInstanceOf(RequestValidationException.class);
+                Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
             }
         }
 
@@ -433,9 +435,8 @@ public class ViewPKTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Throwable cause = e.getCause();
-            Assertions.assertThat(cause).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(cause.getMessage()).contains("Cannot include more than one non-primary key column");
+            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
+            Assertions.assertThat(e.getMessage()).contains("Cannot include more than one non-primary key column");
         }
 
         try
@@ -445,9 +446,8 @@ public class ViewPKTest extends ViewAbstractTest
         }
         catch (Exception e)
         {
-            Throwable cause = e.getCause();
-            Assertions.assertThat(cause).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(cause.getMessage()).contains("Cannot include more than one non-primary key column");
+            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
+            Assertions.assertThat(e.getMessage()).contains("Cannot include more than one non-primary key column");
         }
     }
 
