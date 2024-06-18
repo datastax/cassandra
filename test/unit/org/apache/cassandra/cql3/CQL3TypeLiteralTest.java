@@ -236,14 +236,14 @@ public class CQL3TypeLiteralTest
         for (int i = 0; i < 20; i++)
         {
             int v = randInt();
-            addNativeValue(SimpleDateSerializer.instance.toString(v), CQL3Type.Native.DATE, SimpleDateSerializer.instance.serialize(v));
+            addNativeValue(quote(SimpleDateSerializer.instance.toString(v)), CQL3Type.Native.DATE, SimpleDateSerializer.instance.serialize(v));
         }
         addNativeValue("null", CQL3Type.Native.DATE, null);
 
         for (int i = 0; i < 100; i++)
         {
             long v = randLong(24L * 60 * 60 * 1000 * 1000 * 1000);
-            addNativeValue(TimeSerializer.instance.toString(v), CQL3Type.Native.TIME, TimeSerializer.instance.serialize(v));
+            addNativeValue(quote(TimeSerializer.instance.toString(v)), CQL3Type.Native.TIME, TimeSerializer.instance.serialize(v));
         }
         addNativeValue("null", CQL3Type.Native.TIME, null);
 
@@ -258,7 +258,7 @@ public class CQL3TypeLiteralTest
         for (int i = 0; i < 20; i++)
         {
             long v = randLong();
-            addNativeValue(TimestampSerializer.instance.toStringUTC(new Date(v)), CQL3Type.Native.TIMESTAMP, TimestampType.instance.fromString(Long.toString(v)));
+            addNativeValue(quote(TimestampSerializer.instance.toStringUTC(new Date(v))), CQL3Type.Native.TIMESTAMP, TimestampType.instance.fromString(Long.toString(v)));
         }
         addNativeValue("null", CQL3Type.Native.TIMESTAMP, ByteBufferUtil.EMPTY_BYTE_BUFFER);
         addNativeValue("null", CQL3Type.Native.TIMESTAMP, null);
@@ -299,7 +299,7 @@ public class CQL3TypeLiteralTest
             {
                 throw new RuntimeException(e);
             }
-            addNativeValue(v.getHostAddress(), CQL3Type.Native.INET, InetAddressSerializer.instance.serialize(v));
+            addNativeValue(quote(v.getHostAddress()), CQL3Type.Native.INET, InetAddressSerializer.instance.serialize(v));
         }
         addNativeValue("null", CQL3Type.Native.INET, ByteBufferUtil.EMPTY_BYTE_BUFFER);
         addNativeValue("null", CQL3Type.Native.INET, null);
