@@ -42,6 +42,8 @@ import com.google.common.collect.Lists;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -91,7 +93,6 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.TimeUUID;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable.Version;
 
 import static org.apache.cassandra.utils.bytecomparable.ByteSourceComparisonTest.decomposeForTuple;
 import static org.junit.Assert.assertEquals;
@@ -99,10 +100,25 @@ import static org.junit.Assert.assertEquals;
 /**
  * Tests that the result of forward + backward ByteSource translation is the same as the original.
  */
+@RunWith(Parameterized.class)
 public class ByteSourceConversionTest extends ByteSourceTestBase
 {
+
+    @Parameterized.Parameters(name = "version={0}")
+    public static Iterable<ByteComparable.Version> versions()
+    {
+        return ImmutableList.of(ByteComparable.Version.OSS41,
+                                ByteComparable.Version.OSS50);
+    }
+
+    private final ByteComparable.Version version;
+
+    public ByteSourceConversionTest(ByteComparable.Version version)
+    {
+        this.version = version;
+    }
+
     private final static Logger logger = LoggerFactory.getLogger(ByteSourceConversionTest.class);
-    public static final Version VERSION = Version.OSS50;
 
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();
@@ -120,7 +136,7 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
     public void testStringsUTF8()
     {
         testType(UTF8Type.instance, testStrings);
-        testDirect(x -> ByteSource.of(x, VERSION), ByteSourceInverse::getString, testStrings);
+        testDirect(x -> ByteSource.of(x, version), ByteSourceInverse::getString, testStrings);
     }
 
     @Test
@@ -404,19 +420,19 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
                 b[1] = accessor.valueOf(decompose.apply(t2, o2));
                 ClusteringPrefix<?> c = ByteSourceComparisonTest.makeBound(accessor.factory(), k1, b);
                 final ByteComparable bsc = comp.asByteComparable(c);
-                logger.info("Clustering {} bytesource {}", c.clusteringString(comp.subtypes()), bsc.byteComparableAsString(VERSION));
+                logger.info("Clustering {} bytesource {}", c.clusteringString(comp.subtypes()), bsc.byteComparableAsString(version));
                 ClusteringPrefix<?> converted = getClusteringPrefix(accessor, k1, comp, bsc);
                 assertEquals(String.format("Failed compare(%s, converted %s ByteSource %s) == 0\ntype %s",
                                            safeStr(c.clusteringString(comp.subtypes())),
                                            safeStr(converted.clusteringString(comp.subtypes())),
-                                           bsc.byteComparableAsString(VERSION),
+                                           bsc.byteComparableAsString(version),
                                            comp),
                              0, comp.compare(c, converted));
                 if (checkEquals)
                     assertEquals(String.format("Failed equals %s, got %s ByteSource %s\ntype %s",
                                                safeStr(c.clusteringString(comp.subtypes())),
                                                safeStr(converted.clusteringString(comp.subtypes())),
-                                               bsc.byteComparableAsString(VERSION),
+                                               bsc.byteComparableAsString(version),
                                                comp),
                                  c, converted);
 
@@ -426,14 +442,14 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
                 assertEquals(String.format("Failed reverse compare(%s, converted %s ByteSource %s) == 0\ntype %s",
                                            safeStr(c.clusteringString(compR.subtypes())),
                                            safeStr(converted.clusteringString(compR.subtypes())),
-                                           bsrc.byteComparableAsString(VERSION),
+                                           bsrc.byteComparableAsString(version),
                                            compR),
                              0, compR.compare(c, converted));
                 if (checkEquals)
                     assertEquals(String.format("Failed reverse equals %s, got %s ByteSource %s\ntype %s",
                                                safeStr(c.clusteringString(compR.subtypes())),
                                                safeStr(converted.clusteringString(compR.subtypes())),
-                                               bsrc.byteComparableAsString(VERSION),
+                                               bsrc.byteComparableAsString(version),
                                                compR),
                                  c, converted);
             }
@@ -463,11 +479,11 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
         }
     }
 
-    private static ByteSource.Peekable source(ByteComparable bsc)
+    private ByteSource.Peekable source(ByteComparable bsc)
     {
         if (bsc == null)
             return null;
-        return ByteSource.peekable(bsc.asComparableBytes(VERSION));
+        return ByteSource.peekable(bsc.asComparableBytes(version));
     }
 
     @Test
@@ -670,7 +686,7 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
                               safeStr(i),
                               safeStr(type.getSerializer().toCQLLiteral(b)),
                               safeStr(ByteBufferUtil.bytesToHex(b)),
-                              typeToComparable(type, b).byteComparableAsString(VERSION));
+                              typeToComparable(type, b).byteComparableAsString(version));
             assertConvertsSame(type, i);
         }
         if (!type.isReversed())
@@ -696,7 +712,7 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
                 logger.info("Value {} bytes {} ByteSource {}",
                             safeStr(type.getSerializer().toCQLLiteral(b)),
                             safeStr(ByteBufferUtil.bytesToHex(b)),
-                            typeToComparable(type, b).byteComparableAsString(VERSION));
+                            typeToComparable(type, b).byteComparableAsString(version));
             }
         }
         catch (UnsupportedOperationException e)
@@ -712,11 +728,11 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
     {
         final ByteComparable bs1 = typeToComparable(type, b1);
 
-        ByteBuffer actual = type.fromComparableBytes(source(bs1), VERSION);
+        ByteBuffer actual = type.fromComparableBytes(source(bs1), version);
         assertEquals(String.format("Failed compare(%s, converted %s (bytesource %s))",
                                    ByteBufferUtil.bytesToHex(b1),
                                    ByteBufferUtil.bytesToHex(actual),
-                                   bs1.byteComparableAsString(VERSION)),
+                                   bs1.byteComparableAsString(version)),
                      0,
                      type.compare(b1, actual));
     }
@@ -730,25 +746,25 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
     void assertConvertsSameDecoratedKeys(IPartitioner type, ByteBuffer b1)
     {
         DecoratedKey k1 = type.decorateKey(b1);
-        DecoratedKey actual = BufferDecoratedKey.fromByteComparable(k1, VERSION, type);
+        DecoratedKey actual = BufferDecoratedKey.fromByteComparable(k1, version, type);
 
         assertEquals(String.format("Failed compare(%s[%s bs %s], %s[%s bs %s])\npartitioner %s",
                                    k1,
                                    ByteBufferUtil.bytesToHex(b1),
-                                   k1.byteComparableAsString(VERSION),
+                                   k1.byteComparableAsString(version),
                                    actual,
                                    ByteBufferUtil.bytesToHex(actual.getKey()),
-                                   actual.byteComparableAsString(VERSION),
+                                   actual.byteComparableAsString(version),
                                    type),
                      0,
                      k1.compareTo(actual));
         assertEquals(String.format("Failed equals(%s[%s bs %s], %s[%s bs %s])\npartitioner %s",
                                    k1,
                                    ByteBufferUtil.bytesToHex(b1),
-                                   k1.byteComparableAsString(VERSION),
+                                   k1.byteComparableAsString(version),
                                    actual,
                                    ByteBufferUtil.bytesToHex(actual.getKey()),
-                                   actual.byteComparableAsString(VERSION),
+                                   actual.byteComparableAsString(version),
                                    type),
                      k1,
                      actual);
@@ -789,20 +805,20 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
     {
         ByteComparable b1 = v -> convertor.apply(v1);
         T actual = inverse.apply(source(b1));
-        assertEquals(String.format("ByteSource %s", b1.byteComparableAsString(VERSION)), v1, actual);
+        assertEquals(String.format("ByteSource %s", b1.byteComparableAsString(version)), v1, actual);
     }
 
     <T> void assertConvertsSame(AbstractType<T> type, T v1)
     {
         ByteBuffer b1 = decomposeAndRandomPad(type, v1);
         final ByteComparable bc1 = typeToComparable(type, b1);
-        ByteBuffer convertedBuffer = type.fromComparableBytes(source(bc1), VERSION);
+        ByteBuffer convertedBuffer = type.fromComparableBytes(source(bc1), version);
         T actual = type.compose(convertedBuffer);
 
         assertEquals(String.format("Failed equals %s(%s bs %s), got %s",
                                    safeStr(v1),
                                    ByteBufferUtil.bytesToHex(b1),
-                                   safeStr(bc1.byteComparableAsString(VERSION)),
+                                   safeStr(bc1.byteComparableAsString(version)),
                                    safeStr(actual)),
                      v1,
                      actual);

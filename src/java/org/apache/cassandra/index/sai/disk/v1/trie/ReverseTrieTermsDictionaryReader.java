@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.v1.trie;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.tries.ReverseValueIterator;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.SizedInts;
@@ -34,7 +35,7 @@ public class ReverseTrieTermsDictionaryReader extends ReverseValueIterator<Rever
 {
     public ReverseTrieTermsDictionaryReader(Rebufferer rebufferer, long root)
     {
-        super(rebufferer, root, true, ByteComparable.Version.OSS50);
+        super(rebufferer, root, true, TypeUtil.BYTE_COMPARABLE_VERSION);
     }
 
     @Override

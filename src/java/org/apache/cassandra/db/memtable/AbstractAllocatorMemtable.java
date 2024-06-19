@@ -125,7 +125,6 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         }
     }
 
-    // only to be used by init(), to setup the very first memtable for the cfs
     public AbstractAllocatorMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(metadataRef, commitLogLowerBound);
@@ -247,6 +246,13 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
     {
         getAllocator().offHeap().allocate(additionalSpace, opGroup);
     }
+
+    @Override
+    public long unusedReservedOnHeapMemory()
+    {
+        return allocator.unusedReservedOnHeapMemory();
+    }
+
 
     void scheduleFlush()
     {

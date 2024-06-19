@@ -451,7 +451,7 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
+    public static List<Partition> getAllUnfiltered(ReadCommand command)
     {
         try (ReadExecutionController controller = command.executionController())
         {
@@ -459,9 +459,9 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
+    public static List<Partition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
     {
-        List<ImmutableBTreePartition> results = new ArrayList<>();
+        List<Partition> results = new ArrayList<>();
         try (UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
             while (iterator.hasNext())
@@ -534,7 +534,7 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
         try (ReadExecutionController controller = cmd.executionController())
         {
@@ -542,7 +542,7 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
     {
         try (UnfilteredPartitionIterator iterator = cmd.executeLocally(controller))
         {
