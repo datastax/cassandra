@@ -238,7 +238,7 @@ public class CustomCassandraIndex implements Index
                 validateClusterings(update);
                 break;
             case REGULAR:
-                validateRows(update);
+                validateRows(update.rows());
                 break;
             case STATIC:
                 validateRows(Collections.singleton(update.staticRow()));
@@ -515,7 +515,7 @@ public class CustomCassandraIndex implements Index
     private void validateClusterings(PartitionUpdate update) throws InvalidRequestException
     {
         assert indexedColumn.isClusteringColumn();
-        for (Row row : update)
+        for (Row row : update.rows())
             validateIndexedValue(getIndexedValue(null, row.clustering(), null));
     }
 

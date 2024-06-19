@@ -54,7 +54,7 @@ import org.apache.cassandra.db.compaction.SSTableSplitter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Range;
@@ -954,7 +954,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
         for (int i = 0; i < 100; i++)
         {
             DecoratedKey key = Util.dk(Integer.toString(i));
-            ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(ks.getColumnFamilyStore(CF), key).build());
+            Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(ks.getColumnFamilyStore(CF), key).build());
             assertTrue(partition != null && partition.rowCount() > 0);
         }
     }

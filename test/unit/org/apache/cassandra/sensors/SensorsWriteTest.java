@@ -198,10 +198,6 @@ public class SensorsWriteTest
                             .add("val", oneCharString)
                             .build();
 
-        PartitionUpdate singleRowPartitionUpdate = mutation.getPartitionUpdates().iterator().next();
-        long singleRowAccumulatedSize = singleRowPartitionUpdate.accumulatedDataSize();
-        long singleRowOtherSize = singleRowPartitionUpdate.dataSize() - singleRowAccumulatedSize;
-
         handleMutation(mutation);
         Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(localSensor.getValue()).isGreaterThan(0);
@@ -227,8 +223,7 @@ public class SensorsWriteTest
         handleMutation(mutation);
 
         localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
-        double expectedSize = 10 * singleRowAccumulatedSize + singleRowOtherSize;
-        assertThat(localSensor.getValue()).isEqualTo(expectedSize);
+        assertThat(localSensor.getValue()).isEqualTo(10 * singleRowWriteBytes);
 
         Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
