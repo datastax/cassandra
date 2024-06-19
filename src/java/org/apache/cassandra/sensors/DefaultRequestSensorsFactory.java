@@ -20,7 +20,7 @@ package org.apache.cassandra.sensors;
 
 /**
  * Default implementation of the {@link RequestSensorsFactory} that creates a new instance of {@link DefaultRequestSensors}
- * without considering the keyspace.
+ * enabled for all keyspaces.
  */
 public class DefaultRequestSensorsFactory implements RequestSensorsFactory
 {
