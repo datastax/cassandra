@@ -26,10 +26,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.assertj.core.api.Assertions;
 
+/**
+ * Tests for {@code SELECT} queries with {@code LIMIT} and {@code OFFSET}.
+ */
 public class SelectOffsetTest extends CQLTester
 {
     public static final Object[][] EMPTY_ROWS = new Object[0][];
@@ -280,38 +286,22 @@ public class SelectOffsetTest extends CQLTester
         execute("INSERT INTO %s (k, v) VALUES (3, [2])");
         execute("INSERT INTO %s (k, v) VALUES (4, [3])");
 
-        // limit over number of rows
+        // offset 0 is equivalent to no offset, so it's allowed
         assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 0"),
                    row(1, vector(1f)),
                    row(3, vector(2f)),
                    row(4, vector(3f)),
                    row(2, vector(4f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 1"),
-                   row(3, vector(2f)),
-                   row(4, vector(3f)),
-                   row(2, vector(4f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 2"),
-                   row(4, vector(3f)),
-                   row(2, vector(4f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 3"),
-                   row(2, vector(4f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 4"));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 5"));
 
-        // limit below number of rows
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2 OFFSET 0"),
-                   row(1, vector(1f)),
-                   row(3, vector(2f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2 OFFSET 1"),
-                   row(3, vector(2f)),
-                   row(4, vector(3f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2 OFFSET 2"),
-                   row(4, vector(3f)),
-                   row(2, vector(4f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2 OFFSET 3"),
-                   row(2, vector(4f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2 OFFSET 4"));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2 OFFSET 5"));
+        // offset > 0 is not allowed
+        String query = "SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 1";
+        String error = String.format(SelectStatement.TOPK_OFFSET_ERROR, 1);
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessage(error);
+        Assertions.assertThatThrownBy(() -> executeNet(query))
+                  .isInstanceOf(InvalidQueryException.class)
+                  .hasMessage(error);
     }
 
     @SafeVarargs

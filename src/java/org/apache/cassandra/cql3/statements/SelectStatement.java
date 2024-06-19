@@ -109,6 +109,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     public static final String TOPK_CONSISTENCY_LEVEL_WARNING = "Top-K queries can only be run with consistency level ONE " +
                                                                 "/ LOCAL_ONE / NODE_LOCAL. Consistency level %s was requested. " +
                                                                 "Downgrading the consistency level to %s.";
+    public static final String TOPK_OFFSET_ERROR = "Top-K queries cannot be run with an offset. Offset was set to %d.";
 
     private final String rawCQLStatement;
     public final VariableSpecifications bindVariables;
@@ -344,24 +345,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         Selectors selectors = selection.newSelectors(options);
         ReadQuery query = getQuery(queryState, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, userOffset);
 
-        // Handle additional validation for topK queries
-        if (query.isTopK()) {
-                // We aren't going to allow SERIAL at all, so we can error out on those.
-                checkFalse(options.getConsistency() == ConsistencyLevel.LOCAL_SERIAL ||
-                           options.getConsistency() == ConsistencyLevel.SERIAL,
-                           String.format(TOPK_CONSISTENCY_LEVEL_ERROR, options.getConsistency()));
-
-                if (options.getConsistency() != ConsistencyLevel.ONE &&
-                    options.getConsistency() != ConsistencyLevel.LOCAL_ONE &&
-                    options.getConsistency() != ConsistencyLevel.NODE_LOCAL)
-                {
-                    ConsistencyLevel supplied = options.getConsistency();
-                    ConsistencyLevel downgrade = supplied.isDatacenterLocal() ? ConsistencyLevel.LOCAL_ONE : ConsistencyLevel.ONE;
-                    options.updateConsistency(downgrade);
-                    ClientWarn.instance.warn(String.format(TOPK_CONSISTENCY_LEVEL_WARNING, supplied, downgrade));
-                }
-        }
-
         if (query.limits().isGroupByLimit() && pageSize != null && pageSize.isDefined() && pageSize.getUnit() == PageSize.PageUnit.BYTES)
             throw new InvalidRequestException("Paging in bytes cannot be specified for aggregation queries");
 
@@ -404,10 +387,35 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         DataLimits limit = getDataLimits(queryState, userLimit, perPartitionLimit, userOffset);
 
-        if (isPartitionRangeQuery)
-            return getRangeCommand(options, columnFilter, limit, nowInSec, queryState);
+        ReadQuery query = isPartitionRangeQuery
+                        ? getRangeCommand(options, columnFilter, limit, nowInSec, queryState)
+                        : getSliceCommands(queryState, options, columnFilter, limit, nowInSec);
 
-        return getSliceCommands(queryState, options, columnFilter, limit, nowInSec);
+        // Handle additional validation for topK queries
+        if (query.isTopK())
+        {
+            // We aren't going to allow SERIAL at all, so we can error out on those.
+            checkFalse(options.getConsistency() == ConsistencyLevel.LOCAL_SERIAL ||
+                       options.getConsistency() == ConsistencyLevel.SERIAL,
+                       String.format(TOPK_CONSISTENCY_LEVEL_ERROR, options.getConsistency()));
+
+            // Consistency levels with more than one replica are downgraded to ONE/LOCAL_ONE.
+            if (options.getConsistency() != ConsistencyLevel.ONE &&
+                options.getConsistency() != ConsistencyLevel.LOCAL_ONE &&
+                options.getConsistency() != ConsistencyLevel.NODE_LOCAL)
+            {
+                ConsistencyLevel supplied = options.getConsistency();
+                ConsistencyLevel downgrade = supplied.isDatacenterLocal() ? ConsistencyLevel.LOCAL_ONE : ConsistencyLevel.ONE;
+                options.updateConsistency(downgrade);
+                ClientWarn.instance.warn(String.format(TOPK_CONSISTENCY_LEVEL_WARNING, supplied, downgrade));
+            }
+
+            // We don't support offset for top-k queries.
+            int offset = getOffset(options);
+            checkFalse(offset > 0, String.format(TOPK_OFFSET_ERROR, offset));
+        }
+
+        return query;
     }
 
     private ResultMessage.Rows execute(ReadQuery query,
