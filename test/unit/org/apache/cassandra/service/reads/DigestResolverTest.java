@@ -43,7 +43,7 @@ public class DigestResolverTest extends AbstractReadResponseTest
 {
     private static PartitionUpdate.Builder update(TableMetadata metadata, String key, Row... rows)
     {
-        PartitionUpdate.Builder builder = new PartitionUpdate.Builder(metadata, dk(key), metadata.regularAndStaticColumns(), rows.length, false);
+        PartitionUpdate.Builder builder = PartitionUpdate.builder(metadata, dk(key), metadata.regularAndStaticColumns(), rows.length);
         for (Row row: rows)
         {
             builder.add(row);
