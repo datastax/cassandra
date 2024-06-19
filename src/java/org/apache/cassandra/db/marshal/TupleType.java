@@ -186,15 +186,16 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
         switch (version)
         {
             case LEGACY:
-                return asComparableBytesLegacy(accessor, data);
+            case OSS41:
+                return asComparableBytesLegacy(accessor, data, version);
             case OSS50:
-                return asComparableBytesNew(accessor, data, version);
+                return asComparableBytes50(accessor, data, version);
             default:
                 throw new AssertionError();
         }
     }
 
-    private <V> ByteSource asComparableBytesLegacy(ValueAccessor<V> accessor, V data)
+    private <V> ByteSource asComparableBytesLegacy(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
     {
         if (accessor.isEmpty(data))
             return null;
@@ -202,7 +203,7 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
         V[] bufs = split(accessor, data);  // this may be shorter than types.size -- other srcs remain null in that case
         ByteSource[] srcs = new ByteSource[subTypes.size()];
         for (int i = 0; i < bufs.length; ++i)
-            srcs[i] = bufs[i] != null ? subTypes.get(i).asComparableBytes(accessor, bufs[i], ByteComparable.Version.LEGACY) : null;
+            srcs[i] = bufs[i] != null ? subTypes.get(i).asComparableBytes(accessor, bufs[i], version) : null;
 
         // We always have a fixed number of sources, with the trailing ones possibly being nulls.
         // This can only result in a prefix if the last type in the tuple allows prefixes. Since that type is required
@@ -210,7 +211,7 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
         return ByteSource.withTerminatorLegacy(ByteSource.END_OF_STREAM, srcs);
     }
 
-    private <V> ByteSource asComparableBytesNew(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
+    private <V> ByteSource asComparableBytes50(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
     {
         if (accessor.isEmpty(data))
             return null;
@@ -233,7 +234,7 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
     @Override
     public <V> V fromComparableBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, ByteComparable.Version version)
     {
-        assert version == ByteComparable.Version.OSS50; // Reverse translation is not supported for the legacy version.
+        assert version != ByteComparable.Version.LEGACY; // Reverse translation is not supported for the legacy version.
         if (comparableBytes == null)
             return accessor.empty();
 
@@ -249,11 +250,14 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
             else
                 componentBuffers[i] = null;
         }
-        // consume terminator
-        int terminator = comparableBytes.next();
-        assert terminator == ByteSource.TERMINATOR : String.format("Expected TERMINATOR (0x%2x) after %d components",
-                                                                   ByteSource.TERMINATOR,
-                                                                   subTypes.size());
+        if (version == ByteComparable.Version.OSS50)
+        {
+            // consume terminator
+            int terminator = comparableBytes.next();
+            assert terminator == ByteSource.TERMINATOR : String.format("Expected TERMINATOR (0x%2x) after %d components",
+                                                                       ByteSource.TERMINATOR,
+                                                                       subTypes.size());
+        }
         return buildValue(accessor, componentBuffers);
     }
 

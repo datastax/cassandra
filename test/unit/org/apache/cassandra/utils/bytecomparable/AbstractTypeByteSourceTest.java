@@ -68,7 +68,8 @@ public class AbstractTypeByteSourceTest
     @Parameterized.Parameters(name = "version={0}")
     public static Iterable<ByteComparable.Version> versions()
     {
-        return ImmutableList.of(ByteComparable.Version.OSS50);
+        return ImmutableList.of(ByteComparable.Version.OSS41,
+                                ByteComparable.Version.OSS50);
     }
 
     private final ByteComparable.Version version;
@@ -708,8 +709,8 @@ public class AbstractTypeByteSourceTest
     {
         // Test how ReversedType handles null ByteSource.Peekable - here the choice of base type is important, as
         // the base type should also be able to handle null ByteSource.Peekable.
-        ReversedType<BigInteger> reversedVarintType = ReversedType.getInstance(IntegerType.instance);
-        ByteBuffer decodedNull = reversedVarintType.fromComparableBytes(null, ByteComparable.Version.OSS50);
+        ReversedType<BigInteger> reversedVarintType = (ReversedType<BigInteger>) ReversedType.getInstance(IntegerType.instance);
+        ByteBuffer decodedNull = reversedVarintType.fromComparableBytes(null, version);
         Assert.assertEquals(ByteBufferUtil.EMPTY_BYTE_BUFFER, decodedNull);
 
         // Test how ReversedType handles random data with some common and important base types.
@@ -745,7 +746,7 @@ public class AbstractTypeByteSourceTest
         Random prng = new Random();
         for (Map.Entry<AbstractType<?>, BiFunction<Random, Integer, ByteBuffer>> entry : bufferGeneratorByType.entrySet())
         {
-            ReversedType<?> reversedType = ReversedType.getInstance(entry.getKey());
+            ReversedType<?> reversedType = (ReversedType<?>) ReversedType.getInstance(entry.getKey());
             for (int length = 32; length <= 512; length *= 4)
             {
                 for (int i = 0; i < 100; ++i)

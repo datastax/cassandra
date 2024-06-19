@@ -334,7 +334,7 @@ This is the trivial case, as we can simply use the input bytes in big-endian ord
 and fixed length values are trivially prefix free, i.e. (1) and (2) are satisfied, and thus (3) and (4) follow from the
 observation above.
 
-## Fixed-length signed integers (byte, short, int, legacy bigint)
+## Fixed-length signed integers (byte, short, int, bigint for versions <= OSS41)
 
 As above, but we need to invert the sign bit of the number to put negative numbers before positives. This maps
 `MIN_VALUE` to `0x00`..., `-1` to `0x7F…`, `0` to `0x80…`, and `MAX_VALUE` to `0xFF…`; comparing the resulting number
@@ -457,15 +457,15 @@ end. The values we chose for the separator and terminator are `0x40` and `0x38`,
 Examples:
 
 
-| Types and values         | bytes                  | encodes as                     |
-| ------------------------ | ---------------------- | ------------------------------ |
+| Types and values         | bytes                  | encodes as                 |
+| ------------------------ | ---------------------- |----------------------------|
 | (short 1, float 1.0)     | 00 01, 3F 80 00 00     | 40·80 01·40·BF 80 00 00·38 |
-| (short -1, null)         | FF FF, —              | 40·7F FF·3E·38              |
+| (short -1, null)         | FF FF, —              | 40·7F FF·3E·38             |
 | ≥ (short 0, float -Inf) | 00 00, FF 80 00 00, >= | 40·80 00·40·00 7F FF FF·20 |
-| < (short MIN)            | 80 00, <=              | 40·00 00·20                  |
-| \> (null)                |                        | 3E·60                         |
-| BOTTOM                   |                        | 20                             |
-| TOP                      |                        | 60                             |
+| < (short MIN)            | 80 00, <=              | 40·00 00·20                |
+| \> (null)                |                        | 3E·60                      |
+| BOTTOM                   |                        | 20                         |
+| TOP                      |                        | 60                         |
 
 (The middle dot · doesn't exist in the encoding, it’s just a visualisation of the boundaries in the examples.)
 
@@ -501,21 +501,21 @@ The method we chose for this is the following:
 Examples:
 
 
-| bytes/sequence     | encodes as               |
-| ------------------ | ------------------------ |
-| 22 00              | 22 00 FE                 |
-| 22 00 00 33        | 22 00 FE FF 33 00        |
-| 22 00 11           | 22 00 FF 11 00           |
+| bytes/sequence     | encodes as           |
+| ------------------ |----------------------|
+| 22 00              | 22 00 FE             |
+| 22 00 00 33        | 22 00 FE FF 33 00    |
+| 22 00 11           | 22 00 FF 11 00       |
 | (blob 22, short 0) | 40·22 00·40·80 00·40 |
-| ≥ (blob 22 00)    | 40·22 00 FE·20         |
-| ≤ (blob 22 00 00) | 40·22 00 FE FE·60      |
+| ≥ (blob 22 00)    | 40·22 00 FE·20       |
+| ≤ (blob 22 00 00) | 40·22 00 FE FE·60    |
 
 Within the encoding, a `00` byte can only be followed by a `FE` or `FF` byte, and hence if an encoding is a prefix of
 another, the latter has to have a `FE` or `FF` as the next byte, which ensures both (4) (adding `10`-`EF` to the former
 makes it no longer a prefix of the latter) and (3) (adding `10`-`EF` to the former makes it smaller than the latter; in
 this case the original value of the former is a prefix of the original value of the latter).
 
-## Variable-length integers (varint, RandomPartitioner token), legacy encoding
+## Variable-length integers (varint, RandomPartitioner token), OSS41 and earlier
 
 If integers of unbounded length are guaranteed to start with a non-zero digit, to compare them we can first use a signed
 length, as numbers with longer representations have higher magnitudes. Only if the lengths match we need to compare the
@@ -544,8 +544,8 @@ as well.
 Examples:
 
 
-|   value | bytes            | encodes as              |
-| ------: | ---------------- | ----------------------- |
+|   value | bytes            | encodes as             |
+| ------: | ---------------- |------------------------|
 |       0 | 00               | 80·00                  |
 |       1 | 01               | 80·01                  |
 |      -1 | FF               | 7F·FF                  |
@@ -585,18 +585,18 @@ inverted length bytes), and bigger when positive.
 Examples:
 
 
-|   value | bytes                   | encodes as                      |
-| ------: | ----------------------- | ------------------------------- |
-|       0 | 00                      | 80                              |
-|       1 | 01                      | 81                              |
-|      -1 | FF                      | 7F                              |
-|     255 | 00 FF                   | C0 FF                           |
-|    -256 | FF 00                   | 3F 00                           |
-|     256 | 01 00                   | C1 00                           |
-|    2^16 | 01 00 00                | E1 00 00                        |
-|   -2^32 | FF 00 00 00 00          | 07 00 00 00 00                  |
-|  2^56-1 | 00 FF FF FF FF FF FF FF | FE FF FF FF FF FF FF FF         |
-|   -2^56 | FF 00 00 00 00 00 00 00 | 01 00 00 00 00 00 00 00         |
+|   value | bytes                   | encodes as                    |
+| ------: | ----------------------- |-------------------------------|
+|       0 | 00                      | 80                            |
+|       1 | 01                      | 81                            |
+|      -1 | FF                      | 7F                            |
+|     255 | 00 FF                   | C0 FF                         |
+|    -256 | FF 00                   | 3F 00                         |
+|     256 | 01 00                   | C1 00                         |
+|    2^16 | 01 00 00                | E1 00 00                      |
+|   -2^32 | FF 00 00 00 00          | 07 00 00 00 00                |
+|  2^56-1 | 00 FF FF FF FF FF FF FF | FE FF FF FF FF FF FF FF       |
+|   -2^56 | FF 00 00 00 00 00 00 00 | 01 00 00 00 00 00 00 00       |
 |    2^56 | 01 00 00 00 00 00 00 00 | FF·00·01 00 00 00 00 00 00 00 |
 | -2^56-1 | FE FF FF FF FF FF FF FF | 00·FF·FE FF FF FF FF FF FF FF |
 |  2^1024 | 01 00(128 times)        | FF·7A·01 00(128 times)        |
@@ -671,13 +671,13 @@ byte:
 Examples:
 
 
-|      value |  mexp | mantissa | mantissa in bytes | encodes as           |
-| ---------: | ----: | -------- | ----------------- | -------------------- |
+|      value |  mexp | mantissa | mantissa in bytes | encodes as        |
+| ---------: | ----: | -------- | ----------------- |-------------------|
 |        1.1 |     1 | 0.0110   | .  01 10          | C1·01·81 8A·00    |
 |          1 |     1 | 0.01     | .  01             | C1·01·81·00       |
-|       0.01 |     0 | 0.01     | .  01             | C0·81·00           |
-|          0 |       |          |                   | 80                   |
-|      -0.01 |     0 | -0.01    | . -01             | 40·81·00           |
+|       0.01 |     0 | 0.01     | .  01             | C0·81·00          |
+|          0 |       |          |                   | 80                |
+|      -0.01 |     0 | -0.01    | . -01             | 40·81·00          |
 |         -1 |    -1 | -0.01    | . -01             | 3F·FF·7F·00       |
 |       -1.1 |    -1 | -0.0110  | . -02 90          | 3F·FF·7E DA·00    |
 |      -98.9 |    -1 | -0.9890  | . -99 10          | 3F·FF·1D 8A·00    |
