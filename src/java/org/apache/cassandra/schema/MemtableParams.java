@@ -50,7 +50,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
   */
 public final class MemtableParams
 {
-    private final Memtable.Factory factory;
+    public final Memtable.Factory factory;
     private final String configurationKey;
 
     private MemtableParams(Memtable.Factory factory, String configurationKey)
