@@ -49,6 +49,7 @@ import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -74,7 +75,6 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-
 
     private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
@@ -103,14 +103,13 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         super(indexContext);
         this.keyBounds = keyBounds;
-        //TODO Do we need to follow a setting for this?
-        this.data = new InMemoryTrie<>(TrieMemtable.BUFFER_TYPE);
+        this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.owner().readOrdering());
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
     }
 
     @Override
-    public long add(DecoratedKey key, Clustering clustering, ByteBuffer value, LongConsumer onHeapAllocationsTracker, LongConsumer offHeapAllocationsTracker)
+    public synchronized void add(DecoratedKey key, Clustering clustering, ByteBuffer value, LongConsumer onHeapAllocationsTracker, LongConsumer offHeapAllocationsTracker)
     {
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
         try
@@ -118,8 +117,8 @@ public class TrieMemoryIndex extends MemoryIndex
             value = TypeUtil.asIndexBytes(value, indexContext.getValidator());
             analyzer.reset(value);
             final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
-            final long initialSizeOnHeap = data.sizeOnHeap();
-            final long initialSizeOffHeap = data.sizeOffHeap();
+            final long initialSizeOnHeap = data.usedSizeOnHeap();
+            final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
             while (analyzer.hasNext())
@@ -135,27 +134,17 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
-                    {
-                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
-                    }
-                    else
-                    {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
-                    }
+                    data.putSingleton(encodedTerm, primaryKey, primaryKeysReducer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
-                catch (InMemoryTrie.SpaceExhaustedException e)
+                catch (TrieSpaceExhaustedException e)
                 {
-                    //TODO Handle this properly
-                    throw Throwables.throwAsUncheckedException(e);
+                    Throwables.throwAsUncheckedException(e);
                 }
             }
 
-            onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
+            onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
                                             (primaryKeysReducer.heapAllocations() - reducerHeapSize));
-            offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
-
-            return (data.sizeOnHeap() - initialSizeOnHeap) + (data.sizeOffHeap() - initialSizeOffHeap) + (primaryKeysReducer.heapAllocations() - reducerHeapSize);
+            offHeapAllocationsTracker.accept(data.usedSizeOffHeap() - initialSizeOffHeap);
         }
         finally
         {

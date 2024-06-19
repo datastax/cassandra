@@ -207,8 +207,8 @@ public class SensorsIndexWriteTest
         Sensor secondaryIndexSensor = SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
         // We are not guaranteed that the amount of data we write to the secondary index is more than what we write to the main file,
         // and we are not tracking it very precisely. It should, though, at least include the cell data and deletions which is about
-        // one third the standard write size.
-        assertThat(secondaryIndexSensor.getValue()).isGreaterThanOrEqualTo(standardSensor.getValue() / 3);
+        // half the standard write size.
+        assertThat(secondaryIndexSensor.getValue()).isGreaterThanOrEqualTo(standardSensor.getValue() / 2);
         Sensor secondaryIndexRegistrySensor = SensorsTestUtil.getRegistrySensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
         assertThat(secondaryIndexRegistrySensor).isEqualTo(secondaryIndexSensor);
         // Check that we also get the correct vanilla write bytes for this operation.
