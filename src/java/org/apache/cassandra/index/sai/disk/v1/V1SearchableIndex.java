@@ -170,15 +170,23 @@ public class V1SearchableIndex implements SearchableIndex
     {
         RangeConcatIterator.Builder rangeConcatIteratorBuilder = RangeConcatIterator.builder(segments.size());
 
-        for (Segment segment : segments)
+        try
         {
-            if (segment.intersects(keyRange))
+            for (Segment segment : segments)
             {
-                rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer, limit));
+                if (segment.intersects(keyRange))
+                {
+                    rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer, limit));
+                }
             }
-        }
 
-        return rangeConcatIteratorBuilder.build();
+            return rangeConcatIteratorBuilder.build();
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(rangeConcatIteratorBuilder.ranges());
+            throw t;
+        }
     }
 
     @Override
