@@ -566,14 +566,20 @@ public class ViewUpdateGenerator
             return;
 
         DecoratedKey partitionKey = makeCurrentPartitionKey();
+        PartitionUpdate.Builder update = updates.computeIfAbsent(partitionKey,
+                                                                 k -> builderFor(viewMetadata, partitionKey));
+        update.add(row);
+    }
+
+    private static PartitionUpdate.Builder builderFor(TableMetadata viewMetadata,
+                                                      DecoratedKey partitionKey)
+    {
         // We can't really know which columns of the view will be updated nor how many row will be updated for this key
         // so we rely on hopefully sane defaults.
-        PartitionUpdate.Builder update = updates.computeIfAbsent(partitionKey,
-                                                                 k -> new PartitionUpdate.Builder(viewMetadata,
-                                                                                                  partitionKey,
-                                                                                                  viewMetadata.regularAndStaticColumns(),
-                                                                                                  4));
-        update.add(row);
+        return viewMetadata.params.memtable.factory.partitionUpdateFactory().builder(viewMetadata,
+                                                                                     partitionKey,
+                                                                                     viewMetadata.regularAndStaticColumns(),
+                                                                                     4);
     }
 
     private DecoratedKey makeCurrentPartitionKey()

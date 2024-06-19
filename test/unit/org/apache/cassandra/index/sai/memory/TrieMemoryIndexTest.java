@@ -87,7 +87,7 @@ public class TrieMemoryIndexTest
         while(iterator.hasNext())
         {
             Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
-            int value = ByteSourceInverse.getSignedInt(pair.left.asComparableBytes(ByteComparable.Version.OSS50));
+            int value = ByteSourceInverse.getSignedInt(pair.left.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
             int idCount = 0;
             Iterator<PrimaryKey> primaryKeyIterator = pair.right.iterator();
             while (primaryKeyIterator.hasNext())
@@ -118,7 +118,7 @@ public class TrieMemoryIndexTest
         while(iterator.hasNext())
         {
             Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
-            String value = new String(ByteSourceInverse.readBytes(ByteSource.peekable(pair.left.asComparableBytes(ByteComparable.Version.OSS50))), StandardCharsets.UTF_8);
+            String value = new String(ByteSourceInverse.readBytes(ByteSource.peekable(pair.left.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION))), StandardCharsets.UTF_8);
             int idCount = 0;
             Iterator<PrimaryKey> primaryKeyIterator = pair.right.iterator();
             while (primaryKeyIterator.hasNext())
@@ -158,10 +158,10 @@ public class TrieMemoryIndexTest
 
             final int rowId = i;
             final ByteComparable expectedByteComparable = TypeUtil.isLiteral(type)
-                                                          ? ByteComparable.fixedLength(decompose.apply(rowId))
+                                                          ? v -> ByteSource.preencoded(decompose.apply(rowId))
                                                           : version -> type.asComparableBytes(decompose.apply(rowId), version);
             final ByteComparable actualByteComparable = pair.left;
-            assertEquals("Mismatch at: " + i, 0, ByteComparable.compare(expectedByteComparable, actualByteComparable, ByteComparable.Version.OSS50));
+            assertEquals("Mismatch at: " + i, 0, ByteComparable.compare(expectedByteComparable, actualByteComparable, TypeUtil.BYTE_COMPARABLE_VERSION));
 
             i++;
         }

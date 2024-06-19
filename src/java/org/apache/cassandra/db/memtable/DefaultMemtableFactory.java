@@ -26,5 +26,4 @@ public class DefaultMemtableFactory
 {
     // We can't use TrieMemtable.FACTORY as that requires DatabaseDescriptor to have been initialized.
     public static final Memtable.Factory INSTANCE = (commitLogLowerBound, metadataRef, owner) -> new TrieMemtable(commitLogLowerBound, metadataRef, owner, null);
-//    public static final Memtable.Factory INSTANCE = SkipListMemtable::new;
 }

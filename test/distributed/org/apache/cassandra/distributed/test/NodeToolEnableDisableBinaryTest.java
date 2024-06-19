@@ -96,7 +96,7 @@ public class NodeToolEnableDisableBinaryTest extends TestBaseImpl
                         "            Remote jmx agent username\n" +
                         "\n" +
                         "\n";
-        Assertions.assertThat(tool.getStdout()).isEqualTo(help);
+        Assertions.assertThat(tool.getCleanedStdout()).isEqualTo(help);
 
         tool = ToolRunner.invokeNodetoolJvmDtest(cluster.get(1), "help", "enablebinary");
         help =  "NAME\n" +
@@ -128,7 +128,7 @@ public class NodeToolEnableDisableBinaryTest extends TestBaseImpl
                 "            Remote jmx agent username\n" +
                 "\n" +
                 "\n";
-        Assertions.assertThat(tool.getStdout()).isEqualTo(help);
+        Assertions.assertThat(tool.getCleanedStdout()).isEqualTo(help);
     }
 
     @Test

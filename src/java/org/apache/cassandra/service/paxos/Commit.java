@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -342,7 +343,7 @@ public class Commit
 
     public String toString(String kind)
     {
-        return String.format("%s(%d:%s, %d:%s)", kind, ballot.uuidTimestamp(), ballot, update.stats().minTimestamp, update.toString(false));
+        return String.format("%s(%d:%s, %d:%s)", kind, ballot.uuidTimestamp(), ballot, update.stats().minTimestamp, Partition.toString(update, false));
     }
 
     /**
@@ -472,7 +473,7 @@ public class Commit
 
     private static PartitionUpdate withTimestamp(PartitionUpdate update, long timestamp)
     {
-        return new PartitionUpdate.Builder(update, 0).updateAllTimestamp(timestamp).build();
+        return update.withUpdatedTimestamps(timestamp);
     }
 
     public static class CommitSerializer<T extends Commit> implements IVersionedSerializer<T>

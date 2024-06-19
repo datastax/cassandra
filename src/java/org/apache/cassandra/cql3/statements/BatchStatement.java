@@ -477,7 +477,7 @@ public class BatchStatement implements CQLStatement
         {
             for (PartitionUpdate update : mutation.getPartitionUpdates())
             {
-                for (Row row : update)
+                for (Row row : update.rows())
                     nrUpdatedColumns += row.columns().size();
             }
         }

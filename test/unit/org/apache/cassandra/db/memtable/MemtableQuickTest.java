@@ -139,6 +139,13 @@ public class MemtableQuickTest extends CQLTester
         UntypedResultSet result = execute("SELECT * FROM " + table);
         assertRowCount(result, rowsPerPartition * (partitions - deletedPartitions) - deletedRows);
 
+        Memtable memtable = cfs.getCurrentMemtable();
+        Memtable.FlushablePartitionSet<?> flushSet = memtable.getFlushSet(null, null);
+        Assert.assertEquals(partitions, flushSet.partitionCount());
+        double expectedKeySize = partitions * 8;
+        // expected key size must be within 5% of actual
+        Assert.assertEquals(expectedKeySize, flushSet.partitionKeysSize(), expectedKeySize * 0.05);
+
         Util.flush(cfs);
 
         logger.info("Selecting *");

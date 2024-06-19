@@ -226,14 +226,14 @@ public class AtomicBTreePartitionMemtableAccountingTest
         {
             // Test regular row updates
             Pair<Row, Row> regularRows = makeInitialAndUpdate(r1md, c2md);
-            PartitionUpdate initial = PartitionUpdate.singleRowUpdate(metadata, partitionKey, regularRows.left, null);
-            PartitionUpdate update = PartitionUpdate.singleRowUpdate(metadata, partitionKey, regularRows.right, null);
+            PartitionUpdate initial = PartitionUpdate.singleRowUpdate(metadata, partitionKey, regularRows.left);
+            PartitionUpdate update = PartitionUpdate.singleRowUpdate(metadata, partitionKey, regularRows.right);
             validateUpdates(metadata, partitionKey, Arrays.asList(initial, update));
 
             // Test static row updates
             Pair<Row, Row> staticRows = makeInitialAndUpdate(s3md, c4md);
-            PartitionUpdate staticInitial = PartitionUpdate.singleRowUpdate(metadata, partitionKey, null, staticRows.left);
-            PartitionUpdate staticUpdate = PartitionUpdate.singleRowUpdate(metadata, partitionKey, null, staticRows.right);
+            PartitionUpdate staticInitial = PartitionUpdate.singleRowUpdate(metadata, partitionKey, staticRows.left);
+            PartitionUpdate staticUpdate = PartitionUpdate.singleRowUpdate(metadata, partitionKey, staticRows.right);
             validateUpdates(metadata, partitionKey, Arrays.asList(staticInitial, staticUpdate));
         }
 
@@ -303,7 +303,8 @@ public class AtomicBTreePartitionMemtableAccountingTest
             AtomicBTreePartition partition = new AtomicBTreePartition(metadataRef, partitionKey, allocator);
 
             // For each update, apply it and verify the allocator is positive
-            long unreleasable = updates.stream().mapToLong(update -> {
+            long unreleasable = updates.stream().mapToLong(updateUntyped -> {
+                BTreePartitionUpdate update = BTreePartitionUpdate.asBTreeUpdate(updateUntyped);
                 DeletionTime exsDeletion = partition.deletionInfo().getPartitionDeletion();
                 DeletionTime updDeletion = update.deletionInfo().getPartitionDeletion();
                 long updateUnreleasable = 0;
@@ -334,7 +335,7 @@ public class AtomicBTreePartitionMemtableAccountingTest
             AtomicBTreePartition recreated = new AtomicBTreePartition(metadataRef, partitionKey, recreatedAllocator);
             try (UnfilteredRowIterator iter = partition.unfilteredIterator())
             {
-                PartitionUpdate update = PartitionUpdate.fromIterator(iter, ColumnFilter.NONE);
+                BTreePartitionUpdate update = BTreePartitionUpdate.fromIterator(iter, ColumnFilter.NONE);
                 opOrder.newBarrier().issue();
                 OpOrder.Group writeOp = opOrder.getCurrent();
                 Cloner cloner = recreatedAllocator.cloner(writeOp);

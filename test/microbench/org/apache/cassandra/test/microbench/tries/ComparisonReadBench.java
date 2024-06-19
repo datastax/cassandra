@@ -31,12 +31,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.tries.InMemoryTrie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteArrayUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -84,6 +84,18 @@ public class ComparisonReadBench
 
     @Param({"LONG"})
     TypeOption type = TypeOption.LONG;
+
+    public enum TrieAllocation {
+        SHORT_LIVED,
+        LONG_LIVED_ON_HEAP,
+        LONG_LIVED_OFF_HEAP
+    }
+
+    @Param({"SHORT_LIVED"})
+    static TrieAllocation allocation = TrieAllocation.SHORT_LIVED;
+
+    @Param({"OSS50"})
+    static ByteComparable.Version byteComparableVersion = ByteComparable.Version.OSS50;
 
     final static InMemoryTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
 
@@ -155,7 +167,7 @@ public class ComparisonReadBench
 
         public Long fromByteComparable(ByteComparable bc)
         {
-            return ByteSourceInverse.getSignedLong(bc.asComparableBytes(ByteComparable.Version.OSS50));
+            return ByteSourceInverse.getSignedLong(bc.asComparableBytes(byteComparableVersion));
         }
 
         public ByteComparable longToByteComparable(long l)
@@ -178,8 +190,8 @@ public class ComparisonReadBench
 
         public BigInteger fromByteComparable(ByteComparable bc)
         {
-            return IntegerType.instance.compose(IntegerType.instance.fromComparableBytes(ByteSource.peekable(bc.asComparableBytes(ByteComparable.Version.OSS50)),
-                                                                                         ByteComparable.Version.OSS50));
+            return IntegerType.instance.compose(IntegerType.instance.fromComparableBytes(ByteSource.peekable(bc.asComparableBytes(byteComparableVersion)),
+                                                                                         byteComparableVersion));
         }
 
         public ByteComparable longToByteComparable(long l)
@@ -202,8 +214,8 @@ public class ComparisonReadBench
 
         public BigDecimal fromByteComparable(ByteComparable bc)
         {
-            return DecimalType.instance.compose(DecimalType.instance.fromComparableBytes(ByteSource.peekable(bc.asComparableBytes(ByteComparable.Version.OSS50)),
-                                                                                         ByteComparable.Version.OSS50));
+            return DecimalType.instance.compose(DecimalType.instance.fromComparableBytes(ByteSource.peekable(bc.asComparableBytes(byteComparableVersion)),
+                                                                                         byteComparableVersion));
         }
 
         public ByteComparable longToByteComparable(long l)
@@ -233,12 +245,12 @@ public class ComparisonReadBench
 
         public String fromByteComparable(ByteComparable bc)
         {
-            return new String(ByteSourceInverse.readBytes(bc.asComparableBytes(ByteComparable.Version.OSS50)), StandardCharsets.UTF_8);
+            return new String(ByteSourceInverse.readBytes(bc.asComparableBytes(byteComparableVersion)), StandardCharsets.UTF_8);
         }
 
         public ByteComparable longToByteComparable(long l)
         {
-            return ByteComparable.fixedLength(fromLong(l).getBytes(StandardCharsets.UTF_8));
+            return ByteComparable.preencoded(byteComparableVersion, fromLong(l).getBytes(StandardCharsets.UTF_8));
         }
 
         public Comparator<String> comparator()
@@ -269,12 +281,12 @@ public class ComparisonReadBench
 
         public byte[] fromByteComparable(ByteComparable bc)
         {
-            return ByteSourceInverse.readBytes(bc.asComparableBytes(ByteComparable.Version.OSS50));
+            return ByteSourceInverse.readBytes(bc.asComparableBytes(byteComparableVersion));
         }
 
         public ByteComparable longToByteComparable(long l)
         {
-            return ByteComparable.fixedLength(fromLong(l));
+            return ByteComparable.preencoded(byteComparableVersion, fromLong(l));
         }
 
         public Comparator<byte[]> comparator()
@@ -288,7 +300,7 @@ public class ComparisonReadBench
         void put(long v, byte b);
         byte get(long v);
         Iterable<Byte> values();
-        Iterable<Byte> valuesSlice(long left, boolean includeLeft, long right, boolean includeRight);
+        Iterable<Byte> valuesSlice(long left, long right);
         Iterable<Map.Entry<T, Byte>> entrySet();
         void consumeValues(Consumer<Byte> consumer);
         void consumeEntries(BiConsumer<T, Byte> consumer);
@@ -310,7 +322,20 @@ public class ComparisonReadBench
         TrieAccess(Type<T> type)
         {
             this.type = type;
-            trie = new InMemoryTrie<>(bufferType);
+            switch (allocation)
+            {
+                case SHORT_LIVED:
+                    trie = InMemoryTrie.shortLived(byteComparableVersion);
+                    break;
+                case LONG_LIVED_ON_HEAP:
+                    trie = InMemoryTrie.longLived(byteComparableVersion, BufferType.ON_HEAP, null);
+                    break;
+                case LONG_LIVED_OFF_HEAP:
+                    trie = InMemoryTrie.longLived(byteComparableVersion, BufferType.OFF_HEAP, null);
+                    break;
+                default:
+                    throw new AssertionError();
+            };
         }
 
         public void put(long v, byte b)
@@ -319,9 +344,9 @@ public class ComparisonReadBench
             {
                 trie.putRecursive(type.longToByteComparable(v), b, resolver);
             }
-            catch (InMemoryTrie.SpaceExhaustedException e)
+            catch (TrieSpaceExhaustedException e)
             {
-                throw Throwables.propagate(e);
+                throw new AssertionError(e);
             }
         }
 
@@ -335,9 +360,9 @@ public class ComparisonReadBench
             return trie.values();
         }
 
-        public Iterable<Byte> valuesSlice(long left, boolean includeLeft, long right, boolean includeRight)
+        public Iterable<Byte> valuesSlice(long left, long right)
         {
-            return trie.subtrie(type.longToByteComparable(left), includeLeft, type.longToByteComparable(right), includeRight)
+            return trie.subtrie(type.longToByteComparable(left), type.longToByteComparable(right))
                        .values();
         }
 
@@ -362,9 +387,9 @@ public class ComparisonReadBench
         {
             long deepsize = meter.measureDeep(trie);
             System.out.format("Trie size on heap %,d off heap %,d deep size %,d\n",
-                              trie.sizeOnHeap(), trie.sizeOffHeap(), deepsize);
+                              trie.usedSizeOnHeap(), trie.usedSizeOffHeap(), deepsize);
             System.out.format("per entry on heap %.2f off heap %.2f deep size %.2f\n",
-                              trie.sizeOnHeap() * 1.0 / count, trie.sizeOffHeap() * 1.0 / count, deepsize * 1.0 / count);
+                              trie.usedSizeOnHeap() * 1.0 / count, trie.usedSizeOffHeap() * 1.0 / count, deepsize * 1.0 / count);
         }
     }
 
@@ -394,9 +419,9 @@ public class ComparisonReadBench
             return navigableMap.values();
         }
 
-        public Iterable<Byte> valuesSlice(long left, boolean includeLeft, long right, boolean includeRight)
+        public Iterable<Byte> valuesSlice(long left, long right)
         {
-            return navigableMap.subMap(type.fromLong(left), includeLeft, type.fromLong(right), includeRight)
+            return navigableMap.subMap(type.fromLong(left), type.fromLong(right))
                                .values();
         }
 
@@ -500,7 +525,7 @@ public class ComparisonReadBench
         for (int i = 0; i < count; ++i)
         {
             long v = rand.nextLong();
-            Iterable<Byte> values = access.valuesSlice(v, true, v, true);
+            Iterable<Byte> values = access.valuesSlice(v, v);
             for (byte b : values)
                 sum += b;
         }
@@ -511,7 +536,7 @@ public class ComparisonReadBench
     public int iterateValuesLimited()
     {
         int sum = 0;
-        Iterable<Byte> values = access.valuesSlice(0L, false, Long.MAX_VALUE / 2, true); // 1/4
+        Iterable<Byte> values = access.valuesSlice(0L, Long.MAX_VALUE / 2); // 1/4
         for (byte b : values)
             sum += b;
         return sum;

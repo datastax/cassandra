@@ -46,11 +46,16 @@ import org.apache.cassandra.db.marshal.CounterColumnType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.SetType;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Range;
@@ -1017,7 +1022,7 @@ public class ReadCommandTest
 
         try (ReadExecutionController controller = command.executionController(true))
         {
-            List<ImmutableBTreePartition> partitions = Util.getAllUnfiltered(command, controller);
+            List<Partition> partitions = Util.getAllUnfiltered(command, controller);
             assertEquals(1, partitions.size());
             ByteBuffer digestWithTombstones = controller.getRepairedDataDigest();
             assertTrue(ByteBufferUtil.compareUnsigned(EMPTY_BYTE_BUFFER, digestWithTombstones) != 0);
@@ -1034,7 +1039,7 @@ public class ReadCommandTest
 
         try (ReadExecutionController controller = command.executionController(true))
         {
-            List<ImmutableBTreePartition> partitions = Util.getAllUnfiltered(command, controller);
+            List<Partition> partitions = Util.getAllUnfiltered(command, controller);
             assertTrue(partitions.isEmpty());
             ByteBuffer digestWithoutTombstones = controller.getRepairedDataDigest();
             assertEquals(0, ByteBufferUtil.compareUnsigned(EMPTY_BYTE_BUFFER, digestWithoutTombstones));
@@ -1073,7 +1078,7 @@ public class ReadCommandTest
         
         try (ReadExecutionController controller = command.executionController(true))
         {
-            List<ImmutableBTreePartition> partitions = Util.getAllUnfiltered(command, controller);
+            List<Partition> partitions = Util.getAllUnfiltered(command, controller);
             assertEquals(1, partitions.size());
             digestWithoutPurgedPartition = controller.getRepairedDataDigest();
             assertTrue(ByteBufferUtil.compareUnsigned(EMPTY_BYTE_BUFFER, digestWithoutPurgedPartition) != 0);
@@ -1087,7 +1092,7 @@ public class ReadCommandTest
 
         try (ReadExecutionController controller = command.executionController(true))
         {
-            List<ImmutableBTreePartition> partitions = Util.getAllUnfiltered(command, controller);
+            List<Partition> partitions = Util.getAllUnfiltered(command, controller);
             assertEquals(1, partitions.size());
             ByteBuffer digestWithPurgedPartition = controller.getRepairedDataDigest();
             assertEquals(0, ByteBufferUtil.compareUnsigned(digestWithPurgedPartition, digestWithoutPurgedPartition));

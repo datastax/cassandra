@@ -33,6 +33,8 @@ import com.google.common.collect.Iterators;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
@@ -42,17 +44,41 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.db.partitions.AbstractBTreePartition;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.rows.Row.Deletion;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
+@RunWith(Parameterized.class)
 public class PartitionImplementationTest
 {
+    enum Implementation
+    {
+        BTREE(ImmutableBTreePartition::create),
+        TRIE(TrieBackedPartition::create);
+
+        final Function<UnfilteredRowIterator, Partition> creator;
+
+        Implementation(Function<UnfilteredRowIterator, Partition> creator)
+        {
+            this.creator = creator;
+        }
+    }
+
+    @Parameterized.Parameters(name="{0}")
+    public static Object[] generateData()
+    {
+        return Implementation.values();
+    }
+
+    @Parameterized.Parameter(0)
+    public static Implementation implementation = Implementation.BTREE;
+
     private static final String KEYSPACE = "PartitionImplementationTest";
     private static final String CF = "Standard";
 
@@ -259,10 +285,10 @@ public class PartitionImplementationTest
     {
         NavigableSet<Clusterable> sortedContent = new TreeSet<Clusterable>(metadata.comparator);
         sortedContent.addAll(contentSupplier.get());
-        AbstractBTreePartition partition;
+        Partition partition;
         try (UnfilteredRowIterator iter = new Util.UnfilteredSource(metadata, Util.dk("pk"), staticRow, sortedContent.stream().map(x -> (Unfiltered) x).iterator()))
         {
-            partition = ImmutableBTreePartition.create(iter);
+            partition = implementation.creator.apply(iter);
         }
 
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("col", true));
@@ -292,9 +318,13 @@ public class PartitionImplementationTest
         assertEquals(sortedContent.stream().anyMatch(x -> x instanceof Row),
                      partition.hasRows());
 
+        // rowCount
+        assertEquals(sortedContent.stream().filter(x -> x instanceof Row).count(),
+                     partition.rowCount());
+
         // iterator
         assertIteratorsEqual(sortedContent.stream().filter(x -> x instanceof Row).iterator(),
-                             partition.iterator());
+                             partition.rowIterator());
 
         // unfiltered iterator
         assertIteratorsEqual(sortedContent.iterator(),
@@ -401,7 +431,7 @@ public class PartitionImplementationTest
         return clusterings;
     }
 
-    private void testSlicingOfIterators(NavigableSet<Clusterable> sortedContent, AbstractBTreePartition partition, ColumnFilter cf, boolean reversed)
+    private void testSlicingOfIterators(NavigableSet<Clusterable> sortedContent, Partition partition, ColumnFilter cf, boolean reversed)
     {
         Function<? super Clusterable, ? extends Clusterable> colFilter = x -> x instanceof Row ? ((Row) x).filter(cf, metadata) : x;
         Slices slices = makeSlices();
@@ -568,4 +598,19 @@ public class PartitionImplementationTest
         test(this::generateUnfiltereds, makeStaticRow());
     }
 
+    @Test
+    public void checkStaticPath()
+    {
+        ByteComparable sp = metadata.comparator.asByteComparable(Clustering.STATIC_CLUSTERING);
+        for (ByteComparable.Version v : ByteComparable.Version.values())
+            assertEquals(0, ByteComparable.compare(sp, TrieBackedPartition.STATIC_CLUSTERING_PATH, v));
+    }
+
+    @Test
+    public void checkBottomPath()
+    {
+        ByteComparable sp = metadata.comparator.asByteComparable(ClusteringBound.BOTTOM);
+        for (ByteComparable.Version v : ByteComparable.Version.values())
+            assertEquals(0, ByteComparable.compare(sp, TrieBackedPartition.BOTTOM_PATH, v));
+    }
 }

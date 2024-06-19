@@ -53,6 +53,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.SortingIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
  * Abstract reader for individual segments of an on-disk index.
@@ -145,7 +146,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return indexContext.isLiteral() ? ByteComparable.fixedLength(input)
+        return indexContext.isLiteral() ? v -> ByteSource.preencoded(input)
                                         : v -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), v);
     }
 

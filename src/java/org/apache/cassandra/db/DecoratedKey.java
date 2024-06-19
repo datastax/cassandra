@@ -107,7 +107,7 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
     {
         // Note: In the legacy version one encoding could be a prefix of another as the escaping is only weakly
         // prefix-free (see ByteSourceTest.testDecoratedKeyPrefixes()).
-        // The OSS50 version avoids this by adding a terminator.
+        // The OSS41 and 50 versions avoids this by adding a terminator.
         return ByteSource.withTerminatorMaybeLegacy(version,
                                                     ByteSource.END_OF_STREAM,
                                                     token.asComparableBytes(version),
@@ -232,6 +232,14 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         // Instantiate a decorated key from the decoded token and key bytes, using the provided factory method.
         return decoratedKeyFactory.apply(token, keyBytes);
     }
+
+    public static byte[] keyFromByteComparable(ByteComparable byteComparable,
+                                               Version version,
+                                               IPartitioner partitioner)
+    {
+        return keyFromByteSource(ByteSource.peekable(byteComparable.asComparableBytes(version)), version, partitioner);
+    }
+
 
     public static byte[] keyFromByteSource(ByteSource.Peekable peekableByteSource,
                                            Version version,
