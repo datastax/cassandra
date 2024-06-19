@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
 import org.apache.cassandra.db.tries.Direction;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieEntriesWalker;
 import org.apache.cassandra.io.compress.BufferType;
@@ -48,14 +48,14 @@ public class MemtableTrieReadBench
     @Param({"FORWARD"})
     Direction direction = Direction.FORWARD;
 
-    final static MemtableTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
+    final static InMemoryTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
 
-    MemtableTrie<Byte> trie;
+    InMemoryTrie<Byte> trie;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        trie = new MemtableTrie<>(bufferType);
+        trie = new InMemoryTrie<>(bufferType);
         Random rand = new Random(1);
 
         System.out.format("Putting %,d\n", count);

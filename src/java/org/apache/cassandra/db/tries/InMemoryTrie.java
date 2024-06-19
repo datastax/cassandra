@@ -42,9 +42,9 @@ import org.github.jamm.MemoryLayoutSpecification;
  * This implementation does not currently guarantee this, but we still get the desired result as `apply` is only used
  * with singleton tries.
  */
-public class MemtableTrie<T> extends MemtableReadTrie<T>
+public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 {
-    // See the trie format description in MemtableReadTrie.
+    // See the trie format description in InMemoryReadTrie.
 
     /**
      * Trie size limit. This is not enforced, but users must check from time to time that it is not exceeded (using
@@ -73,13 +73,13 @@ public class MemtableTrie<T> extends MemtableReadTrie<T>
 
     static
     {
-        MemtableTrie<Object> empty = new MemtableTrie<>(BufferType.ON_HEAP);
+        InMemoryTrie<Object> empty = new InMemoryTrie<>(BufferType.ON_HEAP);
         EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
-        empty = new MemtableTrie<>(BufferType.OFF_HEAP);
+        empty = new InMemoryTrie<>(BufferType.OFF_HEAP);
         EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);
     }
 
-    public MemtableTrie(BufferType bufferType)
+    public InMemoryTrie(BufferType bufferType)
     {
         super(new UnsafeBuffer[31 - BUF_START_SHIFT],  // last one is 1G for a total of ~2G bytes
               new AtomicReferenceArray[29 - CONTENTS_START_SHIFT],  // takes at least 4 bytes to write pointer to one content -> 4 times smaller than buffers
@@ -735,7 +735,7 @@ public class MemtableTrie<T> extends MemtableReadTrie<T>
             if (isNull(updatedPostContentNode))
                 setUpdatedPostContentNode(expandOrCreateChainNode(transition, child));
             else
-                setUpdatedPostContentNode(MemtableTrie.this.attachChild(updatedPostContentNode,
+                setUpdatedPostContentNode(InMemoryTrie.this.attachChild(updatedPostContentNode,
                                                                         transition,
                                                                         child));
         }
@@ -801,11 +801,11 @@ public class MemtableTrie<T> extends MemtableReadTrie<T>
 
     /**
      * Somewhat similar to {@link MergeResolver}, this encapsulates logic to be applied whenever new content is being
-     * upserted into a {@link MemtableTrie}. Unlike {@link MergeResolver}, {@link UpsertTransformer} will be applied no
+     * upserted into a {@link InMemoryTrie}. Unlike {@link MergeResolver}, {@link UpsertTransformer} will be applied no
      * matter if there's pre-existing content for that trie key/path or not.
      *
-     * @param <T> The content type for this {@link MemtableTrie}.
-     * @param <U> The type of the new content being applied to this {@link MemtableTrie}.
+     * @param <T> The content type for this {@link InMemoryTrie}.
+     * @param <U> The type of the new content being applied to this {@link InMemoryTrie}.
      */
     public interface UpsertTransformer<T, U>
     {

@@ -20,7 +20,6 @@ package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Random;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -29,7 +28,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-import static org.apache.cassandra.db.tries.MemtableTrieTestBase.*;
+import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.*;
 
 public class MergeTrieTest
 {
@@ -44,8 +43,8 @@ public class MergeTrieTest
         SortedMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
         SortedMap<ByteComparable, ByteBuffer> content2 = new TreeMap<>(FORWARD_COMPARATOR);
 
-        MemtableTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
-        MemtableTrie<ByteBuffer> trie2 = makeMemtableTrie(src2, content2, true);
+        InMemoryTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
+        InMemoryTrie<ByteBuffer> trie2 = makeMemtableTrie(src2, content2, true);
 
         content1.putAll(content2);
         Trie<ByteBuffer> union = trie1.mergeWith(trie2, (x, y) -> x);
@@ -61,8 +60,8 @@ public class MergeTrieTest
         SortedMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
         SortedMap<ByteComparable, ByteBuffer> content2 = new TreeMap<>(FORWARD_COMPARATOR);
 
-        MemtableTrie trie1 = makeMemtableTrie(src1, content1, true);
-        MemtableTrie trie2 = makeMemtableTrie(src2, content2, true);
+        InMemoryTrie trie1 = makeMemtableTrie(src1, content1, true);
+        InMemoryTrie trie2 = makeMemtableTrie(src2, content2, true);
 
         addToMemtableTrie(generateKeys(new Random(5), COUNT), content1, trie1, true);
         addToMemtableTrie(generateKeys(new Random(5), COUNT), content2, trie2, true);
@@ -78,12 +77,12 @@ public class MergeTrieTest
     {
         ByteComparable[] src1 = generateKeys(rand, COUNT);
         SortedMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
-        MemtableTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
+        InMemoryTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
 
         ByteComparable[] src2 = generateKeys(rand, COUNT);
         src2 = removeDuplicates(src2, content1);
         SortedMap<ByteComparable, ByteBuffer> content2 = new TreeMap<>(FORWARD_COMPARATOR);
-        MemtableTrie<ByteBuffer> trie2 = makeMemtableTrie(src2, content2, true);
+        InMemoryTrie<ByteBuffer> trie2 = makeMemtableTrie(src2, content2, true);
 
         content1.putAll(content2);
         Trie<ByteBuffer> union = new MergeTrie.Distinct<>(trie1, trie2);

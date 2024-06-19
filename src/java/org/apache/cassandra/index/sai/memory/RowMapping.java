@@ -24,7 +24,7 @@ import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -65,7 +65,7 @@ public class RowMapping
         }
     };
 
-    private final MemtableTrie<Long> rowMapping = new MemtableTrie<>(BufferType.OFF_HEAP);
+    private final InMemoryTrie<Long> rowMapping = new InMemoryTrie<>(BufferType.OFF_HEAP);
 
     private volatile boolean complete = false;
 
@@ -146,7 +146,7 @@ public class RowMapping
     /**
      * Include PrimaryKey to RowId mapping
      */
-    public void add(PrimaryKey key, long sstableRowId) throws MemtableTrie.SpaceExhaustedException
+    public void add(PrimaryKey key, long sstableRowId) throws InMemoryTrie.SpaceExhaustedException
     {
         assert !complete : "Cannot modify built RowMapping.";
 

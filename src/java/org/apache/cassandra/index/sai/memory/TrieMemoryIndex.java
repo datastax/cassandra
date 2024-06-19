@@ -41,7 +41,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.memtable.TrieMemtable;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -63,7 +63,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
-    private final MemtableTrie<PrimaryKeys> data;
+    private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
 
     private ByteBuffer minTerm;
@@ -80,7 +80,7 @@ public class TrieMemoryIndex extends MemoryIndex
     public TrieMemoryIndex(IndexContext indexContext)
     {
         super(indexContext);
-        this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
+        this.data = new InMemoryTrie<>(TrieMemtable.BUFFER_TYPE);
         this.primaryKeysReducer = new PrimaryKeysReducer();
     }
 
@@ -121,7 +121,7 @@ public class TrieMemoryIndex extends MemoryIndex
                         data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
                     }
                 }
-                catch (MemtableTrie.SpaceExhaustedException e)
+                catch (InMemoryTrie.SpaceExhaustedException e)
                 {
                     Throwables.throwAsUncheckedException(e);
                 }
@@ -289,7 +289,7 @@ public class TrieMemoryIndex extends MemoryIndex
         };
     }
 
-    class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations = new LongAdder();
 
