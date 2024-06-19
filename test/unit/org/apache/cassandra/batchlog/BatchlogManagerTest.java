@@ -27,6 +27,7 @@ import org.junit.*;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -41,7 +42,6 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -114,8 +114,8 @@ public class BatchlogManagerTest
                 .applyUnsafe();
 
         DecoratedKey dk = cfs.decorateKey(ByteBufferUtil.bytes("1234"));
-        ImmutableBTreePartition results = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, dk).build());
-        Iterator<Row> iter = results.iterator();
+        Partition results = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, dk).build());
+        Iterator<Row> iter = results.rowIterator();
         assert iter.hasNext();
 
         Mutation mutation = new Mutation(PartitionUpdate.fullPartitionDelete(cfm,

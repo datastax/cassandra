@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -40,6 +41,7 @@ import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable.Version;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 public class ListType<T> extends CollectionType<List<T>>
 {
@@ -122,6 +124,66 @@ public class ListType<T> extends CollectionType<List<T>>
     public <V> V fromComparableBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, Version version)
     {
         return fromComparableBytesListOrSet(accessor, comparableBytes, version, getElementsType());
+    }
+
+    static <V> ByteSource asComparableBytesListOrSet(AbstractType<?> elementsComparator,
+                                                     ValueAccessor<V> accessor,
+                                                     V data,
+                                                     Version version)
+    {
+        if (accessor.isEmpty(data))
+            return null;
+
+        int offset = 0;
+        int size = CollectionSerializer.readCollectionSize(data, accessor);
+        offset += CollectionSerializer.sizeOfCollectionSize();
+        ByteSource[] srcs = new ByteSource[size];
+        for (int i = 0; i < size; ++i)
+        {
+            V v = CollectionSerializer.readValue(data, accessor, offset);
+            offset += CollectionSerializer.sizeOfValue(v, accessor);
+            srcs[i] = elementsComparator.asComparableBytes(accessor, v, version);
+        }
+        return ByteSource.withTerminatorMaybeLegacy(version, 0x00, srcs);
+    }
+
+    static <V> V fromComparableBytesListOrSet(ValueAccessor<V> accessor,
+                                              ByteSource.Peekable comparableBytes,
+                                              Version version,
+                                              AbstractType<?> elementType)
+    {
+        if (comparableBytes == null)
+            return accessor.empty();
+
+        List<V> buffers = new ArrayList<>();
+        int terminator = version == Version.LEGACY
+                         ? 0x00
+                         : ByteSource.TERMINATOR;
+        int separator = comparableBytes.next();
+        while (separator != terminator)
+        {
+            if (!ByteSourceInverse.nextComponentNull(separator))
+                buffers.add(elementType.fromComparableBytes(accessor, comparableBytes, version));
+            else
+                buffers.add(null);
+            separator = comparableBytes.next();
+        }
+        return CollectionSerializer.pack(buffers, accessor, buffers.size());
+    }
+
+    @Override
+    public String toString(boolean ignoreFreezing)
+    {
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+
+        StringBuilder sb = new StringBuilder();
+        if (includeFrozenType)
+            sb.append(FrozenType.class.getName()).append('(');
+        sb.append(getClass().getName());
+        sb.append(TypeParser.stringifyTypeParameters(subTypes, ignoreFreezing || !isMultiCell()));
+        if (includeFrozenType)
+            sb.append(')');
+        return sb.toString();
     }
 
     public List<ByteBuffer> serializedValues(Iterator<Cell<?>> cells)
