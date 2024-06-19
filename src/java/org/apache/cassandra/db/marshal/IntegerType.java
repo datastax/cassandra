@@ -183,7 +183,7 @@ public final class IntegerType extends NumberType<BigInteger>
      *    2^56-1        as FEFFFFFFFFFFFFFF
      *    2^56          as FF000100000000000000
      *
-     * See {@link #asComparableBytesLegacy} for description of the legacy format.
+     * See {@link #asComparableBytes41} for description of the legacy format.
      */
     @Override
     public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
@@ -204,12 +204,12 @@ public final class IntegerType extends NumberType<BigInteger>
             }
         }
 
-        if (version != ByteComparable.Version.LEGACY)
+        if (version == ByteComparable.Version.OSS50)
             return (limit - p < FULL_FORM_THRESHOLD)
                    ? encodeAsVarInt(accessor, data, limit)
-                   : asComparableBytesCurrent(accessor, data, p, limit, (signbyte >> 7) & 0xFF);
+                   : asComparableBytes50(accessor, data, p, limit, (signbyte >> 7) & 0xFF);
         else
-            return asComparableBytesLegacy(accessor, data, p, limit, signbyte);
+            return asComparableBytes41(accessor, data, p, limit, signbyte);
     }
 
     /**
@@ -266,13 +266,14 @@ public final class IntegerType extends NumberType<BigInteger>
      * The representations are prefix-free, because representations of different length always have length bytes that
      * differ.
      */
-    private <V> ByteSource asComparableBytesCurrent(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
+    private <V> ByteSource asComparableBytes50(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
     {
+        assert startpos >= 0 && startpos + FULL_FORM_THRESHOLD <= limit;
         // start with sign as a byte, then variable-length-encoded length, then bytes (stripped leading sign)
         return new ByteSource()
         {
             int pos = -2;
-            ByteSource lengthEncoding = new VariableLengthUnsignedInteger(limit - startpos - FULL_FORM_THRESHOLD);
+            ByteSource lengthEncoding = new VariableLengthUnsignedInteger(limit - (startpos + FULL_FORM_THRESHOLD));
 
             @Override
             public int next()
@@ -323,7 +324,7 @@ public final class IntegerType extends NumberType<BigInteger>
      *    2^31          as 8380000000
      *    2^32          as 840100000000
      */
-    private <V> ByteSource asComparableBytesLegacy(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
+    private <V> ByteSource asComparableBytes41(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
     {
         return new ByteSource()
         {
@@ -366,6 +367,51 @@ public final class IntegerType extends NumberType<BigInteger>
         if (comparableBytes == null)
             return accessor.empty();
 
+        switch (version)
+        {
+            case OSS41:
+                return fromComparableBytes41(accessor, comparableBytes);
+            case OSS50:
+                return fromComparableBytes50(accessor, comparableBytes);
+            case LEGACY:
+                throw new AssertionError("Legacy byte-comparable format is not revertible.");
+            default:
+                throw new AssertionError();
+        }
+    }
+
+    private <V> V fromComparableBytes41(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes)
+    {
+        int valueBytes;
+        byte signedZero;
+        // Consume the first byte to determine whether the encoded number is positive and
+        // start iterating through the length header bytes and collecting the number of value bytes.
+        int curr = comparableBytes.next();
+        if (curr >= POSITIVE_VARINT_HEADER) // positive number
+        {
+            valueBytes = curr - POSITIVE_VARINT_HEADER + 1;
+            while (curr == POSITIVE_VARINT_LENGTH_HEADER)
+            {
+                curr = comparableBytes.next();
+                valueBytes += curr - POSITIVE_VARINT_HEADER + 1;
+            }
+            signedZero = 0;
+        }
+        else // negative number
+        {
+            valueBytes = POSITIVE_VARINT_HEADER - curr;
+            while (curr == NEGATIVE_VARINT_LENGTH_HEADER)
+            {
+                curr = comparableBytes.next();
+                valueBytes += POSITIVE_VARINT_HEADER - curr;
+            }
+            signedZero = -1;
+        }
+        return extractBytes(accessor, comparableBytes, signedZero, valueBytes);
+    }
+
+    public <V> V fromComparableBytes50(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes)
+    {
         // Consume the first byte to determine whether the encoded number is positive and
         // start iterating through the length header bytes and collecting the number of value bytes.
         int sign = comparableBytes.peek() ^ 0xFF;   // FF if negative, 00 if positive

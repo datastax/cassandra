@@ -22,12 +22,15 @@ package org.apache.cassandra.test.microbench.instance;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import com.google.common.base.Throwables;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.Level;
@@ -35,6 +38,7 @@ import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
 
 @State(Scope.Benchmark)
 public abstract class ReadBenchBase extends SimpleTableWriter
@@ -75,7 +79,9 @@ public abstract class ReadBenchBase extends SimpleTableWriter
         switch (flush)
         {
         case YES:
+            long flushStart = System.currentTimeMillis();
             cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
+            System.err.format("Flushed in %.3f s.\n", (System.currentTimeMillis() - flushStart) / 1000.0);
             break;
         case INMEM:
             if (!cfs.getLiveSSTables().isEmpty())
@@ -100,6 +106,65 @@ public abstract class ReadBenchBase extends SimpleTableWriter
                               cfs.metric.estimatedPartitionCount.getValue(),
                               cfs.metric.writeLatency.tableOrKeyspaceMetric().latency.getSnapshot().getMean());
         }
+    }
+
+
+    public void performWrite(String writeStatement, long ofs, long count) throws Throwable
+    {
+        if (threadCount == 1)
+            performWriteSerial(writeStatement, ofs, count);
+        else
+            performWriteThreads(writeStatement, ofs, count);
+    }
+
+    public void performWriteSerial(String writeStatement, long ofs, long count) throws Throwable
+    {
+        for (long i = ofs; i < ofs + count; ++i)
+            execute(writeStatement, writeArguments(i));
+    }
+
+    public void performWriteThreads(String writeStatement, long ofs, long count) throws Throwable
+    {
+        List<Future<Integer>> futures = new ArrayList<>();
+        for (long i = 0; i < count; ++i)
+        {
+            long pos = ofs + i;
+            futures.add(executorService.submit(() ->
+                                               {
+                                                   try
+                                                   {
+                                                       execute(writeStatement, writeArguments(pos));
+                                                       return 1;
+                                                   }
+                                                   catch (Throwable throwable)
+                                                   {
+                                                       throw Throwables.propagate(throwable);
+                                                   }
+                                               }));
+        }
+        long done = 0;
+        for (Future<Integer> f : futures)
+            done += f.get();
+        assert count == done;
+    }
+
+    @TearDown(Level.Trial)
+    public void teardown() throws InterruptedException
+    {
+        if (flush == Flush.INMEM && !cfs.getLiveSSTables().isEmpty())
+            throw new AssertionError("SSTables created for INMEM test.");
+
+        executorService.shutdown();
+        executorService.awaitTermination(15, TimeUnit.SECONDS);
+
+        // do a flush to print sizes
+        long flushStart = System.currentTimeMillis();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
+        System.err.format("Flushed in %.3f s.\n", (System.currentTimeMillis() - flushStart) / 1000.0);
+
+        CommitLog.instance.shutdownBlocking();
+        CQLTester.tearDownClass();
+        CQLTester.cleanup();
     }
 
     public Object performReadSerial(String readStatement, Supplier<Object[]> supplier) throws Throwable
