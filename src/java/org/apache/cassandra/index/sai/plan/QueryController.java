@@ -262,7 +262,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
         Plan.RowsIteration rowsIteration = planFactory.fetch(keysIterationPlan);
         rowsIteration = planFactory.recheckFilter(command.rowFilter(), rowsIteration);
-        rowsIteration = planFactory.limit(rowsIteration, command.limits().rows());
+        rowsIteration = planFactory.limit(rowsIteration, command.limits().count());
 
         Plan optimizedPlan;
         optimizedPlan = QUERY_OPT_LEVEL > 0
@@ -319,7 +319,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return keysIterationPlan;
     }
 
-    public Iterator<? extends PrimaryKey> buildIterator()
+    public Iterator<?> buildIterator()
     {
         try
         {

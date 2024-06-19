@@ -36,7 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
@@ -569,7 +568,7 @@ abstract public class Plan
          * @param softLimit the number of keys likely to be requested from the returned iterator;
          *                  this is a hint only - it does not change the result set, but may change performance
          */
-        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit);
+        protected abstract Iterator<?> execute(Executor executor, int softLimit);
 
         protected abstract KeysIteration withAccess(Access patterns);
 
@@ -784,7 +783,7 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
+        protected Iterator<?> execute(Executor executor, int softLimit)
         {
             return executor.getKeysFromIndex(predicate);
         }
@@ -1144,7 +1143,7 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
+        protected Iterator<?> execute(Executor executor, int softLimit)
         {
             // soft limit for fetching the keys from source is MAX_VALUE because we need to know
             // all keys to pick the top K.
@@ -1670,9 +1669,9 @@ abstract public class Plan
      */
     public interface Executor
     {
-        Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
-        Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering, int softLimit);
-        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit);
+        Iterator<?> getKeysFromIndex(Expression predicate);
+        Iterator<?> getTopKRows(RowFilter.Expression ordering, int softLimit);
+        Iterator<?> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit);
     }
 
     /**
