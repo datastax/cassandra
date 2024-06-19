@@ -20,8 +20,6 @@ package org.apache.cassandra.db.partitions;
 
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
@@ -36,32 +34,48 @@ import org.apache.cassandra.utils.memory.MemtableAllocator;
 /**
  *  the function we provide to the trie and btree utilities to perform any row and column replacements
  */
-public class BTreePartitionUpdater implements UpdateFunction<Row, Row>, ColumnData.PostReconciliationFunction
+public class BTreePartitionUpdater extends BasePartitionUpdater implements UpdateFunction<Row, Row>
 {
     final MemtableAllocator allocator;
     final OpOrder.Group writeOp;
-    final Cloner cloner;
     final UpdateTransaction indexer;
-    public long dataSize;
-    long heapSize;
-    public long colUpdateTimeDelta = Long.MAX_VALUE;
+    public int partitionsAdded = 0;
 
     public BTreePartitionUpdater(MemtableAllocator allocator, Cloner cloner, OpOrder.Group writeOp, UpdateTransaction indexer)
     {
+        super(cloner);
         this.allocator = allocator;
-        this.cloner = cloner;
         this.writeOp = writeOp;
         this.indexer = indexer;
-        this.heapSize = 0;
-        this.dataSize = 0;
     }
 
-    public BTreePartitionData mergePartitions(BTreePartitionData current, final PartitionUpdate update)
+    @Override
+    public Row insert(Row insert)
+    {
+        Row data = insert.clone(cloner);
+        indexer.onInserted(insert);
+
+        this.dataSize += data.dataSize();
+        this.heapSize += data.unsharedHeapSizeExcludingData();
+        return data;
+    }
+
+    @Override
+    public Row merge(Row existing, Row update)
+    {
+        Row reconciled = Rows.merge(existing, update, this);
+        indexer.onUpdated(existing, reconciled);
+
+        return reconciled;
+    }
+
+    public BTreePartitionData mergePartitions(BTreePartitionData current, final BTreePartitionUpdate update)
     {
         if (current == null)
         {
             current = BTreePartitionData.EMPTY;
-            onAllocatedOnHeap(BTreePartitionData.UNSHARED_HEAP_SIZE);
+            this.onAllocatedOnHeap(BTreePartitionData.UNSHARED_HEAP_SIZE);
+            ++partitionsAdded;
         }
 
         try
@@ -77,7 +91,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>, ColumnDa
         }
     }
 
-    protected BTreePartitionData makeMergedPartition(BTreePartitionData current, PartitionUpdate update)
+    protected BTreePartitionData makeMergedPartition(BTreePartitionData current, BTreePartitionUpdate update)
     {
         DeletionInfo newDeletionInfo = merge(current.deletionInfo, update.deletionInfo());
 
@@ -122,60 +136,6 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>, ColumnDa
         return newInfo;
     }
 
-    @Override
-    public Row insert(Row insert)
-    {
-        Row data = insert.clone(cloner);
-        indexer.onInserted(insert);
-
-        dataSize += data.dataSize();
-        heapSize += data.unsharedHeapSizeExcludingData();
-        return data;
-    }
-
-    public Row merge(Row existing, Row update)
-    {
-        Row reconciled = Rows.merge(existing, update, this);
-        indexer.onUpdated(existing, reconciled);
-
-        return reconciled;
-    }
-
-    public Cell<?> merge(Cell<?> previous, Cell<?> insert)
-    {
-        if (insert == previous)
-            return insert;
-
-        long timeDelta = Math.abs(insert.timestamp() - previous.timestamp());
-        if (timeDelta < colUpdateTimeDelta)
-            colUpdateTimeDelta = timeDelta;
-        if (cloner != null)
-            insert = cloner.clone(insert);
-        dataSize += insert.dataSize() - previous.dataSize();
-        heapSize += insert.unsharedHeapSizeExcludingData() - previous.unsharedHeapSizeExcludingData();
-        return insert;
-    }
-
-    public ColumnData insert(ColumnData insert)
-    {
-        if (cloner != null)
-            insert = insert.clone(cloner);
-        dataSize += insert.dataSize();
-        heapSize += insert.unsharedHeapSizeExcludingData();
-        return insert;
-    }
-
-    @Override
-    public void delete(ColumnData existing)
-    {
-        dataSize -= existing.dataSize();
-        heapSize -= existing.unsharedHeapSizeExcludingData();
-    }
-
-    public void onAllocatedOnHeap(long heapSize)
-    {
-        this.heapSize += heapSize;
-    }
 
     public void reportAllocatedMemory()
     {

@@ -23,7 +23,6 @@ import java.util.NoSuchElementException;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.ByteBlockPool;
 import org.apache.lucene.util.BytesRef;
@@ -43,7 +42,7 @@ public class RAMStringIndexer
     // counters need to be separate so that we can trigger flushes if either ByteBlockPool hits maximum size
     private final Counter termsBytesUsed;
     private final Counter slicesBytesUsed;
-    
+
     private int rowCount = 0;
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
@@ -83,7 +82,7 @@ public class RAMStringIndexer
      * EXPENSIVE OPERATION due to sorting the terms, only call once.
      */
     // TODO: assert or throw and exception if getTermsWithPostings is called > 1
-    public TermsIterator getTermsWithPostings(ByteBuffer minTerm, ByteBuffer maxTerm)
+    public TermsIterator getTermsWithPostings(ByteBuffer minTerm, ByteBuffer maxTerm, ByteComparable.Version byteComparableVersion)
     {
         final int[] sortedTermIDs = termsHash.sort();
 
@@ -136,7 +135,7 @@ public class RAMStringIndexer
             private ByteComparable asByteComparable(byte[] bytes, int offset, int length)
             {
                 // The bytes were encoded when they were inserted into the termsHash.
-                return v -> ByteSource.fixedLength(bytes, offset, length);
+                return ByteComparable.preencoded(byteComparableVersion, bytes, offset, length);
             }
         };
     }
