@@ -16,15 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db.memtable;
+package org.apache.cassandra.db.tries;
 
 /**
- * This class exists solely to avoid initialization of the default memtable class.
- * Some tests want to setup table parameters before initializing DatabaseDescriptor -- this allows them to do so.
+ * Because we use buffers and 32-bit pointers, the trie cannot grow over 2GB of size. This exception is thrown if
+ * a trie operation needs it to grow over that limit.
+ * <p>
+ * To avoid this problem, users should query {@link InMemoryTrie#reachedAllocatedSizeThreshold} from time to time. If
+ * the call returns true, they should switch to a new trie (e.g. by flushing a memtable) as soon as possible. The
+ * threshold is configurable, and is set by default to 10% under the 2GB limit to give ample time for the switch to
+ * happen.
  */
-public class DefaultMemtableFactory
+public class TrieSpaceExhaustedException extends Exception
 {
-    // We can't use TrieMemtable.FACTORY as that requires DatabaseDescriptor to have been initialized.
-    public static final Memtable.Factory INSTANCE = (commitLogLowerBound, metadataRef, owner) -> new TrieMemtable(commitLogLowerBound, metadataRef, owner, null);
-//    public static final Memtable.Factory INSTANCE = SkipListMemtable::new;
+    public TrieSpaceExhaustedException()
+    {
+        super("The hard 2GB limit on trie size has been exceeded");
+    }
 }
