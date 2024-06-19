@@ -19,8 +19,10 @@
 package org.apache.cassandra.tools;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -183,7 +185,12 @@ public class SSTableExportSchemaLoadingTest extends OfflineToolUtils
      */
     private void assertPostTestEnv()
     {
-        assertNoUnexpectedThreadsStarted(OPTIONAL_THREADS_WITH_SCHEMA, true);
+        // SSTableExport static init calls toolInitialization using test/cassandra.yaml which enables the chunk cache
+        // (file_cache_enabled=true) and starts a ChunkCacheCleanup ParkedExecutor thread.
+        String[] threadsStartedBySSTableExport = new String[] { "ChunkCacheCleanup:[1-9]", "ParkedThreadsMonitor" };
+        String[] optionalThreadNames = Stream.concat(Arrays.stream(OPTIONAL_THREADS_WITH_SCHEMA), Arrays.stream(threadsStartedBySSTableExport))
+                                  .toArray(String[]::new);
+        assertNoUnexpectedThreadsStarted(optionalThreadNames, true);
         assertCLSMNotLoaded();
         assertSystemKSNotLoaded();
         assertKeyspaceNotLoaded();
