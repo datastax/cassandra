@@ -564,7 +564,7 @@ public class SinglePartitionSliceCommandTest
         RangeTombstone rt = new RangeTombstone(slice, DeletionTime.build(TimeUnit.MILLISECONDS.toMicros(nowMillis),
                                                                        Ints.checkedCast(TimeUnit.MILLISECONDS.toSeconds(nowMillis))));
 
-        PartitionUpdate.Builder builder = new PartitionUpdate.Builder(metadata, bb(100), metadata.regularAndStaticColumns(), 1);
+        PartitionUpdate.Builder builder = PartitionUpdate.builder(metadata, metadata.partitioner.decorateKey(bb(100)), metadata.regularAndStaticColumns(), 1);
         builder.add(rt);
         new Mutation(builder.build()).apply();
 

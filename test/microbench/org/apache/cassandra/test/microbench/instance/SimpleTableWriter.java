@@ -70,10 +70,16 @@ public abstract class SimpleTableWriter extends CQLTester
     @Param({ "32" })
     int threadCount;
 
+    @Param({"1", "1000"})
+    int rowsPerPartition = 1;
+
+    int partitions;
+
     public void commonSetup() throws Throwable
     {
         rand = new Random(1);
         executorService = Executors.newFixedThreadPool(threadCount);
+        partitions = Math.max(1, count / rowsPerPartition);
         DatabaseDescriptor.setAutoSnapshot(false);
         CQLTester.setUpClass();
         logger.info("setupClass done.");
@@ -91,8 +97,9 @@ public abstract class SimpleTableWriter extends CQLTester
             executeNet(getDefaultVersion(), "use " + keyspace + ";");
         }
         writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
-        logger.info("Prepared, batch " + BATCH + " threads " + threadCount + extraInfo());
-        logger.info("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() +
+        System.err.println(String.format("Prepared, batch %s threads %s flush %s", BATCH, threadCount, extraInfo()));
+        System.err.println(String.format("%s writes in %s partitions x %s rows", count, partitions, rowsPerPartition));
+        System.err.println("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() +
                            " index " + DatabaseDescriptor.getIndexAccessMode());
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
