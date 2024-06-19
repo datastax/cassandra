@@ -771,7 +771,7 @@ public class DataResolverTest extends AbstractReadResponseTest
         }
 
         Mutation mutation = readRepair.getForEndpoint(peer1);
-        Iterator<Row> rowIter = mutation.getPartitionUpdate(cfm2).iterator();
+        Iterator<Row> rowIter = mutation.getPartitionUpdate(cfm2).rowIterator();
         assertTrue(rowIter.hasNext());
         Row row = rowIter.next();
         assertFalse(rowIter.hasNext());
@@ -815,7 +815,7 @@ public class DataResolverTest extends AbstractReadResponseTest
         }
 
         Mutation mutation = readRepair.getForEndpoint(peer1);
-        Iterator<Row> rowIter = mutation.getPartitionUpdate(cfm2).iterator();
+        Iterator<Row> rowIter = mutation.getPartitionUpdate(cfm2).rowIterator();
         assertTrue(rowIter.hasNext());
         Row row = rowIter.next();
         assertFalse(rowIter.hasNext());
@@ -867,7 +867,7 @@ public class DataResolverTest extends AbstractReadResponseTest
         Assert.assertNull(readRepair.sent.get(peer1));
 
         Mutation mutation = readRepair.getForEndpoint(peer2);
-        Iterator<Row> rowIter = mutation.getPartitionUpdate(cfm2).iterator();
+        Iterator<Row> rowIter = mutation.getPartitionUpdate(cfm2).rowIterator();
         assertTrue(rowIter.hasNext());
         Row row = rowIter.next();
         assertFalse(rowIter.hasNext());
@@ -917,7 +917,7 @@ public class DataResolverTest extends AbstractReadResponseTest
             }
         }
 
-        Row row = Iterators.getOnlyElement(readRepair.getForEndpoint(peer1).getPartitionUpdate(cfm2).iterator());
+        Row row = Iterators.getOnlyElement(readRepair.getForEndpoint(peer1).getPartitionUpdate(cfm2).rowIterator());
 
         ComplexColumnData cd = row.getComplexColumnData(m);
 
@@ -1310,7 +1310,7 @@ public class DataResolverTest extends AbstractReadResponseTest
     private void assertRepairContainsNoColumns(Mutation mutation)
     {
         PartitionUpdate update = mutation.getPartitionUpdates().iterator().next();
-        assertFalse(update.iterator().hasNext());
+        assertFalse(update.rowIterator().hasNext());
     }
 
     private void assertRepairMetadata(Mutation mutation)

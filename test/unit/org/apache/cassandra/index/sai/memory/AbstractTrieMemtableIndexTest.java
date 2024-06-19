@@ -56,6 +56,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -256,8 +257,8 @@ public abstract class AbstractTrieMemtableIndexTest extends SAITester
 
     private int termFromComparable(ByteComparable comparable)
     {
-        ByteSource.Peekable peekable = ByteSource.peekable(comparable.asComparableBytes(ByteComparable.Version.OSS50));
-        return Int32Type.instance.compose(Int32Type.instance.fromComparableBytes(peekable, ByteComparable.Version.OSS50));
+        ByteSource.Peekable peekable = ByteSource.peekable(comparable.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
+        return Int32Type.instance.compose(Int32Type.instance.fromComparableBytes(peekable, TypeUtil.BYTE_COMPARABLE_VERSION));
     }
 
     private Map<Integer, Set<DecoratedKey>> buildTermMap()

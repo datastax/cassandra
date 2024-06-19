@@ -45,7 +45,7 @@ public abstract class MemoryIndex
         this.indexContext = indexContext;
     }
 
-    public abstract long add(DecoratedKey key,
+    public abstract void add(DecoratedKey key,
                              Clustering clustering,
                              ByteBuffer value,
                              LongConsumer onHeapAllocationsTracker,
