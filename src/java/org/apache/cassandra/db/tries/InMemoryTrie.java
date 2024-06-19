@@ -241,7 +241,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     private void attachChildToSplit(int node, int trans, int newChild) throws SpaceExhaustedException
     {
         int midPos = splitBlockPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
-        int mid = getInt(midPos);
+        int mid = getIntVolatile(midPos);
         if (isNull(mid))
         {
             mid = createEmptySplitNode();
@@ -255,7 +255,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
 
         int tailPos = splitBlockPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
-        int tail = getInt(tailPos);
+        int tail = getIntVolatile(tailPos);
         if (isNull(tail))
         {
             tail = createEmptySplitNode();
@@ -279,7 +279,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         // first check if this is an update and modify in-place if so
         for (index = 0; index < SPARSE_CHILD_COUNT; ++index)
         {
-            if (isNull(getInt(node + SPARSE_CHILDREN_OFFSET + index * 4)))
+            if (isNull(getIntVolatile(node + SPARSE_CHILDREN_OFFSET + index * 4)))
                 break;
             final int existing = getUnsignedByte(node + SPARSE_BYTES_OFFSET + index);
             if (existing == trans)
@@ -299,7 +299,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             for (int i = 0; i < SPARSE_CHILD_COUNT; ++i)
             {
                 int t = getUnsignedByte(node + SPARSE_BYTES_OFFSET + i);
-                int p = getInt(node + SPARSE_CHILDREN_OFFSET + i * 4);
+                int p = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * 4);
                 attachChildToSplitNonVolatile(split, t, p);
             }
             attachChildToSplitNonVolatile(split, trans, newChild);
@@ -310,7 +310,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         putByte(node + SPARSE_BYTES_OFFSET + childCount, (byte) trans);
 
         // Update order word.
-        int order = getUnsignedShort(node + SPARSE_ORDER_OFFSET);
+        int order = getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET);
         int newOrder = insertInOrderWord(order, childCount, smallerCount);
 
         // Sparse nodes have two access modes: via the order word, when listing transitions, or directly to characters
@@ -358,7 +358,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     {
         assert offset(node) == SPLIT_OFFSET : "Invalid split node in trie";
         int midPos = splitBlockPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
-        int mid = getInt(midPos);
+        int mid = getIntVolatile(midPos);
         if (isNull(mid))
         {
             mid = createEmptySplitNode();
@@ -367,7 +367,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
         assert offset(mid) == SPLIT_OFFSET : "Invalid split node in trie";
         int tailPos = splitBlockPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
-        int tail = getInt(tailPos);
+        int tail = getIntVolatile(tailPos);
         if (isNull(tail))
         {
             tail = createEmptySplitNode();
@@ -404,7 +404,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         int existingChild = node + 1;
         if (offset(existingChild) == LAST_POINTER_OFFSET)
         {
-            existingChild = getInt(existingChild);
+            existingChild = getIntVolatile(existingChild);
         }
         return createSparseNode(existingByte, existingChild, transitionByte, newChild);
     }
@@ -516,7 +516,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
         else
         {
-            int contentIndex = getInt(node + PREFIX_CONTENT_OFFSET);
+            int contentIndex = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
             return createPrefixNode(contentIndex, child, true);
         }
     }
@@ -679,7 +679,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             }
             else if (offset(existingPreContentNode) == PREFIX_OFFSET)
             {
-                existingContentIndex = getInt(existingPreContentNode + PREFIX_CONTENT_OFFSET);
+                existingContentIndex = getIntVolatile(existingPreContentNode + PREFIX_CONTENT_OFFSET);
                 existingPostContentNode = followContentTransition(existingPreContentNode);
             }
             else
@@ -758,7 +758,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             // Otherwise modify in place
             if (updatedPostContentNode != existingPostContentNode) // to use volatile write but also ensure we don't corrupt embedded nodes
                 putIntVolatile(existingPreContentNode + PREFIX_POINTER_OFFSET, updatedPostContentNode);
-            assert contentIndex == getInt(existingPreContentNode + PREFIX_CONTENT_OFFSET) : "Unexpected change of content index.";
+            assert contentIndex == getIntVolatile(existingPreContentNode + PREFIX_CONTENT_OFFSET) : "Unexpected change of content index.";
             return existingPreContentNode;
         }
 
@@ -932,7 +932,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
         if (offset(node) == PREFIX_OFFSET)
         {
-            int contentIndex = getInt(node + PREFIX_CONTENT_OFFSET);
+            int contentIndex = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
             setContent(contentIndex, transformer.apply(getContent(contentIndex), value));
             return node;
         }

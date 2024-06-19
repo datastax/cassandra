@@ -264,14 +264,19 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return getChunk(pos).getByte(inChunkPointer(pos)) & 0xFF;
     }
 
-    final int getUnsignedShort(int pos)
+    final int getUnsignedShortVolatile(int pos)
     {
-        return getChunk(pos).getShort(inChunkPointer(pos)) & 0xFFFF;
+        return getChunk(pos).getShortVolatile(inChunkPointer(pos)) & 0xFFFF;
     }
 
-    final int getInt(int pos)
+    /**
+     * Following a pointer must be done using a volatile read to enforce happens-before between reading the node we
+     * advance to and the preparation of that node that finishes in a volatile write of the pointer that makes it
+     * visible.
+     */
+    final int getIntVolatile(int pos)
     {
-        return getChunk(pos).getInt(inChunkPointer(pos));
+        return getChunk(pos).getIntVolatile(inChunkPointer(pos));
     }
 
     T getContent(int index)
@@ -328,7 +333,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             case CHAIN_MAX_OFFSET:
                 if (trans != getUnsignedByte(node))
                     return NONE;
-                return getInt(node + 1);
+                return getIntVolatile(node + 1);
             default:
                 if (trans != getUnsignedByte(node))
                     return NONE;
@@ -347,7 +352,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             if (b < BLOCK_SIZE)
                 node = node - PREFIX_OFFSET + b;
             else
-                node = getInt(node + PREFIX_POINTER_OFFSET);
+                node = getIntVolatile(node + PREFIX_POINTER_OFFSET);
 
             assert node >= 0 && offset(node) != PREFIX_OFFSET;
         }
@@ -385,7 +390,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
                         return NONE;
                 }
                 // All bytes matched, node is now positioned on the child pointer. Follow it.
-                return getInt(node);
+                return getIntVolatile(node);
         }
     }
 
@@ -398,7 +403,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
         {
             if (getUnsignedByte(node + SPARSE_BYTES_OFFSET + i) == trans)
             {
-                int child = getInt(node + SPARSE_CHILDREN_OFFSET + i * 4);
+                int child = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * 4);
 
                 // we can't trust the transition character read above, because it may have been fetched before a
                 // concurrent update happened, and the update may have managed to modify the pointer by now.
@@ -467,7 +472,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
         if (offset(node) != PREFIX_OFFSET)
             return null;
 
-        int index = getInt(node + PREFIX_CONTENT_OFFSET);
+        int index = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
         return (index >= 0)
                ? getContent(index)
                : null;
@@ -480,7 +485,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
 
     int getSplitBlockPointer(int node, int childIndex, int subLevelLimit)
     {
-        return getInt(splitBlockPointerAddress(node, childIndex, subLevelLimit));
+        return getIntVolatile(splitBlockPointerAddress(node, childIndex, subLevelLimit));
     }
 
     /**
@@ -580,7 +585,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             // Consume it to be the new state's incomingTransition.
             int transition = chunk.getByte(inChunkNode++) & 0xFF;
             // inChunkNode is now positioned on the child pointer.
-            int child = chunk.getInt(inChunkNode);
+            int child = chunk.getIntVolatile(inChunkNode);
             return descendInto(child, transition);
         }
 
@@ -922,7 +927,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
                 addBacktrack(node, data, depth);
 
             // Follow the transition.
-            int child = chunk.getInt(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
+            int child = chunk.getIntVolatile(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
             int transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
             return descendInto(child, transition);
         }
@@ -933,7 +938,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
          */
         int prepareOrderWord(int node)
         {
-            int fwdState = getUnsignedShort(node + SPARSE_ORDER_OFFSET);
+            int fwdState = getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET);
             if (direction.isForward())
                 return fwdState;
             else
@@ -996,7 +1001,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
                 addBacktrack(node, data, depth);
 
             // Follow the transition.
-            int child = chunk.getInt(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
+            int child = chunk.getIntVolatile(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
             return descendInto(child, transition);
         }
 
@@ -1010,7 +1015,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             if (offset(next) <= CHAIN_MAX_OFFSET)
                 return descendIntoChain(next, transition);
             else
-                return descendInto(chunk.getInt(inChunkNode + 1), transition);
+                return descendInto(chunk.getIntVolatile(inChunkNode + 1), transition);
         }
 
         private int advanceToChainTransition(int node, int skipTransition)
@@ -1026,7 +1031,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             if (offset(next) <= CHAIN_MAX_OFFSET)
                 return descendIntoChain(next, transition);
             else
-                return descendInto(chunk.getInt(inChunkNode + 1), transition);
+                return descendInto(chunk.getIntVolatile(inChunkNode + 1), transition);
         }
 
         int descendInto(int child, int transition)
