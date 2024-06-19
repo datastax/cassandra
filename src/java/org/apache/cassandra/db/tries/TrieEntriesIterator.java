@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.AbstractMap;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Map;
 
@@ -66,14 +65,14 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
     /**
      * Iterator representing the content of the trie a sequence of (path, content) pairs.
      */
-    static class AsEntries<T>
-    extends TrieEntriesIterator<T, Map.Entry<ByteComparable, T>>
+    static class AsEntries<T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable, T>>
     {
         public AsEntries(Trie<T> trie, Direction direction)
         {
             super(trie, direction);
         }
 
+        @Override
         protected Map.Entry<ByteComparable, T> mapContent(T content, byte[] bytes, int byteLength)
         {
             return toEntry(content, bytes, byteLength);

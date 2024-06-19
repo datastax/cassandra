@@ -26,7 +26,7 @@ import java.util.function.Function;
 
 import com.google.common.collect.ImmutableList;
 
-import org.agrona.concurrent.UnsafeBuffer;
+import org.agrona.DirectBuffer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -35,20 +35,21 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  * Normal users of tries will only use the public methods, which provide various transformations of the trie, conversion
  * of its content to other formats (e.g. iterable of values), and several forms of processing.
  *
- * For any unimplemented data extraction operations one can build on the TrieEntriesWalker (for-each processing) and
- * TrieEntriesIterator (to iterator) base classes, which provide the necessary mechanisms to handle walking the trie.
+ * For any unimplemented data extraction operations one can build on the {@link TrieEntriesWalker} (for-each processing)
+ * and {@link TrieEntriesIterator} (to iterator) base classes, which provide the necessary mechanisms to handle walking
+ * the trie.
  *
- * The internal representation of tries using this interface is defined in the Cursor interface.
+ * The internal representation of tries using this interface is defined in the {@link Cursor} interface.
  *
  * Cursors are a method of presenting the internal structure of a trie without representing nodes as objects, which is
  * still useful for performing the basic operations on tries (iteration, slicing/intersection and merging). A cursor
  * will list the nodes of a trie in order, together with information about the path that was taken to reach them.
  *
- * To begin traversal over a trie, one must retrieve a cursor by calling cursor(). Because cursors are stateful, the
- * traversal must always proceed from one thread. Should concurrent reads be required, separate calls to cursor() must
- * be made. Any modification that has completed before the construction of a cursor must be visible, but any later
- * concurrent modifications may be presented fully, partially or not at all; this also means that if multiple are made,
- * the cursor may see any part of any subset of them.
+ * To begin traversal over a trie, one must retrieve a cursor by calling {@link #cursor}. Because cursors are
+ * stateful, the traversal must always proceed from one thread. Should concurrent reads be required, separate calls to
+ * {@link #cursor} must be made. Any modification that has completed before the construction of a cursor must be
+ * visible, but any later concurrent modifications may be presented fully, partially or not at all; this also means that
+ * if multiple are made, the cursor may see any part of any subset of them.
  *
  * Note: This model only supports depth-first traversals. We do not currently have a need for breadth-first walks.
  *
@@ -139,7 +140,7 @@ public abstract class Trie<T>
      * a cursor for a trie containing "ab", "abc" and "cba", will visit the nodes in order "cba", "ab", "abc", i.e.
      * prefixes will still be reported before their descendants.
      */
-    interface Cursor<T>
+    protected interface Cursor<T>
     {
 
         /**
@@ -247,13 +248,13 @@ public abstract class Trie<T>
         /** Add a single byte to the path. */
         void addPathByte(int nextByte);
         /** Add the count bytes from position pos in the given buffer. */
-        void addPathBytes(UnsafeBuffer buffer, int pos, int count);
+        void addPathBytes(DirectBuffer buffer, int pos, int count);
     }
 
     /**
      * Used by {@link Cursor#advanceToContent} to track the transitions and backtracking taken.
      */
-    interface ResettingTransitionsReceiver extends TransitionsReceiver
+    protected interface ResettingTransitionsReceiver extends TransitionsReceiver
     {
         /** Delete all bytes beyond the given length. */
         void resetPathLength(int newLength);
@@ -265,7 +266,7 @@ public abstract class Trie<T>
      * See {@link TrieDumper} for an example of how this can be used, and {@link TrieEntriesWalker} as a base class
      * for other common usages.
      */
-    interface Walker<T, R> extends ResettingTransitionsReceiver
+    protected interface Walker<T, R> extends ResettingTransitionsReceiver
     {
         /** Called when content is found. */
         void content(T content);
@@ -287,27 +288,32 @@ public abstract class Trie<T>
      */
     public interface ValueConsumer<T> extends Consumer<T>, Walker<T, Void>
     {
+        @Override
         default void content(T content)
         {
             accept(content);
         }
 
+        @Override
         default Void complete()
         {
             return null;
         }
 
+        @Override
         default void resetPathLength(int newDepth)
         {
             // not tracking path
         }
 
+        @Override
         default void addPathByte(int nextByte)
         {
             // not tracking path
         }
 
-        default void addPathBytes(UnsafeBuffer buffer, int pos, int count)
+        @Override
+        default void addPathBytes(DirectBuffer buffer, int pos, int count)
         {
             // not tracking path
         }
@@ -320,7 +326,6 @@ public abstract class Trie<T>
     {
         process(consumer, Direction.FORWARD);
     }
-
 
     /**
      * Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
@@ -350,7 +355,7 @@ public abstract class Trie<T>
 
     static <T, R> R process(Walker<T, R> walker, Cursor<T> cursor)
     {
-        assert cursor.depth() == 0;
+        assert cursor.depth() == 0 : "The provided cursor has already been advanced.";
         T content = cursor.content();   // handle content on the root node
         if (content == null)
             content = cursor.advanceToContent(walker);
@@ -446,7 +451,6 @@ public abstract class Trie<T>
      */
     public Iterable<T> values()
     {
-
         return this::valueIterator;
     }
 
@@ -501,6 +505,7 @@ public abstract class Trie<T>
     {
         T resolve(Collection<T> contents);
 
+        @Override
         default T resolve(T c1, T c2)
         {
             return resolve(ImmutableList.of(c1, c2));
@@ -509,7 +514,8 @@ public abstract class Trie<T>
 
     private static final CollectionMergeResolver<Object> THROWING_RESOLVER = new CollectionMergeResolver<Object>()
     {
-        public Object resolve(Collection contents)
+        @Override
+        public Object resolve(Collection<Object> contents)
         {
             throw error();
         }
@@ -524,6 +530,7 @@ public abstract class Trie<T>
      * Returns a resolver that throws whenever more than one of the merged nodes contains content.
      * Can be used to merge tries that are known to have distinct content paths.
      */
+    @SuppressWarnings("unchecked")
     public static <T> CollectionMergeResolver<T> throwingResolver()
     {
         return (CollectionMergeResolver<T>) THROWING_RESOLVER;
