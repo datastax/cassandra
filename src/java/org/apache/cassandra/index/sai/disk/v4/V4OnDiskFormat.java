@@ -30,6 +30,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 public class V4OnDiskFormat extends V3OnDiskFormat
 {
@@ -54,7 +55,7 @@ public class V4OnDiskFormat extends V3OnDiskFormat
         // Composite types use their individual type to ensure they sorted correctly in the trie so we can do
         // range queries over entries.
         return TypeUtil.isLiteral(type) && !TypeUtil.isComposite(type)
-               ? ByteComparable.fixedLength(input)
+               ? v -> ByteSource.preencoded(input)
                : TypeUtil.asComparableBytes(input, type);
     }
 }

@@ -35,15 +35,19 @@ import static org.junit.Assert.fail;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.serializers.MarshalException;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.UUIDGen;
 import org.assertj.core.api.Assertions;
 
 public class DynamicCompositeTypeTest
@@ -203,8 +207,8 @@ public class DynamicCompositeTypeTest
 
         ColumnMetadata cdef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
 
-        ImmutableBTreePartition readPartition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
-        Iterator<Row> iter = readPartition.iterator();
+        Partition readPartition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Iterator<Row> iter = readPartition.rowIterator();
 
         compareValues(iter.next().getCell(cdef), "cname1");
         compareValues(iter.next().getCell(cdef), "cname2");
@@ -240,8 +244,8 @@ public class DynamicCompositeTypeTest
 
         ColumnMetadata cdef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
 
-        ImmutableBTreePartition readPartition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
-        Iterator<Row> iter = readPartition.iterator();
+        Partition readPartition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Iterator<Row> iter = readPartition.rowIterator();
 
         compareValues(iter.next().getCell(cdef), "cname5");
         compareValues(iter.next().getCell(cdef), "cname4");

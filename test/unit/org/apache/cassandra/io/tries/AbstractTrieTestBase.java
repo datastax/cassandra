@@ -41,6 +41,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.LEGACY;
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS50;
 
 @RunWith(Parameterized.class)
@@ -75,6 +76,11 @@ abstract public class AbstractTrieTestBase
                              new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_STACK, LEGACY },
                              new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_HEAP, LEGACY },
                              new Object[]{ TestClass.PAGE_AWARE_DEEP_MIXED, LEGACY },
+                             new Object[]{ TestClass.SIMPLE, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_STACK, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_HEAP, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_MIXED, OSS41 },
                              new Object[]{ TestClass.SIMPLE, OSS50 },
                              new Object[]{ TestClass.PAGE_AWARE, OSS50 },
                              new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_STACK, OSS50 },
@@ -135,7 +141,7 @@ abstract public class AbstractTrieTestBase
         for (int i = 0; i < s.length(); ++i)
             buf.put((byte) s.charAt(i));
         buf.rewind();
-        return ByteComparable.fixedLength(buf);
+        return ByteComparable.preencoded(version, buf);
     }
 
     protected String decodeSource(ByteComparable source)
@@ -143,9 +149,7 @@ abstract public class AbstractTrieTestBase
         if (source == null)
             return null;
         StringBuilder sb = new StringBuilder();
-        ByteComparable.Version version = ByteComparable.Version.OSS50;
-        ByteSource stream = source.asComparableBytes(version);
-
+        ByteSource.Peekable stream = ByteSource.peekable(source.asComparableBytes(version));
         for (int b = stream.next(); b != ByteSource.END_OF_STREAM; b = stream.next())
             sb.append((char) b);
         return sb.toString();

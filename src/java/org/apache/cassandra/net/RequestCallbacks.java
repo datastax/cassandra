@@ -252,7 +252,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         final InetAddressAndPort peer;
         public final RequestCallback callback;
 
-        private CallbackInfo(Message message, InetAddressAndPort peer, RequestCallback callback)
+        public CallbackInfo(Message message, InetAddressAndPort peer, RequestCallback callback)
         {
             this.createdAtNanos = message.createdAtNanos();
             this.expiresAtNanos = message.expiresAtNanos();

@@ -57,7 +57,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ValueAccessors;
 import org.apache.cassandra.db.partitions.FilteredPartition;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
@@ -414,7 +414,7 @@ public class CompactionsTest
 
         Collection<SSTableReader> sstablesBefore = cfs.getLiveSSTables();
 
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         assertTrue(!partition.isEmpty());
 
         RowUpdateBuilder deleteRowBuilder = new RowUpdateBuilder(table, 2, key);
@@ -423,7 +423,7 @@ public class CompactionsTest
         // Remove key
 
         partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
-        assertTrue(partition.iterator().next().cells().iterator().next().isTombstone());
+        assertTrue(partition.rowIterator().next().cells().iterator().next().isTombstone());
 
         // Sleep one second so that the removal is indeed purgeable even with gcgrace == 0
         Thread.sleep(1000);
