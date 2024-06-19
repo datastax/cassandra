@@ -18,9 +18,11 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.AbstractMap;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.function.Predicate;
+
+import com.google.common.base.Predicates;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -31,23 +33,33 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor implements Iterator<V>
 {
     private final Trie.Cursor<T> cursor;
+    private final Predicate<T> predicate;
     T next;
     boolean gotNext;
 
-    protected TrieEntriesIterator(Trie<T> trie, Direction direction)
+    protected TrieEntriesIterator(Trie<T> trie, Direction direction, Predicate<T> predicate)
     {
-        cursor = trie.cursor(direction);
+        this(trie.cursor(direction), predicate);
+    }
+
+    TrieEntriesIterator(Trie.Cursor<T> cursor, Predicate<T> predicate)
+    {
+        this.cursor = cursor;
+        this.predicate = predicate;
         assert cursor.depth() == 0;
         next = cursor.content();
-        gotNext = next != null;
+        gotNext = next != null && predicate.test(next);
     }
 
     public boolean hasNext()
     {
-        if (!gotNext)
+        while (!gotNext)
         {
             next = cursor.advanceToContent(this);
-            gotNext = true;
+            if (next != null)
+                gotNext = predicate.test(next);
+            else
+                gotNext = true;
         }
 
         return next != null;
@@ -55,10 +67,18 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
 
     public V next()
     {
+        if (!hasNext())
+            throw new IllegalStateException("next without hasNext");
+
         gotNext = false;
         T v = next;
         next = null;
         return mapContent(v, keyBytes, keyPos);
+    }
+
+    ByteComparable.Version byteComparableVersion()
+    {
+        return cursor.byteComparableVersion();
     }
 
     protected abstract V mapContent(T content, byte[] bytes, int byteLength);
@@ -66,22 +86,40 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
     /**
      * Iterator representing the content of the trie a sequence of (path, content) pairs.
      */
-    static class AsEntries<T>
-    extends TrieEntriesIterator<T, Map.Entry<ByteComparable, T>>
+    static class AsEntries<T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable, T>>
     {
-        public AsEntries(Trie<T> trie, Direction direction)
+        public AsEntries(Trie.Cursor<T> cursor)
         {
-            super(trie, direction);
+            super(cursor, Predicates.alwaysTrue());
         }
 
+        @Override
         protected Map.Entry<ByteComparable, T> mapContent(T content, byte[] bytes, int byteLength)
         {
-            return toEntry(content, bytes, byteLength);
+            return toEntry(byteComparableVersion(), content, bytes, byteLength);
         }
     }
 
-    static <T> java.util.Map.Entry<ByteComparable, T> toEntry(T content, byte[] bytes, int byteLength)
+    /**
+     * Iterator representing the content of the trie a sequence of (path, content) pairs.
+     */
+    static class AsEntriesFilteredByType<T, U extends T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable, U>>
     {
-        return new AbstractMap.SimpleImmutableEntry<>(toByteComparable(bytes, byteLength), content);
+        public AsEntriesFilteredByType(Trie.Cursor<T> cursor, Class<U> clazz)
+        {
+            super(cursor, clazz::isInstance);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")  // checked by the predicate
+        protected Map.Entry<ByteComparable, U> mapContent(T content, byte[] bytes, int byteLength)
+        {
+            return toEntry(byteComparableVersion(), (U) content, bytes, byteLength);
+        }
+    }
+
+    static <T> java.util.Map.Entry<ByteComparable, T> toEntry(ByteComparable.Version version, T content, byte[] bytes, int byteLength)
+    {
+        return new AbstractMap.SimpleImmutableEntry<>(toByteComparable(version, bytes, byteLength), content);
     }
 }

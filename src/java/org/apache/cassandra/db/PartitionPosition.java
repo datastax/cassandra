@@ -70,6 +70,13 @@ public interface PartitionPosition extends RingPosition<PartitionPosition>, Byte
      */
     public abstract ByteSource asComparableBytes(Version version);
 
+    /**
+     * Produce a byte-comparable representation for the position before or after the key.
+     * This does nothing for token boundaries (which are already at a position between valid keys), and changes
+     * the terminator byte for keys.
+     */
+    public abstract ByteComparable asComparableBound(boolean before);
+
     public static class RowPositionSerializer implements IPartitionerDependentSerializer<PartitionPosition>
     {
         /*

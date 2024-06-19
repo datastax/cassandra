@@ -20,7 +20,7 @@ package org.apache.cassandra.db.tries;
 
 import java.util.Arrays;
 
-import org.agrona.concurrent.UnsafeBuffer;
+import org.agrona.DirectBuffer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 public class TriePathReconstructor implements Trie.ResettingTransitionsReceiver
@@ -35,7 +35,7 @@ public class TriePathReconstructor implements Trie.ResettingTransitionsReceiver
         keyBytes[keyPos++] = (byte) nextByte;
     }
 
-    public void addPathBytes(UnsafeBuffer buffer, int pos, int count)
+    public void addPathBytes(DirectBuffer buffer, int pos, int count)
     {
         int newPos = keyPos + count;
         if (newPos > keyBytes.length)
@@ -49,8 +49,9 @@ public class TriePathReconstructor implements Trie.ResettingTransitionsReceiver
         keyPos = newLength;
     }
 
-    static ByteComparable toByteComparable(byte[] bytes, int byteLength)
+    static ByteComparable toByteComparable(ByteComparable.Version byteComparableVersion, byte[] bytes, int byteLength)
     {
-        return ByteComparable.fixedLength(Arrays.copyOf(bytes, byteLength));
+        // Taking a copy here to make sure it does not get modified when the cursor advances.
+        return ByteComparable.preencoded(byteComparableVersion, Arrays.copyOf(bytes, byteLength));
     }
 }

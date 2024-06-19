@@ -35,7 +35,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -313,7 +313,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         }
     }
 
-    private void addRow(Row row) throws IOException, MemtableTrie.SpaceExhaustedException
+    private void addRow(Row row) throws IOException, TrieSpaceExhaustedException
     {
         PrimaryKey primaryKey = primaryKeyFactory.create(currentKey, row.clustering());
         perSSTableWriter.nextRow(primaryKey);

@@ -30,8 +30,8 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -164,10 +164,10 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                 @Override
                 public boolean visit(byte[] packedValue)
                 {
-                    final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
+                    final ByteComparable actualTerm = ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, packedValue);
                     final ByteComparable expectedTerm = ByteComparable.of(Math.toIntExact(visited.get()));
                     assertEquals("Point value mismatch after visiting " + visited.get() + " entries.", 0,
-                                 ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+                                 ByteComparable.compare(actualTerm, expectedTerm, TypeUtil.BYTE_COMPARABLE_VERSION));
 
                     visited.addAndGet(1);
                     return true;
@@ -205,7 +205,7 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
                 final IntArrayList postings = new IntArrayList();
                 postings.add(currentRowId++);
-                final ByteSource encoded = Int32Type.instance.asComparableBytes(term, ByteComparable.Version.OSS41);
+                final ByteSource encoded = Int32Type.instance.asComparableBytes(term, TypeUtil.BYTE_COMPARABLE_VERSION);
                 return Pair.create(v -> encoded, postings);
             }
         };

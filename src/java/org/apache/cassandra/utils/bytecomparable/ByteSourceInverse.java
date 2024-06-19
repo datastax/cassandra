@@ -18,9 +18,14 @@
 package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.db.marshal.ValueAccessor;
+import org.apache.cassandra.utils.ByteArrayUtil;
 
 /**
  * Contains inverse transformation utilities for {@link ByteSource}s.
@@ -29,7 +34,6 @@ import org.apache.cassandra.db.marshal.ValueAccessor;
  */
 public final class ByteSourceInverse
 {
-    private static final int INITIAL_BUFFER_CAPACITY = 32;
     private static final int BYTE_ALL_BITS = 0xFF;
     private static final int BYTE_NO_BITS = 0x00;
     private static final int BYTE_SIGN_BIT = 1 << 7;
@@ -38,26 +42,18 @@ public final class ByteSourceInverse
     private static final long LONG_SIGN_BIT = 1L << 63;
 
     /**
-     * Get the given number of bytes and produce a long from them, effectively treating the bytes as a big-endian
+     * Consume the given number of bytes and produce a long from them, effectively treating the bytes as a big-endian
      * unsigned encoding of the number.
      */
     public static long getUnsignedFixedLengthAsLong(ByteSource byteSource, int length)
     {
-        if (byteSource == null)
-            throw new IllegalArgumentException("Unexpected null ByteSource");
-        if (length < 1 || length > 8)
-            throw new IllegalArgumentException("Between 1 and 8 bytes can be read at a time");
+        Preconditions.checkNotNull(byteSource);
+        Preconditions.checkArgument(length >= 1 && length <= 8, "Between 1 and 8 bytes can be read at a time");
 
         long result = 0;
         for (int i = 0; i < length; ++i)
-        {
-            int data = byteSource.next();
-            if (data == ByteSource.END_OF_STREAM)
-                throw new IllegalArgumentException(
-                        String.format("Unexpected end of stream reached after %d bytes (expected >= %d)", i, length));
-            assertValidByte(data);
-            result = (result << 8) | data;
-        }
+            result = (result << 8) | getAndCheckByte(byteSource, i, length);  // note: this must use the unsigned byte value
+
         return result;
     }
 
@@ -67,24 +63,15 @@ public final class ByteSourceInverse
      */
     public static <V> V getSignedFixedLength(ValueAccessor<V> accessor, ByteSource byteSource, int length)
     {
-        if (byteSource == null)
-            throw new IllegalArgumentException("Unexpected null ByteSource");
-        if (length < 1)
-            throw new IllegalArgumentException("At least 1 byte should be read");
+        Preconditions.checkNotNull(byteSource);
+        Preconditions.checkArgument(length >= 1, "At least 1 byte should be read");
 
         V result = accessor.allocate(length);
         // The first byte needs to have its sign flipped
-        accessor.putByte(result, 0, (byte) (byteSource.next() ^ BYTE_SIGN_BIT));
+        accessor.putByte(result, 0, (byte) (getAndCheckByte(byteSource, 0, length) ^ BYTE_SIGN_BIT));
         // and the rest can be retrieved unchanged.
         for (int i = 1; i < length; ++i)
-        {
-            int data = byteSource.next();
-            if (data == ByteSource.END_OF_STREAM)
-                throw new IllegalArgumentException(
-                        String.format("Unexpected end of stream reached after %d bytes (expected >= %d)", i, length));
-            assertValidByte(data);
-            accessor.putByte(result, i, (byte) data);
-        }
+            accessor.putByte(result, i, (byte) getAndCheckByte(byteSource, i, length));
         return result;
     }
 
@@ -103,16 +90,13 @@ public final class ByteSourceInverse
      */
     public static <V> V getSignedFixedLengthFloat(ValueAccessor<V> accessor, ByteSource byteSource, int length)
     {
-        if (byteSource == null)
-            throw new IllegalArgumentException("Unexpected null ByteSource");
-        if (length < 1)
-            throw new IllegalArgumentException("At least 1 byte should be read");
+        Preconditions.checkNotNull(byteSource);
+        Preconditions.checkArgument(length >= 1, "At least 1 byte should be read");
 
         V result = accessor.allocate(length);
 
         int xor;
-        int first = byteSource.next();
-        assertValidByte(first);
+        int first = getAndCheckByte(byteSource, 0, length);
         if (first < 0x80)
         {
             // Negative number. Invert all bits.
@@ -129,15 +113,8 @@ public final class ByteSourceInverse
 
         // xor is now applied to the rest of the bytes to flip their bits if necessary.
         for (int i = 1; i < length; ++i)
-        {
-            int data = byteSource.next();
-            if (data == ByteSource.END_OF_STREAM)
-                throw new IllegalArgumentException(
-                String.format("Unexpected end of stream reached after %d bytes (expected >= %d)", i, length));
-            assertValidByte(data);
-            data ^= xor;
-            accessor.putByte(result, i, (byte) data);
-        }
+            accessor.putByte(result, i, (byte) (getAndCheckByte(byteSource, i, length) ^ xor));
+
         return result;
     }
 
@@ -152,30 +129,21 @@ public final class ByteSourceInverse
     }
 
     /**
-     * Get the next length bytes from the source unchanged.
+     * Consume the next length bytes from the source unchanged.
      */
     public static <V> V getFixedLength(ValueAccessor<V> accessor, ByteSource byteSource, int length)
     {
-        if (byteSource == null)
-            throw new IllegalArgumentException("Unexpected null ByteSource");
-        if (length < 1)
-            throw new IllegalArgumentException("At least 1 byte should be read");
+        Preconditions.checkNotNull(byteSource);
+        Preconditions.checkArgument(length >= 1, "At least 1 byte should be read");
 
         V result = accessor.allocate(length);
         for (int i = 0; i < length; ++i)
-        {
-            int data = byteSource.next();
-            if (data == ByteSource.END_OF_STREAM)
-                throw new IllegalArgumentException(
-                        String.format("Unexpected end of stream reached after %d bytes (expected >= %d)", i, length));
-            assertValidByte(data);
-            accessor.putByte(result, i, (byte) data);
-        }
+            accessor.putByte(result, i, (byte) getAndCheckByte(byteSource, i, length));
         return result;
     }
 
     /**
-     * Get the next length bytes from the source unchanged, also translating null to an empty buffer.
+     * Consume the next length bytes from the source unchanged, also translating null to an empty buffer.
      */
     public static <V> V getOptionalFixedLength(ValueAccessor<V> accessor, ByteSource byteSource, int length)
     {
@@ -183,7 +151,7 @@ public final class ByteSourceInverse
     }
 
     /**
-     * Gets the next {@code int} from the current position of the given {@link ByteSource}. The source position is
+     * Consume the next {@code int} from the current position of the given {@link ByteSource}. The source position is
      * modified accordingly (moved 4 bytes forward).
      * <p>
      * The source is not strictly required to represent just the encoding of an {@code int} value, so theoretically
@@ -204,7 +172,7 @@ public final class ByteSourceInverse
     }
 
     /**
-     * Gets the next {@code long} from the current position of the given {@link ByteSource}. The source position is
+     * Consume the next {@code long} from the current position of the given {@link ByteSource}. The source position is
      * modified accordingly (moved 8 bytes forward).
      * <p>
      * The source is not strictly required to represent just the encoding of a {@code long} value, so theoretically
@@ -231,13 +199,7 @@ public final class ByteSourceInverse
      */
     public static byte getSignedByte(ByteSource byteSource)
     {
-        if (byteSource == null)
-            throw new IllegalArgumentException("Unexpected null ByteSource");
-        int theByte = byteSource.next();
-        if (theByte == ByteSource.END_OF_STREAM)
-            throw new IllegalArgumentException("Unexpected ByteSource with length 0 instead of 1");
-
-        return (byte) (theByte ^ BYTE_SIGN_BIT);
+        return (byte) (getAndCheckByte(Preconditions.checkNotNull(byteSource), 0, 1) ^ BYTE_SIGN_BIT);
     }
 
     /**
@@ -255,8 +217,78 @@ public final class ByteSourceInverse
     }
 
     /**
+     * Decode a variable-length signed integer.
+     */
+    public static long getVariableLengthInteger(ByteSource byteSource)
+    {
+        int signAndMask = getAndCheckByte(byteSource);
+
+        long sum = 0;
+        int bytes;
+        // For every bit after the sign that matches the sign, read one more byte.
+        for (bytes = 0; bytes < 7 && sameByteSign(signAndMask << (bytes + 1), signAndMask); ++bytes)
+            sum = (sum << 8) | getAndCheckByte(byteSource);
+
+        // The eighth length bit is stored in the second byte.
+        if (bytes == 7 && sameByteSign((int) (sum >> 48), signAndMask))
+            return ((sum << 8) | getAndCheckByte(byteSource)) ^ LONG_SIGN_BIT;    // 9-byte encoding, use bytes 2-9 with inverted sign
+        else
+        {
+            sum |= (((long) signAndMask) << bytes * 8);     // add the rest of the bits
+            long signMask = -0x40L << bytes * 7;            // mask of the bits that should be replaced by the sign
+            long sign = (byte) (signAndMask ^ 0x80) >> 7;   // -1 if negative (0 leading bit), 0 otherwise
+            return sum & ~signMask | sign & signMask;
+        }
+    }
+
+    /**
+     * Decode a variable-length unsigned integer, passing all bytes read through XOR with the given xorWith parameter.
+     *
+     * Used in BigInteger encoding to read number length, where negative numbers have their length negated
+     * (i.e. xorWith = 0xFF) to ensure correct ordering.
+     */
+    public static long getVariableLengthUnsignedIntegerXoring(ByteSource byteSource, int xorWith)
+    {
+        int signAndMask = getAndCheckByte(byteSource) ^ xorWith;
+
+        long sum = 0;
+        int bytes;
+        // Read an extra byte while the next most significant bit is 1.
+        for (bytes = 0; bytes <= 7 && ((signAndMask << bytes) & 0x80) != 0; ++bytes)
+            sum = (sum << 8) | getAndCheckByte(byteSource) ^ xorWith;
+
+        // Strip the length bits from the leading byte.
+        signAndMask &= ~(-256 >> bytes);
+        return sum | (((long) signAndMask) << bytes * 8);     // Add the rest of the bits of the leading byte.
+    }
+
+    /** Returns true if the two parameters treated as bytes have the same sign. */
+    private static boolean sameByteSign(int a, int b)
+    {
+        return ((a ^ b) & 0x80) == 0;
+    }
+
+
+    private static int getAndCheckByte(ByteSource byteSource)
+    {
+        return getAndCheckByte(byteSource, -1, -1);
+    }
+
+    private static int getAndCheckByte(ByteSource byteSource, int pos, int length)
+    {
+        int data = byteSource.next();
+        if (data == ByteSource.END_OF_STREAM)
+            throw new IllegalArgumentException(
+                length > 0 ? String.format("Unexpected end of stream reached after %d bytes (expected >= %d)", pos, length)
+                           : "Unexpected end of stream");
+        assert data >= BYTE_NO_BITS && data <= BYTE_ALL_BITS
+            : "A ByteSource must produce unsigned bytes and end in END_OF_STREAM";
+        return data;
+    }
+
+    /**
      * Reads a single variable-length byte sequence (blob, string, ...) encoded according to the scheme described
-     * in ByteSource.md, decoding it back to its original, unescaped form.
+     * in ByteComparable.md, decoding it back to its original, unescaped form.
      *
      * @param byteSource The source of the variable-length bytes sequence.
      * @return A byte array containing the original, unescaped bytes of the given source. Unescaped here means
@@ -275,6 +307,7 @@ public final class ByteSourceInverse
         return new ByteSource() {
             boolean escaped = false;
 
+            @Override
             public int next()
             {
                 if (!escaped)
@@ -322,46 +355,6 @@ public final class ByteSourceInverse
      * Reads the bytes of the given source into a byte array. Doesn't do any transformation on the bytes, just reads
      * them until it reads an {@link ByteSource#END_OF_STREAM} byte, after which it returns an array of all the read
      * bytes, <strong>excluding the {@link ByteSource#END_OF_STREAM}</strong>.
-     * <p>
-     * This method sizes a tentative internal buffer array at {@code initialBufferCapacity}.  However, if
-     * {@code byteSource} exceeds this size, the buffer array is recreated with doubled capacity as many times as
-     * necessary.  If, after {@code byteSource} is fully exhausted, the number of bytes read from it does not exactly
-     * match the current size of the tentative buffer array, then it is copied into another array sized to fit the
-     * number of bytes read; otherwise, it is returned without that final copy step.
-     *
-     * @param byteSource The source which bytes we're interested in.
-     * @param initialBufferCapacity The initial size of the internal buffer.
-     * @return A byte array containing exactly all the read bytes. In case of a {@code null} source, the returned byte
-     * array will be empty.
-     */
-    public static byte[] readBytes(ByteSource byteSource, final int initialBufferCapacity)
-    {
-        if (byteSource == null)
-            return new byte[0];
-
-        int readBytes = 0;
-        byte[] buf = new byte[initialBufferCapacity];
-        int data;
-        while ((data = byteSource.next()) != ByteSource.END_OF_STREAM)
-        {
-            buf = ensureCapacity(buf, readBytes);
-            buf[readBytes++] = (byte) data;
-        }
-
-        if (readBytes != buf.length)
-        {
-            buf = Arrays.copyOf(buf, readBytes);
-        }
-        return buf;
-    }
-
-    /**
-     * Reads the bytes of the given source into a byte array. Doesn't do any transformation on the bytes, just reads
-     * them until it reads an {@link ByteSource#END_OF_STREAM} byte, after which it returns an array of all the read
-     * bytes, <strong>excluding the {@link ByteSource#END_OF_STREAM}</strong>.
-     * <p>
-     * This is equivalent to {@link #readBytes(ByteSource, int)} where the second actual parameter is
-     * {@linkplain #INITIAL_BUFFER_CAPACITY} ({@value INITIAL_BUFFER_CAPACITY}).
      *
      * @param byteSource The source which bytes we're interested in.
      * @return A byte array containing exactly all the read bytes. In case of a {@code null} source, the returned byte
@@ -369,23 +362,50 @@ public final class ByteSourceInverse
      */
     public static byte[] readBytes(ByteSource byteSource)
     {
-        return readBytes(byteSource, INITIAL_BUFFER_CAPACITY);
+        if (byteSource instanceof ByteSource.ConvertableToArray)
+            return ((ByteSource.ConvertableToArray) byteSource).remainingBytesToArray();
+
+        if (byteSource == null)
+            return ByteArrayUtil.EMPTY_BYTE_ARRAY;
+
+        int step = 232;    // size chosen so that new byte[step] fits into 256 bytes
+        byte[] last = new byte[step];
+        int copied = byteSource.nextBytes(last);
+        if (copied < step)
+            return Arrays.copyOf(last, copied);
+
+        List<byte[]> other = new ArrayList<>();
+        do
+        {
+            other.add(last);
+            last = new byte[step];
+            copied = byteSource.nextBytes(last);
+        }
+        while (copied == step);
+
+        byte[] dest = new byte[other.size() * step + copied];
+        int pos = 0;
+        for (byte[] b : other)
+        {
+            System.arraycopy(b, 0, dest, pos, step);
+            pos += step;
+        }
+        System.arraycopy(last, 0, dest, pos, copied);
+        return dest;
     }
 
     /**
-     * Ensures the given buffer has capacity for taking data with the given length - if it doesn't, it returns a copy
-     * of the buffer, but with double the capacity.
+     * Reads the bytes of the given source into the given byte array and returns the number of bytes read. Doesn't do
+     * any transformation on the bytes, just reads them until it reads an {@code ByteSource.END_OF_STREAM} byte. If the
+     * target byte array does not have enough space to fit the whole source, a {@code RuntimeException} is thrown. See
+     * also {@link ByteSource#nextBytes(byte[])}.
      */
-    private static byte[] ensureCapacity(byte[] buf, int dataLengthInBytes)
+    public static int readBytesMustFit(ByteSource byteSource, byte[] dest)
     {
-        if (dataLengthInBytes == buf.length)
-            // We won't gain much with guarding against overflow. We'll overflow when dataLengthInBytes >= 1 << 30,
-            // and if we do guard, we'll be able to extend the capacity to Integer.MAX_VALUE (which is 1 << 31 - 1).
-            // Controlling the exception that will be thrown shouldn't matter that much, and  in practice, we almost
-            // surely won't be reading gigabytes of ByteSource data at once.
-            return Arrays.copyOf(buf, dataLengthInBytes * 2);
-        else
-            return buf;
+        int read = byteSource.nextBytes(dest);
+        if (read == dest.length && byteSource.next() != ByteSource.END_OF_STREAM)
+            throw new RuntimeException(String.format("Number of bytes available exceeds the buffer size of %d.", dest.length));
+        return read;
     }
 
     /**
@@ -418,10 +438,7 @@ public final class ByteSourceInverse
      */
     public static ByteSource.Peekable nextComponentSource(ByteSource.Peekable source)
     {
-        int separator = source.next();
-        return nextComponentNull(separator)
-               ? null
-               : source;
+        return nextComponentSource(source, source.next());
     }
 
     /**
@@ -438,11 +455,7 @@ public final class ByteSourceInverse
 
     public static boolean nextComponentNull(int separator)
     {
-        return separator == ByteSource.NEXT_COMPONENT_NULL || separator == ByteSource.NEXT_COMPONENT_NULL_REVERSED;
-    }
-
-    private static void assertValidByte(int data)
-    {
-        assert data >= BYTE_NO_BITS && data <= BYTE_ALL_BITS;
+        return separator == ByteSource.NEXT_COMPONENT_NULL
+               || separator == ByteSource.NEXT_COMPONENT_NULL_REVERSED;
     }
 }

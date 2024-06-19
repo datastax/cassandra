@@ -47,8 +47,9 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.tries.Direction;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -75,7 +76,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
-    private final MemtableTrie<PrimaryKeys> data;
+    private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
 
     private final Memtable memtable;
@@ -102,7 +103,7 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         super(indexContext);
         this.keyBounds = keyBounds;
-        this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
+        this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.owner().readOrdering());
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
     }
@@ -119,8 +120,8 @@ public class TrieMemoryIndex extends MemoryIndex
             value = TypeUtil.encode(value, indexContext.getValidator());
             analyzer.reset(value);
             final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
-            final long initialSizeOnHeap = data.sizeOnHeap();
-            final long initialSizeOffHeap = data.sizeOffHeap();
+            final long initialSizeOnHeap = data.usedSizeOnHeap();
+            final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
             while (analyzer.hasNext())
@@ -136,24 +137,17 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
-                    {
-                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
-                    }
-                    else
-                    {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
-                    }
+                    data.putSingleton(encodedTerm, primaryKey, primaryKeysReducer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
-                catch (MemtableTrie.SpaceExhaustedException e)
+                catch (TrieSpaceExhaustedException e)
                 {
                     Throwables.throwAsUncheckedException(e);
                 }
             }
 
-            onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
+            onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
                                             (primaryKeysReducer.heapAllocations() - reducerHeapSize));
-            offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
+            offHeapAllocationsTracker.accept(data.usedSizeOffHeap() - initialSizeOffHeap);
         }
         finally
         {
@@ -237,7 +231,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 // Before version DB, we encoded composite types using a non order-preserving function. In order to
                 // perform a range query on a map, we use the bounds to get all entries for a given map key and then
                 // only keep the map entries that satisfy the expression.
-                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
                     mergingIteratorBuilder.add(entry.getValue());
             });
@@ -305,7 +299,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
 
-    class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations = new LongAdder();
 

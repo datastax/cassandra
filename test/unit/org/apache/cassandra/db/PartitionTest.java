@@ -132,8 +132,8 @@ public class PartitionTest
 
             ReadCommand cmd1 = Util.cmd(cfs, "key1").build();
             ReadCommand cmd2 = Util.cmd(cfs, "key2").build();
-            ImmutableBTreePartition p1 = Util.getOnlyPartitionUnfiltered(cmd1);
-            ImmutableBTreePartition p2 = Util.getOnlyPartitionUnfiltered(cmd2);
+            Partition p1 = Util.getOnlyPartitionUnfiltered(cmd1);
+            Partition p2 = Util.getOnlyPartitionUnfiltered(cmd2);
 
             byte[] digest1 = getDigest(p1.unfilteredIterator(), version);
             byte[] digest2 = getDigest(p2.unfilteredIterator(), version);
@@ -178,7 +178,7 @@ public class PartitionTest
         builder.build().applyUnsafe();
 
         RowUpdateBuilder.deleteRowAt(cfs.metadata(), 10L, localDeletionTime, "key1", "c").applyUnsafe();
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, "key1").build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, "key1").build());
         EncodingStats stats = partition.stats();
         assertEquals(localDeletionTime, stats.minLocalDeletionTime);
     }

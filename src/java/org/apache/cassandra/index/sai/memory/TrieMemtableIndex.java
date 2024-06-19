@@ -53,16 +53,17 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.SortingIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class TrieMemtableIndex implements MemtableIndex
@@ -278,7 +279,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return indexContext.isLiteral() ? ByteComparable.fixedLength(input)
+        return indexContext.isLiteral() ? v -> ByteSource.preencoded(input)
                                         : v -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), v);
     }
 
@@ -303,7 +304,7 @@ public class TrieMemtableIndex implements MemtableIndex
         for (int i = minSubrange; i <= maxSubrange; i++)
             rangeIterators.add(rangeIndexes[i].iterator());
 
-        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, ByteComparable.Version.OSS41),
+        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, TypeUtil.BYTE_COMPARABLE_VERSION),
                                  new PrimaryKeysMergeReducer(rangeIterators.size()));
     }
 

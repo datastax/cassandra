@@ -94,7 +94,7 @@ public class TimeUUIDType extends TemporalType<UUID>
         swizzled.putLong(0, TimeUUIDType.reorderTimestampBytes(hiBits));
         swizzled.putLong(8, accessor.getLong(data, 8) ^ 0x8080808080808080L);
 
-        return ByteSource.fixedLength(swizzled);
+        return ByteSource.preencoded(swizzled);
     }
 
     @Override

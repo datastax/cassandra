@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
 import org.apache.cassandra.db.tries.Direction;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieEntriesWalker;
 import org.apache.cassandra.io.compress.BufferType;
@@ -37,10 +37,13 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1,jvmArgsAppend = { "-Xmx4G", "-Xms4G", "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"})
 @Threads(1) // no concurrent writes
 @State(Scope.Benchmark)
-public class MemtableTrieReadBench
+public class InMemoryTrieReadBench
 {
     @Param({"ON_HEAP", "OFF_HEAP"})
     BufferType bufferType = BufferType.OFF_HEAP;
+
+    @Param({"OSS50"})
+    ByteComparable.Version byteComparableVersion = ByteComparable.Version.OSS50;
 
     @Param({"1000", "100000", "10000000"})
     int count = 1000;
@@ -48,14 +51,14 @@ public class MemtableTrieReadBench
     @Param({"FORWARD"})
     Direction direction = Direction.FORWARD;
 
-    final static MemtableTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
+    final static InMemoryTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
 
-    MemtableTrie<Byte> trie;
+    InMemoryTrie<Byte> trie;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        trie = new MemtableTrie<>(bufferType);
+        trie = InMemoryTrie.longLived(byteComparableVersion, bufferType, null);
         Random rand = new Random(1);
 
         System.out.format("Putting %,d\n", count);
@@ -65,9 +68,9 @@ public class MemtableTrieReadBench
             trie.putRecursive(ByteComparable.of(l), Byte.valueOf((byte) (l >> 56)), resolver);
         }
         System.out.format("Trie size on heap %,d off heap %,d\n",
-                          trie.sizeOnHeap(), trie.sizeOffHeap());
+                          trie.usedSizeOnHeap(), trie.usedSizeOffHeap());
         System.out.format("per entry on heap %.2f off heap %.2f\n",
-                          trie.sizeOnHeap() * 1.0 / count, trie.sizeOffHeap() * 1.0 / count);
+                          trie.usedSizeOnHeap() * 1.0 / count, trie.usedSizeOffHeap() * 1.0 / count);
     }
 
     @Benchmark
@@ -175,9 +178,7 @@ public class MemtableTrieReadBench
     public int iterateValuesLimited()
     {
         Iterable<Byte> values = trie.subtrie(ByteComparable.of(0L),
-                                             true,
-                                             ByteComparable.of(Long.MAX_VALUE / 2),         // 1/4 of all
-                                             false)
+                                             ByteComparable.of(Long.MAX_VALUE / 2))         // 1/4 of all
                                     .values();
         int sum = 0;
         for (byte b : values)

@@ -190,15 +190,16 @@ public class LegacyOnDiskFormatTest
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
         long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
+        ByteComparable.Version byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
         TermsReader termsReader = new TermsReader(textContext,
                                                   components.get(IndexComponentType.TERMS_DATA).createFileHandle(),
-                                                  components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
+                                                  byteComparableVersion,
                                                   components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
                                                   root,
                                                   footerPointer,
                                                   Version.AA); // These tests are for AA, so no need to parameterize
         Expression expression = new Expression(textContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
-        ByteComparable term = ByteComparable.fixedLength(expression.lower.value.encoded);
+        ByteComparable term = ByteComparable.preencoded(byteComparableVersion, expression.lower.value.encoded);
 
         PostingList result = termsReader.exactMatch(term, QueryEventListeners.NO_OP_TRIE_LISTENER, new QueryContext());
 

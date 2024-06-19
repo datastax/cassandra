@@ -199,11 +199,7 @@ public abstract class SegmentBuilder
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
             var encodedTerm = components.version().onDiskFormat().encodeForTrie(term, termComparator);
-            // Use the source term to estimate the length of the array we'll need. This is unlikely to be exact, but
-            // it will hopefully prevent intermediate array creation as ByteSourceInverse consumes the ByteSource.
-            // This 5% addition was added as a guess, and could possibly be improved.
-            var estimatedLength = Math.round(term.remaining() * 1.05f);
-            var bytes = ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(byteComparableVersion), estimatedLength);
+            var bytes = ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(byteComparableVersion));
             var bytesRef = new BytesRef(bytes);
             return ramIndexer.add(bytesRef, segmentRowId);
         }
@@ -213,7 +209,7 @@ public abstract class SegmentBuilder
         {
             try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
             {
-                return writer.writeAll(ramIndexer.getTermsWithPostings(minTerm, maxTerm));
+                return writer.writeAll(ramIndexer.getTermsWithPostings(minTerm, maxTerm, byteComparableVersion));
             }
         }
 

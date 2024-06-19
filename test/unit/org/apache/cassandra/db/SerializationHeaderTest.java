@@ -126,7 +126,7 @@ public class SerializationHeaderTest
                         Cell<?> cell = BufferCell.live(cd, 1L, value);
                         Clustering<?> clustering = clusteringFunction.apply(value);
                         Row row = BTreeRow.singleCellRow(clustering, cell);
-                        sstableWriter.append(PartitionUpdate.singleRowUpdate(schema, value, row).unfilteredIterator());
+                        sstableWriter.append(PartitionUpdate.singleRowUpdate(schema, schema.partitioner.decorateKey(value), row).unfilteredIterator());
                     }
                     sstableWriter.finish(false);
                     txn.finish();

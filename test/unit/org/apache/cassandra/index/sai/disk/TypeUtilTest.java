@@ -284,7 +284,7 @@ public class TypeUtilTest extends SaiRandomizedTest
             // simulate: saving into on-disk trie
             ByteComparable t0 = v -> type.asComparableBytes(b0, v);
             ByteComparable t1 = v -> type.asComparableBytes(b1, v);
-            assertTrue("#" + i, ByteComparable.compare(t0, t1, ByteComparable.Version.OSS41) <= 0);
+            assertTrue("#" + i, ByteComparable.compare(t0, t1, TypeUtil.BYTE_COMPARABLE_VERSION) <= 0);
         }
     }
 

@@ -25,12 +25,11 @@ import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.fail;
 
-public class MemtableTriePutTest extends MemtableTrieTestBase
+public class InMemoryTriePutTest extends InMemoryTrieTestBase
 {
     @Override
     boolean usePut()
@@ -39,9 +38,9 @@ public class MemtableTriePutTest extends MemtableTrieTestBase
     }
 
     @Test
-    public void testLongKey_StackOverflow() throws MemtableTrie.SpaceExhaustedException
+    public void testLongKey_StackOverflow() throws TrieSpaceExhaustedException
     {
-        MemtableTrie<String> trie = new MemtableTrie<>(BufferType.ON_HEAP);
+        InMemoryTrie<String> trie = strategy.create();
         Random rand = new Random(1);
         byte[] key = new byte[40960];
         rand.nextBytes(key);
@@ -49,7 +48,7 @@ public class MemtableTriePutTest extends MemtableTrieTestBase
 
         try
         {
-            trie.putRecursive(ByteComparable.fixedLength(buf), "value", (x, y) -> y);
+            trie.putRecursive(ByteComparable.preencoded(byteComparableVersion, buf), "value", (x, y) -> y);
             Assert.fail("StackOverflowError expected with a recursive put for very long keys!");
         }
         catch (StackOverflowError soe)
@@ -57,17 +56,17 @@ public class MemtableTriePutTest extends MemtableTrieTestBase
             // Expected.
         }
         // Using non-recursive put should work.
-        putSimpleResolve(trie, ByteComparable.fixedLength(buf), "value", (x, y) -> y, false);
+        putSimpleResolve(trie, ByteComparable.preencoded(byteComparableVersion, buf), "value", (x, y) -> y, false);
     }
 
     // This tests that trie space allocation works correctly close to the 2G limit. It is normally disabled because
     // the test machines don't provide enough heap memory (test requires ~8G heap to finish). Run it manually when
-    // MemtableTrie.allocateBlock is modified.
+    // InMemoryTrie.allocateBlock is modified.
     @Ignore
     @Test
-    public void testOver1GSize() throws MemtableTrie.SpaceExhaustedException
+    public void testOver1GSize() throws TrieSpaceExhaustedException
     {
-        MemtableTrie<String> trie = new MemtableTrie<>(BufferType.ON_HEAP);
+        InMemoryTrie<String> trie = strategy.create();
         trie.advanceAllocatedPos(0x20000000);
         String t1 = "test1";
         String t2 = "testing2";
@@ -93,9 +92,9 @@ public class MemtableTriePutTest extends MemtableTrieTestBase
         try
         {
             trie.putRecursive(ByteComparable.of(t3), t3, (x, y) -> y);  // should put it over the edge
-            fail("MemtableTrie.SpaceExhaustedError was expected");
+            fail("InMemoryTrie.SpaceExhaustedError was expected");
         }
-        catch (MemtableTrie.SpaceExhaustedException e)
+        catch (TrieSpaceExhaustedException e)
         {
             // expected
         }
@@ -108,9 +107,9 @@ public class MemtableTriePutTest extends MemtableTrieTestBase
         try
         {
             trie.advanceAllocatedPos(Integer.MAX_VALUE);
-            fail("MemtableTrie.SpaceExhaustedError was expected");
+            fail("InMemoryTrie.SpaceExhaustedError was expected");
         }
-        catch (MemtableTrie.SpaceExhaustedException e)
+        catch (TrieSpaceExhaustedException e)
         {
             // expected
         }
