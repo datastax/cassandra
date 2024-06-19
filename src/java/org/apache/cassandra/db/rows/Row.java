@@ -370,7 +370,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
      * <p>
      * Currently, the only use of shadowable row deletions is Materialized Views, see CASSANDRA-10261.
      */
-    public static class Deletion
+    public static class Deletion implements IMeasurableMemory
     {
         public static final Deletion LIVE = new Deletion(DeletionTime.LIVE, false);
         private static final long EMPTY_SIZE = ObjectSizes.measure(DeletionTime.build(0, 0));

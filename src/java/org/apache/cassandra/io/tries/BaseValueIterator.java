@@ -37,7 +37,7 @@ public abstract class BaseValueIterator<CONCRETE extends BaseValueIterator<CONCR
     {
         super(source, root, version);
         this.limit = limit;
-        collector = collecting ? new TransitionBytesCollector() : null;
+        collector = collecting ? new TransitionBytesCollector(byteComparableVersion) : null;
     }
 
     /**

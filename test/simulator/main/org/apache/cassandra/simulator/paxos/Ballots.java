@@ -115,7 +115,7 @@ public class Ballots
                 promised.unixMicros(),
                 accepted == null || accepted.update.isEmpty() ? 0L : accepted.ballot.unixMicros(),
                 accepted == null || accepted.update.isEmpty() ? 0L : accepted.update.stats().minTimestamp,
-                latestBallot(committed.update.iterator()),
+                latestBallot(committed.update.unfilteredIterator()),
                 baseTable
             );
         });
