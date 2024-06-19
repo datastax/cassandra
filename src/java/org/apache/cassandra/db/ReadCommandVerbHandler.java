@@ -60,16 +60,15 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         validateTransientStatus(message);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = RequestSensorsFactory.instance.create(command.metadata().keyspace);
+        RequestSensors requestSensors = RequestSensorsFactory.instance.create(command.metadata().keyspace);
         Context context = Context.from(command);
-        sensors.registerSensor(context, Type.READ_BYTES);
-        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        requestSensors.registerSensor(context, Type.READ_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
         // Initialize internode bytes with the inbound message size:
-        sensors.registerSensor(context, Type.INTERNODE_BYTES);
-        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
-
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+        requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
         command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
@@ -90,20 +89,20 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
 
-        addInternodeSensorToResponse(reply, sensors, context);
-        SensorsCustomParams.addReadSensorToResponse(reply, sensors, context);
+        addInternodeSensorToResponse(requestSensors, context, reply);
+        SensorsCustomParams.addReadSensorToResponse(reply, requestSensors, context);
 
         Tracing.trace("Enqueuing response to {}", message.from());
         MessagingService.instance().send(reply.build(), message.from());
     }
 
-    private void addInternodeSensorToResponse(Message.Builder<ReadResponse> reply, RequestSensors sensors, Context context)
+    private void addInternodeSensorToResponse(RequestSensors requestSensors, Context context, Message.Builder<ReadResponse> reply)
     {
         int size = reply.currentPayloadSize(MessagingService.current_version);
-        sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
-        sensors.syncAllSensors();
+        requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+        requestSensors.syncAllSensors();
 
-        Optional<Sensor> requestSensor = sensors.getSensor(context, Type.INTERNODE_BYTES);
+        Optional<Sensor> requestSensor = requestSensors.getSensor(context, Type.INTERNODE_BYTES);
         requestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> {
             reply.withCustomParam(SensorsCustomParams.encodeTableInInternodeBytesRequestParam(context.getTable()),
                                      bytes);

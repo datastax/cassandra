@@ -29,7 +29,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-public class DefaultRequestSensorsTest
+public class ActiveRequestSensorsTest
 {
     private Context context1;
     private Type type1;
@@ -51,9 +51,9 @@ public class DefaultRequestSensorsTest
         context2 = new Context("ks2", "t2", "id2");
         type2 = Type.WRITE_BYTES;
 
-        context1Sensors = new DefaultRequestSensors(() -> sensorsRegistry);
-        context2Sensors = new DefaultRequestSensors(() -> sensorsRegistry);
-        sensors = new DefaultRequestSensors(() -> sensorsRegistry);
+        context1Sensors = new ActiveRequestSensors(() -> sensorsRegistry);
+        context2Sensors = new ActiveRequestSensors(() -> sensorsRegistry);
+        sensors = new ActiveRequestSensors(() -> sensorsRegistry);
     }
 
     @Test

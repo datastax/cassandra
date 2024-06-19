@@ -73,7 +73,7 @@ public class SensorsWriteTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
-        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(DefaultRequestSensorsFactory.class.getName());
+        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(ActiveRequestSensorsFactory.class.getName());
 
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,

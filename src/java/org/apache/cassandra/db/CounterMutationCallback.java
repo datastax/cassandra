@@ -39,14 +39,14 @@ public class CounterMutationCallback implements Runnable
 {
     private final Message<CounterMutation> requestMessage;
     private final InetAddressAndPort respondToAddress;
-    private final RequestSensors sensors;
+    private final RequestSensors requestSensors;
     private int replicaCount = 0;
 
-    public CounterMutationCallback(Message<CounterMutation> requestMessage, InetAddressAndPort respondToAddress, RequestSensors sensors)
+    public CounterMutationCallback(Message<CounterMutation> requestMessage, InetAddressAndPort respondToAddress, RequestSensors requestSensors)
     {
         this.requestMessage = requestMessage;
         this.respondToAddress = respondToAddress;
-        this.sensors = sensors;
+        this.requestSensors = requestSensors;
     }
 
     /**
@@ -74,38 +74,38 @@ public class CounterMutationCallback implements Runnable
 
         // Add internode bytes sensors to the response after updating each per-table sensor with the current response
         // message size: this is missing the sensor values, but it's a good enough approximation
-        Collection<Sensor> requestSensors = this.sensors.getSensors(Type.INTERNODE_BYTES);
+        Collection<Sensor> sensors = this.requestSensors.getSensors(Type.INTERNODE_BYTES);
         int perSensorSize = response.currentPayloadSize(MessagingService.current_version) / tables;
-        requestSensors.forEach(sensor -> this.sensors.incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
-        this.sensors.syncAllSensors();
+        sensors.forEach(sensor -> this.requestSensors.incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
+        this.requestSensors.syncAllSensors();
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInInternodeBytesRequestParam;
         Function<String, String> tableParam = SensorsCustomParams::encodeTableInInternodeBytesTableParam;
-        addSensorsToResponse(requestSensors, requestParam, tableParam, response, replicaMultiplier);
+        addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);
 
         // Add write bytes sensors to the response
         requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
         tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
-        requestSensors = this.sensors.getSensors(Type.WRITE_BYTES);
-        addSensorsToResponse(requestSensors, requestParam, tableParam, response, replicaMultiplier);
+        sensors = this.requestSensors.getSensors(Type.WRITE_BYTES);
+        addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);
     }
 
-    private static void addSensorsToResponse(Collection<Sensor> requestSensors,
+    private static void addSensorsToResponse(Collection<Sensor> sensors,
                                              Function<String, String> requestParamSupplier,
                                              Function<String, String> tableParamSupplier,
                                              Message.Builder<NoPayload> response,
                                              int replicaMultiplier)
     {
-        for (Sensor requestSensor : requestSensors)
+        for (Sensor sensor : sensors)
         {
-            String requestBytesParam = requestParamSupplier.apply(requestSensor.getContext().getTable());
-            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue() * replicaMultiplier);
+            String requestBytesParam = requestParamSupplier.apply(sensor.getContext().getTable());
+            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue() * replicaMultiplier);
             response.withCustomParam(requestBytesParam, requestBytes);
 
             // for each table in the mutation, send the global per table counter write bytes as recorded by the registry
-            Optional<Sensor> registrySensor = SensorsRegistry.instance.getOrCreateSensor(requestSensor.getContext(), requestSensor.getType());
-            registrySensor.ifPresent(sensor -> {
-                String tableBytesParam = tableParamSupplier.apply(sensor.getContext().getTable());
-                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue() * replicaMultiplier);
+            Optional<Sensor> registrySensor = SensorsRegistry.instance.getOrCreateSensor(sensor.getContext(), sensor.getType());
+            registrySensor.ifPresent(s -> {
+                String tableBytesParam = tableParamSupplier.apply(s.getContext().getTable());
+                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(s.getValue() * replicaMultiplier);
                 response.withCustomParam(tableBytesParam, tableBytes);
             });
         }

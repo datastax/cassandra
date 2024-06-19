@@ -49,17 +49,17 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         logger.trace("Applying forwarded {}", cm);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
+        RequestSensors requestSensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
         Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
-        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
         // Initialize internode bytes with the inbound message size:
         for (TableMetadata tm : tables)
         {
             Context context = Context.from(tm);
-            sensors.registerSensor(context, Type.INTERNODE_BYTES);
-            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+            requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
         }
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
@@ -72,7 +72,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         // it's own in that case.
         StorageProxy.applyCounterMutationOnLeader(cm,
                                                   localDataCenter,
-                                                  new CounterMutationCallback(message, message.from(), sensors),
+                                                  new CounterMutationCallback(message, message.from(), requestSensors),
                                                   queryStartNanoTime);
     }
 }

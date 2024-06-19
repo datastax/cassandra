@@ -18,15 +18,20 @@
 
 package org.apache.cassandra.sensors;
 
-/**
- * Default implementation of the {@link RequestSensorsFactory} that creates a new instance of {@link DefaultRequestSensors}
- * enabled for all keyspaces.
- */
-public class DefaultRequestSensorsFactory implements RequestSensorsFactory
+import org.junit.Test;
+
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+
+public class ActiveRequestSensorsFactoryTest
 {
-    @Override
-    public RequestSensors create(String keyspace)
+    @Test
+    public void testCreate()
     {
-        return new DefaultRequestSensors();
+        ActiveRequestSensorsFactory factory = new ActiveRequestSensorsFactory();
+        RequestSensors sensors = factory.create("ks1");
+        assertThat(sensors).isNotNull();
+        assertThat(sensors).isInstanceOf(ActiveRequestSensors.class);
+        RequestSensors anotherSensors = factory.create("ks1");
+        assertThat(sensors).isNotSameAs(anotherSensors);
     }
 }

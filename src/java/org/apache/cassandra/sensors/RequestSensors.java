@@ -73,7 +73,7 @@ public interface RequestSensors
     void incrementSensor(Context context, Type type, double value);
 
     /**
-     * Sync all the sensors values to a global sensor registry chosen by the implementations class. This method
+     * Sync all the sensors values tracked for this request to the global {@link SensorsRegistry}. This method
      * will be called at least once per request/response so it is recommended to make the implementation idempotent.
      */
     void syncAllSensors();

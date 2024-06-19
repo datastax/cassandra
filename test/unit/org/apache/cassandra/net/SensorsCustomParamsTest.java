@@ -31,7 +31,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.DefaultRequestSensorsFactory;
+import org.apache.cassandra.sensors.ActiveRequestSensorsFactory;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
@@ -43,7 +43,7 @@ import static org.junit.Assert.assertTrue;
 
 public class SensorsCustomParamsTest
 {
-    private static final DefaultRequestSensorsFactory requestSensorsFactory = new DefaultRequestSensorsFactory();
+    private static final ActiveRequestSensorsFactory requestSensorsFactory = new ActiveRequestSensorsFactory();
 
     @BeforeClass
     public static void setUpClass() throws Exception

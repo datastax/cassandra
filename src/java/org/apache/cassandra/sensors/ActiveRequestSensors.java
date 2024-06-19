@@ -33,8 +33,8 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.utils.Pair;
 
 /**
- * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
- * point to create and modify sensors. More specifically:
+ * Activates {@link RequestSensors}s associated to a given request/response and related {@link Context}: this is the main
+ * entry point to create and modify sensors. More specifically:
  * <ul>
  *     <li>Create a new sensor associated to the request/response via {@link #registerSensor(Context, Type)}.</li>
  *     <li>Increment the sensor value for the request/response via {@link #incrementSensor(Context, Type, double)}.</li>
@@ -46,20 +46,20 @@ import org.apache.cassandra.utils.Pair;
  * {@link RequestSensors} objects, hence {@link #syncAllSensors()} MUST be invoked to propagate the sensors values
  * at a global level to the {@link SensorsRegistry}.
  */
-public class DefaultRequestSensors implements RequestSensors
+public class ActiveRequestSensors implements RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
     private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
     private final ConcurrentMap<Sensor, Double> latestSyncedValuePerSensor = new ConcurrentHashMap<>();
     private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
 
-    DefaultRequestSensors()
+    ActiveRequestSensors()
     {
         this(() -> SensorsRegistry.instance);
     }
 
     @VisibleForTesting
-    DefaultRequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
+    ActiveRequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
     {
         this.sensorsRegistry = sensorsRegistry;
     }
@@ -118,7 +118,7 @@ public class DefaultRequestSensors implements RequestSensors
     {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        DefaultRequestSensors sensors1 = (DefaultRequestSensors) o;
+        ActiveRequestSensors sensors1 = (ActiveRequestSensors) o;
         return Objects.equals(sensors, sensors1.sensors);
     }
 

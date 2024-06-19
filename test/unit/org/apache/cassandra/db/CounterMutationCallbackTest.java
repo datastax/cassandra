@@ -44,8 +44,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.DefaultRequestSensors;
-import org.apache.cassandra.sensors.DefaultRequestSensorsFactory;
+import org.apache.cassandra.sensors.ActiveRequestSensorsFactory;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Sensor;
@@ -132,7 +131,7 @@ public class CounterMutationCallbackTest
                .build();
         int responseSize = msg.emptyResponseBuilder().currentPayloadSize(MessagingService.current_version);
 
-        DefaultRequestSensorsFactory requestSensorsFactory = new DefaultRequestSensorsFactory();
+        ActiveRequestSensorsFactory requestSensorsFactory = new ActiveRequestSensorsFactory();
         RequestSensors requestSensors = requestSensorsFactory.create("ks1");
         RequestTracker.instance.set(requestSensors);
 
