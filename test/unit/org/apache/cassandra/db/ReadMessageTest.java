@@ -29,6 +29,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogTestReplayer;
@@ -173,7 +174,7 @@ public class ReadMessageTest
         int found = 0;
         for (FilteredPartition partition : Util.getAll(Util.cmd(cfs).build()))
         {
-            for (Row r : partition)
+            for (Row r : partition.rows())
             {
                 if (r.getCell(col).value().equals(ByteBufferUtil.bytes("abcd")))
                     ++found;
@@ -229,6 +230,9 @@ public class ReadMessageTest
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
+                if (SchemaConstants.isSystemKeyspace(upd.metadata().keyspace))
+                    continue;
+
                 Row r = upd.getRow(Clustering.make(ByteBufferUtil.bytes("c")));
                 if (r != null)
                 {
