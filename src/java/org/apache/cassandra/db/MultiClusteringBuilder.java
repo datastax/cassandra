@@ -425,6 +425,10 @@ public class MultiClusteringBuilder
     public NavigableSet<ClusteringBound<?>> buildBound(boolean isStart)
     {
         built = true;
+
+        if (clusterings.size() == 1 && clusterings.get(0) == ClusteringElements.ROOT)
+            return BTreeSet.empty(comparator);
+
         ClusteringBuilder builder = ClusteringBuilder.create(comparator);
 
         // Use UniqueComparator to allow duplicates.

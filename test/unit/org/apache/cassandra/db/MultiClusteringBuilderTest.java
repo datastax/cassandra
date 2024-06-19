@@ -26,5 +26,7 @@ public class MultiClusteringBuilderTest extends CQLTester
         Assertions.assertThat(clusterings)
                   .hasSize(1)
                   .allMatch(Clustering.EMPTY::equals);
+        Assertions.assertThat(builder.buildBound(true)).isEmpty();
+        Assertions.assertThat(builder.buildBound(false)).isEmpty();
     }
 }
