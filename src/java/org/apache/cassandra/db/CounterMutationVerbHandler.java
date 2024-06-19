@@ -32,6 +32,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestSensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.StorageProxy;
 
@@ -48,17 +49,18 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         logger.trace("Applying forwarded {}", cm);
 
         // Initialize the sensor and set ExecutorLocals
+        RequestSensors requestSensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
         Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
-        RequestSensors requestSensors = new RequestSensors();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
         // Initialize internode bytes with the inbound message size:
-        tables.forEach(tm -> {
+        for (TableMetadata tm : tables)
+        {
             Context context = Context.from(tm);
             requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
             requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
-        });
+        }
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
         // We should not wait for the result of the write in this thread,
@@ -70,7 +72,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         // it's own in that case.
         StorageProxy.applyCounterMutationOnLeader(cm,
                                                   localDataCenter,
-                                                  new CounterMutationCallback(message, message.from()),
+                                                  new CounterMutationCallback(message, message.from(), requestSensors),
                                                   queryStartNanoTime);
     }
 }
