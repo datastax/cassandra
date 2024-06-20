@@ -224,7 +224,6 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         SearchScoreProvider ssp;
         if (features.contains(FeatureId.FUSED_ADC))
         {
-            assert similarityFunction != VectorSimilarityFunction.COSINE; // FIXME not yet supported
             var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
             var rr = view.rerankerFor(queryVector, similarityFunction);
             ssp = new SearchScoreProvider(asf, rr);
