@@ -41,6 +41,7 @@ public class CQLSSTableWriterClientTest extends CQLSSTableWriterTest
                                                     Config config = new Config();
                                                     config.data_file_directories = new String[]{ dataDir.absolutePath() };
                                                     config.default_compaction = new ParameterizedClass("LeveledCompactionStrategy");
+                                                    config.num_tokens = 1;
                                                     return config;
                                                 });
         DatabaseDescriptor.setDataDirectories(new File[] { dataDir});
