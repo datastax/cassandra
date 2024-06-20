@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.BeforeClass;
@@ -38,6 +39,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.internal.creation.MockSettingsImpl;
 import sun.nio.ch.DirectBuffer;
 
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
@@ -75,6 +77,9 @@ public class DirectIOSegmentTest
         doCallRealMethod().when(manager).getConfiguration();
         when(bufferPool.createBuffer()).thenReturn(ByteBuffer.allocate(bufSize + fsBlockSize));
         doNothing().when(manager).addSize(anyLong());
+        long idBase = currentTimeMillis();
+        AtomicInteger nextId = new AtomicInteger(1);
+        doReturn(idBase + nextId.getAndIncrement()).when(manager).getNextId();
 
         qt().forAll(Generators.forwardRanges(0, bufSize))
             .checkAssert(startEnd -> {
@@ -125,6 +130,9 @@ public class DirectIOSegmentTest
         doCallRealMethod().when(manager).getConfiguration();
         when(bufferPool.createBuffer()).thenReturn(ByteBuffer.allocate(bufSize + fsBlockSize));
         doNothing().when(manager).addSize(anyLong());
+        long idBase = currentTimeMillis();
+        AtomicInteger nextId = new AtomicInteger(1);
+        doReturn(idBase + nextId.getAndIncrement()).when(manager).getNextId();
 
         FileChannel channel = mock(FileChannel.class);
         ThrowingFunction<Path, FileChannel, IOException> channelFactory = path -> channel;
