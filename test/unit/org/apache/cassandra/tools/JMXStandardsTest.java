@@ -131,6 +131,8 @@ public class JMXStandardsTest
                 for (int i = 0; i < methods.length; i++)
                 {
                     Method method = methods[i];
+                    if (method.getName().startsWith("$jacocoInit"))
+                        continue;
                     checkType(method, "return", method.getGenericReturnType(), warnings, errors);
                     Stream.of(method.getGenericParameterTypes()).forEach(t -> checkType(method, "parameter", t, warnings, errors));
                     Stream.of(method.getGenericExceptionTypes()).forEach(t -> checkType(method, "throws", t, warnings, errors));
