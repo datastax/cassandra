@@ -102,10 +102,11 @@ public class LegacySSTableTest
     // Get all versions up to the current one. Useful for testing in compatibility mode C18301
     private static String[] getValidLegacyVersions()
     {
-        return ALL_VERSIONS.stream()
-                           .filter(v -> DatabaseDescriptor.getSelectedSSTableFormat().getVersion(v).isCompatible())
-                           .filter(v -> new File(LEGACY_SSTABLE_ROOT, v + "/" + LEGACY_TABLES_KEYSPACE).isDirectory())
-                           .toArray(String[]::new);
+        String[] legacy = ALL_VERSIONS.stream()
+                                      .filter(v -> DatabaseDescriptor.getSelectedSSTableFormat().getVersion(v).isCompatible())
+                                      .filter(v -> new File(LEGACY_SSTABLE_ROOT, v + "/" + LEGACY_TABLES_KEYSPACE).isDirectory())
+                                      .toArray(String[]::new);
+        return legacy;
     }
 
     // 1200 chars
