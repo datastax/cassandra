@@ -22,7 +22,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.junit.Test;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
@@ -43,8 +47,7 @@ public class RebuildWithImmutableComponentsTest extends AbstractRebuildAndImmuta
         return true;
     }
 
-    @Override
-    protected void validateSSTables(ColumnFamilyStore cfs, IndexContext context) throws Exception
+    private void validateSSTables(ColumnFamilyStore cfs, IndexContext context) throws Exception
     {
         Index.Group indexGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
         assert indexGroup != null;
@@ -69,6 +72,14 @@ public class RebuildWithImmutableComponentsTest extends AbstractRebuildAndImmuta
                 }
             }
         }
+    }
+
+    @Test
+    public void rebuildCreateNewGenerationFiles() throws Throwable
+    {
+        String indexName = createTableWithIndexAndRebuild();
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        validateSSTables(cfs, getIndexContext(indexName));
     }
 
     private static Set<String> allSSTableFilenames(SSTableReader sstable)

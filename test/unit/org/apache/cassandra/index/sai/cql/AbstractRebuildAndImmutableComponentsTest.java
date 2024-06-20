@@ -20,17 +20,21 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Test;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS;
 import static org.junit.Assert.assertEquals;
 
+/**
+ * Common code for tests to validate the behavior of the {@link org.apache.cassandra.config.CassandraRelevantProperties#IMMUTABLE_SAI_COMPONENTS} property.
+ * <p>
+ * Implementation note: this was meant to contain the common `@Test` to both implementation of this abstract class,
+ * with just the final validation of sstables being abstracted, but when doing that, something in CI (I suspect `ant`)
+ * tries to run the test directly on the abstract class (which fails with an `InstantiationException`, obviously, but
+ * ends up as a test failure). If there is a magic flag to make it work, I don't know it and don't care to looking for
+ * it. So the concrete tests are in the subclasses, even if it's not quite DRY.
+ */
 public abstract class AbstractRebuildAndImmutableComponentsTest extends SAITester
 {
      private Boolean defaultImmutableSetting;
@@ -52,14 +56,12 @@ public abstract class AbstractRebuildAndImmutableComponentsTest extends SAITeste
             IMMUTABLE_SAI_COMPONENTS.setBoolean(defaultImmutableSetting);
     }
 
-    @Test
-    public void rebuildCreateNewGenerationFiles() throws Throwable
+    protected String createTableWithIndexAndRebuild() throws Throwable
     {
         // Setup: create index, insert data, flush, and make sure everything is correct.
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
         String name = createIndex("CREATE CUSTOM INDEX test_index ON %s(val) USING 'StorageAttachedIndex'");
 
-        IndexContext context = createIndexContext(name, UTF8Type.instance);
 
         execute("INSERT INTO %s (id, val) VALUES ('0', 'testValue')");
         execute("INSERT INTO %s (id, val) VALUES ('1', 'otherValue')");
@@ -75,9 +77,6 @@ public abstract class AbstractRebuildAndImmutableComponentsTest extends SAITeste
 
         assertEquals(2, execute("SELECT id FROM %s WHERE val = 'testValue'").size());
 
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        validateSSTables(cfs, context);
+        return name;
     }
-
-    protected abstract void validateSSTables(ColumnFamilyStore cfs, IndexContext context) throws Exception;
 }
