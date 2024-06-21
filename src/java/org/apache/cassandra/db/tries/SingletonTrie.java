@@ -42,7 +42,7 @@ class SingletonTrie<T> extends Trie<T>
     class Cursor implements Trie.Cursor<T>
     {
         private final Direction direction;
-        private final ByteSource src = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        private ByteSource src = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
         private int currentDepth = 0;
         private int currentTransition = -1;
         private int nextTransition = src.next();
@@ -118,6 +118,22 @@ class SingletonTrie<T> extends Trie<T>
         public int incomingTransition()
         {
             return currentTransition;
+        }
+
+        @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        @Override
+        public Trie<T> tailTrie()
+        {
+            if (!(src instanceof ByteSource.Duplicatable))
+                src = ByteSource.duplicatable(src);
+            ByteSource.Duplicatable duplicatableSource = (ByteSource.Duplicatable) src;
+
+            return new SingletonTrie(v -> duplicatableSource.duplicate(), value);
         }
     }
 }

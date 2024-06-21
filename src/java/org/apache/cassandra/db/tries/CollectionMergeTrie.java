@@ -281,6 +281,11 @@ class CollectionMergeTrie<T> extends Trie<T>
             return heap0Depth;
         }
 
+        boolean branchHasMultipleSources()
+        {
+            return equalCursor(heap[0], head);
+        }
+
         @Override
         public int advance()
         {
@@ -293,7 +298,7 @@ class CollectionMergeTrie<T> extends Trie<T>
         {
             // If the current position is present in just one cursor, we can safely descend multiple levels within
             // its branch as no one of the other tries has content for it.
-            if (equalCursor(heap[0], head))
+            if (branchHasMultipleSources())
                 return advance();   // More than one source at current position, do single-step advance.
 
             // If there are no children, i.e. the cursor ascends, we have to check if it's become larger than some
@@ -347,8 +352,17 @@ class CollectionMergeTrie<T> extends Trie<T>
         }
 
         @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        @Override
         public T content()
         {
+            if (!branchHasMultipleSources())
+                return head.content();
+
             applyToEqualOnHeap(CollectionMergeCursor::collectContent);
             collectContent(head, -1);
 
@@ -374,6 +388,19 @@ class CollectionMergeTrie<T> extends Trie<T>
             T itemContent = item.content();
             if (itemContent != null)
                 contents.add(itemContent);
+        }
+
+        @Override
+        public Trie<T> tailTrie()
+        {
+            if (!branchHasMultipleSources())
+                return head.tailTrie();
+
+            List<Trie<T>> inputs = new ArrayList<>(heap.length);
+            inputs.add(head.tailTrie());
+            applyToEqualOnHeap((self, cursor, index) -> inputs.add(cursor.tailTrie()));
+
+            return new CollectionMergeTrie<>(inputs, resolver);
         }
     }
 

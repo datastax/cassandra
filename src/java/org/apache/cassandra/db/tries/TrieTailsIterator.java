@@ -22,39 +22,53 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.function.Predicate;
 
-import com.google.common.base.Predicates;
-
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Convertor of trie entries to iterator where each entry is passed through {@link #mapContent} (to be implemented by
  * descendants).
  */
-public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor implements Iterator<V>
+public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor implements Iterator<V>
 {
-    private final Trie.Cursor<T> cursor;
+    final Trie.Cursor<T> cursor;
     private final Predicate<T> predicate;
-    T next;
-    boolean gotNext;
+    private T next;
+    private boolean gotNext;
 
-    TrieEntriesIterator(Trie.Cursor<T> cursor, Predicate<T> predicate)
+    TrieTailsIterator(Trie.Cursor<T> cursor, Predicate<T> predicate)
     {
         this.cursor = cursor;
         this.predicate = predicate;
         assert cursor.depth() == 0;
-        next = cursor.content();
-        gotNext = next != null && predicate.test(next);
     }
 
     public boolean hasNext()
     {
-        while (!gotNext)
+        if (!gotNext)
         {
-            next = cursor.advanceToContent(this);
+            int depth = cursor.depth();
+            if (depth > 0)
+            {
+                // if we are not at the root, skip the branch we just returned
+                depth = cursor.skipTo(depth, cursor.incomingTransition() + cursor.direction().increase);
+                if (depth < 0)
+                    return false;
+                resetPathLength(depth - 1);
+                addPathByte(cursor.incomingTransition());
+            }
+
+            next = cursor.content();
             if (next != null)
                 gotNext = predicate.test(next);
-            else
-                gotNext = true;
+
+            while (!gotNext)
+            {
+                next = cursor.advanceToContent(this);
+                if (next != null)
+                    gotNext = predicate.test(next);
+                else
+                    gotNext = true;
+            }
         }
 
         return next != null;
@@ -62,9 +76,6 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
 
     public V next()
     {
-        if (!hasNext())
-            throw new IllegalStateException("next without hasNext");
-
         gotNext = false;
         T v = next;
         next = null;
@@ -76,40 +87,18 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
     /**
      * Iterator representing the content of the trie a sequence of (path, content) pairs.
      */
-    static class AsEntries<T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable, T>>
+    static class AsEntries<T> extends TrieTailsIterator<T, Map.Entry<ByteComparable, Trie<T>>>
     {
-        public AsEntries(Trie.Cursor<T> cursor)
-        {
-            super(cursor, Predicates.alwaysTrue());
-        }
-
-        @Override
-        protected Map.Entry<ByteComparable, T> mapContent(T content, byte[] bytes, int byteLength)
-        {
-            return toEntry(content, bytes, byteLength);
-        }
-    }
-
-    /**
-     * Iterator representing the content of the trie a sequence of (path, content) pairs.
-     */
-    static class AsEntriesFilteredByType<T, U extends T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable, U>>
-    {
-        public AsEntriesFilteredByType(Trie.Cursor<T> cursor, Class<U> clazz)
+        public AsEntries(Trie.Cursor<T> cursor, Class<? extends T> clazz)
         {
             super(cursor, clazz::isInstance);
         }
 
         @Override
-        @SuppressWarnings("unchecked")  // checked by the predicate
-        protected Map.Entry<ByteComparable, U> mapContent(T content, byte[] bytes, int byteLength)
+        protected Map.Entry<ByteComparable, Trie<T>> mapContent(T content, byte[] bytes, int byteLength)
         {
-            return toEntry((U) content, bytes, byteLength);
+            ByteComparable key = toByteComparable(bytes, byteLength);
+            return new AbstractMap.SimpleImmutableEntry<>(key, cursor.tailTrie());
         }
-    }
-
-    static <T> java.util.Map.Entry<ByteComparable, T> toEntry(T content, byte[] bytes, int byteLength)
-    {
-        return new AbstractMap.SimpleImmutableEntry<>(toByteComparable(bytes, byteLength), content);
     }
 }

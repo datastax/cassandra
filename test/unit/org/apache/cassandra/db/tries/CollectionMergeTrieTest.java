@@ -46,8 +46,8 @@ public class CollectionMergeTrieTest
         SortedMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
         SortedMap<ByteComparable, ByteBuffer> content2 = new TreeMap<>(FORWARD_COMPARATOR);
 
-        InMemoryTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
-        InMemoryTrie<ByteBuffer> trie2 = makeMemtableTrie(src2, content2, true);
+        InMemoryTrie<ByteBuffer> trie1 = makeInMemoryTrie(src1, content1, true);
+        InMemoryTrie<ByteBuffer> trie2 = makeInMemoryTrie(src2, content2, true);
 
         content1.putAll(content2);
         // construct directly, trie.merge() will defer to mergeWith on two sources
@@ -64,11 +64,11 @@ public class CollectionMergeTrieTest
         SortedMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
         SortedMap<ByteComparable, ByteBuffer> content2 = new TreeMap<>(FORWARD_COMPARATOR);
 
-        InMemoryTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
-        InMemoryTrie<ByteBuffer> trie2 = makeMemtableTrie(src2, content2, true);
+        InMemoryTrie<ByteBuffer> trie1 = makeInMemoryTrie(src1, content1, true);
+        InMemoryTrie<ByteBuffer> trie2 = makeInMemoryTrie(src2, content2, true);
 
-        addToMemtableTrie(generateKeys(new Random(5), COUNT), content1, trie1, true);
-        addToMemtableTrie(generateKeys(new Random(5), COUNT), content2, trie2, true);
+        addToInMemoryTrie(generateKeys(new Random(5), COUNT), content1, trie1, true);
+        addToInMemoryTrie(generateKeys(new Random(5), COUNT), content2, trie2, true);
 
         content1.putAll(content2);
         Trie<ByteBuffer> union = new CollectionMergeTrie<>(ImmutableList.of(trie1, trie2), x -> x.iterator().next());
@@ -81,12 +81,12 @@ public class CollectionMergeTrieTest
     {
         ByteComparable[] src1 = generateKeys(rand, COUNT);
         SortedMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
-        InMemoryTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
+        InMemoryTrie<ByteBuffer> trie1 = makeInMemoryTrie(src1, content1, true);
 
         ByteComparable[] src2 = generateKeys(rand, COUNT);
         src2 = removeDuplicates(src2, content1);
         SortedMap<ByteComparable, ByteBuffer> content2 = new TreeMap<>(FORWARD_COMPARATOR);
-        InMemoryTrie<ByteBuffer> trie2 = makeMemtableTrie(src2, content2, true);
+        InMemoryTrie<ByteBuffer> trie2 = makeInMemoryTrie(src2, content2, true);
 
         content1.putAll(content2);
         Trie<ByteBuffer> union = new CollectionMergeTrie.Distinct<>(ImmutableList.of(trie1, trie2));
@@ -147,7 +147,7 @@ public class CollectionMergeTrieTest
         for (int i = 0; i < mergeCount; ++i)
         {
             ByteComparable[] src = removeDuplicates(generateKeys(rand, count), content);
-            Trie<ByteBuffer> trie = makeMemtableTrie(src, content, true);
+            Trie<ByteBuffer> trie = makeInMemoryTrie(src, content, true);
             tries.add(trie);
         }
 
@@ -164,7 +164,7 @@ public class CollectionMergeTrieTest
         for (int i = 0; i < mergeCount; ++i)
         {
             ByteComparable[] src = generateKeys(rand, count);
-            Trie<ByteBuffer> trie = makeMemtableTrie(src, content, true);
+            Trie<ByteBuffer> trie = makeInMemoryTrie(src, content, true);
             tries.add(trie);
         }
 

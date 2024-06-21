@@ -143,6 +143,12 @@ class MergeTrie<T> extends Trie<T>
             return atC1 ? c1.incomingTransition() : c2.incomingTransition();
         }
 
+        @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
         public T content()
         {
             T mc = atC2 ? c2.content() : null;
@@ -153,6 +159,19 @@ class MergeTrie<T> extends Trie<T>
                 return mc;
             else
                 return resolver.resolve(nc, mc);
+        }
+
+        @Override
+        public Trie<T> tailTrie()
+        {
+            if (atC1 && atC2)
+                return new MergeTrie<>(resolver, c1.tailTrie(), c2.tailTrie());
+            else if (atC1)
+                return c1.tailTrie();
+            else if (atC2)
+                return c2.tailTrie();
+            else
+                throw new AssertionError();
         }
     }
 

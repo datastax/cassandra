@@ -168,8 +168,8 @@ public class SlicedTrie<T> extends Trie<T>
 
     private static class SlicedCursor<T> implements Cursor<T>
     {
-        private final ByteSource start;
-        private final ByteSource end;
+        private ByteSource start;
+        private ByteSource end;
         private final Cursor<T> source;
         private final Direction direction;
 
@@ -379,6 +379,12 @@ public class SlicedTrie<T> extends Trie<T>
         }
 
         @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        @Override
         public T content()
         {
             switch (state)
@@ -395,6 +401,70 @@ public class SlicedTrie<T> extends Trie<T>
                 default:
                     return null;
             }
+        }
+
+        @Override
+        public Trie<T> tailTrie()
+        {
+            final Trie<T> sourceTail = source.tailTrie();
+            switch (state)
+            {
+                case INSIDE:
+                    return sourceTail;
+                case COMMON_PREFIX:
+                    return makeTrie(sourceTail, duplicatableStart(), startNext, duplicatableEnd(), endNext, direction);
+                case START_PREFIX:
+                    return makeTrie(sourceTail, duplicatableStart(), startNext, null, -1, direction);
+                case END_PREFIX:
+                    return makeTrie(sourceTail, null, -1, duplicatableEnd(), endNext, direction);
+                default:
+                    throw new UnsupportedOperationException("tailTrie on a slice boundary");
+            }
+        }
+
+        private ByteSource.Duplicatable duplicatableStart()
+        {
+            if (start == null || start instanceof ByteSource.Duplicatable)
+                return (ByteSource.Duplicatable) start;
+            ByteSource.Duplicatable duplicatable = ByteSource.duplicatable(start);
+            start = duplicatable;
+            return duplicatable;
+        }
+
+        private ByteSource.Duplicatable duplicatableEnd()
+        {
+            if (end == null || end instanceof ByteSource.Duplicatable)
+                return (ByteSource.Duplicatable) end;
+            ByteSource.Duplicatable duplicatable = ByteSource.duplicatable(end);
+            end = duplicatable;
+            return duplicatable;
+        }
+
+
+        private static <T> Trie<T> makeTrie(Trie<T> source,
+                                            ByteSource.Duplicatable startSource,
+                                            int startNext,
+                                            ByteSource.Duplicatable endSource,
+                                            int endNext,
+                                            Direction direction)
+        {
+            ByteSource.Duplicatable leftSource = direction.select(startSource, endSource);
+            ByteSource.Duplicatable rightSource = direction.select(endSource, startSource);
+            int leftNext = direction.select(startNext, endNext);
+            int rightNext = direction.select(endNext, startNext);
+            return new Trie<T>()
+            {
+                @Override
+                protected Cursor<T> cursor(Direction direction)
+                {
+                    return new SlicedCursor<>(source.cursor(direction),
+                                              leftSource != null ? leftSource.duplicate() : null,
+                                              leftNext,
+                                              rightSource != null ? rightSource.duplicate() : null,
+                                              rightNext,
+                                              direction);
+                }
+            };
         }
     }
 }

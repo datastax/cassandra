@@ -38,7 +38,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.asString;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.assertSameContent;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKeys;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.makeMemtableTrie;
+import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.makeInMemoryTrie;
 import static java.util.Arrays.asList;
 import static org.junit.Assert.assertEquals;
 
@@ -55,13 +55,13 @@ public class SlicedTrieTest
     "s",
     "q",
     "\000",
-    "\777",
-    "\777\000",
-    "\000\777",
+    "\377",
+    "\377\000",
+    "\000\377",
     "\000\000",
     "\000\000\000",
-    "\000\000\777",
-    "\777\777"
+    "\000\000\377",
+    "\377\377"
     });
     public static final ByteComparable[] KEYS = toByteComparable(new String[]{
     "test1",
@@ -75,12 +75,12 @@ public class SlicedTrieTest
     "sort",
     "sorting",
     "square",
-    "\777\000",
-    "\000\777",
+    "\377\000",
+    "\000\377",
     "\000\000",
     "\000\000\000",
-    "\000\000\777",
-    "\777\777"
+    "\000\000\377",
+    "\377\377"
     });
     public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, Trie.BYTE_COMPARABLE_VERSION);
     private static final int COUNT = 15000;
@@ -97,7 +97,7 @@ public class SlicedTrieTest
         ByteComparable[] src1 = generateKeys(rand, count);
         NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>((bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, Trie.BYTE_COMPARABLE_VERSION));
 
-        InMemoryTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
+        InMemoryTrie<ByteBuffer> trie1 = makeInMemoryTrie(src1, content1, true);
 
         checkEqualRange(content1, trie1, null, true, null, true);
         checkEqualRange(content1, trie1, InMemoryTrieTestBase.generateKey(rand), true, null, true);
@@ -180,7 +180,7 @@ public class SlicedTrieTest
     {
         Arrays.sort(BOUNDARIES, BYTE_COMPARABLE_COMPARATOR);
         NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
-        InMemoryTrie<ByteBuffer> trie1 = makeMemtableTrie(KEYS, content1, true);
+        InMemoryTrie<ByteBuffer> trie1 = makeInMemoryTrie(KEYS, content1, true);
 
         for (int li = -1; li < BOUNDARIES.length; ++li)
         {
@@ -225,11 +225,11 @@ public class SlicedTrieTest
         List<Trie<ByteBuffer>> tries = new ArrayList<>();
         for (int i = 0; i < mergeCount; ++i)
         {
-            tries.add(makeMemtableTrie(Arrays.copyOfRange(KEYS,
+            tries.add(makeInMemoryTrie(Arrays.copyOfRange(KEYS,
                                                            KEYS.length * i / mergeCount,
                                                            KEYS.length * (i + 1) / mergeCount),
-                                        content1,
-                                        true));
+                                       content1,
+                                       true));
         }
         Trie<ByteBuffer> trie1 = Trie.mergeDistinct(tries);
 
@@ -353,6 +353,18 @@ public class SlicedTrieTest
                 public Integer content()
                 {
                     return current == direction.select(-1, childs) ? -1 : current;
+                }
+
+                @Override
+                public Direction direction()
+                {
+                    return direction;
+                }
+
+                @Override
+                public Trie<Integer> tailTrie()
+                {
+                    throw new UnsupportedOperationException("tailTrie on test cursor");
                 }
             }
         };

@@ -249,6 +249,18 @@ public abstract class InMemoryTrieTestBase
             SpecStackEntry parent = stack.parent;
             return parent != null ? parent.curChild + 0x30 : -1;
         }
+
+        @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        @Override
+        public Trie<ByteBuffer> tailTrie()
+        {
+            throw new UnsupportedOperationException("tailTrie on test cursor");
+        }
     }
 
     static Trie<ByteBuffer> specifiedTrie(Object[] nodeDef)
@@ -316,7 +328,7 @@ public abstract class InMemoryTrieTestBase
     {
         ByteComparable[] src = generateKeys(rand, COUNT);
         SortedMap<ByteComparable, ByteBuffer> content = new TreeMap<>(FORWARD_COMPARATOR);
-        InMemoryTrie<ByteBuffer> trie = makeMemtableTrie(src, content, usePut());
+        InMemoryTrie<ByteBuffer> trie = makeInMemoryTrie(src, content, usePut());
         int keysize = Arrays.stream(src)
                             .mapToInt(src1 -> ByteComparable.length(src1, VERSION))
                             .sum();
@@ -424,20 +436,60 @@ public abstract class InMemoryTrieTestBase
             assertEquals(test, trie.get(mapping.apply(test)));
     }
 
-    static InMemoryTrie<ByteBuffer> makeMemtableTrie(ByteComparable[] src,
+    static InMemoryTrie<ByteBuffer> makeInMemoryTrie(ByteComparable[] src,
                                                      Map<ByteComparable, ByteBuffer> content,
                                                      boolean usePut)
 
     {
         InMemoryTrie<ByteBuffer> trie = new InMemoryTrie<>(BufferType.OFF_HEAP);
-        addToMemtableTrie(src, content, trie, usePut);
+        addToInMemoryTrie(src, content, trie, usePut);
         return trie;
     }
 
-    static void addToMemtableTrie(ByteComparable[] src,
+    static void addToInMemoryTrie(ByteComparable[] src,
                                   Map<ByteComparable, ByteBuffer> content,
-                                  InMemoryTrie<ByteBuffer> trie,
+                                  InMemoryTrie<? super ByteBuffer> trie,
                                   boolean usePut)
+
+    {
+        for (ByteComparable b : src)
+            addToInMemoryTrie(content, trie, usePut, b);
+    }
+
+    static void addNthToInMemoryTrie(ByteComparable[] src,
+                                     Map<ByteComparable, ByteBuffer> content,
+                                     InMemoryTrie<? super ByteBuffer> trie,
+                                     boolean usePut,
+                                     int divisor,
+                                     int remainder)
+
+    {
+        int i = 0;
+        for (ByteComparable b : src)
+        {
+            if (i++ % divisor != remainder)
+                continue;
+
+            addToInMemoryTrie(content, trie, usePut, b);
+        }
+    }
+
+    private static void addToInMemoryTrie(Map<ByteComparable, ByteBuffer> content, InMemoryTrie<? super ByteBuffer> trie, boolean usePut, ByteComparable b)
+    {
+        // Note: Because we don't ensure order when calling resolve, just use a hash of the key as payload
+        // (so that all sources have the same value).
+        int payload = asString(b).hashCode();
+        ByteBuffer v = ByteBufferUtil.bytes(payload);
+        content.put(b, v);
+        if (VERBOSE)
+            System.out.println("Adding " + asString(b) + ": " + ByteBufferUtil.bytesToHex(v));
+        putSimpleResolve(trie, b, v, (x, y) -> y, usePut);
+        if (VERBOSE)
+            System.out.println(trie.dump(x -> string(x)));
+    }
+
+    static void addToMap(ByteComparable[] src,
+                         Map<ByteComparable, ByteBuffer> content)
 
     {
         for (ByteComparable b : src)
@@ -447,15 +499,19 @@ public abstract class InMemoryTrieTestBase
             int payload = asString(b).hashCode();
             ByteBuffer v = ByteBufferUtil.bytes(payload);
             content.put(b, v);
-            if (VERBOSE)
-                System.out.println("Adding " + asString(b) + ": " + ByteBufferUtil.bytesToHex(v));
-            putSimpleResolve(trie, b, v, (x, y) -> y, usePut);
-            if (VERBOSE)
-                System.out.println(trie.dump(ByteBufferUtil::bytesToHex));
         }
     }
 
-    static void checkGet(Trie<ByteBuffer> trie, Map<ByteComparable, ByteBuffer> items)
+    private static String string(Object x)
+    {
+        return x instanceof ByteBuffer
+               ? ByteBufferUtil.bytesToHex((ByteBuffer) x)
+               : x instanceof ByteComparable
+                 ? ((ByteComparable) x).byteComparableAsString(VERSION)
+                 : x.toString();
+    }
+
+    static void checkGet(Trie<? super ByteBuffer> trie, Map<ByteComparable, ByteBuffer> items)
     {
         for (Map.Entry<ByteComparable, ByteBuffer> en : items.entrySet())
         {

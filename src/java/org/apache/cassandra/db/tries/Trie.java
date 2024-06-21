@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import com.google.common.collect.ImmutableList;
 
@@ -170,6 +171,11 @@ public abstract class Trie<T>
         T content();
 
         /**
+         * Returns the direction in which this cursor is progressing.
+         */
+        Direction direction();
+
+        /**
          * Advance one position to the node whose associated path is next lexicographically.
          * This can be either:<ul>
          * <li>descending one level to the first child of the current node,
@@ -264,6 +270,12 @@ public abstract class Trie<T>
             }
             return true;
         }
+
+        /**
+         * Returns a tail trie, i.e. a trie whose root is the current position. Walking tail trie will list all
+         * descendants of the current position with depth adjusted by the current depth.
+         */
+        Trie<T> tailTrie();
     }
 
     protected abstract Cursor<T> cursor(Direction direction);
@@ -483,7 +495,31 @@ public abstract class Trie<T>
      */
     public Iterator<Map.Entry<ByteComparable, T>> entryIterator(Direction direction)
     {
-        return new TrieEntriesIterator.AsEntries<>(this, direction);
+        return new TrieEntriesIterator.AsEntries<>(cursor(direction));
+    }
+
+    /**
+     * Returns the ordered entry set of this trie's content in an iterable, filtered by the given type.
+     */
+    public <U extends T> Iterable<Map.Entry<ByteComparable, U>> filteredEntrySet(Class<U> clazz)
+    {
+        return filteredEntrySet(Direction.FORWARD, clazz);
+    }
+
+    /**
+     * Returns the ordered entry set of this trie's content in an iterable, filtered by the given type.
+     */
+    public <U extends T> Iterable<Map.Entry<ByteComparable, U>> filteredEntrySet(Direction direction, Class<U> clazz)
+    {
+        return () -> filteredEntryIterator(direction, clazz);
+    }
+
+    /**
+     * Returns the ordered entry set of this trie's content in an iterator, filtered by the given type.
+     */
+    public <U extends T> Iterator<Map.Entry<ByteComparable, U>> filteredEntryIterator(Direction direction, Class<U> clazz)
+    {
+        return new TrieEntriesIterator.AsEntriesFilteredByType<>(cursor(direction), clazz);
     }
 
     /**
@@ -495,11 +531,59 @@ public abstract class Trie<T>
     }
 
     /**
+     * Returns the ordered set of values of this trie as an iterable.
+     */
+    public Iterable<T> values(Direction direction)
+    {
+        return direction.isForward() ? this::valueIterator : this::reverseValueIterator;
+    }
+
+    /**
      * Returns the ordered set of values of this trie in an iterator.
      */
     public Iterator<T> valueIterator()
     {
-        return new TrieValuesIterator<>(this);
+        return valueIterator(Direction.FORWARD);
+    }
+
+    /**
+     * Returns the inversely ordered set of values of this trie in an iterator.
+     */
+    public Iterator<T> reverseValueIterator()
+    {
+        return valueIterator(Direction.REVERSE);
+    }
+
+    /**
+     * Returns the ordered set of values of this trie in an iterator.
+     */
+    public Iterator<T> valueIterator(Direction direction)
+    {
+        return new TrieValuesIterator<>(cursor(direction));
+    }
+
+    /**
+     * Returns the ordered set of values of this trie in an iterable, filtered by the given type.
+     */
+    public <U extends T> Iterable<U> filteredValues(Class<U> clazz)
+    {
+        return filteredValues(Direction.FORWARD, clazz);
+    }
+
+    /**
+     * Returns the ordered set of values of this trie in an iterable, filtered by the given type.
+     */
+    public <U extends T> Iterable<U> filteredValues(Direction direction, Class<U> clazz)
+    {
+        return () -> filteredValuesIterator(direction, clazz);
+    }
+
+    /**
+     * Returns the ordered set of values of this trie in an iterator, filtered by the given type.
+     */
+    public <U extends T> Iterator<U> filteredValuesIterator(Direction direction, Class<U> clazz)
+    {
+        return new TrieValuesIterator.FilteredByType<>(cursor(direction), clazz);
     }
 
     /**
@@ -647,6 +731,12 @@ public abstract class Trie<T>
                     return depth = -1;
                 }
 
+                @Override
+                public Trie<Object> tailTrie()
+                {
+                    return EMPTY;
+                }
+
                 public int depth()
                 {
                     return depth;
@@ -657,6 +747,12 @@ public abstract class Trie<T>
                     return null;
                 }
 
+                @Override
+                public Direction direction()
+                {
+                    return direction;
+                }
+
                 public int incomingTransition()
                 {
                     return -1;
@@ -664,6 +760,41 @@ public abstract class Trie<T>
             };
         }
     };
+
+
+    /**
+     * Returns a Trie that is a view of this one, where the given prefix is prepended before the root.
+     */
+    public Trie<T> prefix(ByteComparable prefix)
+    {
+        return new PrefixedTrie(prefix, this);
+    }
+
+    /**
+     * Returns an entry set containing all tail tree constructed at the points that contain content of
+     * the given type.
+     */
+    public Iterable<Map.Entry<ByteComparable, Trie<T>>> tailTries(Direction direction, Class<? extends T> clazz)
+    {
+        return () -> new TrieTailsIterator.AsEntries<>(cursor(direction), clazz);
+    }
+
+    /**
+     * Returns a trie that corresponds to the branch of this trie rooted at the given prefix.
+     * <p>
+     * The result will include the same values as {@code subtrie(prefix, nextBranch(prefix))}, but the keys in the resulting
+     * trie will not include the prefix. In other words,
+     *   {@code tailTrie(prefix).prefix(prefix) = subtrie(prefix, nextBranch(prefix))}
+     * where nextBranch stands for the key adjusted by adding one at the last position.
+     */
+    public Trie<T> tailTrie(ByteComparable prefix)
+    {
+        Cursor<T> c = cursor(Direction.FORWARD);
+        if (c.descendAlong(prefix.asComparableBytes(BYTE_COMPARABLE_VERSION)))
+            return c.tailTrie();
+        else
+            return empty();
+    }
 
     @SuppressWarnings("unchecked")
     public static <T> Trie<T> empty()

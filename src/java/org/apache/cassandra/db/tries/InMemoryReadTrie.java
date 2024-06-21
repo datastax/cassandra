@@ -551,6 +551,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
     class MemtableCursor extends CursorBacktrackingState implements Cursor<T>
     {
         private int currentNode;
+        private int currentFullNode;
         private int incomingTransition;
         private T content;
         private final Direction direction;
@@ -645,6 +646,18 @@ public class InMemoryReadTrie<T> extends Trie<T>
         public int incomingTransition()
         {
             return incomingTransition;
+        }
+
+        @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        @Override
+        public Trie<T> tailTrie()
+        {
+            return new InMemoryReadTrie<>(buffers, contentArrays, currentFullNode);
         }
 
         private int backtrack()
@@ -1045,6 +1058,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             ++depth;
             incomingTransition = transition;
             content = getNodeContent(child);
+            currentFullNode = child;
             currentNode = followContentTransition(child);
             return depth;
         }
@@ -1054,6 +1068,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             ++depth;
             incomingTransition = transition;
             content = null;
+            currentFullNode = child;
             currentNode = child;
             return depth;
         }
@@ -1138,6 +1153,18 @@ public class InMemoryReadTrie<T> extends Trie<T>
             public int incomingTransition()
             {
                 return source.incomingTransition();
+            }
+
+            @Override
+            public Direction direction()
+            {
+                return source.direction();
+            }
+
+            @Override
+            public Trie<String> tailTrie()
+            {
+                throw new AssertionError();
             }
 
             @Override
