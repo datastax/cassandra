@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
@@ -40,6 +39,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.SingleRestriction;
+import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
@@ -991,9 +991,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               int userLimit,
                               int userOffset) throws InvalidRequestException
     {
-        Consumer<ResultSet> sorter = orderingComparator == null ? null : rs -> orderResults(rs, options);
         GroupMaker groupMaker = aggregationSpec == null ? null : aggregationSpec.newGroupMaker();
-        ResultSetBuilder result = new ResultSetBuilder(getResultMetadata(), selectors, groupMaker, sorter, userLimit, userOffset);
+        SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset, options);
+        ResultSetBuilder result = new ResultSetBuilder(getResultMetadata(), selectors, groupMaker, rows);
 
         while (partitions.hasNext())
         {
@@ -1127,27 +1127,26 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     /**
      * Orders results when multiple keys are selected (using IN)
      */
-    public void orderResults(ResultSet cqlRows, QueryOptions options)
+    public SortedRowsBuilder sortedRowsBuilder(int limit, int offset, QueryOptions options)
     {
-        if (cqlRows.size() == 0 || !needsPostQueryOrdering())
-            return;
-
-        if (orderingComparator != null)
+        if (!needsPostQueryOrdering() || orderingComparator == null)
         {
-            if (orderingComparator instanceof IndexColumnComparator)
-            {
-                SingleRestriction restriction = ((IndexColumnComparator<?>) orderingComparator).restriction;
-                int columnIndex = ((IndexColumnComparator<?>) orderingComparator).columnIndex;
+            return SortedRowsBuilder.create(limit, offset);
+        }
+        else if (orderingComparator instanceof IndexColumnComparator)
+        {
+            SingleRestriction restriction = ((IndexColumnComparator<?>) orderingComparator).restriction;
+            int columnIndex = ((IndexColumnComparator<?>) orderingComparator).columnIndex;
 
-                Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
-                assert index != null;
+            Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
+            assert index != null;
 
-                index.postQuerySort(cqlRows, restriction, columnIndex, options);
-            }
-            else
-            {
-                Collections.sort(cqlRows.rows, orderingComparator);
-            }
+            Index.Scorer scorer = index.postQueryScorer(restriction, columnIndex, options);
+            return SortedRowsBuilder.create(limit, offset, scorer);
+        }
+        else
+        {
+            return SortedRowsBuilder.create(limit, offset, orderingComparator);
         }
     }
 

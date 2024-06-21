@@ -223,6 +223,47 @@ public class SelectOffsetTest extends CQLTester
                            row(0, 0, 2, 2));
         testLimitAndOffset("SELECT * FROM %s WHERE k = 0 ORDER BY c1 DESC PER PARTITION LIMIT 1",
                            row(0, 1, 2, 5));
+
+        // With keys IN
+        testLimitAndOffset("SELECT * FROM %s WHERE k IN (1, 0)",
+                           row(0, 0, 0, 0),
+                           row(0, 0, 1, 1),
+                           row(0, 0, 2, 2),
+                           row(0, 1, 0, 3),
+                           row(0, 1, 1, 4),
+                           row(0, 1, 2, 5),
+                           row(1, 0, 0, 6),
+                           row(1, 0, 1, 7),
+                           row(1, 0, 2, 8),
+                           row(1, 1, 0, 9),
+                           row(1, 1, 1, 10),
+                           row(1, 1, 2, 11));
+        testLimitAndOffsetWithoutPaging("SELECT * FROM %s WHERE k IN (1, 0) ORDER BY c1, c2",
+                                        row(0, 0, 0, 0),
+                                        row(1, 0, 0, 6),
+                                        row(0, 0, 1, 1),
+                                        row(1, 0, 1, 7),
+                                        row(0, 0, 2, 2),
+                                        row(1, 0, 2, 8),
+                                        row(0, 1, 0, 3),
+                                        row(1, 1, 0, 9),
+                                        row(0, 1, 1, 4),
+                                        row(1, 1, 1, 10),
+                                        row(0, 1, 2, 5),
+                                        row(1, 1, 2, 11));
+        testLimitAndOffsetWithoutPaging("SELECT * FROM %s WHERE k IN (1, 0) ORDER BY c1 DESC, c2 DESC",
+                                        row(0, 1, 2, 5),
+                                        row(1, 1, 2, 11),
+                                        row(0, 1, 1, 4),
+                                        row(1, 1, 1, 10),
+                                        row(0, 1, 0, 3),
+                                        row(1, 1, 0, 9),
+                                        row(0, 0, 2, 2),
+                                        row(1, 0, 2, 8),
+                                        row(0, 0, 1, 1),
+                                        row(1, 0, 1, 7),
+                                        row(0, 0, 0, 0),
+                                        row(1, 0, 0, 6));
     }
 
     @Test
@@ -285,13 +326,35 @@ public class SelectOffsetTest extends CQLTester
         execute("INSERT INTO %s (k, v) VALUES (2, [4])");
         execute("INSERT INTO %s (k, v) VALUES (3, [2])");
         execute("INSERT INTO %s (k, v) VALUES (4, [3])");
+        execute("INSERT INTO %s (k, v) VALUES (5, [2])");
 
         // offset 0 is equivalent to no offset, so it's allowed
         assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 0"),
                    row(1, vector(1f)),
+                   row(5, vector(2f)),
                    row(3, vector(2f)),
                    row(4, vector(3f)),
                    row(2, vector(4f)));
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 5 OFFSET 0"),
+                   row(1, vector(1f)),
+                   row(5, vector(2f)),
+                   row(3, vector(2f)),
+                   row(4, vector(3f)),
+                   row(2, vector(4f)));
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 4 OFFSET 0"),
+                   row(1, vector(1f)),
+                   row(5, vector(2f)),
+                   row(3, vector(2f)),
+                   row(4, vector(3f)));
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 3 OFFSET 0"),
+                   row(1, vector(1f)),
+                   row(5, vector(2f)),
+                   row(3, vector(2f)));
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2 OFFSET 0"),
+                   row(1, vector(1f)),
+                   row(3, vector(2f)));
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 1 OFFSET 0"),
+                   row(1, vector(1f)));
 
         // offset > 0 is not allowed
         String query = "SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 1";
@@ -312,17 +375,27 @@ public class SelectOffsetTest extends CQLTester
 
     private void testLimitAndOffset(String select, Object[]... rows) throws Throwable
     {
+        testLimitAndOffset(select, true, rows);
+    }
+
+    private void testLimitAndOffsetWithoutPaging(String select, Object[]... rows) throws Throwable
+    {
+        testLimitAndOffset(select, false, rows);
+    }
+
+    private void testLimitAndOffset(String select, boolean paging, Object[]... rows) throws Throwable
+    {
         for (int limit = 1; limit <= rows.length + 1; limit++)
         {
             for (int offset = 0; offset <= rows.length + 1; offset++)
             {
-                testLimitAndOffset(select, limit, offset, rows);
+                testLimitAndOffset(select, limit, offset, paging, rows);
             }
-            testLimitAndOffset(select, limit, null, rows);
+            testLimitAndOffset(select, limit, null, paging, rows);
         }
     }
 
-    private void testLimitAndOffset(String query, int limit, @Nullable Integer offset, Object[]... rows) throws Throwable
+    private void testLimitAndOffset(String query, int limit, @Nullable Integer offset, boolean paging, Object[]... rows) throws Throwable
     {
         // append the specified limit and offset to the unrestricted query
         StringBuilder sb = new StringBuilder(query);
@@ -336,23 +409,27 @@ public class SelectOffsetTest extends CQLTester
         rows = trimRows(limit, offset, rows);
 
         // test without paging
+        logger.debug("Executing test query without paging: {}", query);
         assertRows(execute(queryWithLimitAndOffset), rows);
 
-        // test with paging
-        int numRows = rows.length;
-        for (int pageSize : ImmutableSet.of(Integer.MAX_VALUE, numRows + 1, numRows, numRows - 1, 1))
+        // test with paging (not all queries support it)
+        if (paging)
         {
-            logger.debug("Executing test query with page size {}: {}", pageSize, query);
-            ResultSet rs = executeNetWithPaging(queryWithLimitAndOffset, pageSize);
-
-            // key-based paging should be disabled when limit/offset paging is used
-            if (offset != null && offset > 0)
+            int numRows = rows.length;
+            for (int pageSize : ImmutableSet.of(Integer.MAX_VALUE, numRows + 1, numRows, numRows - 1, 1))
             {
-                Assert.assertTrue(rs.isFullyFetched());
-                Assert.assertNull(rs.getExecutionInfo().getPagingState());
-            }
+                logger.debug("Executing test query with page size {}: {}", pageSize, query);
+                ResultSet rs = executeNetWithPaging(queryWithLimitAndOffset, pageSize);
 
-            assertRowsNet(rs, rows);
+                // key-based paging should be disabled when limit/offset paging is used
+                if (offset != null && offset > 0)
+                {
+                    Assert.assertTrue(rs.isFullyFetched());
+                    Assert.assertNull(rs.getExecutionInfo().getPagingState());
+                }
+
+                assertRowsNet(rs, rows);
+            }
         }
 
         // test with bind markers

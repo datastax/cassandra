@@ -447,16 +447,34 @@ public interface Index
     public RowFilter getPostIndexQueryFilter(RowFilter filter);
 
     /**
-     * Reorder query result before sending to client
+     * Returns a {@link Scorer} to give a similarity/proximity score to CQL result rows, so they can be ordered by the
+     * coordinator before sending them to client.
      *
-     * @param cqlRows     result set from a query
      * @param restriction restriction that requires current index
      * @param columnIndex idx of the indexed column in returned row
      * @param options     query options
+     * @return a scorer to score the rows
      */
-    default void postQuerySort(ResultSet cqlRows, Restriction restriction, int columnIndex, QueryOptions options)
+    default Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
     {
         throw new NotImplementedException();
+    }
+
+    /**
+     * Gives a similarity/proximity score to CQL result rows.
+     */
+    interface Scorer
+    {
+        /**
+         * @param row a CQL result row
+         * @return the similarity/proximity score for the row
+         */
+        float score(List<ByteBuffer> row);
+
+        /**
+         * @return {@code true} if higher scores are considered better, {@code false} otherwise
+         */
+        boolean reversed();
     }
 
     /**

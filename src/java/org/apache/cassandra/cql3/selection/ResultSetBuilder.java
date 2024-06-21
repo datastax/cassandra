@@ -21,9 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.function.Consumer;
-
-import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.ResultSet.ResultMetadata;
@@ -37,7 +34,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 public final class ResultSetBuilder
 {
-    private final ResultSet resultSet;
+    private final ResultMetadata metadata;
+    private final SortedRowsBuilder rows;
 
     /**
      * As multiple thread can access a <code>Selection</code> instance each <code>ResultSetBuilder</code> will use
@@ -62,30 +60,23 @@ public final class ResultSetBuilder
     final long[] timestamps;
     final int[] ttls;
 
-    private final Consumer<ResultSet> sorter;
-    private final int limit;
-    private int offset;
     private boolean hasResults = false;
     private int readRowsSize = 0;
 
     public ResultSetBuilder(ResultMetadata metadata, Selectors selectors)
     {
-        this(metadata, selectors, null, null, Integer.MAX_VALUE, 0);
+        this(metadata, selectors, null, SortedRowsBuilder.create());
     }
 
     public ResultSetBuilder(ResultMetadata metadata,
                             Selectors selectors,
                             GroupMaker groupMaker,
-                            @Nullable Consumer<ResultSet> sorter,
-                            int limit,
-                            int offset)
+                            SortedRowsBuilder rows)
     {
-        this.resultSet = new ResultSet(metadata.copy(), new ArrayList<>());
+        this.metadata = metadata.copy();
+        this.rows = rows;
         this.selectors = selectors;
         this.groupMaker = groupMaker;
-        this.sorter = sorter;
-        this.limit = limit;
-        this.offset = offset;
         this.timestamps = selectors.collectTimestamps() ? new long[selectors.numberOfFetchedColumns()] : null;
         this.ttls = selectors.collectTTLs() ? new int[selectors.numberOfFetchedColumns()] : null;
 
@@ -175,15 +166,11 @@ public final class ResultSetBuilder
 
         // For aggregates we need to return a row even it no records have been found
         if (!hasResults && groupMaker != null && groupMaker.returnAtLeastOneRow())
-            addRow();
-
-        if (sorter != null)
         {
-            sorter.accept(resultSet);
-            resultSet.trim(limit, offset);
+            addRow();
         }
 
-        return resultSet;
+        return new ResultSet(metadata, rows.build());
     }
 
     public int readRowsSize()
@@ -208,10 +195,6 @@ public final class ResultSetBuilder
             readRowsSize += value != null ? value.remaining() : 0;
         }
 
-        // Only add the row if it's within the limit and offset, unless there is an order, in which case we'll trim
-        // later, after applying that order to the full results.
-        // TODO: there might be an opportunity to reduce memory usage by using insertion sort
-        if (sorter != null || offset-- <= 0 && resultSet.size() < limit)
-            resultSet.addRow(row);
+        rows.add(row);
     }
 }
