@@ -285,7 +285,7 @@ public class ChunkCacheTest
             proxy = new ChannelProxy(file, channel);
             FileHandle.Builder builder = new FileHandle.Builder(proxy.file())
                                          .withChunkCache(chunkCache);
-            fileHandle = builder.complete();
+            fileHandle = builder.complete(f -> proxy);
             reader = fileHandle.createReader();
 
             return reader;
