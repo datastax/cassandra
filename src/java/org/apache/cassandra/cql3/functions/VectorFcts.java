@@ -96,8 +96,8 @@ public class VectorFcts
                 if (arguments.containsNulls())
                     return null;
 
-                var v1 = vts.createFloatVector(type.getSerializer().deserializeFloatArray(arguments.get(0)));
-                var v2 = vts.createFloatVector(type.getSerializer().deserializeFloatArray(arguments.get(1)));
+                var v1 = vts.createFloatVector(arguments.get(0));
+                var v2 = vts.createFloatVector(arguments.get(1));
 
                 if (!supportsZeroVectors && (isEffectivelyZero(v1) || isEffectivelyZero(v2)))
                     throw new InvalidRequestException("Function " + name + " doesn't support all-zero vectors.");
@@ -138,23 +138,34 @@ public class VectorFcts
                 private final Random random = new Random();
 
                 @Override
+                public Arguments newArguments(ProtocolVersion version)
+                {
+                    return new FunctionArguments(version,
+                                                 (v, b) -> Int32Type.instance.compose(b),
+                                                 (v, b) -> {
+                                                    if (b == null || !b.hasRemaining())
+                                                        throw new InvalidRequestException(format("Min argument of function %s must not be null", 
+                                                                                                 RandomFloatVectorFunctionFactory.this));
+                                                     return minType.compose(b).floatValue();
+                                                 },
+                                                 (v, b) -> {
+                                                     if (b == null || !b.hasRemaining())
+                                                         throw new InvalidRequestException(format("Max argument of function %s must not be null",
+                                                                                                  RandomFloatVectorFunctionFactory.this));
+                                                     return maxType.compose(b).floatValue();
+                                                 });
+                }
+
+                @Override
                 public ByteBuffer execute(Arguments arguments)
                 {
                     // get the min argument
-                    ByteBuffer arg1 = arguments.get(1);
-                    if (arg1 == null || !arg1.hasRemaining())
-                        throw new InvalidRequestException(format("Min argument of function %s must not be null",
-                                                                 RandomFloatVectorFunctionFactory.this));
-                    float min = minType.compose(arg1).floatValue();
+                    float min = arguments.get(1);
                     if (!Float.isFinite(min))
                         throw new InvalidRequestException("Min value must be finite");
 
                     // get the max argument
-                    ByteBuffer arg2 = arguments.get(2);
-                    if (arg2 == null || !arg2.hasRemaining())
-                        throw new InvalidRequestException(format("Max argument of function %s must not be null",
-                                                                 RandomFloatVectorFunctionFactory.this));
-                    float max = maxType.compose(arg2).floatValue();
+                    float max = arguments.get(2);
                     if (!Float.isFinite(max))
                         throw new InvalidRequestException("Max value must be finite");
                     if (max <= min)
@@ -200,13 +211,24 @@ public class VectorFcts
             return new NativeScalarFunction(name.name, vectorType, vectorType)
             {
                 @Override
+                public Arguments newArguments(ProtocolVersion version)
+                {
+                    return new FunctionArguments(version,
+                                                 (v, b) -> {
+                                                     if (b == null || !b.hasRemaining())
+                                                         return null;
+                                                     return vectorType.getSerializer().deserializeFloatArray(b);
+                                                 });
+                }
+
+                @Override
                 public ByteBuffer execute(Arguments arguments)
                 {
                     // get the vector argument
-                    ByteBuffer arg0 = arguments.get(0);
-                    if (arg0 == null || !arg0.hasRemaining())
+                    var arg0 = arguments.get(0);
+                    if (arg0 == null)
                         return null;
-                    var vector = vts.createFloatVector(vectorType.getSerializer().deserializeFloatArray(arg0));
+                    var vector = vts.createFloatVector(arg0);
 
                     // normalize
                     VectorUtil.l2normalize(vector);
