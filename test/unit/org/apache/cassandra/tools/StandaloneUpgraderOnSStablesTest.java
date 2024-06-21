@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.tools;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -27,6 +28,7 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
@@ -51,7 +53,10 @@ public class StandaloneUpgraderOnSStablesTest
 {
     static WithProperties properties;
 
-    String legacyId = LegacySSTableTest.legacyVersions[LegacySSTableTest.legacyVersions.length - 1];
+    List<String> legacyVersions = Arrays.stream(LegacySSTableTest.legacyVersions)
+                      .filter(v -> v.compareTo(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion().version) < 0)
+                      .collect(Collectors.toList());
+    String legacyId = legacyVersions.get(legacyVersions.size() - 1);
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
