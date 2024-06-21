@@ -23,14 +23,15 @@ import java.util.PrimitiveIterator;
 import java.util.stream.IntStream;
 
 import io.github.jbellis.jvector.graph.SearchResult;
+import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
- * An iterator over {@link ScoredRowId} sorted by score descending. The iterator converts ordinals (node ids) to
+ * An iterator over {@link RowIdWithScore} sorted by score descending. The iterator converts ordinals (node ids) to
  * segment row ids and pairs them with the score given by the index.
  */
-public class NodeScoreToScoredRowIdIterator extends AbstractIterator<ScoredRowId>
+public class NodeScoreToRowIdWithScoreIterator extends AbstractIterator<RowIdWithScore>
 {
     private final CloseableIterator<SearchResult.NodeScore> nodeScores;
     private final RowIdsView rowIdsView;
@@ -38,19 +39,20 @@ public class NodeScoreToScoredRowIdIterator extends AbstractIterator<ScoredRowId
     private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
     private float currentScore;
 
-    public NodeScoreToScoredRowIdIterator(CloseableIterator<SearchResult.NodeScore> nodeScores, RowIdsView rowIdsView)
+    public NodeScoreToRowIdWithScoreIterator(CloseableIterator<SearchResult.NodeScore> nodeScores,
+                                             RowIdsView rowIdsView)
     {
         this.nodeScores = nodeScores;
         this.rowIdsView = rowIdsView;
     }
 
     @Override
-    protected ScoredRowId computeNext()
+    protected RowIdWithScore computeNext()
     {
         try
         {
             if (segmentRowIdIterator.hasNext())
-                return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
+                return new RowIdWithScore(segmentRowIdIterator.nextInt(), currentScore);
 
             while (nodeScores.hasNext())
             {
@@ -59,7 +61,7 @@ public class NodeScoreToScoredRowIdIterator extends AbstractIterator<ScoredRowId
                 var ordinal = result.node;
                 segmentRowIdIterator = rowIdsView.getSegmentRowIdsMatching(ordinal);
                 if (segmentRowIdIterator.hasNext())
-                    return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
+                    return new RowIdWithScore(segmentRowIdIterator.nextInt(), currentScore);
             }
             return endOfData();
         }

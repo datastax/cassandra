@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.trie.ReverseTrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -123,8 +124,13 @@ public class TermsReader implements Closeable
 
     public TermsIterator allTerms(long segmentOffset)
     {
+        return allTerms(segmentOffset, true);
+    }
+
+    public TermsIterator allTerms(long segmentOffset, boolean ascending)
+    {
         // blocking, since we use it only for segment merging for now
-        return new TermsScanner(segmentOffset);
+        return ascending ? new TermsScanner(segmentOffset) : new ReverseTermsScanner(segmentOffset);
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -307,13 +313,14 @@ public class TermsReader implements Closeable
         }
     }
 
-    // currently only used for testing
     private class TermsScanner implements TermsIterator
     {
         private final long segmentOffset;
         private final TrieTermsDictionaryReader termsDictionaryReader;
         private final ByteBuffer minTerm, maxTerm;
         private Pair<ByteComparable, Long> entry;
+        private final IndexInput postingsInput;
+        private final IndexInput postingsSummaryInput;
 
         private TermsScanner(long segmentOffset)
         {
@@ -321,6 +328,8 @@ public class TermsReader implements Closeable
             this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(ByteComparable.Version.OSS41)));
             this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(ByteComparable.Version.OSS41)));
             this.segmentOffset = segmentOffset;
+            this.postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            this.postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
         }
 
         @Override
@@ -328,14 +337,16 @@ public class TermsReader implements Closeable
         public PostingList postings() throws IOException
         {
             assert entry != null;
-            final IndexInput input = IndexFileUtils.instance.openInput(postingsFile);
-            return new OffsetPostingList(segmentOffset, new ScanningPostingsReader(input, new PostingsReader.BlocksSummary(input, entry.right)));
+            var postingList = new ScanningPostingsReader(postingsInput, new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right));
+            return new OffsetPostingList(segmentOffset, postingList);
         }
 
         @Override
         public void close()
         {
             termsDictionaryReader.close();
+            FileUtils.closeQuietly(postingsInput);
+            FileUtils.closeQuietly(postingsSummaryInput);
         }
 
         @Override
@@ -365,6 +376,69 @@ public class TermsReader implements Closeable
         public boolean hasNext()
         {
             return termsDictionaryReader.hasNext();
+        }
+    }
+
+    private class ReverseTermsScanner implements TermsIterator
+    {
+        private final long segmentOffset;
+        private final ReverseTrieTermsDictionaryReader iterator;
+        private Pair<ByteComparable, Long> entry;
+        private final IndexInput postingsInput;
+        private final IndexInput postingsSummaryInput;
+
+        private ReverseTermsScanner(long segmentOffset)
+        {
+            this.iterator = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot);
+            this.segmentOffset = segmentOffset;
+            this.postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            this.postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+        }
+
+        @Override
+        @SuppressWarnings("resource")
+        public PostingList postings() throws IOException
+        {
+            assert entry != null;
+            var postingList = new ScanningPostingsReader(postingsInput, new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right));
+            return new OffsetPostingList(segmentOffset, postingList);
+        }
+
+        @Override
+        public void close()
+        {
+            iterator.close();
+            FileUtils.closeQuietly(postingsInput);
+            FileUtils.closeQuietly(postingsSummaryInput);
+        }
+
+        @Override
+        public ByteBuffer getMinTerm()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ByteBuffer getMaxTerm()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ByteComparable next()
+        {
+            if (iterator.hasNext())
+            {
+                entry = iterator.next();
+                return entry.left;
+            }
+            return null;
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            return iterator.hasNext();
         }
     }
 

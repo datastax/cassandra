@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.utils.LongIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.mockito.Mockito;
 
@@ -43,7 +44,7 @@ import static org.junit.Assert.*;
 
 public class PlanTest
 {
-    private final static RowFilter.Expression ordering = Mockito.mock(RowFilter.Expression.class);
+    private final static Orderer ordering = Mockito.mock(Orderer.class);
     private final static RowFilter.Expression pred1 = filerPred("pred1", Operator.LT);
     private final static RowFilter.Expression pred2 = filerPred("pred2", Operator.LT);
     private final static RowFilter.Expression pred3 = filerPred("pred3", Operator.LT);
@@ -300,7 +301,7 @@ public class PlanTest
     public void annSort()
     {
         Plan.KeysIteration i = factory.numericIndexScan(saiPred1, (long) (0.5 * factory.tableMetrics.rows));
-        Plan.KeysIteration s = factory.annSort(i, ordering);
+        Plan.KeysIteration s = factory.sort(i, ordering);
 
         assertEquals(0.5 * factory.tableMetrics.rows, s.expectedKeys(), 0.01);
         assertTrue(s.initCost() >= i.fullCost());
@@ -324,7 +325,7 @@ public class PlanTest
         RowFilter rowFilter = RowFilter.builder().add(pred1).add(pred2).add(pred3).build();
 
         Plan.KeysIteration union = factory.union(Lists.newArrayList(factory.intersection(Lists.newArrayList(s1, s2)), s3));
-        Plan.KeysIteration sort = factory.annSort(union, ordering);
+        Plan.KeysIteration sort = factory.sort(union, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration filter = factory.recheckFilter(rowFilter, fetch);
         Plan.RowsIteration limit = factory.limit(filter, 3);
@@ -430,13 +431,13 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering)
+            public Iterator<? extends PrimaryKeyWithSortKey> getTopKRows()
             {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering)
+            public Iterator<? extends PrimaryKeyWithSortKey> getTopKRows(RangeIterator keys)
             {
                 throw new UnsupportedOperationException();
             }
@@ -472,7 +473,7 @@ public class PlanTest
         Plan.KeysIteration s2 = factory.numericIndexScan(saiPred2, (long) (0.002 * factory.tableMetrics.rows));
         Plan.KeysIteration s3 = factory.literalIndexScan(saiPred3, (long) (0.001 * factory.tableMetrics.rows));
         Plan.KeysIteration union = factory.union(Lists.newArrayList(factory.intersection(Lists.newArrayList(s1, s2)), s3));
-        Plan.KeysIteration sort = factory.annSort(union, ordering);
+        Plan.KeysIteration sort = factory.sort(union, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration filter = factory.recheckFilter(RowFilter.builder().add(pred1).add(pred2).add(pred3).build(), fetch);
         Plan.RowsIteration limit = factory.limit(filter, 3);
@@ -571,7 +572,7 @@ public class PlanTest
         // Important: this requires hight number of rows in the table, so that the cost of fetching all keys from the index
         // is significantly larger than the cost of fetching a few result rows from storage.
         Plan.KeysIteration indexScan = factory.numericIndexScan(saiPred1, (long) (0.1 * factory.tableMetrics.rows));
-        Plan.KeysIteration sort = factory.annSort(indexScan, ordering);
+        Plan.KeysIteration sort = factory.sort(indexScan, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter1, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -591,7 +592,7 @@ public class PlanTest
         Plan.KeysIteration indexScan1 = factory.numericIndexScan(saiPred1, (long) (0.1 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan2 = factory.numericIndexScan(saiPred2, (long) (0.2 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2));
-        Plan.KeysIteration sort = factory.annSort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter12, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -610,7 +611,7 @@ public class PlanTest
         Plan.KeysIteration indexScan1 = factory.numericIndexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan2 = factory.numericIndexScan(saiPred2, (long) (0.9 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2));
-        Plan.KeysIteration sort = factory.annSort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter12, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -629,7 +630,7 @@ public class PlanTest
         Plan.KeysIteration indexScan2 = factory.numericIndexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan3 = factory.numericIndexScan(saiPred3, (long) (0.5 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2, indexScan3));
-        Plan.KeysIteration sort = factory.annSort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -648,7 +649,7 @@ public class PlanTest
         Plan.KeysIteration indexScan2 = factory.numericIndexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan3 = factory.numericIndexScan(saiPred3, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2, indexScan3));
-        Plan.KeysIteration sort = factory.annSort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -665,7 +666,7 @@ public class PlanTest
         Plan.KeysIteration indexScan1 = factory.numericIndexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan2 = factory.numericIndexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2));
-        Plan.KeysIteration sort = factory.annSort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter12, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -885,7 +886,7 @@ public class PlanTest
         }
 
         Plan.KeysIteration intersection = factory.intersection(indexScans);
-        Plan.KeysIteration sort = factory.annSort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilterBuilder.build(), fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);

@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
@@ -35,10 +36,11 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -182,17 +184,17 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
-                                                             AbstractBounds<PartitionPosition> keyRange,
-                                                             QueryContext context,
-                                                             int limit) throws IOException
+    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                            AbstractBounds<PartitionPosition> keyRange,
+                                                                            QueryContext context,
+                                                                            int limit) throws IOException
     {
-        var iterators = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(segments.size());
+        var iterators = new ArrayList<CloseableIterator<? extends PrimaryKeyWithSortKey>>(segments.size());
         for (Segment segment : segments)
         {
             if (segment.intersects(keyRange))
             {
-                iterators.add(segment.orderBy(expression, keyRange, context, limit));
+                iterators.add(segment.orderBy(orderer, keyRange, context, limit));
             }
         }
 
@@ -200,11 +202,15 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
     {
-        List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>(segments.size());
+        var results = new ArrayList<CloseableIterator<? extends PrimaryKeyWithSortKey>>(segments.size());
         for (Segment segment : segments)
-            results.add(segment.orderResultsBy(context, keys, exp, limit));
+        {
+            // Only pass the primary keys in a segment's range to the segment index.
+            var segmentKeys = getKeysInRange(keys, segment);
+            results.add(segment.orderResultsBy(context, segmentKeys, orderer, limit));
+        }
 
         return results;
     }
@@ -237,6 +243,37 @@ public class V1SearchableIndex implements SearchableIndex
                    .column(MAX_TERM, maxTerm)
                    .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());
         }
+    }
+
+    /** Create a sublist of the keys within (inclusive) the segment's bounds */
+    protected List<PrimaryKey> getKeysInRange(List<PrimaryKey> keys, Segment segment)
+    {
+        int minIndex = findBoundaryIndex(keys, segment, true);
+        int maxIndex = findBoundaryIndex(keys, segment, false);
+        return keys.subList(minIndex, maxIndex);
+    }
+
+    private int findBoundaryIndex(List<PrimaryKey> keys, Segment segment, boolean findMin)
+    {
+        // The minKey and maxKey are sometimes just partition keys (not primary keys), so binarySearch
+        // may not return the index of the least/greatest match.
+        var key = findMin ? segment.metadata.minKey : segment.metadata.maxKey;
+        int index = Collections.binarySearch(keys, key);
+        if (index < 0)
+            return -index - 1;
+        if (findMin)
+        {
+            while (index > 0 && keys.get(index - 1).equals(key))
+                index--;
+        }
+        else
+        {
+            while (index < keys.size() - 1 && keys.get(index + 1).equals(key))
+                index++;
+            // We must include the PrimaryKey at the boundary
+            index++;
+        }
+        return index;
     }
 
     @Override

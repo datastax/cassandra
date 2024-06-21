@@ -66,7 +66,7 @@ import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.InMemoryPartitionIterator;
 import org.apache.cassandra.index.sai.utils.InMemoryUnfilteredPartitionIterator;
 import org.apache.cassandra.index.sai.utils.PartitionInfo;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -75,40 +75,47 @@ import org.apache.cassandra.utils.Pair;
 import static java.lang.Math.min;
 
 /**
- * Processor that scans all rows from given partitions and selects rows with top-k scores based on vector indexes.
+ * Processor applied to SAI based ORDER BY queries. This class could likely be refactored into either two filter
+ * methods depending on where the processing is happening or into two classes.
  *
- * This processor performs the following steps:
- * - collect rows with score into PriorityQueue that sorts rows based on score. If there are multiple vector indexes,
+ * This processor performs the following steps on a replica:
+ * - collect LIMIT rows from partition iterator, making sure that all are valid.
+ * - return rows in Primary Key order
+ *
+ * This processor performs the following steps on a coordinator:
+ * - consume all rows from the provided partition iterator and sort them according to the specified order.
+ *   For vectors, that is similarit score and for all others, that is the ordering defined by their
+ *   {@link org.apache.cassandra.db.marshal.AbstractType}. If there are multiple vector indexes,
  *   the final score is the sum of all vector index scores.
  * - remove rows with the lowest scores from PQ if PQ size exceeds limit
- * - return rows from PQ in primary key order to client
- *
- * Note that recall will be lower with paging, because:
- * - page size is used as limit
- * - for the first query, coordinator returns global top page-size rows within entire ring
- * - for the subsequent queries, coordinators returns global top page-size rows withom range from last-returned-row to max token
+ * - return rows from PQ in primary key order to caller
  */
-public class VectorTopKProcessor
+public class TopKProcessor
 {
-    protected static final Logger logger = LoggerFactory.getLogger(VectorTopKProcessor.class);
+    protected static final Logger logger = LoggerFactory.getLogger(TopKProcessor.class);
     private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor();
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private final ReadCommand command;
     private final IndexContext indexContext;
+    private final RowFilter.Expression expression;
     private final VectorFloat<?> queryVector;
 
     private final int limit;
 
-    public VectorTopKProcessor(ReadCommand command)
+    public TopKProcessor(ReadCommand command)
     {
         this.command = command;
 
-        Pair<IndexContext, float[]> annIndexAndExpression = findTopKIndexContext();
+        Pair<IndexContext, RowFilter.Expression> annIndexAndExpression = findTopKIndexContext();
         Preconditions.checkNotNull(annIndexAndExpression);
 
         this.indexContext = annIndexAndExpression.left;
-        this.queryVector = vts.createFloatVector(annIndexAndExpression.right);
+        this.expression = annIndexAndExpression.right;
+        if (expression.operator() == Operator.ANN)
+            this.queryVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, expression.getIndexValue().duplicate()));
+        else
+            this.queryVector = null;
         this.limit = command.limits().count();
     }
 
@@ -154,10 +161,19 @@ public class VectorTopKProcessor
     private <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filterInternal(P partitions)
     {
         // priority queue ordered by score in descending order
-        PriorityQueue<Triple<PartitionInfo, Row, Float>> topK =
-                new PriorityQueue<>(limit, Comparator.comparing((Triple<PartitionInfo, Row, Float> t) -> t.getRight()).reversed());
+        PriorityQueue<Triple<PartitionInfo, Row, Float>> topK = new PriorityQueue<>(limit, Comparator.comparing((Triple<PartitionInfo, Row, Float> t) -> t.getRight()).reversed());
         // to store top-k results in primary key order
         TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition = new TreeMap<>(Comparator.comparing(p -> p.key));
+        // TODO optimize me.
+        Comparator<ByteBuffer> bufferComparator = (a, b) -> {
+            var aEncoded = TypeUtil.encode(a, indexContext.getValidator());
+            var bEncoded = TypeUtil.encode(b, indexContext.getValidator());
+            return TypeUtil.compare(aEncoded, bEncoded, indexContext.getValidator());
+        };
+        Comparator<Triple<PartitionInfo, Row, ByteBuffer>> comparator = Comparator.comparing(Triple::getRight, bufferComparator);
+        if (expression.operator() == Operator.ORDER_BY_DESC)
+            comparator = comparator.reversed();
+        var sorter = new PriorityQueue<>(limit, comparator);
 
         if (PARALLEL_EXECUTOR != ImmediateExecutor.INSTANCE && partitions instanceof ParallelCommandProcessor) {
             ParallelCommandProcessor pIter = (ParallelCommandProcessor) partitions;
@@ -215,7 +231,7 @@ public class VectorTopKProcessor
                 try (var partitionRowIterator = retriever.next())
                 {
                     var iter = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever.PrimaryKeyIterator) partitionRowIterator;
-                    PartitionResults pr = processPartition(iter, iter.scoredPrimaryKey, retriever);
+                    PartitionResults pr = processPartition(iter, iter.primaryKeyWithSortKey, retriever);
                     rowsMatched += pr.rows.size();
                     for (var row : pr.rows)
                         addUnfiltered(unfilteredByPartition, row.getLeft(), row.getMiddle());
@@ -231,18 +247,31 @@ public class VectorTopKProcessor
                 // have to close to move to the next partition, otherwise hasNext() fails
                 try (var partitionRowIterator = partitions.next())
                 {
-                    PartitionResults pr = processPartition(partitionRowIterator);
-                    topK.addAll(pr.rows);
-                    for (var uf: pr.tombstones)
-                        addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
+                    if (queryVector != null)
+                    {
+                        PartitionResults pr = processPartition(partitionRowIterator);
+                        topK.addAll(pr.rows);
+                        for (var uf: pr.tombstones)
+                            addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
+                    }
+                    else
+                    {
+                        while (partitionRowIterator.hasNext())
+                        {
+                            Row row = (Row) partitionRowIterator.next();
+                            sorter.add(Triple.of(PartitionInfo.create(partitionRowIterator), row, row.getCell(expression.column()).buffer()));
+                        }
+                    }
+
                 }
             }
         }
 
         // reorder rows in partition/clustering order
-        final int numResults = min(topK.size(), limit);
+        int min = Math.max(topK.size(), sorter.size());
+        final int numResults = min(min, limit);
         for (int i = 0; i < numResults; i++) {
-            var triple = topK.poll();
+            var triple = queryVector != null ? topK.poll() : sorter.poll();
             addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
         }
 
@@ -303,19 +332,16 @@ public class VectorTopKProcessor
     /**
      * Processes a single partition, calculating scores for rows and extracting tombstones.
      */
-    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, ScoredPrimaryKey key,
+    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, PrimaryKeyWithSortKey key,
                                               StorageAttachedIndexSearcher.ScoreOrderedResultRetriever retriever) {
-        Row staticRow = partitionRowIterator.staticRow();
         PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
-        // VSTODO vector columns shouldn't be static, so can we remove this?
-        float keyAndStaticScore = getScoreForRow(key.partitionKey(), staticRow);
         var pr = new PartitionResults(partitionInfo);
 
         if (!partitionRowIterator.hasNext())
             return pr;
 
         Unfiltered unfiltered = partitionRowIterator.next();
-        assert !partitionRowIterator.hasNext() : "Only one row should be returned from vector search";
+        assert !partitionRowIterator.hasNext() : "Only one row should be returned";
         // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
         // TombstoneOverwhelmingException to prevent OOM.
         if (unfiltered.isRangeTombstoneMarker())
@@ -325,9 +351,9 @@ public class VectorTopKProcessor
         }
 
         Row row = (Row) unfiltered;
-        float rowScore = keyAndStaticScore + getScoreForRow(null, row);
-        if (retriever.shouldInclude(key, rowScore))
-            pr.addRow(Triple.of(partitionInfo, row, rowScore));
+        if (retriever.shouldInclude(key, row))
+            // TODO figure out better way to organize this data, score doesn't matter to us here.
+            pr.addRow(Triple.of(partitionInfo, row, 0f));
 
         return pr;
     }
@@ -364,7 +390,7 @@ public class VectorTopKProcessor
     }
 
 
-    private Pair<IndexContext, float[]> findTopKIndexContext()
+    private Pair<IndexContext, RowFilter.Expression> findTopKIndexContext()
     {
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(command.metadata());
 
@@ -373,9 +399,7 @@ public class VectorTopKProcessor
             StorageAttachedIndex sai = findVectorIndexFor(cfs.indexManager, expression);
             if (sai != null)
             {
-
-                float[] qv = TypeUtil.decomposeVector(sai.getIndexContext(), expression.getIndexValue().duplicate());
-                return Pair.create(sai.getIndexContext(), qv);
+                return Pair.create(sai.getIndexContext(), expression);
             }
         }
 
@@ -385,7 +409,7 @@ public class VectorTopKProcessor
     @Nullable
     private StorageAttachedIndex findVectorIndexFor(SecondaryIndexManager sim, RowFilter.Expression e)
     {
-        if (e.operator() != Operator.ANN)
+        if (e.operator() != Operator.ANN && e.operator() != Operator.ORDER_BY_ASC && e.operator() != Operator.ORDER_BY_DESC)
             return null;
 
         Optional<Index> index = sim.getBestIndexFor(e);
