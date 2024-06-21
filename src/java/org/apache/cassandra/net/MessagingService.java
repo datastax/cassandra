@@ -265,11 +265,11 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public static final int VERSION_SG_10 = 100; // DS Converged Cassandra 4.0
     public static final int VERSION_SG_20 = 110; // DS Converged Cassandra 5.0
     public static final int minimum_version = VERSION_40;
-    public static final int maximum_version = VERSION_50;
+    public static final int maximum_version = VERSION_SG_20;
     // we want to use a modified behavior for the tools and clients - that is, since they are not running a server, they
     // should not need to run in a compatibility mode. They should be able to connect to the server regardless whether
     // it uses messaving version 4 or 5
-    public static final int current_version = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? VERSION_40 : VERSION_50;
+    public static final int current_version = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? VERSION_SG_10 : VERSION_SG_20;
     // DSE 6.8 version for backward compatibility
     public static final int VERSION_DSE_68 = 168;
     static AcceptVersions accept_messaging;
