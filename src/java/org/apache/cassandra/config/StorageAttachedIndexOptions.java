@@ -36,7 +36,7 @@ public class StorageAttachedIndexOptions
         if ((segment_write_buffer_space_mb < 0) || (segment_write_buffer_space_mb > MAXIMUM_SEGMENT_BUFFER_MB))
         {
             throw new ConfigurationException("Invalid value for segment_write_buffer_space_mb. " +
-                                             "Value must be a positive integer less than 32768");
+                                             "Value must be a positive integer less than " + MAXIMUM_SEGMENT_BUFFER_MB);
         }
 
         if ((zerocopy_used_threshold < 0.0) || (zerocopy_used_threshold > 1.0))
