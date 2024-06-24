@@ -215,7 +215,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             if (minSSTableRowId > maxSSTableRowId)
                 return CloseableIterator.emptyIterator();
 
-            // if it covers entire segment, skip bit set
+            // if it the range covers the entire segment, skip directly to an index search
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
                 return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
 
@@ -227,7 +227,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             var initialCostEstimate = estimateCost(rerankK, nRows);
             Tracing.logAndTrace(logger, "Search range covers {} rows in index of {} nodes; estimate for LIMIT {} is {}",
                                 nRows, graph.size(), rerankK, initialCostEstimate);
-            // if we have a small number of results then let TopK processor do exact NN computation
+            // if the range spans a small number of rows, then generate scores from the sstable rows instead of searching the index
             if (initialCostEstimate.shouldUseBruteForce())
             {
                 var segmentRowIds = new IntArrayList(nRows, 0);
@@ -248,19 +248,19 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             {
                 int startSegmentRowId = metadata.toSegmentRowId(minSSTableRowId);
                 int endSegmentRowId = metadata.toSegmentRowId(maxSSTableRowId);
-
                 bits = ordinalsView.buildOrdinalBits(startSegmentRowId, endSegmentRowId, this::bitSetForSearch);
             }
-            catch (IOException e)
-            {
-                throw new RuntimeException(e);
-            }
-
+            // the set of ordinals may be empty if no rows in the range had a vector associated with them
             int cardinality = bits instanceof SparseBits ? ((SparseBits) bits).cardinality() : ((BitSet) bits).cardinality();
             if (cardinality == 0)
                 return CloseableIterator.emptyIterator();
-            // We can make a more accurate cost estimate now
-            // TODO skip the search in favor of brute force with a low enough cardinality?
+            // Rows are many-to-one wrt index ordinals, so the actual number of ordinals involved (`cardinality`)
+            // could be less than the number of rows in the range (`nRows`).  In that case we should update the cost
+            // so that we don't pollute the planner with incorrectly pessimistic estimates.
+            //
+            // Technically, we could also have another `shouldUseBruteForce` branch here, but we don't have
+            // the code to generate rowids from ordinals, and it's a rare enough case that it doesn't seem worth
+            // the trouble to add it.
             var betterCostEstimate = estimateCost(rerankK, cardinality);
 
             return graph.search(queryVector, limit, rerankK, threshold, bits, context, visited -> {
