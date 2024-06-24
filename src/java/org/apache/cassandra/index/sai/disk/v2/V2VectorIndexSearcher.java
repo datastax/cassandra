@@ -88,7 +88,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
     public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
     /**
-     * How much more epensive is brute forcing the comparisons than going through the index?
+     * How much more expensive is brute forcing the comparisons than going through the index?
      * (brute force needs to go through the full read path to pull out the vectors from the row)
      */
     public static double BRUTE_FORCE_EXPENSE_FACTOR = DatabaseDescriptor.getAnnBruteForceExpenseFactor();
@@ -215,7 +215,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             if (minSSTableRowId > maxSSTableRowId)
                 return CloseableIterator.emptyIterator();
 
-            // if it the range covers the entire segment, skip directly to an index search
+            // if the range covers the entire segment, skip directly to an index search
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
                 return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
 

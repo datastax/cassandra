@@ -23,7 +23,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 
 public class StorageAttachedIndexOptions
 {
-    private static final int DEFAULT_SEGMENT_BUFFER_MB = 1024;
+    public static final int DEFAULT_SEGMENT_BUFFER_MB = 1024;
     private static final double DEFAULT_ZEROCOPY_USED_THRESHOLD = 0.3;
     private static final double DEFAULT_ANN_BRUTE_FORCE_FACTOR = 3.0;
 

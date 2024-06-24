@@ -27,13 +27,11 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
-import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -45,7 +43,6 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
-import org.agrona.collections.Object2IntHashMap;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -278,9 +275,9 @@ public class VectorMemtableIndex implements MemtableIndex
         // convert the expression value to query vector
         var qv = vts.createFloatVector(exp.lower.value.vector);
         // brute force path
-        if (relevantOrdinals.size() <= maxBruteForceRows)
+        if (keysInGraph.size() <= maxBruteForceRows)
         {
-            if (relevantOrdinals.isEmpty())
+            if (keysInGraph.isEmpty())
                 return CloseableIterator.emptyIterator();
             return orderByBruteForce(qv, keysInGraph);
         }
