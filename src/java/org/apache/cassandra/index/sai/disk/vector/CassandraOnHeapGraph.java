@@ -169,6 +169,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
     }
 
+    public int getOrdinal(VectorFloat<?> vector)
+    {
+        return postingsMap.get(vector).getOrdinal();
+    }
+
     /**
      * @return the incremental bytes used by adding the given vector to the index
      */
