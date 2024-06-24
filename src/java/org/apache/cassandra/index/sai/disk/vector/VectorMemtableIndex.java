@@ -32,7 +32,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -43,6 +42,7 @@ import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -252,26 +252,37 @@ public class VectorMemtableIndex implements MemtableIndex
             // This case implies maximumKey is empty too.
             return CloseableIterator.emptyIterator();
 
-        var qv = vts.createFloatVector(exp.lower.value.vector);
-        List<PrimaryKey> keysInRange = keys.stream()
-                                           .dropWhile(k -> k.compareTo(minimumKey) < 0)
-                                           .takeWhile(k -> k.compareTo(maximumKey) <= 0)
-                                           .collect(Collectors.toList());
-
-        int maxBruteForceRows = maxBruteForceRows(limit, keysInRange.size(), graph.size());
-        logger.trace("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                     keysInRange.size(), maxBruteForceRows, graph.size(), limit);
-        Tracing.trace("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                      keysInRange.size(), maxBruteForceRows, graph.size(), limit);
-        if (keysInRange.size() <= maxBruteForceRows)
+        // Compute the keys that exist in the current memtable and their corresponding graph ordinals
+        var keysInGraph = new HashSet<PrimaryKey>();
+        var relevantOrdinals = new IntHashSet();
+        keys.stream()
+            .dropWhile(k -> k.compareTo(minimumKey) < 0)
+            .takeWhile(k -> k.compareTo(maximumKey) <= 0)
+            .forEach(k ->
         {
-            if (keysInRange.isEmpty())
-                return CloseableIterator.emptyIterator();
-            return orderByBruteForce(qv, keysInRange);
-        }
+            var v = graph.vectorForKey(k);
+            if (v == null)
+                return;
+            var i = graph.getOrdinal(v);
+            keysInGraph.add(k);
+            relevantOrdinals.add(i);
+        });
 
-        var bits = new KeyFilteringBits(keysInRange);
-        var nodeScoreIterator = graph.search(context, qv, limit, 0, bits);
+        int maxBruteForceRows = maxBruteForceRows(limit, relevantOrdinals.size(), graph.size());
+        Tracing.logAndTrace(logger, "{} rows relevant to current memtable out of {} materialized by SAI; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
+                            relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), limit);
+
+        // convert the expression value to query vector
+        var qv = vts.createFloatVector(exp.lower.value.vector);
+        // brute force path
+        if (keysInGraph.size() <= maxBruteForceRows)
+        {
+            if (keysInGraph.isEmpty())
+                return CloseableIterator.emptyIterator();
+            return orderByBruteForce(qv, keysInGraph);
+        }
+        // indexed path
+        var nodeScoreIterator = graph.search(context, qv, limit, 0, relevantOrdinals::contains);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
@@ -461,31 +472,6 @@ public class VectorMemtableIndex implements MemtableIndex
             if (keyQueue.isEmpty())
                 return endOfData();
             return keyQueue.poll();
-        }
-    }
-
-    private class KeyFilteringBits implements Bits
-    {
-        private final Set<PrimaryKey> results;
-
-        /**
-         * A {@link Bits} implementation that filters out all ordinals that do not correspond to a {@link PrimaryKey}
-         * in the provided list.
-         * @param results - an ordered list of {@link PrimaryKey}s
-         */
-        public KeyFilteringBits(List<PrimaryKey> results)
-        {
-            this.results = new HashSet<>(results);
-        }
-
-        @Override
-        public boolean get(int i)
-        {
-            var pks = graph.keysFromOrdinal(i);
-            for (var pk : pks)
-                if (results.contains(pk))
-                    return true;
-            return false;
         }
     }
 
