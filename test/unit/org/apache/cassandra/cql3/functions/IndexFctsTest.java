@@ -31,7 +31,7 @@ public class IndexFctsTest extends SAITester
         execute("INSERT INTO %s (k, v) VALUES (1, 'johnny apples seedlings')");
         execute("INSERT INTO %s (k, v) VALUES (2, null)");
 
-        assertRows(execute("SELECT k, analyze(v, ?) FROM %s",
+        assertRows(execute("SELECT k, sai_analyze(v, ?) FROM %s",
                            "{\n" +
                            "\t\"tokenizer\":{\"name\":\"whitespace\"},\n" +
                            "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
@@ -39,12 +39,12 @@ public class IndexFctsTest extends SAITester
                    row(1, list("johnni", "appl", "seedl")),
                    row(2, null));
 
-        assertInvalidThrowMessage("Function system.analyze requires a non-null json_analyzer parameter (2nd argument)",
+        assertInvalidThrowMessage("Function system.sai_analyze requires a non-null json_analyzer parameter (2nd argument)",
                                   InvalidRequestException.class,
-                                  "SELECT analyze(v, null) FROM %s");
+                                  "SELECT sai_analyze(v, null) FROM %s");
 
-        assertInvalidThrowMessage("Function system.analyze unable to analyze text=abc json_analyzer=def",
+        assertInvalidThrowMessage("Function system.sai_analyze unable to analyze text=abc json_analyzer=def",
                                   InvalidRequestException.class,
-                                  "SELECT analyze('abc', 'def') FROM %s");
+                                  "SELECT sai_analyze('abc', 'def') FROM %s");
     }
 }

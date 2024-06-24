@@ -37,18 +37,18 @@ public abstract class IndexFcts
 {
     public static void addFunctionsTo(NativeFunctions functions)
     {
-        functions.add(new AnalyzeFunction());
+        functions.add(new SAIAnalyzeFunction());
     }
 
     /**
      * CQL native function to get the tokens produced for given text value and the analyzer defined by the given JSON options.
      */
-    private static class AnalyzeFunction extends NativeScalarFunction
+    private static class SAIAnalyzeFunction extends NativeScalarFunction
     {
-        private static final String NAME = "analyze";
+        private static final String NAME = "sai_analyze";
         private static final ListType<String> returnType = ListType.getInstance(UTF8Type.instance, false);
 
-        private AnalyzeFunction()
+        private SAIAnalyzeFunction()
         {
             super(NAME, returnType, UTF8Type.instance, UTF8Type.instance);
         }
