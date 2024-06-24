@@ -23,13 +23,16 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 
 public class StorageAttachedIndexOptions
 {
-    public static final int DEFAULT_SEGMENT_BUFFER_MB = 1024;
-    public static final double DEFAULT_ZEROCOPY_USED_THRESHOLD = 0.3;
+    private static final int DEFAULT_SEGMENT_BUFFER_MB = 1024;
+    private static final double DEFAULT_ZEROCOPY_USED_THRESHOLD = 0.3;
+    private static final double DEFAULT_ANN_BRUTE_FORCE_FACTOR = 3.0;
 
     private static final int MAXIMUM_SEGMENT_BUFFER_MB = 32768;
+    public static final double MAXIMUM_ANN_BRUTE_FORCE_FACTOR = 100.0;
 
     public int segment_write_buffer_space_mb = DEFAULT_SEGMENT_BUFFER_MB;
     public double zerocopy_used_threshold = DEFAULT_ZEROCOPY_USED_THRESHOLD;
+    public double ann_brute_force_factor = DEFAULT_ANN_BRUTE_FORCE_FACTOR;
 
     public void validate()
     {
@@ -37,6 +40,11 @@ public class StorageAttachedIndexOptions
         {
             throw new ConfigurationException("Invalid value for segment_write_buffer_space_mb. " +
                                              "Value must be a positive integer less than " + MAXIMUM_SEGMENT_BUFFER_MB);
+        }
+
+        if ((ann_brute_force_factor <= 0.0) || (ann_brute_force_factor > MAXIMUM_ANN_BRUTE_FORCE_FACTOR))
+        {
+            throw new ConfigurationException(String.format("Invalid value for ann_brute_force_factor. Value must be within (0.0,%s]", MAXIMUM_ANN_BRUTE_FORCE_FACTOR));
         }
 
         if ((zerocopy_used_threshold < 0.0) || (zerocopy_used_threshold > 1.0))
@@ -52,8 +60,9 @@ public class StorageAttachedIndexOptions
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         StorageAttachedIndexOptions that = (StorageAttachedIndexOptions) o;
-        return Objects.equal(segment_write_buffer_space_mb, that.segment_write_buffer_space_mb) &&
-               Objects.equal(zerocopy_used_threshold, that.zerocopy_used_threshold);
+        return Objects.equal(segment_write_buffer_space_mb, that.segment_write_buffer_space_mb)
+               && Objects.equal(zerocopy_used_threshold, that.zerocopy_used_threshold)
+               && Objects.equal(ann_brute_force_factor, that.ann_brute_force_factor);
     }
 
     @Override

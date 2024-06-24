@@ -3704,4 +3704,16 @@ public class DatabaseDescriptor
     {
         return conf != null ? conf.default_compaction : null;
     }
+
+    public static double getAnnBruteForceExpenseFactor()
+    {
+        return conf.sai_options.ann_brute_force_factor;
+    }
+
+    public static void setAnnBruteForceExpenseFactor(double factor)
+    {
+        Preconditions.checkArgument(factor > 0.0, "ANN brute force expense factor must be greater than zero");
+        Preconditions.checkArgument(factor <= StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR, "ANN brute force expense factor must be at most " + StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR);
+        conf.sai_options.ann_brute_force_factor = factor;
+    }
 }
