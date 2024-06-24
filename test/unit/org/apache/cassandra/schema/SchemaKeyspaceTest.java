@@ -40,6 +40,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -49,6 +50,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Message;
@@ -331,16 +333,26 @@ public class SchemaKeyspaceTest
     @Test
     public void testIsKeyspaceWithLocalStrategy()
     {
-        assertTrue(Schema.isKeyspaceWithLocalStrategy("system"));
-        assertTrue(Schema.isKeyspaceWithLocalStrategy(Schema.instance.getKeyspaceMetadata("system")));
-        assertFalse(Schema.isKeyspaceWithLocalStrategy("non_existing"));
+        try (WithProperties properties = new WithProperties().set(CassandraRelevantProperties.TEST_ALLOW_LOCALSTRATEGY, true))
+        {
+            assertTrue(Schema.isKeyspaceWithLocalStrategy("system"));
+            assertTrue(Schema.isKeyspaceWithLocalStrategy(Schema.instance.getKeyspaceMetadata("system")));
+            assertFalse(Schema.isKeyspaceWithLocalStrategy("non_existing"));
 
-        SchemaLoader.createKeyspace("local_ks", KeyspaceParams.local());
-        SchemaLoader.createKeyspace("simple_ks", KeyspaceParams.simple(3));
+            SchemaLoader.createKeyspace("local_ks", KeyspaceParams.local());
+            SchemaLoader.createKeyspace("simple_ks", KeyspaceParams.simple(3));
 
-        assertTrue(Schema.isKeyspaceWithLocalStrategy("local_ks"));
-        assertTrue(Schema.isKeyspaceWithLocalStrategy(Schema.instance.getKeyspaceMetadata("local_ks")));
-        assertFalse(Schema.isKeyspaceWithLocalStrategy("simple_ks"));
+            assertTrue(Schema.isKeyspaceWithLocalStrategy("local_ks"));
+            assertTrue(Schema.isKeyspaceWithLocalStrategy(Schema.instance.getKeyspaceMetadata("local_ks")));
+            assertFalse(Schema.isKeyspaceWithLocalStrategy("simple_ks"));
+        }
+        finally
+        {
+            String query = String.format("DROP KEYSPACE %s", "local_ks");
+            executeOnceInternal(query);
+            query = String.format("DROP KEYSPACE %s", "simple_ks");
+            executeOnceInternal(query);
+        }
     }
 
     @Test
