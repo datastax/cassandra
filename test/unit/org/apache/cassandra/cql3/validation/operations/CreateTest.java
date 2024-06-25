@@ -19,16 +19,22 @@ package org.apache.cassandra.cql3.validation.operations;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
@@ -65,8 +71,24 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+@RunWith(Parameterized.class)
 public class CreateTest extends CQLTester
 {
+    @Parameterized.Parameter(0)
+    public boolean durationLegacyMode;
+
+    @Parameterized.Parameters(name = "durationLegacyMode={0}")
+    public static List<Object[]> params()
+    {
+        return Arrays.asList(new Object[]{ false }, new Object[]{ true });
+    }
+
+    @Before
+    public void before() throws Throwable
+    {
+        CassandraRelevantProperties.DURATION_IN_MAPS_COMPATIBILITY_MODE.setBoolean(durationLegacyMode);
+    }
+
     @Test
     public void testCreateTableWithNameCapitalPAndColumnDuration() throws Throwable
     {
@@ -219,8 +241,14 @@ public class CreateTest extends CQLTester
         assertInvalidMessage("Invalid type frozen<map<text, duration>> for column m: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0(m frozen<map<text, duration>> PRIMARY KEY, v int)");
 
+        assertInvalidMessage("Invalid type frozen<map<duration, text>> for column m: duration types are not supported within PRIMARY KEY columns",
+                             "CREATE TABLE cql_test_keyspace.table0(m frozen<map<duration, text>> PRIMARY KEY, v int)");
+
         assertInvalidMessage("Invalid type frozen<map<text, duration>> for column m: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0(pk int, m frozen<map<text, duration>>, v int, PRIMARY KEY (pk, m))");
+
+        assertInvalidMessage("Invalid type frozen<map<duration, text>> for column m: duration types are not supported within PRIMARY KEY columns",
+                             "CREATE TABLE cql_test_keyspace.table0(pk int, m frozen<map<duration, text>>, v int, PRIMARY KEY (pk, m))");
 
         // Test duration within Set
         assertInvalidMessage("Invalid type set<duration> for column s: duration types are not supported within non-frozen",
@@ -228,6 +256,50 @@ public class CreateTest extends CQLTester
 
         assertInvalidMessage("Invalid type frozen<set<duration>> for column s: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0(s frozen<set<duration>> PRIMARY KEY, v int)");
+
+        // Test duration in map in a regular column
+        // duration as a value in a non-frozen map should work
+        createTable("CREATE TABLE %s(pk int, m map<text, duration>, v int, PRIMARY KEY (pk))");
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (m)", KEYSPACE, currentTable()));
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (full(m))", KEYSPACE, currentTable()));
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (keys(m))", KEYSPACE, currentTable())); // TODO perhaps this should be allowed
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (entries(m))", KEYSPACE, currentTable()));
+
+        // duration as a key in a non-frozen map should not work
+        assertInvalidMessage("Invalid type map<duration, text> for column m: duration types are not supported within non-frozen map keys.",
+                             "CREATE TABLE cql_test_keyspace.table0(pk int, m map<duration, text>, v int, PRIMARY KEY (pk))");
+
+        // Test duration in map in a static column
+        // duration as a value in a non-frozen map should work
+        createTable("CREATE TABLE %s(pk int, ck int, m map<text, duration> static, v int, PRIMARY KEY (pk, ck))");
+
+        // duration as a key in a non-frozen map should not work
+        assertInvalidMessage("Invalid type map<duration, text> for column m: duration types are not supported within non-frozen map keys.",
+                             "CREATE TABLE cql_test_keyspace.table0(pk int, ck int, m map<duration, text> static, v int, PRIMARY KEY (pk, ck))");
+
+        createTable("CREATE TABLE %s(pk int, m frozen<map<text, duration>>, v int, PRIMARY KEY (pk))");
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (m)", KEYSPACE, currentTable()));
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (full(m))", KEYSPACE, currentTable()));
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (keys(m))", KEYSPACE, currentTable()));
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (entries(m))", KEYSPACE, currentTable())); // TODO perhaps this should be allowed
+
+        createTable("CREATE TABLE %s(pk int, m frozen<map<duration, text>>, v int, PRIMARY KEY (pk))");
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (m)", KEYSPACE, currentTable()));
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (full(m))", KEYSPACE, currentTable()));
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (keys(m))", KEYSPACE, currentTable())); // TODO perhaps this should be allowed
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             String.format("CREATE INDEX ON %s.%s (entries(m))", KEYSPACE, currentTable()));
 
         // Test duration within List
         createTable("CREATE TABLE %s(pk int PRIMARY KEY, l list<duration>)");

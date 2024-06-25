@@ -33,6 +33,7 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -53,6 +54,8 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.DURATION_IN_MAPS_COMPATIBILITY_MODE;
 
 public class SerializationHeader
 {
@@ -334,7 +337,7 @@ public class SerializationHeader
 
             try
             {
-                type.validateForColumn(columnName, isPrimaryKeyColumn, table.isCounter(), dropped, isForOfflineTool);
+                type.validateForColumn(columnName, isPrimaryKeyColumn, table.isCounter(), dropped, isForOfflineTool, DURATION_IN_MAPS_COMPATIBILITY_MODE.getBoolean());
                 return type;
             }
             catch (InvalidColumnTypeException e)
@@ -376,7 +379,7 @@ public class SerializationHeader
                 try
                 {
                     // Make doubly sure the fixed type is valid before returning it.
-                    fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, isForOfflineTool);
+                    fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, isForOfflineTool, DURATION_IN_MAPS_COMPATIBILITY_MODE.getBoolean());
                     return fixed;
                 }
                 catch (InvalidColumnTypeException e2)
