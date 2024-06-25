@@ -290,6 +290,7 @@ public abstract class FuzzTestBase extends CQLTester.InMemory
         // set the repair rcp timeout high so we don't hit it... this class is mostly testing repair reaching success
         // so don't want to deal with unlucky histories...
         DatabaseDescriptor.setRepairRpcTimeout(TimeUnit.DAYS.toMillis(1));
+        DatabaseDescriptor.setRepairPrepareMessageTimeout(TimeUnit.DAYS.toMillis(1));
 
 
         InMemory.setUpClass();
