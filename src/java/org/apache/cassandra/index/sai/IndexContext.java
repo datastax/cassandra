@@ -37,8 +37,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,6 +44,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -66,6 +65,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
+import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
@@ -129,7 +129,7 @@ public class IndexContext
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;
     private final AbstractType<?> validator;
-    private final Memtable.Owner owner;
+    private final ColumnFamilyStore owner;
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
     private final IndexMetadata config;
@@ -156,7 +156,7 @@ public class IndexContext
                         @Nonnull ColumnMetadata column,
                         @Nonnull IndexTarget.Type indexType,
                         IndexMetadata config,
-                        @Nonnull Memtable.Owner owner)
+                        @Nonnull ColumnFamilyStore owner)
     {
         this.keyspace = keyspace;
         this.table = table;
@@ -173,7 +173,7 @@ public class IndexContext
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                               : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
 
-        this.primaryKeyFactory = Version.latest().onDiskFormat().primaryKeyFactory(clusteringComparator);
+        this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
         if (config != null)
         {
@@ -571,9 +571,9 @@ public class IndexContext
         return viewManager.getView().size() * Version.latest().onDiskFormat().openFilesPerIndex(this);
     }
 
-    public void drop(Collection<SSTableReader> sstablesToRebuild)
+    public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
     {
-        viewManager.drop(sstablesToRebuild);
+        viewManager.prepareSSTablesForRebuild(sstablesToRebuild);
     }
 
     public boolean isIndexed()
@@ -805,7 +805,9 @@ public class IndexContext
             if (context.sstable.isMarkedCompacted())
                 return;
 
-            if (!context.indexDescriptor.isPerIndexBuildComplete(this))
+            var perSSTableComponents = context.usedPerSSTableComponents();
+            var perIndexComponents = perSSTableComponents.indexDescriptor().perIndexComponents(this);
+            if (!perSSTableComponents.isComplete() || !perIndexComponents.isComplete())
             {
                 logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
                 return;
@@ -815,15 +817,15 @@ public class IndexContext
             {
                 if (validate)
                 {
-                    if (!context.indexDescriptor.validatePerIndexComponents(this))
+                    if (!perIndexComponents.validateComponents(context.sstable, owner.getTracker(), false))
                     {
-                        logger.warn(logMessage("Invalid per-column component for SSTable {}"), context.descriptor());
+                        // Note that a precise warning is already logged by the validation if there is an issue.
                         invalid.add(context);
                         return;
                     }
                 }
 
-                SSTableIndex index = new SSTableIndex(context, this);
+                SSTableIndex index = new SSTableIndex(context, perIndexComponents);
                 logger.debug(logMessage("Successfully created index for SSTable {}."), context.descriptor());
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.

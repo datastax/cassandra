@@ -73,7 +73,7 @@ public class Segment implements Closeable, SegmentOrdering
         this.indexFiles = indexFiles;
         this.metadata = metadata;
 
-        var version = sstableContext.indexDescriptor.getVersion(indexContext);
+        var version = indexFiles.usedPerIndexComponents().version();
         IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
         logger.info("Opened searcher {} for segment {}:{} for index [{}] on column [{}] at version {}",
                     searcher.getClass().getSimpleName(),
