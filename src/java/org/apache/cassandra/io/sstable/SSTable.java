@@ -17,21 +17,23 @@
  */
 package org.apache.cassandra.io.sstable;
 
+import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -65,12 +67,14 @@ import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABL
  */
 public abstract class SSTable
 {
+    static final Logger logger = LoggerFactory.getLogger(SSTable.class);
+
     public static final int TOMBSTONE_HISTOGRAM_BIN_SIZE = 100;
     public static final int TOMBSTONE_HISTOGRAM_SPOOL_SIZE = 100000;
     public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = CassandraRelevantProperties.STREAMING_HISTOGRAM_ROUND_SECONDS.getInt();
 
     public final Descriptor descriptor;
-    public final Set<Component> components;
+    private volatile ImmutableSet<Component> components;
     public final boolean compression;
 
     protected final TableMetadataRef metadata;
@@ -89,7 +93,7 @@ public abstract class SSTable
 
         this.descriptor = builder.descriptor;
         this.ioOptions = builder.getIOOptions();
-        this.components = new CopyOnWriteArraySet<>(builder.getComponents());
+        this.components = ImmutableSet.copyOf(builder.getComponents());
         this.compression = components.contains(Components.COMPRESSION_INFO);
         this.metadata = builder.getTableMetadataRef();
         this.chunkCache = builder.getChunkCache();
@@ -156,10 +160,9 @@ public abstract class SSTable
 
     public abstract AbstractBounds<Token> getBounds();
 
-    @VisibleForTesting
-    public Set<Component> getComponents()
+    public ImmutableSet<Component> components()
     {
-        return ImmutableSet.copyOf(components);
+        return components;
     }
 
     /**
@@ -341,18 +344,13 @@ public abstract class SSTable
     public synchronized void registerComponents(Collection<Component> newComponents, Tracker tracker)
     {
         Collection<Component> componentsToAdd = new HashSet<>(Collections2.filter(newComponents, x -> !components.contains(x)));
-        TOCComponent.appendTOC(descriptor, componentsToAdd);
-        components.addAll(componentsToAdd);
-
-        if (tracker == null)
+        if (componentsToAdd.isEmpty())
             return;
 
-        for (Component component : componentsToAdd)
-        {
-            File file = descriptor.fileFor(component);
-            if (file.exists())
-                tracker.updateSizeTracking(file.length());
-        }
+        TOCComponent.appendTOC(descriptor, componentsToAdd);
+        components = ImmutableSet.<Component>builder().addAll(components).addAll(componentsToAdd).build();
+
+        updateComponentsTracking(componentsToAdd, tracker, 1);
     }
 
     /**
@@ -362,15 +360,62 @@ public abstract class SSTable
      */
     public synchronized void unregisterComponents(Collection<Component> removeComponents, Tracker tracker)
     {
-        Collection<Component> componentsToRemove = new HashSet<>(Collections2.filter(removeComponents, components::contains));
-        components.removeAll(componentsToRemove);
+        Set<Component> componentsToRemove = new HashSet<>(Collections2.filter(removeComponents, components::contains));
+        components = Sets.difference(components, componentsToRemove).immutableCopy();
         TOCComponent.rewriteTOC(descriptor, components);
 
-        for (Component component : componentsToRemove)
+        updateComponentsTracking(componentsToRemove, tracker, -1);
+    }
+
+    private void updateComponentsTracking(Collection<Component> toUpdate, Tracker tracker, long multiplier)
+    {
+        if (tracker == null)
+            return;
+
+        for (Component component : toUpdate)
         {
             File file = descriptor.fileFor(component);
             if (file.exists())
-                tracker.updateSizeTracking(-file.length());
+                tracker.updateSizeTracking(multiplier * file.length());
+        }
+    }
+
+    /**
+     * Reads components from the TOC file and update the `components` set of this object accordindly.
+     * <p>
+     * Usually, components are added/removed through {@link #addComponents}, {@link #registerComponents} or
+     * {@link #unregisterComponents}, which both update this object component and update the TOC file accordingly, and
+     * this method should not be used. But some implementation of tiered storage may add components/rewrite the TOC
+     * "externally" (one reason can be offloading index rebuild) and need those change to be reflected to this object
+     * and this is where this method comes in.
+     * <p>
+     * If the TOC file does not exist, cannot be read, or does not at least contains the minimal components that all
+     * sstables should have when this is called, this method is a no-op.
+     */
+    public synchronized void reloadComponentsFromTOC(Tracker tracker)
+    {
+        try
+        {
+            Set<Component> tocComponents = TOCComponent.loadTOC(descriptor);
+            Set<Component> requiredComponents = descriptor.getFormat().primaryComponents();
+            if (!tocComponents.containsAll(requiredComponents))
+            {
+                logger.error("Cannot reload components from read TOC file for {}; the TOC does not contain all the required components for the sstable type and is like corrupted (components in TOC: {}, required by sstable format: {})",
+                             descriptor, tocComponents, requiredComponents);
+                return;
+            }
+
+            Set<Component> toAdd = Sets.difference(tocComponents, components);
+            Set<Component> toRemove = Sets.difference(components, tocComponents);
+            components = ImmutableSet.copyOf(tocComponents);
+
+            updateComponentsTracking(toAdd, tracker, 1);
+            updateComponentsTracking(toRemove, tracker, -1);
+
+        }
+        catch (IOException e)
+        {
+            logger.error("Failed to read TOC file for {}; ignoring component reload", descriptor, e);
         }
     }
     
