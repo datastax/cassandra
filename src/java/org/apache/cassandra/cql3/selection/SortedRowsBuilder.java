@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.function.BiFunction;
 
 import org.apache.cassandra.index.Index;
 
@@ -91,7 +92,9 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
     {
-        return new WithComparator(limit, offset, comparator);
+        return new WithComparator<>(limit, offset,
+                                    WithComparator.DecoratedRow::new,
+                                    (x, y) -> comparator.compare(x.row, y.row));
     }
 
     /**
@@ -104,7 +107,11 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
     {
-        return new WithScorer(limit, offset, scorer);
+        return new WithComparator<>(limit, offset,
+                                    (row, id) -> new ScoredRow(row, id, scorer.score(row)),
+                                    (x, y) ->  scorer.reversed()
+                                                ? Float.compare(y.score, x.score)
+                                                : Float.compare(x.score, y.score));
     }
 
     /**
@@ -137,107 +144,39 @@ public abstract class SortedRowsBuilder
     }
 
     /**
-     * {@link SortedRowsBuilder} that orders the added rows based on a {@link Comparator}.
-     */
-    private static class WithComparator extends WithValuesOrder<WithValuesOrder.DecoratedRow>
-    {
-        private final Comparator<List<ByteBuffer>> comparator;
-
-        private WithComparator(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
-        {
-            super(limit, offset);
-            this.comparator = comparator;
-        }
-
-        @Override
-        DecoratedRow decorate(List<ByteBuffer> row, int id)
-        {
-            return new DecoratedRow(row, id);
-        }
-
-        @Override
-        public int compare(DecoratedRow one, DecoratedRow other)
-        {
-            return comparator.compare(one.row, other.row);
-        }
-    }
-
-    /**
-     * {@link SortedRowsBuilder} that orders the added rows based on a {@link Index.Scorer}.
+     * {@link SortedRowsBuilder} that orders rows based on the provided comparator.
      * </p>
-     * The rows are decorated with their scores, so we don't have to recompute them while sorting.
-     */
-    private static class WithScorer extends WithValuesOrder<WithScorer.ScoredRow>
-    {
-        private final Index.Scorer scorer;
-
-        private WithScorer(int limit, int offset, Index.Scorer scorer)
-        {
-            super(limit, offset);
-            this.scorer = scorer;
-        }
-
-        @Override
-        ScoredRow decorate(List<ByteBuffer> row, int id)
-        {
-            return new ScoredRow(row, id, scorer.score(row));
-        }
-
-        @Override
-        public int compare(ScoredRow one, ScoredRow other)
-        {
-            return scorer.reversed()
-                   ? Float.compare(other.score, one.score)
-                   : Float.compare(one.score, other.score);
-        }
-
-        static final class ScoredRow extends DecoratedRow
-        {
-            private final float score;
-
-            ScoredRow(List<ByteBuffer> row, int id, float score)
-            {
-                super(row, id);
-                this.score = score;
-            }
-        }
-    }
-
-    /**
-     * {@link SortedRowsBuilder} that orders rows based on the {@link #compare(DecoratedRow, DecoratedRow)} method.
+     * It's possible for the comparison to produce ties. To deal with these ties, the rows are decorated with their
+     * position in the sequence of calls to {@link #add(List)}, so we can use that identifying position to solve ties by
+     * favoring the row that was inserted first.
      * </p>
-     * It's possible for {@link #compare(DecoratedRow, DecoratedRow)} to produce ties. To deal with these ties, the rows
-     * are decorated with their position in the sequence of calls to {@link #add(List)}, so we can use that identifying
-     * position to solve ties by favoring the row that was inserted first.
+     * The rows can be decorated with any other value used for the comparator, so it doesn't need to reclaculate that
+     * value in every comparison.
      * </p>
      * It keeps at most {@code limit + offset} rows in memory.
      */
-    private static abstract class WithValuesOrder<T extends WithValuesOrder.DecoratedRow> extends SortedRowsBuilder
+    private static class WithComparator<T extends WithComparator.DecoratedRow> extends SortedRowsBuilder
     {
-        private final PriorityQueue<T> queue = new PriorityQueue<>(this::compareReversedWithIdx);
+        private final BiFunction<List<ByteBuffer>, Integer, T> decorator;
+        private final PriorityQueue<T> queue;
         private int numAddedRows = 0;
         private boolean built = false;
 
-        private WithValuesOrder(int limit, int offset)
+        private WithComparator(int limit,
+                               int offset,
+                               BiFunction<List<ByteBuffer>, Integer, T> decorator,
+                               Comparator<T> comparator)
         {
             super(limit, offset);
-        }
-
-        abstract T decorate(List<ByteBuffer> row, int id);
-
-        abstract int compare(T indexedRow, T other);
-
-        private int compareReversedWithIdx(T one, T other)
-        {
-            int cmp = compare(other, one);
-            return cmp != 0 ? cmp : Integer.compare(other.id, one.id);
+            queue = new PriorityQueue<>(comparator.thenComparingInt(one -> one.id).reversed());
+            this.decorator = decorator;
         }
 
         @Override
         public void add(List<ByteBuffer> row)
         {
             assert !built : "Cannot add more rows after calling build()";
-            T candidate = decorate(row, numAddedRows++);
+            T candidate = decorator.apply(row, numAddedRows++);
             queue.offer(candidate);
             if (queue.size() > limit + offset)
                 queue.poll();
@@ -261,8 +200,8 @@ public abstract class SortedRowsBuilder
         }
 
         /**
-         * A row decorated with its position in the sequence of calls to {@link #add(List)},
-         * so we can use it to solve ties in {@link #compareReversedWithIdx(DecoratedRow, DecoratedRow)}.
+         * A row decorated with its position in the sequence of calls to {@link #add(List)}, so we can use it to solve ties
+         * in comparisons.
          */
         static class DecoratedRow
         {
@@ -274,6 +213,21 @@ public abstract class SortedRowsBuilder
                 this.row = row;
                 this.id = id;
             }
+        }
+    }
+
+    /**
+     * A {@link WithComparator.DecoratedRow} that is also decorated with a score assigned by a {@link Index.Scorer},
+     * so we don't need to recalculate that score in every comparison.
+     */
+    private static final class ScoredRow extends WithComparator.DecoratedRow
+    {
+        private final float score;
+
+        private ScoredRow(List<ByteBuffer> row, int id, float score)
+        {
+            super(row, id);
+            this.score = score;
         }
     }
 }
