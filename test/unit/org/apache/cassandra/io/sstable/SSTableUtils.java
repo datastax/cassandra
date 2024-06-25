@@ -236,7 +236,7 @@ public class SSTableUtils
             // mark all components for removal
             if (cleanup)
                 for (SSTableReader reader: readers)
-                    for (Component component : reader.components)
+                    for (Component component : reader.components())
                         reader.descriptor.fileFor(component).deleteOnExit();
             return readers;
         }

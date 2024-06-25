@@ -35,9 +35,11 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * Writes all on-disk index structures attached to a given SSTable.
@@ -61,33 +63,42 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     private long sstableRowId = 0;
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
+                                      TableMetadata tableMetadata,
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker lifecycleNewTracker,
                                       long keyCount) throws IOException
     {
-        this(indexDescriptor, indices, lifecycleNewTracker, keyCount, false);
+        this(indexDescriptor, tableMetadata, indices, lifecycleNewTracker, keyCount, false);
     }
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
+                                      TableMetadata tableMetadata,
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker lifecycleNewTracker,
                                       long keyCount,
                                       boolean perIndexComponentsOnly) throws IOException
     {
+        // We always write at the latest version (through what that version is can be configured for specific cases)
+        var onDiskFormat = Version.latest().onDiskFormat();
         this.indexDescriptor = indexDescriptor;
-        this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
+        // Note: I think there is a silent assumption here. That is, the PK factory we use here must be for the latest
+        // format version, because that is what `IndexContext.keyFactory` always uses (see ctor)
+        this.primaryKeyFactory = onDiskFormat.newPrimaryKeyFactory(tableMetadata.comparator);
         this.indices = indices;
         this.rowMapping = RowMapping.create(lifecycleNewTracker.opType());
-        this.perIndexWriters = indices.stream().map(i -> indexDescriptor.newPerIndexWriter(i,
-                                                                                           lifecycleNewTracker,
-                                                                                           rowMapping,
-                                                                                           keyCount))
+        this.perIndexWriters = indices.stream().map(i -> onDiskFormat.newPerIndexWriter(i,
+                                                                                        indexDescriptor,
+                                                                                        lifecycleNewTracker,
+                                                                                        rowMapping,
+                                                                                        keyCount))
                                       .filter(Objects::nonNull) // a null here means the column had no data to flush
                                       .collect(Collectors.toList());
 
         // If the SSTable components are already being built by another index build then we don't want
-        // to build them again so use a null writer
-        this.perSSTableWriter = perIndexComponentsOnly ? PerSSTableWriter.NONE : indexDescriptor.newPerSSTableWriter();
+        // to build them again so use a NO-OP writer
+        this.perSSTableWriter = perIndexComponentsOnly
+                                ? PerSSTableWriter.NONE
+                                : onDiskFormat.newPerSSTableWriter(indexDescriptor);
     }
 
     @Override

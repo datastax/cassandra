@@ -70,12 +70,13 @@ public final class PrimaryKeyMapIterator extends RangeIterator
         KeyFilter filter;
         TableMetadata metadata = ctx.sstable().metadata();
         // if not row-aware, we don't have clustering
-        if (ctx.indexDescriptor().getVersion().onDiskFormat().indexFeatureSet().isRowAware() && metadata.hasStaticColumns())
+        var perSSTableComponents = ctx.usedPerSSTableComponents();
+        if (perSSTableComponents.version().onDiskFormat().indexFeatureSet().isRowAware() && metadata.hasStaticColumns())
             filter = KeyFilter.KEYS_WITH_CLUSTERING;
         else // the table doesn't consist anything we want to filter out, so let's use the cheap option
             filter = KeyFilter.ALL;
 
-        if (ctx.indexDescriptor().isSSTableEmpty())
+        if (perSSTableComponents.isEmpty())
             return RangeIterator.empty();
 
         PrimaryKeyMap keys = ctx.primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
@@ -86,7 +87,7 @@ public final class PrimaryKeyMapIterator extends RangeIterator
             return RangeIterator.empty();
         }
 
-        PrimaryKey.Factory pkFactory = ctx.indexDescriptor.primaryKeyFactory;
+        PrimaryKey.Factory pkFactory = ctx.primaryKeyFactory();
         Token minToken = keyRange.left.getToken();
         PrimaryKey minKeyBound = pkFactory.createTokenOnly(minToken);
         PrimaryKey sstableMinKey = keys.primaryKeyFromRowId(0);
