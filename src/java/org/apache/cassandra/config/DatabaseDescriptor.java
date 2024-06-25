@@ -115,7 +115,6 @@ import org.apache.cassandra.service.paxos.Paxos;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOCATE_TOKENS_FOR_KEYSPACE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.AUTO_BOOTSTRAP;
@@ -2348,12 +2347,12 @@ public class DatabaseDescriptor
 
     public static long getRepairPrepareMessageTimeout(TimeUnit unit)
     {
-        return unit.convert(conf.repair_prepare_message_timeout_in_ms, MILLISECONDS);
+        return conf.repair_prepare_message_timeout_in_ms.to(unit);
     }
 
-    public static void setRepairPrepareMessageTimeout(long timeOutInMillis)
+    public static void setRepairPrepareMessageTimeout(Long timeOutInMillis)
     {
-        conf.repair_prepare_message_timeout_in_ms = timeOutInMillis;
+        conf.repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound(timeOutInMillis);
     }
 
     public static boolean hasCrossNodeTimeout()
