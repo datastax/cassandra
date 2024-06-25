@@ -42,7 +42,10 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
@@ -137,20 +140,23 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return false;
         }
 
+        SSTableContext existingPerSSTableContext = group.sstableContextManager().getContext(sstable);
+        IndexDescriptor indexDescriptor = group.descriptorFor(sstable);
+        Set<Component> replacedComponents = new HashSet<>();
+
         try (RandomAccessReader dataFile = sstable.openDataReader();
              LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD, sstable))
         {
-            perSSTableFileLock = shouldWritePerSSTableFiles(sstable);
+            perSSTableFileLock = shouldWritePerSSTableFiles(sstable, indexDescriptor, replacedComponents);
             // If we were unable to get the per-SSTable file lock it means that the
             // per-SSTable components are already being built so we only want to
             // build the per-index components
             boolean perIndexComponentsOnly = perSSTableFileLock == null;
-            // remove existing per column index files instead of overwriting
-            IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
-            indexes.forEach(index -> indexDescriptor.deleteColumnIndex(index.getIndexContext()));
+            for (StorageAttachedIndex index : indexes)
+                prepareForRebuild(indexDescriptor.perIndexComponents(index.getIndexContext()), replacedComponents);
 
             long keyCount = SSTableReader.getApproximateKeyCount(Set.of(sstable));
-            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, indexes, txn, keyCount, perIndexComponentsOnly);
+            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, metadata, indexes, txn, keyCount, perIndexComponentsOnly);
 
             indexWriter.begin();
 
@@ -188,7 +194,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     previousBytesRead = bytesRead;
                 }
 
-                completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock);
+                completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
                 txn.trackNewAttachedIndexFiles(sstable);
             }
             logger.debug("Completed indexing sstable {}", sstable.descriptor);
@@ -255,27 +261,38 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
      * if the per sstable index files are already created, not need to write it again, unless it's full rebuild.
      * if not created, try to acquire a lock, so only one builder will generate per sstable index files
      */
-    private CountDownLatch shouldWritePerSSTableFiles(SSTableReader sstable)
+    private CountDownLatch shouldWritePerSSTableFiles(SSTableReader sstable, IndexDescriptor indexDescriptor, Set<Component> replacedComponents)
     {
         // if per-table files are incomplete or checksum failed during full rebuild.
-        IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
-        if (!indexDescriptor.isPerSSTableBuildComplete() || isFullRebuild)
+        if (!indexDescriptor.perSSTableComponents().isComplete() || isFullRebuild)
         {
             CountDownLatch latch = CountDownLatch.newCountDownLatch(1);
             if (inProgress.putIfAbsent(sstable, latch) == null)
             {
-                // lock owner should cleanup existing per-SSTable files
-                group.deletePerSSTableFiles(Collections.singleton(sstable));
+                prepareForRebuild(indexDescriptor.perSSTableComponents(), replacedComponents);
                 return latch;
             }
         }
         return null;
     }
 
+    private static void prepareForRebuild(IndexComponents.ForRead components, Set<Component> replacedComponents)
+    {
+        // The current components will be replaced by "other" components if either 1) we either use immutable components,
+        // or 2) the old components are from an old version. In the later cases, even if immutable components is not in
+        // use, then newly written components will have a different version and thus be different files.
+        if (components.version().useImmutableComponentFiles() || !components.version().equals(Version.latest()))
+            replacedComponents.addAll(components.allAsCustomComponents());
+
+        if (!components.version().useImmutableComponentFiles())
+            components.forWrite().forceDeleteAllComponents();
+    }
+
     private void completeSSTable(SSTableFlushObserver indexWriter,
                                  SSTableReader sstable,
                                  Set<StorageAttachedIndex> indexes,
-                                 CountDownLatch latch) throws InterruptedException
+                                 CountDownLatch latch,
+                                 Set<Component> replacedComponents) throws InterruptedException
     {
         indexWriter.complete();
 
@@ -303,7 +320,9 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
 
         // register custom index components into existing sstables
-        sstable.registerComponents(group.getLiveComponents(sstable, existing), tracker);
+        sstable.registerComponents(group.activeComponents(sstable), tracker);
+        if (!replacedComponents.isEmpty())
+            sstable.unregisterComponents(replacedComponents, tracker);
         Set<StorageAttachedIndex> incomplete = group.onSSTableChanged(Collections.emptyList(), Collections.singleton(sstable), existing, false);
 
         if (!incomplete.isEmpty())
