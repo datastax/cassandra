@@ -20,10 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Set;
 
-import org.junit.Test;
-
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -38,7 +35,8 @@ public class RebuildWithoutImmutableComponentsTest extends AbstractRebuildAndImm
         return false;
     }
 
-    private void validateSSTables(ColumnFamilyStore cfs, IndexContext context)
+    @Override
+    protected void validateSSTables(ColumnFamilyStore cfs, IndexContext context)
     {
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
@@ -46,13 +44,5 @@ public class RebuildWithoutImmutableComponentsTest extends AbstractRebuildAndImm
             assertEquals(0, descriptor.perSSTableComponents().generation());
             assertEquals(0, descriptor.perIndexComponents(context).generation());
         }
-    }
-
-    @Test
-    public void rebuildCreateNewGenerationFiles() throws Throwable
-    {
-        String indexName = createTableWithIndexAndRebuild();
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        validateSSTables(cfs, getIndexContext(indexName));
     }
 }
