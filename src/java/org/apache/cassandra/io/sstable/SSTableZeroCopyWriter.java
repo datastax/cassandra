@@ -37,6 +37,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.TOCComponent;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -64,13 +65,13 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         lifecycleNewTracker.trackNew(this);
         this.componentWriters = new HashMap<>();
 
-        Set<Component> unsupported = components.stream()
+        Set<Component> unsupported = components().stream()
                                                .filter(c -> !c.type.streamable)
                                                .collect(Collectors.toSet());
         if (!unsupported.isEmpty())
             throw new AssertionError(format("Unsupported streaming components detected: %s", unsupported));
 
-        for (Component c : components)
+        for (Component c : components())
             componentWriters.put(c.name, makeWriter(descriptor, c));
     }
 
@@ -132,6 +133,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         for (ZeroCopySequentialWriter writer : componentWriters.values())
             writer.finish();
 
+        TOCComponent.updateTOC(descriptor, components());
         return finished();
     }
 
@@ -139,7 +141,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     public Collection<SSTableReader> finished()
     {
         if (finalReader == null)
-            finalReader = SSTableReader.open(owner().orElse(null), descriptor, components, metadata);
+            finalReader = SSTableReader.open(owner().orElse(null), descriptor, components(), metadata);
 
         return ImmutableList.of(finalReader);
     }
