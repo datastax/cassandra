@@ -398,11 +398,8 @@ public class SAITester extends CQLTester
                     if (sstableIndex.isEmpty())
                         continue;
 
-                    // Make sure the index does use the context it should (for which we already checked the version),
-                    // but note that `SSTableIndex` uses a "sharedCopy()" of the context, so we check equality of the
-                    // pk map factory (which should be same between original and a copy).
-                    assertEquals(sstableIndex.usedPerIndexComponents(), expectedVersion);
-
+                    // Make sure the index does use components of the proper version.
+                    assertEquals(sstableIndex.usedPerIndexComponents().version(), expectedVersion);
                 }
             }
         }

@@ -1036,8 +1036,8 @@ public class NativeIndexDDLTest extends SAITester
             createTable(CREATE_TABLE_TEMPLATE);
             String numericIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
             String stringIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-            IndexContext numericIndexContext = createIndexContext(numericIndexName, Int32Type.instance);
-            IndexContext stringIndexContext = createIndexContext(stringIndexName, UTF8Type.instance);
+            IndexContext numericIndexContext = getIndexContext(numericIndexName);
+            IndexContext stringIndexContext = getIndexContext(stringIndexName);
 
             int rowCount = 2;
             execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");

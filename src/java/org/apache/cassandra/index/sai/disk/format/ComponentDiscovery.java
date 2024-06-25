@@ -134,7 +134,7 @@ class ComponentDiscovery
             forGroup.types.add(parsed.component);
         }
 
-        // We then do an additional path to remove any group that is not complete.
+        // We then do an additional pass to remove any group that is not complete.
         invalid.clear();
         for (Map.Entry<String, DiscoveredComponents> entry : discovered.groups.entrySet())
         {
@@ -172,7 +172,7 @@ class ComponentDiscovery
                     continue;
 
                 // And all start with "SAI" (the rest can depend on the version, but that part is common to all version)
-                if (!component.name.startsWith("SAI"))
+                if (!component.name.startsWith(Version.SAI_DESCRIPTOR))
                     continue;
 
                 // Lastly, we check that the component file exists. If it doesn't, then we assume something is wrong

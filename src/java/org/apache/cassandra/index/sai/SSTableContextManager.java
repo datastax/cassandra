@@ -131,11 +131,13 @@ public class SSTableContextManager
         // 2. it uses a "complete" set of per-sstable components (not that we always initially create a `SSTableContext`
         //    from a complete set, so if it is not complete, it means the previous components have been corrupted, and
         //    we want to use the new one (a rebuild)).
-        // 2. it uses "up-to-date" per-sstable components.
+        // 3. it uses "up-to-date" per-sstable components.
         if (previousContext != null && previousContext.usedPerSSTableComponents().isComplete() && previousContext.usedPerSSTableComponents().hasSameVersionAndGenerationThan(perSSTableComponents))
             return previousContext;
 
         // Now, if we create a new one, we should close the previous one if it exists.
+        // Note that `SSTableIndex` references `SSTableContext` through a `#sharedCopy() so even if there is still
+        // index referencing this context currently in use, this will not break ongoing queries.
         if (previousContext != null)
             previousContext.close();
 

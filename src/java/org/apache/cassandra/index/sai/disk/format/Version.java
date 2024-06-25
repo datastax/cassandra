@@ -229,7 +229,7 @@ public class Version
     //
     // Format: <sstable descriptor>-SAI+<version>(+<generation>)(+<index name>)+<component name>.db
     //
-    private static final String SAI_DESCRIPTOR = "SAI";
+    public static final String SAI_DESCRIPTOR = "SAI";
     private static final String SAI_SEPARATOR = "+";
     private static final String EXTENSION = ".db";
 
