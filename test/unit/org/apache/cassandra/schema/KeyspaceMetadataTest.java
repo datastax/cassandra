@@ -350,4 +350,26 @@ public class KeyspaceMetadataTest extends CQLTester
             assertTrue(transformedParamTest.test(param), "Param doesn't satisfy the provided test for view " + view);
         }
     }
+
+    @Test
+    public void testSchemaTypeMetadata()
+    {
+        String tableDefault = createTable("CREATE TABLE %s (key int, val text, PRIMARY KEY (key, val));");
+        String table = createTable("CREATE TABLE %s (key int, val text, PRIMARY KEY (key, val)) WITH schema_type='table';");
+        String collection = createTable("CREATE TABLE %s (key int, val text, PRIMARY KEY (key, val)) WITH schema_type='collection';");
+
+        KeyspaceMetadata original = Schema.instance.getKeyspaceMetadata(KEYSPACE);
+        assertNotNull(original);
+
+        assertEquals(original.tables.getNullable(tableDefault).params.schemaType, SchemaType.TABLE);
+        assertEquals(original.tables.getNullable(table).params.schemaType, SchemaType.TABLE);
+        assertEquals(original.tables.getNullable(collection).params.schemaType, SchemaType.COLLECTION);
+
+        // allow changes to schema_type (this is needed for the migration of existing collections)
+        execute(String.format("ALTER TABLE %s.%s WITH schema_type='collection';", KEYSPACE, table));
+
+        KeyspaceMetadata modified = Schema.instance.getKeyspaceMetadata(KEYSPACE);
+        assertEquals(modified.tables.getNullable(table).params.schemaType, SchemaType.COLLECTION);
+
+    }
 }
