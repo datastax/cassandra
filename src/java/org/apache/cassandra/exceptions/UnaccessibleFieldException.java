@@ -16,30 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai;
+package org.apache.cassandra.exceptions;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-
-import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.utils.ReflectionUtils;
-
-public class SAIUtil
+public class UnaccessibleFieldException extends RuntimeException
 {
-    public static void setLatestVersion(Version version)
+    private static final long serialVersionUID = 7340063332562337064L;
+
+    public UnaccessibleFieldException(String message)
     {
-        Field latest = null;
-        try
-        {
-            latest = Version.class.getDeclaredField("LATEST");
-            latest.setAccessible(true);
-            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-            modifiersField.setAccessible(true);
-            latest.set(null, version);
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
+        super(message);
+    }
+
+    public UnaccessibleFieldException(String message, Throwable cause)
+    {
+        super(message, cause);
     }
 }

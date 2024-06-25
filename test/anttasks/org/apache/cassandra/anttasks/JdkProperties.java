@@ -16,30 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai;
+package org.apache.cassandra.anttasks;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
+import org.apache.tools.ant.Project;
+import org.apache.tools.ant.Task;
 
-import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.utils.ReflectionUtils;
-
-public class SAIUtil
+public class JdkProperties extends Task
 {
-    public static void setLatestVersion(Version version)
+
+    public void execute()
     {
-        Field latest = null;
-        try
-        {
-            latest = Version.class.getDeclaredField("LATEST");
-            latest.setAccessible(true);
-            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-            modifiersField.setAccessible(true);
-            latest.set(null, version);
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
+        Project project = getProject();
+        project.setNewProperty("java.version." + project.getProperty("ant.java.version").replace("1.", ""), "true");
+        project.setNewProperty("use-jdk" + project.getProperty("ant.java.version").replace("1.", ""), "true");
     }
 }

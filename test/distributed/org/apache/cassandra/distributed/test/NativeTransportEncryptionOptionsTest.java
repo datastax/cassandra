@@ -148,7 +148,7 @@ public class NativeTransportEncryptionOptionsTest extends AbstractEncryptionOpti
             c.set("client_encryption_options",
                   ImmutableMap.builder().putAll(validKeystore)
                               .put("enabled", true)
-                              .put("accepted_protocols", Collections.singletonList("TLSv1.2"))
+                              .put("accepted_protocols", ImmutableList.of("TLSv1.2", "TLSv1.3"))
                               .build());
         }).start())
         {
@@ -171,9 +171,9 @@ public class NativeTransportEncryptionOptionsTest extends AbstractEncryptionOpti
             Assert.assertEquals("TLSv1.2", tls12Connection.lastProtocol());
 
             TlsConnection tls13Connection = new TlsConnection(address.getHostAddress(), port, Collections.singletonList("TLSv1.3"));
-            Assert.assertEquals("Should not be possible to establish a TLSv1.3 connection",
-                                ConnectResult.FAILED_TO_NEGOTIATE, tls13Connection.connect());
-            tls13Connection.assertReceivedHandshakeException();
+            Assert.assertEquals("Should be possible to establish a TLSv1.3 connection",
+                                ConnectResult.NEGOTIATED, tls13Connection.connect());
+            Assert.assertEquals("TLSv1.3", tls13Connection.lastProtocol());
         }
     }
 
