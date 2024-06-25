@@ -254,7 +254,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
 
                     Validator validator = new Validator(ctx, vState, validationRequest.nowInSec,
                                                         isIncremental(desc.parentSessionId), previewKind);
-                    Future<?> validationFuture = ValidationManager.instance.submitValidation(store, validator);
+                    Future<?> validationFuture = ctx.validationManager().submitValidation(store, validator);
                     ParentRepairSessionListener.instance.onValidation(desc, validationFuture);
                 }
                 catch (Throwable t)
