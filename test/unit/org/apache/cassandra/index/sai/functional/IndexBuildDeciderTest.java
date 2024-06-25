@@ -31,6 +31,7 @@ import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
@@ -38,7 +39,7 @@ import org.apache.cassandra.index.sai.SSTableContextManager;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter;
-import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -145,10 +146,11 @@ public class IndexBuildDeciderTest extends SAITester
         return FileUtils.listPathsWithAbsolutePath(secondSSTable.descriptor.baseFileURI()).size();
     }
 
-    private int indexFileCount(IndexContext context)
+    private int indexFileCount(IndexContext ignored)
     {
-        return Version.latest().onDiskFormat().perIndexComponents(context).size()
-               + Version.latest().onDiskFormat().perSSTableComponents().size();
+        IndexContext context = createIndexContext("v1", Int32Type.instance);
+        return V2OnDiskFormat.instance.perIndexComponentTypes(context).size()
+               + V2OnDiskFormat.instance.perSSTableComponentTypes().size();
     }
 
     public static class IndexBuildDeciderWithoutInitialBuild implements IndexBuildDecider

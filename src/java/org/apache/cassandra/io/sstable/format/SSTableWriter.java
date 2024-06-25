@@ -112,7 +112,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         // sstable files were created before the sstable is registered in the lifecycle transaction, which may lead
         // to a race such that the sstable is listed as completed due to the lack of the transaction file before
         // anything is actually written to it.
-        Set<Component> existingComponents = Sets.filter(components, c -> descriptor.fileFor(c).exists());
+        Set<Component> existingComponents = Sets.filter(components(), c -> descriptor.fileFor(c).exists());
         assert existingComponents.isEmpty() : String.format("Cannot create a new SSTable in directory %s as component files %s already exist there",
                                                             descriptor.directory,
                                                             existingComponents);
@@ -156,7 +156,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         logger.warn("Failed to open " + descriptor + " for writing", ex);
         for (int i = observers.size()-1; i >= 0; i--)
             observers.get(i).abort(ex);
-        descriptor.getFormat().deleteOrphanedComponents(descriptor, components);
+        descriptor.getFormat().deleteOrphanedComponents(descriptor, components());
         lifecycleNewTracker.untrackNew(this);
     }
 
@@ -383,7 +383,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
             new StatsComponent(descriptor, finalizeMetadata()).save(descriptor);
 
             // save the table of components
-            TOCComponent.appendTOC(descriptor, components);
+            TOCComponent.appendTOC(descriptor, components());
         }
 
         private void openResult()
@@ -506,7 +506,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
             Set<Component> components = new HashSet<>();
             for (Index.Group group : indexGroups)
             {
-                components.addAll(group.getComponents());
+                components.addAll(group.componentsForNewSSTable());
             }
 
             return components;

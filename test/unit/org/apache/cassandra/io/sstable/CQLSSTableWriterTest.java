@@ -72,7 +72,6 @@ import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -1392,12 +1391,10 @@ public abstract class CQLSSTableWriterTest
         File[] dataFiles = dataDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
         assertNotNull(dataFiles);
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(Descriptor.fromFile(dataFiles[0]),
-                                                                 Murmur3Partitioner.instance,
-                                                                 Schema.instance.getTableMetadata(keyspace, table).comparator);
+        IndexDescriptor indexDescriptor = IndexDescriptor.empty(Descriptor.fromFile(dataFiles[0]));
 
-        assertTrue(indexDescriptor.isPerIndexBuildComplete(createIndexContext("idx1", UTF8Type.instance)));
-        assertTrue(indexDescriptor.isPerIndexBuildComplete(createIndexContext("idx2", UTF8Type.instance)));
+        assertTrue(indexDescriptor.perIndexComponents(createIndexContext("idx1", UTF8Type.instance)).isComplete());
+        assertTrue(indexDescriptor.perIndexComponents(createIndexContext("idx2", UTF8Type.instance)).isComplete());
 
         if (PathUtils.isDirectory(dataDir.toPath()))
             PathUtils.forEach(dataDir.toPath(), PathUtils::deleteRecursive);
@@ -1436,13 +1433,10 @@ public abstract class CQLSSTableWriterTest
         assertNotNull(dataFiles);
 
         // no indexes built due to withBuildIndexes set to false
-        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(Descriptor.fromFile(dataFiles[0]),
-                                                                 Murmur3Partitioner.instance,
-                                                                 Schema.instance.getTableMetadata(keyspace, table).comparator);
+        IndexDescriptor indexDescriptor = IndexDescriptor.empty(Descriptor.fromFile(dataFiles[0]));
 
-        
-        assertFalse(indexDescriptor.isPerIndexBuildComplete(createIndexContext("idx1", UTF8Type.instance)));
-        assertFalse(indexDescriptor.isPerIndexBuildComplete(createIndexContext("idx2", UTF8Type.instance)));
+        assertTrue(indexDescriptor.perIndexComponents(createIndexContext("idx1", UTF8Type.instance)).isComplete());
+        assertTrue(indexDescriptor.perIndexComponents(createIndexContext("idx2", UTF8Type.instance)).isComplete());
     }
 
     public IndexContext createIndexContext(String name, AbstractType<?> validator)

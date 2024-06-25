@@ -54,7 +54,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
  *     return objects that will interact with the on-disk components or return information about the on-disk
  *     components. If they take an {@link IndexContext} as well they will be interacting with per-index files
  *     otherwise they will be interacting with per-sstable files</li>
- *     <li>Methods taking an {@link IndexComponent}. These methods only interact with a single component or
+ *     <li>Methods taking an {@link IndexComponentType}. These methods only interact with a single component or
  *     set of components</li>
  *
  * To add a new version,
@@ -78,27 +78,29 @@ public interface OnDiskFormat
      * @param comparator
      * @return the primary key factory
      */
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator);
+    public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator);
 
     /**
      * Returns a {@link PrimaryKeyMap.Factory} for the SSTable
      *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
-     * @param sstable The {@link SSTableReader} associated with the {@link IndexDescriptor}
+     * @param perSSTableComponents The concrete sstable components to use for the factory
+     * @param primaryKeyFactory The {@link PrimaryKey.Factory} corresponding to the provided {@code perSSTableComponents}.
+     * @param sstable The {@link SSTableReader} associated with the per-sstable components
      * @return a {@link PrimaryKeyMap.Factory} for the SSTable
      * @throws IOException
      */
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException;
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException;
 
     /**
      * Create a new {@link SearchableIndex} for an on-disk index. This is held by the {@SSTableIndex}
      * and shared between queries.
      *
      * @param sstableContext The {@link SSTableContext} holding the per-SSTable information for the index
-     * @param indexContext The {@link IndexContext} holding the per-index information for the index
-     * @return
+     * @param perIndexComponents The group of per-index sstable components to use/read for the returned index (which
+     *                           also link to the underlying {@link IndexContext} for the index).
+     * @return the created {@link SearchableIndex}.
      */
-    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext indexContext);
+    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents);
 
     IndexSearcher newIndexSearcher(SSTableContext sstableContext,
                                    IndexContext indexContext,
@@ -134,56 +136,33 @@ public interface OnDiskFormat
                                             long keyCount);
 
     /**
-     * Validate all the per-SSTable on-disk components and throw if a component is not valid
+     * Validate the provided on-disk components (that must be for this version).
      *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
+     * @param component The component to validate
      * @param checksum {@code true} if the checksum should be tested as part of the validation
      *
-     * @return true if all the per-SSTable components are valid
+     * @return true if the component is valid
      */
-    public boolean validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum);
+    boolean validateIndexComponent(IndexComponent.ForRead component, boolean checksum);
 
     /**
-     * Validate all the per-index on-disk components and throw if a component is not valid
-     *
-     * @param descriptor The {@link IndexDescriptor} for the SSTable
-     * @param context The {@link IndexContext} holding the per-index information for the index
-     * @param checksum {@code true} if the checksum should be tested as part of the validation
-     *
-     * @return true if all the per-index components are valid
-     */
-    default boolean validatePerIndexComponents(IndexDescriptor descriptor, IndexContext context, boolean checksum)
-    {
-        for (IndexComponent component : perIndexComponents(context))
-        {
-            if (descriptor.isIndexEmpty(context))
-                continue;
-            if (!validateOneIndexComponent(component, descriptor, context, checksum))
-                return false;
-        }
-        return true;
-    }
-
-    boolean validateOneIndexComponent(IndexComponent component, IndexDescriptor descriptor, IndexContext context, boolean checksum);
-
-    /**
-     * Returns the set of {@link IndexComponent} for the per-SSTable part of an index.
-     * This is a complete set of components that could exist on-disk. It does not imply that the
+     * Returns the set of {@link IndexComponentType} for the per-SSTable part of an index.
+     * This is a complete set of componentstypes that could exist on-disk. It does not imply that the
      * components currently exist on-disk.
      *
-     * @return The set of {@link IndexComponent} for the per-SSTable index
+     * @return The set of {@link IndexComponentType} for the per-SSTable index
      */
-    public Set<IndexComponent> perSSTableComponents();
+    public Set<IndexComponentType> perSSTableComponentTypes();
 
     /**
-     * Returns the set of {@link IndexComponent} for the per-index part of an index.
-     * This is a complete set of components that could exist on-disk. It does not imply that the
+     * Returns the set of {@link IndexComponentType} for the per-index part of an index.
+     * This is a complete set of component types that could exist on-disk. It does not imply that the
      * components currently exist on-disk.
      *
      * @param indexContext The {@link IndexContext} for the index
-     * @return The set of {@link IndexComponent} for the per-index index
+     * @return The set of {@link IndexComponentType} for the per-index index
      */
-    public Set<IndexComponent> perIndexComponents(IndexContext indexContext);
+    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext);
 
     /**
      * Return the number of open per-SSTable files that can be open during a query.
@@ -205,11 +184,11 @@ public interface OnDiskFormat
     public int openFilesPerIndex(IndexContext indexContext);
 
     /**
-     * Return the {@link ByteOrder} for the given {@link IndexComponent} and {@link IndexContext}.
+     * Return the {@link ByteOrder} for the given {@link IndexComponentType} and {@link IndexContext}.
      *
-     * @param component - The {@link IndexComponent} for the index
+     * @param component - The {@link IndexComponentType} for the index
      * @param context - The {@link IndexContext} for the index
-     * @return The {@link ByteOrder} for the file associated with the {@link IndexComponent}
+     * @return The {@link ByteOrder} for the file associated with the {@link IndexComponentType}
      */
-    public ByteOrder byteOrderFor(IndexComponent component, IndexContext context);
+    public ByteOrder byteOrderFor(IndexComponentType component, IndexContext context);
 }
