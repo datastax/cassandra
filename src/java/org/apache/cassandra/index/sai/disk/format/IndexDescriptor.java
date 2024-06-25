@@ -20,42 +20,41 @@ package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteOrder;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
 
-import com.google.common.annotations.VisibleForTesting;
+import javax.annotation.Nullable;
+
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.disk.EmptyIndex;
-import org.apache.cassandra.index.sai.disk.PerIndexWriter;
-import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.oldlucene.EndiannessReverserChecksumIndexInput;
-import org.apache.cassandra.index.sai.memory.RowMapping;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.util.IOUtils;
 
@@ -68,7 +67,7 @@ import org.apache.lucene.util.IOUtils;
  * of the current on-disk components and files. It is responsible for opening files for use by
  * writers and readers.
  * <p>
- * Each sstable has per-index components ({@link IndexComponent}) associated with it, and also components
+ * Each sstable has per-index components ({@link IndexComponentType}) associated with it, and also components
  * that are shared by all indexes (notably, the components that make up the PrimaryKeyMap).
  * <p>
  * IndexDescriptor's remaining responsibility is to act as a proxy to the {@link OnDiskFormat}
@@ -77,451 +76,208 @@ import org.apache.lucene.util.IOUtils;
 public class IndexDescriptor
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     // TODO Because indexes can be added at any time to existing data, the Version of a column index
     // may not match the Version of the base sstable.  OnDiskFormat + IndexFeatureSet + IndexDescriptor
     // was not designed with this in mind, leading to some awkwardness, notably in IFS where some features
     // are per-sstable (`isRowAware`) and some are per-column (`hasVectorIndexChecksum`).
 
-    // per-SSTable fields
     public final Descriptor descriptor;
-    public final IPartitioner partitioner;
-    public final ClusteringComparator clusteringComparator;
-    public final PrimaryKey.Factory primaryKeyFactory;
 
-    // versions and components.  null context = per-sstable entry
-    private final Map<IndexContext, Version> versions = Maps.newHashMap();
-    private final Map<IndexContext, Set<IndexComponent>> components = Maps.newHashMap();
-    private final Map<AttachedIndexComponent, File> fileMap = Maps.newHashMap();
+    // For each context (null is used for per-sstable ones), the concrete set of existing and "active" components (it
+    // is possible for multiple version and/or generation of a component to exists "on disk"; the "active" one is the
+    // most recent version and generation that is fully built (has a completion marker)).
+    private final Map<IndexContext, IndexComponentsImpl> groups = Maps.newHashMap();
 
-    /**
-     * A component together with the group it belongs to.
-     */
-    private static class AttachedIndexComponent
-    {
-        public final IndexContext context; // may be null
-        public final IndexComponent component;
-
-        public AttachedIndexComponent(IndexComponent component, IndexContext context)
-        {
-            this.component = component;
-            this.context = context;
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(context, component);
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            AttachedIndexComponent that = (AttachedIndexComponent) o;
-            return Objects.equals(context, that.context) && component == that.component;
-        }
-    }
-
-    private IndexDescriptor(Version version, Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
+    private IndexDescriptor(Descriptor descriptor)
     {
         this.descriptor = descriptor;
-        this.partitioner = partitioner;
-        this.clusteringComparator = clusteringComparator;
-        this.primaryKeyFactory = PrimaryKey.factory(clusteringComparator, version.onDiskFormat().indexFeatureSet());
-
-        versions.put(null, version);
-        components.put(null, Sets.newHashSet());
     }
 
-    public static IndexDescriptor createNew(Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
+    public static IndexDescriptor empty(Descriptor descriptor)
     {
-        return new IndexDescriptor(Version.latest(), descriptor, partitioner, clusteringComparator);
+        IndexDescriptor created = new IndexDescriptor(descriptor);
+        // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
+        // set it to an empty group here.
+        created.populateOne(null, null);
+        return created;
     }
 
-    public static IndexDescriptor createFrom(SSTableReader sstable)
+    public static IndexDescriptor load(SSTableReader sstable, Set<IndexContext> indices)
     {
-        // see if we have a completion component on disk, and if so use that version
-        for (Version version : Version.ALL)
+        ComponentDiscovery.DiscoveredGroups discovered = ComponentDiscovery.discoverComponents(sstable.descriptor);
+        IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor);
+        descriptor.populate(discovered, indices);
+        return descriptor;
+    }
+
+    private void populate(ComponentDiscovery.DiscoveredGroups discovered, Collection<IndexContext> indices)
+    {
+        populateOne(discovered.groups.get(null), null);
+        for (var context : indices)
+            populateOne(discovered.groups.get(context.getIndexName()), context);
+    }
+
+    private void populateOne(@Nullable ComponentDiscovery.DiscoveredComponents discovered, @Nullable IndexContext context)
+    {
+        IndexComponentsImpl components;
+        if (discovered == null)
         {
-            if (componentExistsOnDisk(version, sstable.descriptor, IndexComponent.GROUP_COMPLETION_MARKER, null))
-                return new IndexDescriptor(version,
-                                           sstable.descriptor,
-                                           sstable.metadata().partitioner,
-                                           sstable.metadata().comparator);
+            // Means there isn't a complete build for this context. We add some empty "group" as a marker.
+            components = createEmptyGroup(context);
         }
-        // we always want a non-null IndexDescriptor, even if it's empty
-        return new IndexDescriptor(Version.latest(),
-                                   sstable.descriptor,
-                                   sstable.metadata().partitioner,
-                                   sstable.metadata().comparator);
-    }
-
-    public boolean hasComponent(IndexComponent component)
-    {
-        registerPerSSTableComponents();
-        return components.get(null).contains(component);
-    }
-
-    public boolean hasComponent(IndexComponent component, IndexContext context)
-    {
-        registerPerIndexComponents(context);
-        var components = this.components.get(context);
-        return components != null && components.contains(component);
-    }
-
-    public String componentFileName(IndexComponent component)
-    {
-        return versions.get(null).fileNameFormatter().format(component, null);
-    }
-
-    public String componentFileName(IndexComponent component, IndexContext context)
-    {
-        return getVersion(context).fileNameFormatter().format(component, context);
-    }
-
-    public Version getVersion()
-    {
-        return getVersion(null);
-    }
-
-    public Version getVersion(IndexContext context)
-    {
-        return versions.computeIfAbsent(context, __ ->
+        else
         {
-            for (Version version : Version.ALL)
-            {
-                var marker = context == null ? IndexComponent.GROUP_COMPLETION_MARKER : IndexComponent.COLUMN_COMPLETION_MARKER;
-                if (componentExistsOnDisk(version, descriptor, marker, context))
-                    return version;
-            }
-            // this is called by flush while creating new index files, as well as loading files that already exist
-            return Version.latest();
-        });
+            components = new IndexComponentsImpl(context, discovered.version, discovered.generation);
+            discovered.types.forEach(components::addOrGet);
+            components.isComplete = true;
+        }
+        groups.put(context, components);
+    }
+
+    private IndexComponentsImpl createEmptyGroup(@Nullable IndexContext context)
+    {
+        return new IndexComponentsImpl(context, Version.latest(), -1);
+    }
+
+    public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices)
+    {
+        Version version = Version.latest();
+        Set<Component> components = new HashSet<>();
+        for (IndexComponentType component : version.onDiskFormat().perSSTableComponentTypes())
+            components.add(customComponentFor(version, component, null, 0));
+
+        for (StorageAttachedIndex index : indices)
+        {
+            IndexContext context = index.getIndexContext();
+            for (IndexComponentType component : version.onDiskFormat().perIndexComponentTypes(context))
+                components.add(customComponentFor(version, component, context, 0));
+        }
+        return components;
+    }
+
+    private static Component customComponentFor(Version version, IndexComponentType componentType, @Nullable IndexContext context, int generation)
+    {
+        return new Component(SSTableFormat.Components.Types.CUSTOM, version.fileNameFormatter().format(componentType, context, generation));
     }
 
     /**
-     * Returns true if the given component exists on disk for the given index.
-     * If context is null, the component is assumed to be a per-sstable component.
-     */
-    private static boolean componentExistsOnDisk(Version version, Descriptor descriptor, IndexComponent component, IndexContext context)
-    {
-        var file = fileFor(descriptor, version, component, context);
-        return file.exists();
-    }
-
-    public File fileFor(IndexComponent component)
-    {
-        var ac = new AttachedIndexComponent(component, null);
-        return fileMap.computeIfAbsent(ac, __ -> createFile(component, null));
-    }
-
-    public File fileFor(IndexComponent component, IndexContext context)
-    {
-        return fileMap.computeIfAbsent(new AttachedIndexComponent(component, context),
-                                                     p -> createFile(component, context));
-    }
-
-    public Set<Component> getLivePerSSTableComponents()
-    {
-        registerPerSSTableComponents();
-        return components.get(null).stream()
-                         .map(c -> c.type.createComponent(componentFileName(c)))
-                         .collect(Collectors.toSet());
-    }
-
-    public Set<Component> getLivePerIndexComponents(IndexContext context)
-    {
-        registerPerIndexComponents(context);
-        var components = this.components.get(context);
-        return components == null
-               ? Collections.emptySet()
-               : components.stream()
-                 .map(c -> c.type.createComponent(componentFileName(c, context)))
-                 .collect(Collectors.toSet());
-    }
-
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(SSTableReader sstable) throws IOException
-    {
-        return versions.get(null).onDiskFormat().newPrimaryKeyMapFactory(this, sstable);
-    }
-
-    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext context)
-    {
-        return isIndexEmpty(context)
-               ? new EmptyIndex()
-               : getVersion(context).onDiskFormat().newSearchableIndex(sstableContext, context);
-    }
-
-    public PerSSTableWriter newPerSSTableWriter() throws IOException
-    {
-        return versions.get(null).onDiskFormat().newPerSSTableWriter(this);
-    }
-
-    public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
-                                            LifecycleNewTracker tracker,
-                                            RowMapping rowMapping,
-                                            long keyCount)
-    {
-        return Version.latest().onDiskFormat().newPerIndexWriter(index, this, tracker, rowMapping, keyCount);
-    }
-
-    /**
-     * @return true if the per-sstable index components have been built and are complete
-     */
-    public boolean isPerSSTableBuildComplete()
-    {
-        return hasComponent(IndexComponent.GROUP_COMPLETION_MARKER);
-    }
-
-    /**
-     * Returns true if the per-column index components have been built and are valid.
+     * Given the indexes for the sstable this is a descriptor for, reload from disk to check if newer components are
+     * available.
+     * <p>
+     * This method is generally <b>not</b> safe to call concurrently with the other methods that modify the state
+     * of {@link IndexDescriptor}, which are {@link #newPerSSTableComponentsForWrite()} and
+     * {@link #newPerIndexComponentsForWrite(IndexContext)}. This method is in fact meant for tiered storage use-cases
+     * where (post-flush) index building is done on separate dedicated services, and this method allows to reload the
+     * result of such external services once it is made available locally.
      *
+     * @param indices The set of indices to should part of the reloaded descriptor.
+     * @return this descriptor, for chaining purpose.
+     */
+    public IndexDescriptor reload(Set<IndexContext> indices)
+    {
+        ComponentDiscovery.DiscoveredGroups discovered = ComponentDiscovery.discoverComponents(descriptor);
+
+        // We want to make sure the descriptor only has data for the provided `indices` on reload, so we remove any
+        // index data that is not in the ones provided. This essentially make sure we don't hold up memory for
+        // dropped indexes.
+        for (IndexContext context : new HashSet<>(groups.keySet()))
+        {
+            if (context != null && !indices.contains(context))
+                groups.remove(context);
+        }
+
+        // Then reload data for the provided indices.
+        populate(discovered, indices);
+        return this;
+    }
+
+    public IndexComponents.ForRead perSSTableComponents()
+    {
+        return groups.get(null);
+    }
+
+    public IndexComponents.ForRead perIndexComponents(IndexContext context)
+    {
+        var perIndex = groups.get(context);
+        return perIndex == null ? createEmptyGroup(context) : perIndex;
+    }
+
+    public IndexComponents.ForWrite newPerSSTableComponentsForWrite()
+    {
+        return newComponentsForWrite(null);
+    }
+
+    public IndexComponents.ForWrite newPerIndexComponentsForWrite(IndexContext context)
+    {
+        return newComponentsForWrite(context);
+    }
+
+    private IndexComponents.ForWrite newComponentsForWrite(@Nullable IndexContext context)
+    {
+        var currentComponents = groups.get(context);
+        // If we're "bumping" the version compared to the existing group, then we can use generation 0. Otherwise, we
+        // have to bump the generation, unless we're using immutable components, in which case we always use generation 0.
+        // Unless we don't use immutable components, in which case we always use generation 0.
+        Version newVersion = Version.latest();
+        if (currentComponents != null && newVersion.useImmutableComponentFiles())
+        {
+            int candidateGeneration = currentComponents.version().equals(newVersion)
+                                      ? currentComponents.generation() + 1
+                                      : 0;
+            // Usually, we'll just use `candidateGeneration`, but we want to avoid overriding existing file (it's
+            // theoretically possible that the next generation was created at some other point, but then corrupted,
+            // and so we falled back on the previous generation but some of those file for the next generation still
+            // exists). So we check repeatedly increment the generation until we find one for which no files exist.
+            return createFirstGenerationAvailableComponents(context, newVersion, candidateGeneration);
+        }
+        else
+        {
+            return new IndexComponentsImpl(context, newVersion, 0);
+        }
+    }
+
+    private IndexComponentsImpl createFirstGenerationAvailableComponents(@Nullable IndexContext context, Version version, int startGeneration)
+    {
+        int generationToTest = startGeneration;
+        while (true)
+        {
+            IndexComponentsImpl candidate = new IndexComponentsImpl(context, version, generationToTest);
+            if (candidate.expectedComponentsForVersion().stream().noneMatch(candidate::componentExistsOnDisk))
+                return candidate;
+
+            noSpamLogger.warn(logMessage("Wanted to use generation {} for new build of {} SAI components of {}, but found some existing components on disk for that generation (maybe leftover from an incomplete/corrupted build?); trying next generation"),
+                              generationToTest,
+                              context == null ? "per-SSTable" : "per-index",
+                              descriptor);
+            generationToTest++;
+        }
+    }
+
+    /**
+     * Returns true if the per-column index components of the provided sstable have been built and are valid.
+     *
+     * @param sstable The sstable to check
      * @param context The {@link IndexContext} for the index
      * @return true if the per-column index components have been built and are complete
      */
-    public boolean isPerIndexBuildComplete(IndexContext context)
+    public static boolean isIndexBuildCompleteOnDisk(SSTableReader sstable, IndexContext context)
     {
-        return hasComponent(IndexComponent.GROUP_COMPLETION_MARKER) &&
-               hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, context);
-    }
-
-    public boolean isSSTableEmpty()
-    {
-        return isPerSSTableBuildComplete() && numberOfComponents(null) == 1;
+        IndexDescriptor descriptor = IndexDescriptor.load(sstable, Set.of(context));
+        return descriptor.perSSTableComponents().isComplete()
+               && descriptor.perIndexComponents(context).isComplete();
     }
 
     public boolean isIndexEmpty(IndexContext context)
     {
-        return isPerIndexBuildComplete(context) && numberOfComponents(context) == 1;
-    }
-
-    public long sizeOnDiskOfPerSSTableComponents()
-    {
-        return versions.get(null).onDiskFormat()
-                       .perSSTableComponents()
-                       .stream()
-                       .map(this::fileFor)
-                       .filter(File::exists)
-                       .mapToLong(File::length)
-                       .sum();
-    }
-
-    public long sizeOnDiskOfPerIndexComponents(IndexContext context)
-    {
-        registerPerIndexComponents(context);
-        var components = this.components.get(context);
-        if (components == null)
-            return 0;
-
-        return components.stream()
-                         .map(c -> new AttachedIndexComponent(c, context))
-                         .map(fileMap::get)
-                         .filter(java.util.Objects::nonNull)
-                         .filter(File::exists)
-                         .mapToLong(File::length)
-                         .sum();
-    }
-
-    @VisibleForTesting
-    public long sizeOnDiskOfPerIndexComponent(IndexComponent component, IndexContext context)
-    {
-        var components = this.components.get(context);
-        if (components == null)
-            return 0;
-
-        return components.stream()
-                         .filter(c -> c == component)
-                         .map(c -> new AttachedIndexComponent(c, context))
-                         .map(fileMap::get)
-                         .filter(java.util.Objects::nonNull)
-                         .filter(File::exists)
-                         .mapToLong(File::length)
-                         .sum();
-    }
-
-    public boolean validatePerIndexComponents(IndexContext context)
-    {
-        logger.debug("validatePerIndexComponents called for " + context.getIndexName());
-        registerPerIndexComponents(context);
-        return getVersion(context).onDiskFormat().validatePerIndexComponents(this, context, false);
-    }
-
-    public boolean validatePerIndexComponentsChecksum(IndexContext context)
-    {
-        registerPerIndexComponents(context);
-        return getVersion(context).onDiskFormat().validatePerIndexComponents(this, context, true);
-    }
-
-    public boolean validatePerSSTableComponents()
-    {
-        registerPerSSTableComponents();
-        return versions.get(null).onDiskFormat().validatePerSSTableComponents(this, false);
-    }
-
-    public boolean validatePerSSTableComponentsChecksum()
-    {
-        registerPerSSTableComponents();
-        return versions.get(null).onDiskFormat().validatePerSSTableComponents(this, true);
-    }
-
-    public void deletePerSSTableIndexComponents()
-    {
-        registerPerSSTableComponents();
-        var perSSTableComponents = components.get(null);
-        perSSTableComponents.stream()
-                            .map(c -> fileMap.remove(new AttachedIndexComponent(c, null)))
-                            .filter(java.util.Objects::nonNull)
-                            .forEach(this::deleteComponent);
-        perSSTableComponents.clear();
-    }
-
-    public void deleteColumnIndex(IndexContext context)
-    {
-        registerPerIndexComponents(context);
-        var components = this.components.get(context);
-        if (components == null)
-            return;
-
-        components.stream()
-                  .map(c -> new AttachedIndexComponent(c, context))
-                  .map(fileMap::remove)
-                  .filter(java.util.Objects::nonNull)
-                  .forEach(this::deleteComponent);
-        components.clear();
-    }
-
-    public void createComponentOnDisk(IndexComponent component) throws IOException
-    {
-        com.google.common.io.Files.touch(fileFor(component).toJavaIOFile());
-        registerPerSSTableComponent(component);
-    }
-
-    public void createComponentOnDisk(IndexComponent component, IndexContext context) throws IOException
-    {
-        com.google.common.io.Files.touch(fileFor(component, context).toJavaIOFile());
-        components.computeIfAbsent(context, k -> Sets.newHashSet()).add(component);
-    }
-
-    public IndexInput openPerSSTableInput(IndexComponent component)
-    {
-        return IndexFileUtils.instance().openBlockingInput(createPerSSTableFileHandle(component));
-    }
-
-    public ChecksumIndexInput openCheckSummedPerSSTableInput(IndexComponent component)
-    {
-        var indexInput = openPerSSTableInput(component);
-        return checksumIndexInput(null, indexInput);
-    }
-
-    public IndexInput openPerIndexInput(IndexComponent component, IndexContext context)
-    {
-        return IndexFileUtils.instance().openBlockingInput(createPerIndexFileHandle(component, context));
-    }
-
-    public ChecksumIndexInput openCheckSummedPerIndexInput(IndexComponent component, IndexContext context)
-    {
-        var indexInput = openPerIndexInput(component, context);
-        return checksumIndexInput(context, indexInput);
-    }
-
-    /**
-     * Returns a ChecksumIndexInput that reads the indexInput in the correct endianness for the context.
-     * These files were written by the Lucene {@link org.apache.lucene.store.DataOutput}. When written by
-     * Lucene 7.5, {@link org.apache.lucene.store.DataOutput} wrote the file using big endian formatting.
-     * After the upgrade to Lucene 9, the {@link org.apache.lucene.store.DataOutput} writes in little endian
-     * formatting.
-     *
-     * @param context The index context
-     * @param indexInput The index input to read
-     * @return A ChecksumIndexInput that reads the indexInput in the correct endianness for the context
-     */
-    private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
-    {
-        return getVersion(context) == Version.AA
-               ? new EndiannessReverserChecksumIndexInput(indexInput, getVersion(context))
-               : IndexFileUtils.getBufferedChecksumIndexInput(indexInput, getVersion(context));
-    }
-
-    public IndexOutputWriter openPerSSTableOutput(IndexComponent component) throws IOException
-    {
-        return openPerSSTableOutput(component, false);
-    }
-
-    public IndexOutputWriter openPerSSTableOutput(IndexComponent component, boolean append) throws IOException
-    {
-        final File file = fileFor(component);
-
-        if (logger.isTraceEnabled())
-            logger.trace(logMessage("Creating SSTable attached index output for component {} on file {}..."),
-                         component,
-                         file);
-
-        IndexOutputWriter writer = IndexFileUtils.instance().openOutput(file, getVersion().onDiskFormat().byteOrderFor(component, null), append, versions.get(null));
-
-        registerPerSSTableComponent(component);
-
-        return writer;
-    }
-
-    public IndexOutputWriter openPerIndexOutput(IndexComponent component, IndexContext context) throws IOException
-    {
-        return openPerIndexOutput(component, context, false);
-    }
-
-    public IndexOutputWriter openPerIndexOutput(IndexComponent component, IndexContext context, boolean append) throws IOException
-    {
-        final File file = fileFor(component, context);
-
-        if (logger.isTraceEnabled())
-            logger.trace(context.logMessage("Creating sstable attached index output for component {} on file {}..."),
-                         component,
-                         file);
-
-        IndexOutputWriter writer = IndexFileUtils.instance().openOutput(file, getVersion().onDiskFormat().byteOrderFor(component, context), append, versions.get(context));
-
-        registerPerSSTableComponent(component);
-
-        return writer;
-    }
-
-    public FileHandle createPerSSTableFileHandle(IndexComponent component)
-    {
-        FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, component);
-        return addByteOrderAndComplete(builder, component, null);
-    }
-
-    public FileHandle createPerIndexFileHandle(IndexComponent component, IndexContext context)
-    {
-        FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, component, context);
-        return addByteOrderAndComplete(builder, component, context);
-    }
-
-    private FileHandle addByteOrderAndComplete(FileHandle.Builder builder, IndexComponent component, IndexContext context)
-    {
-        var order = getVersion(context).onDiskFormat().byteOrderFor(component, context);
-        return builder.order(order).complete();
-    }
-
-    /**
-     * Opens a file handle for the provided index component similarly to {@link #createPerIndexFileHandle(IndexComponent, IndexContext)},
-     * but this method shoud be called instead of the aforemented one if the access is done "as part of flushing", that is
-     * before the full index that this is a part of has been finalized.
-     * <p>
-     * The use of this method can allow specific storage providers, typically tiered storage ones, to distinguish accesses
-     * that happen "at flush time" from other accesses, as the related file may be in different tier of storage.
-     */
-    public FileHandle createFlushTimePerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext)
-    {
-        FileHandle.Builder builder = StorageProvider.instance.flushTimeFileHandleBuilderFor(this, indexComponent, indexContext);
-        return builder.complete();
+        return perSSTableComponents().isComplete() && perIndexComponents(context).isEmpty();
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(descriptor, versions.get(null));
+        return Objects.hash(descriptor, perSSTableComponents().version());
     }
 
     @Override
@@ -531,7 +287,7 @@ public class IndexDescriptor
         if (o == null || getClass() != o.getClass()) return false;
         IndexDescriptor other = (IndexDescriptor)o;
         return Objects.equals(descriptor, other.descriptor) &&
-               Objects.equals(versions.get(null), other.versions.get(null));
+               Objects.equals(perSSTableComponents().version(), other.perSSTableComponents().version());
     }
 
     @Override
@@ -549,42 +305,7 @@ public class IndexDescriptor
                              message);
     }
 
-    private void registerPerSSTableComponents()
-    {
-        versions.get(null).onDiskFormat().perSSTableComponents()
-                .stream()
-                .filter(c -> !components.get(null).contains(c) && fileFor(c).exists())
-                .forEach(components.get(null)::add);
-    }
-
-    private void registerPerIndexComponents(IndexContext context)
-    {
-        Set<IndexComponent> components = this.components.computeIfAbsent(context, k -> Sets.newHashSet());
-        getVersion(context).onDiskFormat().perIndexComponents(context)
-                           .stream()
-                           .filter(c -> !components.contains(c) && fileFor(c, context).exists())
-                           .forEach(components::add);
-    }
-
-    private int numberOfComponents(IndexContext context)
-    {
-        return components.containsKey(context) ? components.get(context).size() : 0;
-    }
-
-    private File createFile(IndexComponent component, IndexContext context)
-    {
-        Component customComponent = component.type.createComponent(componentFileName(component, context));
-        return descriptor.fileFor(customComponent);
-    }
-
-    public static File fileFor(Descriptor descriptor, Version version, IndexComponent component, IndexContext context)
-    {
-        var componentFileName = version.fileNameFormatter().format(component, context);
-        Component customComponent = component.type.createComponent(componentFileName);
-        return descriptor.fileFor(customComponent);
-    }
-
-    private void deleteComponent(File file)
+    private static void deleteComponentFile(File file)
     {
         logger.debug("Deleting storage attached index component file {}", file);
         try
@@ -597,13 +318,356 @@ public class IndexDescriptor
         }
     }
 
-    private void registerPerSSTableComponent(IndexComponent component)
+    private class IndexComponentsImpl implements IndexComponents.ForWrite
     {
-        components.get(null).add(component);
-    }
+        private final @Nullable IndexContext context;
+        private final Version version;
+        private final int generation;
 
-    public ByteComparable.Version getEncodingVersion(IndexComponent indexComponent)
-    {
-        return getVersion().byteComparableVersionFor(indexComponent, descriptor.version);
+        private final Map<IndexComponentType, IndexComponentImpl> components = new EnumMap<>(IndexComponentType.class);
+
+        // Mark groups that are complete (and should not have new components added).
+        private volatile boolean isComplete;
+
+        private IndexComponentsImpl(@Nullable IndexContext context, Version version, int generation)
+        {
+            this.context = context;
+            this.version = version;
+            this.generation = generation;
+        }
+
+        private boolean componentExistsOnDisk(IndexComponentType component)
+        {
+            return new IndexComponentImpl(component).file().exists();
+        }
+
+        @Override
+        public Descriptor descriptor()
+        {
+            return descriptor;
+        }
+
+        @Override
+        public IndexDescriptor indexDescriptor()
+        {
+            return IndexDescriptor.this;
+        }
+
+        @Nullable
+        @Override
+        public IndexContext context()
+        {
+            return context;
+        }
+
+        @Override
+        public Version version()
+        {
+            return version;
+        }
+
+        @Override
+        public int generation()
+        {
+            return generation;
+        }
+
+        @Override
+        public boolean has(IndexComponentType component)
+        {
+            return components.containsKey(component);
+        }
+
+        @Override
+        public boolean isEmpty()
+        {
+            return isComplete() && components.size() == 1;
+        }
+
+        @Override
+        public Collection<IndexComponent.ForRead> all()
+        {
+            return Collections.unmodifiableCollection(components.values());
+        }
+
+        @Override
+        public boolean validateComponents(SSTable sstable, Tracker tracker, boolean validateChecksum)
+        {
+            if (isEmpty())
+                return true;
+
+            boolean isValid = true;
+            for (IndexComponentType expected : expectedComponentsForVersion())
+            {
+                var component = components.get(expected);
+                if (component == null)
+                {
+                    logger.warn(logMessage("Missing index component {} from SSTable {}"), expected, descriptor);
+                    isValid = false;
+                }
+                else if (!version().onDiskFormat().validateIndexComponent(component, validateChecksum))
+                {
+                    logger.warn(logMessage("Invalid/corrupted component {} for SSTable {}"), expected, descriptor);
+                    if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+                    {
+                        // We delete the corrupted file. Yes, this may break ongoing reads to that component, but
+                        // if something is wrong with the file, we're rather fail loudly from that point on than
+                        // risking reading and returning corrupted data.
+                        deleteComponentFile(component.file());
+                        // Note that invalidation will also delete the completion marker
+                    }
+                    else
+                    {
+                        logger.debug("Leaving believed-corrupt component {} of SSTable {} in place because {} is false", expected, descriptor, CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getKey());
+                    }
+
+                    isValid = false;
+                }
+            }
+            if (!isValid)
+                invalidate(sstable, tracker);
+            return isValid;
+        }
+
+        @Override
+        public void invalidate(SSTable sstable, Tracker tracker)
+        {
+            // This rewrite the TOC to stop listing the components, which ensures that if the node is restarted,
+            // then discovery will use an empty group for that context (like we add at the end of this method).
+            sstable.unregisterComponents(allAsCustomComponents(), tracker);
+
+            // Also delete the completion marker, to make it clear the group of components shouldn't be used anymore.
+            // Note it's comparatively safe to do so in that the marker is never accessed during reads, so we cannot
+            // break ongoing operations here.
+            var marker = components.remove(completionMarkerComponent());
+            if (marker != null)
+                deleteComponentFile(marker.file());
+
+            // Keeping legacy behavior if immutable components is disabled.
+            if (!version.useImmutableComponentFiles() && CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+                forceDeleteAllComponents();
+
+            // We replace the group by an explicitly empty one.
+            groups.put(context, createEmptyGroup(context));
+        }
+
+        @Override
+        public ForWrite forWrite()
+        {
+            // The difference between Reader and Writer is just to make code cleaner and make it clear when we read
+            // components from when we write/modify them. But this concrete implementatation is both in practice.
+            return this;
+        }
+
+        @Override
+        public IndexComponent.ForRead get(IndexComponentType component)
+        {
+            IndexComponentImpl info = components.get(component);
+            Preconditions.checkNotNull(info, "SSTable %s has no %s component for version %s and generation %s (context: %s)", descriptor, component, version, generation, context);
+            return info;
+        }
+
+        @Override
+        public long liveSizeOnDiskInBytes()
+        {
+            return components.values().stream().map(IndexComponentImpl::file).mapToLong(File::length).sum();
+        }
+
+        @Override
+        public IndexComponent.ForWrite addOrGet(IndexComponentType component)
+        {
+            Preconditions.checkArgument(!isComplete, "Should not add components for SSTable %s at this point; the completion marker has already been written", descriptor);
+            // When a sstable doesn't have any complete group, we use a marker empty one with a generation of -1:
+            Preconditions.checkArgument(generation >= 0, "Should not be adding component to empty components");
+            return components.computeIfAbsent(component, IndexComponentImpl::new);
+        }
+
+        @Override
+        public void forceDeleteAllComponents()
+        {
+            components.values()
+                      .stream()
+                      .map(IndexComponentImpl::file)
+                      .forEach(IndexDescriptor::deleteComponentFile);
+            components.clear();
+        }
+
+        @Override
+        public void markComplete() throws IOException
+        {
+            addOrGet(completionMarkerComponent()).createEmpty();
+            isComplete = true;
+            groups.put(context, this);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(descriptor, context, version, generation);
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            IndexComponentsImpl that = (IndexComponentsImpl) o;
+            return Objects.equals(descriptor, that.descriptor())
+                   && Objects.equals(context, that.context)
+                   && Objects.equals(version, that.version)
+                   && generation == that.generation;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s components for %s (v: %s, gen: %d): %s",
+                                 context == null ? "Per-SSTable" : "Per-Index",
+                                 descriptor,
+                                 version,
+                                 generation,
+                                 components.values());
+        }
+
+        private class IndexComponentImpl implements IndexComponent.ForRead, IndexComponent.ForWrite
+        {
+            private final IndexComponentType component;
+
+            private volatile String filenamePart;
+            private volatile File file;
+
+            private IndexComponentImpl(IndexComponentType component)
+            {
+                this.component = component;
+            }
+
+            @Override
+            public IndexComponentsImpl parent()
+            {
+                return IndexComponentsImpl.this;
+            }
+
+            @Override
+            public IndexComponentType componentType()
+            {
+                return component;
+            }
+
+            @Override
+            public ByteOrder byteOrder()
+            {
+                return version.onDiskFormat().byteOrderFor(component, context);
+            }
+
+            @Override
+            public String fileNamePart()
+            {
+                // Not thread-safe, but not really the end of the world if called multiple time
+                if (filenamePart == null)
+                    filenamePart = version.fileNameFormatter().format(component, context, generation);
+                return filenamePart;
+            }
+
+            @Override
+            public Component asCustomComponent()
+            {
+                return new Component(SSTableFormat.Components.Types.CUSTOM, fileNamePart());
+            }
+
+            @Override
+            public File file()
+            {
+                // Not thread-safe, but not really the end of the world if called multiple time
+                if (file == null)
+                    file = descriptor.fileFor(asCustomComponent());
+                return file;
+            }
+
+            @Override
+            public FileHandle createFileHandle()
+            {
+                final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this);
+                return builder.order(byteOrder()).complete();
+            }
+
+            @Override
+            public FileHandle createFlushTimeFileHandle()
+            {
+                final FileHandle.Builder builder = StorageProvider.instance.flushTimeFileHandleBuilderFor(this);
+                return builder.order(byteOrder()).complete();
+            }
+
+            @Override
+            public IndexInput openInput()
+            {
+                return IndexFileUtils.instance().openBlockingInput(createFileHandle());
+            }
+
+            @Override
+            public ChecksumIndexInput openCheckSummedInput()
+            {
+                var indexInput = openInput();
+                return checksumIndexInput(indexInput);
+            }
+
+            /**
+             * Returns a ChecksumIndexInput that reads the indexInput in the correct endianness for the context.
+             * These files were written by the Lucene {@link org.apache.lucene.store.DataOutput}. When written by
+             * Lucene 7.5, {@link org.apache.lucene.store.DataOutput} wrote the file using big endian formatting.
+             * After the upgrade to Lucene 9, the {@link org.apache.lucene.store.DataOutput} writes in little endian
+             * formatting.
+             *
+             * @param indexInput The index input to read
+             * @return A ChecksumIndexInput that reads the indexInput in the correct endianness for the context
+             */
+            private ChecksumIndexInput checksumIndexInput(IndexInput indexInput)
+            {
+                if (version == Version.AA)
+                    return new EndiannessReverserChecksumIndexInput(indexInput, version);
+                else
+                    return new BufferedChecksumIndexInput(indexInput);
+            }
+
+            @Override
+            public IndexOutputWriter openOutput(boolean append) throws IOException
+            {
+                File file = file();
+
+                if (logger.isTraceEnabled())
+                    logger.trace(this.parent().logMessage("Creating SSTable attached index output for component {} on file {}..."),
+                                 component,
+                                 file);
+
+                return IndexFileUtils.instance().openOutput(file, byteOrder(), append, version);
+            }
+
+            @Override
+            public void createEmpty() throws IOException
+            {
+                com.google.common.io.Files.touch(file().toJavaIOFile());
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return Objects.hash(this.parent(), component);
+            }
+
+            @Override
+            public boolean equals(Object o)
+            {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                IndexComponentImpl that = (IndexComponentImpl) o;
+                return Objects.equals(this.parent(), that.parent())
+                       && component == that.component;
+            }
+
+            @Override
+            public String toString()
+            {
+                return file().toString();
+            }
+        }
     }
 }

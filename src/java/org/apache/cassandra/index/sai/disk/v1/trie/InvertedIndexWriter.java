@@ -25,11 +25,10 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.commons.lang3.mutable.MutableLong;
 
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -45,10 +44,10 @@ public class InvertedIndexWriter implements Closeable
     private final PostingsWriter postingsWriter;
     private long postingsAdded;
 
-    public InvertedIndexWriter(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
+    public InvertedIndexWriter(IndexComponents.ForWrite components) throws IOException
     {
-        this.termsDictionaryWriter = new TrieTermsDictionaryWriter(indexDescriptor, indexContext);
-        this.postingsWriter = new PostingsWriter(indexDescriptor, indexContext);
+        this.termsDictionaryWriter = new TrieTermsDictionaryWriter(components);
+        this.postingsWriter = new PostingsWriter(components);
     }
 
     /**
@@ -89,8 +88,8 @@ public class InvertedIndexWriter implements Closeable
         map.put(SAICodecUtils.FOOTER_POINTER, "" + footerPointer.getValue());
 
         // Postings list file pointers are stored directly in TERMS_DATA, so a root is not needed.
-        components.put(IndexComponent.POSTING_LISTS, -1, postingsOffset, postingsLength);
-        components.put(IndexComponent.TERMS_DATA, termsRoot, termsOffset, termsLength, map);
+        components.put(IndexComponentType.POSTING_LISTS, -1, postingsOffset, postingsLength);
+        components.put(IndexComponentType.TERMS_DATA, termsRoot, termsOffset, termsLength, map);
 
         return components;
     }

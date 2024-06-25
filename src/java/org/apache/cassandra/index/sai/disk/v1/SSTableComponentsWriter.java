@@ -25,8 +25,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.lucene.util.IOUtils;
@@ -38,24 +38,20 @@ public class SSTableComponentsWriter implements PerSSTableWriter
 {
     protected static final Logger logger = LoggerFactory.getLogger(SSTableComponentsWriter.class);
 
-    private final IndexDescriptor indexDescriptor;
+    private final IndexComponents.ForWrite perSSTableComponents;
     private final NumericValuesWriter tokenWriter;
     private final NumericValuesWriter offsetWriter;
     private final MetadataWriter metadataWriter;
 
     private long currentKeyPartitionOffset;
 
-    public SSTableComponentsWriter(IndexDescriptor indexDescriptor) throws IOException
+    public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
     {
-        this.indexDescriptor = indexDescriptor;
-
-        this.metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
-
-        this.tokenWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES),
-                                                   indexDescriptor.openPerSSTableOutput(IndexComponent.TOKEN_VALUES),
+        this.perSSTableComponents = perSSTableComponents;
+        this.metadataWriter = new MetadataWriter(perSSTableComponents);
+        this.tokenWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.TOKEN_VALUES),
                                                    metadataWriter, false);
-        this.offsetWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.OFFSETS_VALUES),
-                                                    indexDescriptor.openPerSSTableOutput(IndexComponent.OFFSETS_VALUES),
+        this.offsetWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.OFFSETS_VALUES),
                                                     metadataWriter, true);
     }
 
@@ -75,14 +71,14 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     public void complete(Stopwatch stopwatch) throws IOException
     {
         IOUtils.close(tokenWriter, offsetWriter, metadataWriter);
-        indexDescriptor.createComponentOnDisk(IndexComponent.GROUP_COMPLETION_MARKER);
+        perSSTableComponents.markComplete();
     }
 
     @Override
     public void abort(Throwable accumulator)
     {
-        logger.debug(indexDescriptor.logMessage("Aborting token/offset writer for {}..."), indexDescriptor.descriptor);
-        indexDescriptor.deletePerSSTableIndexComponents();
+        logger.debug(perSSTableComponents.logMessage("Aborting token/offset writer for {}..."), perSSTableComponents.descriptor());
+        perSSTableComponents.forceDeleteAllComponents();
     }
 
     @VisibleForTesting

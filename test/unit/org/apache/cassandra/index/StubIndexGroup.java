@@ -34,6 +34,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -92,7 +93,14 @@ public class StubIndexGroup implements Index.Group
         return null;
     }
 
-    public Set<Component> getComponents()
+    @Override
+    public Set<Component> componentsForNewSSTable()
+    {
+        return Collections.emptySet();
+    }
+
+    @Override
+    public Set<Component> activeComponents(SSTableReader sstable)
     {
         return Collections.emptySet();
     }
