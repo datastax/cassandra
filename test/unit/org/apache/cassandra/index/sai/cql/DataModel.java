@@ -127,7 +127,8 @@ public interface DataModel
                                                        "1896, " + NORMAL_COLUMN_DATA.get(12),
                                                        "1896, " + NORMAL_COLUMN_DATA.get(13),
                                                        "1845, " + NORMAL_COLUMN_DATA.get(14),
-                                                       "1845, " + NORMAL_COLUMN_DATA.get(15));
+                                                       "1845, " + NORMAL_COLUMN_DATA.get(15)
+    );
 
     static AtomicInteger seq = new AtomicInteger();
 

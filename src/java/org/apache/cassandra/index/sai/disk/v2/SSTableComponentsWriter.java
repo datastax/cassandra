@@ -59,11 +59,13 @@ public class SSTableComponentsWriter implements PerSSTableWriter
         this.blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                      indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                      metadataWriter, true);
+
         this.sortedTermsWriter = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                        metadataWriter,
                                                        bytesWriter,
                                                        blockFPWriter,
-                                                       trieWriter);
+                                                       trieWriter,
+                                                       indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE));
     }
 
     @Override

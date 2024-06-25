@@ -73,6 +73,7 @@ public class SortedTermsReader
     private final SortedTermsMeta meta;
     private final FileHandle termsTrie;
     private final LongArray.Factory blockOffsetsFactory;
+    private final ByteComparable.Version termsTrieByteComparableVersion;
 
     /**
      * Creates a new reader based on its data components.
@@ -89,7 +90,8 @@ public class SortedTermsReader
                              @Nonnull FileHandle termsDataBlockOffsets,
                              @Nonnull FileHandle termsTrie,
                              @Nonnull SortedTermsMeta meta,
-                             @Nonnull NumericValuesMeta blockOffsetsMeta) throws IOException
+                             @Nonnull NumericValuesMeta blockOffsetsMeta,
+                             @Nonnull ByteComparable.Version termsTrieByteComparableVersion) throws IOException
     {
         this.termsData = termsData;
         this.termsTrie = termsTrie;
@@ -99,6 +101,7 @@ public class SortedTermsReader
         }
         this.meta = meta;
         this.blockOffsetsFactory = new MonotonicBlockPackedReader(termsDataBlockOffsets, blockOffsetsMeta);
+        this.termsTrieByteComparableVersion = termsTrieByteComparableVersion;
     }
 
     /**
@@ -153,7 +156,7 @@ public class SortedTermsReader
             this.termsDataFp = this.termsData.getFilePointer();
             this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
             this.currentTerm = new BytesRef(Math.max(meta.maxTermLength, 0));  // maxTermLength can be negative if meta.count == 0
-            this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP, ByteComparable.Version.OSS41);
+            this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP, termsTrieByteComparableVersion);
         }
 
         /**

@@ -55,8 +55,8 @@ public abstract class MemtableTrieTestBase
 
     static final ByteComparable.Version VERSION = MemtableTrie.BYTE_COMPARABLE_VERSION;
 
-    public static final Comparator<ByteComparable> FORWARD_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, VERSION);
-    public static final Comparator<ByteComparable> REVERSE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(invert(bytes1), invert(bytes2), VERSION);
+    public static final Comparator<ByteComparable> FORWARD_COMPARATOR = ByteComparable::compare;
+    public static final Comparator<ByteComparable> REVERSE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(invert(bytes1), invert(bytes2));
 
     abstract boolean usePut();
 
@@ -505,7 +505,7 @@ public abstract class MemtableTrieTestBase
         trie.forEachEntry(direction, (key, value) -> {
             Assert.assertTrue("Map exhausted first, key " + asString(key), it.hasNext());
             Map.Entry<ByteComparable, ByteBuffer> entry = it.next();
-            assertEquals(0, ByteComparable.compare(entry.getKey(), key, Trie.BYTE_COMPARABLE_VERSION));
+            assertEquals(0, ByteComparable.compare(entry.getKey(), key));
             assertEquals(entry.getValue(), value);
         });
         Assert.assertFalse("Trie exhausted first", it.hasNext());
@@ -545,7 +545,7 @@ public abstract class MemtableTrieTestBase
             Map.Entry<ByteComparable, ByteBuffer> en2 = it2.next();
             b.append(String.format("TreeSet %s:%s\n", asString(en2.getKey()), ByteBufferUtil.bytesToHex(en2.getValue())));
             b.append(String.format("Trie    %s:%s\n", asString(en1.getKey()), ByteBufferUtil.bytesToHex(en1.getValue())));
-            if (ByteComparable.compare(en1.getKey(), en2.getKey(), VERSION) != 0 || ByteBufferUtil.compareUnsigned(en1.getValue(), en2.getValue()) != 0)
+            if (ByteComparable.compare(en1.getKey(), en2.getKey()) != 0 || ByteBufferUtil.compareUnsigned(en1.getValue(), en2.getValue()) != 0)
                 failedAt.add(en1.getKey());
         }
         while (it1.hasNext())

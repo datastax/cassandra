@@ -23,6 +23,7 @@ import java.util.Arrays;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.index.PointValues.Relation;
 
 import static org.apache.lucene.index.PointValues.Relation.CELL_INSIDE_QUERY;
@@ -44,7 +45,7 @@ public class BKDQueries
         }
     };
 
-    public static BKDReader.IntersectVisitor bkdQueryFrom(Expression expression, int numDim, int bytesPerDim)
+    public static BKDReader.IntersectVisitor bkdQueryFrom(Expression expression, int numDim, int bytesPerDim, ByteComparable.Version version)
     {
         if (expression.lower == null && expression.upper == null)
         {
@@ -54,25 +55,25 @@ public class BKDQueries
         Bound lower = null ;
         if (expression.lower != null)
         {
-            final byte[] lowerBound = toComparableBytes(numDim, bytesPerDim, expression.lower.value.encoded, expression.validator);
+            final byte[] lowerBound = toComparableBytes(numDim, bytesPerDim, expression.lower.value.encoded, expression.validator, version);
             lower = new Bound(lowerBound, !expression.lower.inclusive);
         }
 
         Bound upper = null;
         if (expression.upper != null)
         {
-            final byte[] upperBound = toComparableBytes(numDim, bytesPerDim, expression.upper.value.encoded, expression.validator);
+            final byte[] upperBound = toComparableBytes(numDim, bytesPerDim, expression.upper.value.encoded, expression.validator, version);
             upper = new Bound(upperBound, !expression.upper.inclusive);
         }
 
         return new RangeQueryVisitor(numDim, bytesPerDim, lower, upper);
     }
 
-    private static byte[] toComparableBytes(int numDim, int bytesPerDim, ByteBuffer value, AbstractType<?> type)
+    private static byte[] toComparableBytes(int numDim, int bytesPerDim, ByteBuffer value, AbstractType<?> type, ByteComparable.Version version)
     {
         byte[] buffer = new byte[TypeUtil.fixedSizeOf(type)];
         assert buffer.length == bytesPerDim * numDim;
-        TypeUtil.toComparableBytes(value, type, buffer);
+        TypeUtil.toComparableBytes(value, type, buffer, version);
         return buffer;
     }
 

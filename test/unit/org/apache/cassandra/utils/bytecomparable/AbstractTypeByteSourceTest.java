@@ -99,7 +99,7 @@ public class AbstractTypeByteSourceTest
                 int compareBuffers = Integer.signum(type.compare(left, right));
                 ByteSource leftSource = type.asComparableBytes(left.duplicate(), version);
                 ByteSource rightSource = type.asComparableBytes(right.duplicate(), version);
-                int compareBytes = Integer.signum(ByteComparable.compare(v -> leftSource, v -> rightSource, version));
+                int compareBytes = Integer.signum(ByteComparable.compare(v -> leftSource, v -> rightSource));
                 Assert.assertEquals(compareBuffers, compareBytes);
             }
         }

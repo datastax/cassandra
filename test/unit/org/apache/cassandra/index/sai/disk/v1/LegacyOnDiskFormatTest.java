@@ -167,7 +167,10 @@ public class LegacyOnDiskFormatTest
                                             metadatas.get(0).getIndexRoot(IndexComponent.KD_TREE_POSTING_LISTS));
 
         Expression expression = new Expression(indexContext).add(Operator.LT, Int32Type.instance.decompose(10));
-        BKDReader.IntersectVisitor query = bkdQueryFrom(expression, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
+        BKDReader.IntersectVisitor query = bkdQueryFrom(expression,
+                                                        bkdReader.getNumDimensions(),
+                                                        bkdReader.getBytesPerDimension(),
+                                                        indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE));
         PostingList postingList = bkdReader.intersect(query, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext());
         assertNotNull(postingList);
     }

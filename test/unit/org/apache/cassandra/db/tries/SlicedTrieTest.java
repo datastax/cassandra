@@ -82,7 +82,7 @@ public class SlicedTrieTest
     "\000\000\777",
     "\777\777"
     });
-    public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, Trie.BYTE_COMPARABLE_VERSION);
+    public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = ByteComparable::compare;
     private static final int COUNT = 15000;
     Random rand = new Random();
 
@@ -95,7 +95,7 @@ public class SlicedTrieTest
     public void testIntersectRange(int count)
     {
         ByteComparable[] src1 = generateKeys(rand, count);
-        NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>((bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, Trie.BYTE_COMPARABLE_VERSION));
+        NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(ByteComparable::compare);
 
         MemtableTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
 
@@ -106,7 +106,7 @@ public class SlicedTrieTest
         {
             ByteComparable l = rand.nextBoolean() ? MemtableTrieTestBase.generateKey(rand) : src1[rand.nextInt(src1.length)];
             ByteComparable r = rand.nextBoolean() ? MemtableTrieTestBase.generateKey(rand) : src1[rand.nextInt(src1.length)];
-            int cmp = ByteComparable.compare(l, r, Trie.BYTE_COMPARABLE_VERSION);
+            int cmp = ByteComparable.compare(l, r);
             if (cmp > 0)
             {
                 ByteComparable t = l;
@@ -132,7 +132,7 @@ public class SlicedTrieTest
     @Test
     public void testSingletonSubtrie()
     {
-        Arrays.sort(BOUNDARIES, (a, b) -> ByteComparable.compare(a, b, ByteComparable.Version.OSS41));
+        Arrays.sort(BOUNDARIES, (a, b) -> ByteComparable.compare(a, b));
         for (int li = -1; li < BOUNDARIES.length; ++li)
         {
             ByteComparable l = li < 0 ? null : BOUNDARIES[li];
@@ -147,8 +147,8 @@ public class SlicedTrieTest
 
                     for (ByteComparable key : KEYS)
                     {
-                        int cmp1 = l != null ? ByteComparable.compare(key, l, ByteComparable.Version.OSS41) : 1;
-                        int cmp2 = r != null ? ByteComparable.compare(r, key, ByteComparable.Version.OSS41) : 1;
+                        int cmp1 = l != null ? ByteComparable.compare(key, l) : 1;
+                        int cmp2 = r != null ? ByteComparable.compare(r, key) : 1;
                         Trie<Boolean> ix = new SlicedTrie<>(Trie.singleton(key, true), l, includeLeft, r, includeRight);
                         boolean expected = true;
                         if (cmp1 < 0 || cmp1 == 0 && !includeLeft)

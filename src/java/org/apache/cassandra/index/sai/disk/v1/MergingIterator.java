@@ -107,7 +107,7 @@ public final class MergingIterator implements Iterator<ByteComparable>
         top[numTop++] = queue.pop();
         // extract all subs from the queue that have the same top element
         while (queue.size() != 0
-               && ByteComparable.compare(queue.top().current, top[0].current, ByteComparable.Version.OSS41) == 0)
+               && ByteComparable.compare(queue.top().current, top[0].current) == 0)
         {
             top[numTop++] = queue.pop();
         }
@@ -153,7 +153,7 @@ public final class MergingIterator implements Iterator<ByteComparable>
         @Override
         protected boolean lessThan(SubIterator a, SubIterator b)
         {
-            final int cmp = ByteComparable.compare(a.current, b.current, ByteComparable.Version.OSS41);
+            final int cmp = ByteComparable.compare(a.current, b.current);
 
             if (cmp != 0)
             {

@@ -342,7 +342,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                     assertEquals(String.format("Failed comparing %s and %s, %s vs %s version %s",
                                                safeStr(c.clusteringString(comp.subtypes())),
                                                safeStr(e.clusteringString(comp.subtypes())), bsc, bse, v),
-                                 expected, Integer.signum(ByteComparable.compare(bsc, bse, v)));
+                                 expected, Integer.signum(ByteComparable.compare(bsc, bse)));
                     maybeCheck41Properties(expected, bsc, bse, v);
                     maybeAssertNotPrefix(bsc, bse, v);
 
@@ -353,7 +353,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                     assertEquals(String.format("Failed comparing reversed %s and %s, %s vs %s version %s",
                                                safeStr(c.clusteringString(comp.subtypes())),
                                                safeStr(e.clusteringString(comp.subtypes())), bsrc, bsre, v),
-                                 expectedR, Integer.signum(ByteComparable.compare(bsrc, bsre, v)));
+                                 expectedR, Integer.signum(ByteComparable.compare(bsrc, bsre)));
                     maybeCheck41Properties(expectedR, bsrc, bsre, v);
                     maybeAssertNotPrefix(bsrc, bsre, v);
                 }
@@ -652,7 +652,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
         logger.info("{}\n{}", s1, s2);
 
         // Check that the representations compare correctly
-        Assert.assertEquals(Long.signum(kk1.compareTo(kk2)), ByteComparable.compare(kk1, kk2, version));
+        Assert.assertEquals(Long.signum(kk1.compareTo(kk2)), ByteComparable.compare(kk1, kk2));
         // s1 must not be a prefix of s2
         assertNotPrefix(s1, s2);
     }
@@ -791,7 +791,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
 
         for (Version version : Version.values())
         {
-            int actual = Integer.signum(ByteComparable.compare(bs1, bs2, version));
+            int actual = Integer.signum(ByteComparable.compare(bs1, bs2));
             assertEquals(String.format("Failed comparing %s(%s) and %s(%s)", ByteBufferUtil.bytesToHex(b1), bs1.byteComparableAsString(version), ByteBufferUtil.bytesToHex(b2), bs2.byteComparableAsString(version)),
                          expected,
                          actual);
@@ -814,7 +814,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
 
         for (Version version : Version.values())
         {
-            int actual = Integer.signum(ByteComparable.compare(k1, k2, version));
+            int actual = Integer.signum(ByteComparable.compare(k1, k2));
             assertEquals(String.format("Failed comparing %s[%s](%s) and %s[%s](%s)\npartitioner %s version %s",
                                        ByteBufferUtil.bytesToHex(b1),
                                        k1,
@@ -862,7 +862,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
         ByteComparable b1 = v -> convertor.apply(v1);
         ByteComparable b2 = v -> convertor.apply(v2);
         int expected = Integer.signum(comparator.apply(v1, v2));
-        int actual = Integer.signum(ByteComparable.compare(b1, b2, null));  // version ignored above
+        int actual = Integer.signum(ByteComparable.compare(b1, b2));
         assertEquals(String.format("Failed comparing %s and %s", v1, v2), expected, actual);
     }
 
@@ -876,7 +876,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
 
         for (Version version : Version.values())
         {
-            int actual = Integer.signum(ByteComparable.compare(bc1, bc2, version));
+            int actual = Integer.signum(ByteComparable.compare(bc1, bc2));
             if (expected != actual)
             {
                 if (type.isReversed())
@@ -885,7 +885,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                     ClusteringComparator cc = new ClusteringComparator(type);
                     ByteComparable c1 = cc.asByteComparable(Clustering.make(b1));
                     ByteComparable c2 = cc.asByteComparable(Clustering.make(b2));
-                    int actualcc = Integer.signum(ByteComparable.compare(c1, c2, version));
+                    int actualcc = Integer.signum(ByteComparable.compare(c1, c2));
                     if (actualcc == expected)
                         return;
                     assertEquals(String.format("Failed comparing reversed %s(%s, %s) and %s(%s, %s) direct (%d) and as clustering", safeStr(v1), ByteBufferUtil.bytesToHex(b1), c1, safeStr(v2), ByteBufferUtil.bytesToHex(b2), c2, actual), expected, actualcc);

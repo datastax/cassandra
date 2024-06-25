@@ -341,7 +341,11 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
         else
         {
-            builder = new SegmentBuilder.KDTreeSegmentBuilder(rowIdOffset, indexContext.getValidator(), limiter, indexContext.getIndexWriterConfig());
+            builder = new SegmentBuilder.KDTreeSegmentBuilder(rowIdOffset,
+                                                              indexContext.getValidator(),
+                                                              limiter,
+                                                              indexContext.getIndexWriterConfig(),
+                                                              indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE));
         }
 
         long globalBytesUsed = limiter.increment(builder.totalBytesAllocated());

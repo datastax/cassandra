@@ -85,7 +85,7 @@ public class TermsReader implements Closeable
         termDictionaryFile = termsData;
         postingsFile = postingLists;
         termDictionaryRoot = root;
-        this.encodingVersion = indexDescriptor.getEncodingVersion(IndexComponent.TERMS_DATA);
+        this.encodingVersion = indexDescriptor.byteComparableVersionFor(IndexComponent.TERMS_DATA);
 
         try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile))
         {
@@ -283,7 +283,7 @@ public class TermsReader implements Closeable
             do
             {
                 Pair<ByteComparable, Long> nextTriePair = reader.next();
-                ByteSource mapEntry = nextTriePair.left.asComparableBytes(ByteComparable.Version.OSS41);
+                ByteSource mapEntry = nextTriePair.left.asComparableBytes(encodingVersion);
                 long postingsOffset = nextTriePair.right;
                 byte[] nextBytes = ByteSourceInverse.readBytes(mapEntry);
 
@@ -318,8 +318,8 @@ public class TermsReader implements Closeable
         private TermsScanner(long segmentOffset)
         {
             this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, encodingVersion);
-            this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(ByteComparable.Version.OSS41)));
-            this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(ByteComparable.Version.OSS41)));
+            this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(encodingVersion)));
+            this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(encodingVersion)));
             this.segmentOffset = segmentOffset;
         }
 

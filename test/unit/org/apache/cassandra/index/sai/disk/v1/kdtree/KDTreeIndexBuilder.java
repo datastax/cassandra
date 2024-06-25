@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
@@ -141,7 +142,8 @@ public class KDTreeIndexBuilder
     KDTreeIndexSearcher flushAndOpen() throws IOException
     {
         final TermsIterator termEnum = new MemtableTermsIterator(null, null, terms);
-        final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues.fromTermEnum(termEnum, type);
+        final ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE);
+        final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues.fromTermEnum(termEnum, type, version);
 
         final SegmentMetadata metadata;
 
@@ -189,9 +191,10 @@ public class KDTreeIndexBuilder
     {
         final int size = endTermExclusive - startTermInclusive;
         Assert.assertTrue(size > 0);
+        ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE);
         KDTreeIndexBuilder indexBuilder = new KDTreeIndexBuilder(indexDescriptor,
                                                                  Int32Type.instance,
-                                                                 singleOrd(int32Range(startTermInclusive, endTermExclusive), Int32Type.instance, startTermInclusive, size),
+                                                                 singleOrd(int32Range(startTermInclusive, endTermExclusive), Int32Type.instance, version, startTermInclusive, size),
                                                                  size,
                                                                  startTermInclusive,
                                                                  endTermExclusive);
@@ -204,9 +207,10 @@ public class KDTreeIndexBuilder
         BigDecimal bigDifference = endTermExclusive.subtract(startTermInclusive);
         int size = bigDifference.intValueExact() * 10;
         Assert.assertTrue(size > 0);
+        ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE);
         KDTreeIndexBuilder indexBuilder = new KDTreeIndexBuilder(indexDescriptor,
                                                                  DecimalType.instance,
-                                                                 singleOrd(decimalRange(startTermInclusive, endTermExclusive), DecimalType.instance, startTermInclusive.intValueExact() * 10, size),
+                                                                 singleOrd(decimalRange(startTermInclusive, endTermExclusive), DecimalType.instance, version, startTermInclusive.intValueExact() * 10, size),
                                                                  size,
                                                                  startTermInclusive.intValueExact() * 10,
                                                                  endTermExclusive.intValueExact() * 10);
@@ -219,9 +223,10 @@ public class KDTreeIndexBuilder
         BigInteger bigDifference = endTermExclusive.subtract(startTermInclusive);
         int size = bigDifference.intValueExact();
         Assert.assertTrue(size > 0);
+        ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE);
         KDTreeIndexBuilder indexBuilder = new KDTreeIndexBuilder(indexDescriptor,
                                                                  IntegerType.instance,
-                                                                 singleOrd(bigIntegerRange(startTermInclusive, endTermExclusive), IntegerType.instance, startTermInclusive.intValueExact(), size),
+                                                                 singleOrd(bigIntegerRange(startTermInclusive, endTermExclusive), IntegerType.instance, version, startTermInclusive.intValueExact(), size),
                                                                  size,
                                                                  startTermInclusive.intValueExact(),
                                                                  endTermExclusive.intValueExact());
@@ -239,9 +244,10 @@ public class KDTreeIndexBuilder
     {
         final long size = endTermExclusive - startTermInclusive;
         Assert.assertTrue(size > 0);
+        ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE);
         KDTreeIndexBuilder indexBuilder = new KDTreeIndexBuilder(indexDescriptor,
                                                                  LongType.instance,
-                                                                 singleOrd(longRange(startTermInclusive, endTermExclusive), LongType.instance, Math.toIntExact(startTermInclusive), Math.toIntExact(size)),
+                                                                 singleOrd(longRange(startTermInclusive, endTermExclusive), LongType.instance, version, Math.toIntExact(startTermInclusive), Math.toIntExact(size)),
                                                                  Math.toIntExact(size),
                                                                  Math.toIntExact(startTermInclusive),
                                                                  Math.toIntExact(endTermExclusive));
@@ -259,9 +265,10 @@ public class KDTreeIndexBuilder
     {
         final int size = endTermExclusive - startTermInclusive;
         Assert.assertTrue(size > 0);
+        ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE);
         KDTreeIndexBuilder indexBuilder = new KDTreeIndexBuilder(indexDescriptor,
                                                                  ShortType.instance,
-                                                                 singleOrd(shortRange(startTermInclusive, endTermExclusive), ShortType.instance, startTermInclusive, size),
+                                                                 singleOrd(shortRange(startTermInclusive, endTermExclusive), ShortType.instance, version, startTermInclusive, size),
                                                                  size,
                                                                  startTermInclusive,
                                                                  endTermExclusive);
@@ -272,7 +279,7 @@ public class KDTreeIndexBuilder
      * Returns inverted index where each posting list contains exactly one element equal to the terms ordinal number +
      * given offset.
      */
-    public static AbstractIterator<Pair<ByteComparable, LongArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
+    public static AbstractIterator<Pair<ByteComparable, LongArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, ByteComparable.Version version, int segmentRowIdOffset, int size)
     {
         return new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
         {
@@ -291,7 +298,7 @@ public class KDTreeIndexBuilder
                 postings.add(currentSegmentRowId++);
                 assertTrue(terms.hasNext());
 
-                final ByteSource encoded = TypeUtil.asComparableBytes(terms.next(), type, ByteComparable.Version.OSS41);
+                final ByteSource encoded = TypeUtil.asComparableBytes(terms.next(), type, version);
                 return Pair.create(v -> encoded, postings);
             }
         };

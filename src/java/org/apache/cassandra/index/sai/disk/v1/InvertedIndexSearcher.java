@@ -72,7 +72,8 @@ public class InvertedIndexSearcher extends IndexSearcher
                                  indexContext,
                                  indexFiles.termsData(),
                                  indexFiles.postingLists(),
-                                 root, footerPointer);
+                                 root,
+                                 footerPointer);
     }
 
     @Override

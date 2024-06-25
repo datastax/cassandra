@@ -83,6 +83,7 @@ public class TermsReaderTest extends SaiRandomizedTest
 
         long termsFooterPointer = Long.parseLong(indexMetas.get(IndexComponent.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 
+        ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.TERMS_DATA);
         try (TermsReader reader = new TermsReader(indexDescriptor,
                                                   indexContext,
                                                   termsData,
@@ -96,7 +97,7 @@ public class TermsReaderTest extends SaiRandomizedTest
                 for (ByteComparable term = actualTermsEnum.next(); term != null; term = actualTermsEnum.next())
                 {
                     final ByteComparable expected = termsEnum.get(i++).left;
-                    assertEquals(0, ByteComparable.compare(expected, term, ByteComparable.Version.OSS41));
+                    assertEquals(0, ByteComparable.compare(expected, term));
                 }
             }
         }
@@ -120,6 +121,8 @@ public class TermsReaderTest extends SaiRandomizedTest
 
         long termsFooterPointer = Long.parseLong(indexMetas.get(IndexComponent.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 
+
+        ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.TERMS_DATA);
         try (TermsReader reader = new TermsReader(indexDescriptor,
                                                   indexContext,
                                                   termsData,
@@ -129,7 +132,7 @@ public class TermsReaderTest extends SaiRandomizedTest
         {
             for (Pair<ByteComparable, LongArrayList> pair : termsEnum)
             {
-                final byte[] bytes = ByteSourceInverse.readBytes(pair.left.asComparableBytes(ByteComparable.Version.OSS41));
+                final byte[] bytes = ByteSourceInverse.readBytes(pair.left.asComparableBytes(version));
                 try (PostingList actualPostingList = reader.exactMatch(ByteComparable.fixedLength(bytes),
                                                                        (QueryEventListener.TrieIndexEventListener)NO_OP_TRIE_LISTENER,
                                                                        new QueryContext()))

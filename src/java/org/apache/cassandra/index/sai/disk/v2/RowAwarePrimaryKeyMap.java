@@ -31,6 +31,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -81,6 +82,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final ClusteringComparator clusteringComparator;
         private final PrimaryKey.Factory primaryKeyFactory;
         private final SSTableId<?> sstableId;
+        private final ByteComparable.Version byteComparableVersion;
 
         public RowAwarePrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable)
         {
@@ -96,7 +98,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.termsDataBlockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS);
                 this.termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
                 this.termsTrie = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
-                this.sortedTermsReader = new SortedTermsReader(termsData, termsDataBlockOffsets, termsTrie, sortedTermsMeta, blockOffsetsMeta);
+                this.byteComparableVersion = indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
+                this.sortedTermsReader = new SortedTermsReader(termsData, termsDataBlockOffsets, termsTrie, sortedTermsMeta, blockOffsetsMeta, byteComparableVersion);
                 this.partitioner = sstable.metadata().partitioner;
                 this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
                 this.clusteringComparator = indexDescriptor.clusteringComparator;
@@ -120,7 +123,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                                  partitioner,
                                                  primaryKeyFactory,
                                                  clusteringComparator,
-                                                 sstableId);
+                                                 sstableId,
+                                                 byteComparableVersion);
             }
             catch (IOException e)
             {
@@ -143,6 +147,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private final ClusteringComparator clusteringComparator;
     private final SSTableId<?> sstableId;
     private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
+    private final ByteComparable.Version byteComparableVersion;
 
     private RowAwarePrimaryKeyMap(LongArray rowIdToToken,
                                   SortedTermsReader sortedTermsReader,
@@ -150,7 +155,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                   IPartitioner partitioner,
                                   PrimaryKey.Factory primaryKeyFactory,
                                   ClusteringComparator clusteringComparator,
-                                  SSTableId<?> sstableId)
+                                  SSTableId<?> sstableId,
+                                  ByteComparable.Version version)
     {
         this.rowIdToToken = rowIdToToken;
         this.sortedTermsReader = sortedTermsReader;
@@ -159,6 +165,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         this.primaryKeyFactory = primaryKeyFactory;
         this.clusteringComparator = clusteringComparator;
         this.sstableId = sstableId;
+        this.byteComparableVersion = version;
     }
 
     @Override
@@ -251,10 +258,10 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         try
         {
             cursor.seekToPointId(sstableRowId);
-            ByteSource.Peekable peekable = cursor.term().asPeekableBytes(ByteComparable.Version.OSS41);
+            ByteSource.Peekable peekable = cursor.term().asPeekableBytes(byteComparableVersion);
 
             Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable),
-                                                                            ByteComparable.Version.OSS41);
+                                                                            byteComparableVersion);
             byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
 
             if (keyBytes == null)

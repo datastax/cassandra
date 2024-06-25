@@ -160,7 +160,7 @@ public class TrieMemoryIndexTest
                                                           ? ByteComparable.fixedLength(decompose.apply(rowId))
                                                           : version -> type.asComparableBytes(decompose.apply(rowId), version);
             final ByteComparable actualByteComparable = pair.left;
-            assertEquals("Mismatch at: " + i, 0, ByteComparable.compare(expectedByteComparable, actualByteComparable, ByteComparable.Version.OSS41));
+            assertEquals("Mismatch at: " + i, 0, ByteComparable.compare(expectedByteComparable, actualByteComparable));
 
             i++;
         }

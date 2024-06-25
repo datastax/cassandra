@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.index.sai.disk.v1.kdtree.BKDQueries.bkdQueryFrom;
 
@@ -49,6 +50,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
 
     private final BKDReader bkdReader;
     private final QueryEventListener.BKDIndexEventListener perColumnEventListener;
+    private final ByteComparable.Version byteComparableVersion;
 
     KDTreeIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                         PerIndexFiles perIndexFiles,
@@ -69,6 +71,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
                                   indexFiles.kdtreePostingLists(),
                                   postingsPosition);
         perColumnEventListener = (QueryEventListener.BKDIndexEventListener)indexContext.getColumnQueryMetrics();
+        byteComparableVersion = indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE);
     }
 
     @Override
@@ -91,7 +94,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
 
         if (exp.getOp().isEqualityOrRange())
         {
-            final BKDReader.IntersectVisitor query = bkdQueryFrom(exp, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
+            final BKDReader.IntersectVisitor query = bkdQueryFrom(exp, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension(), byteComparableVersion);
             QueryEventListener.BKDIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             return bkdReader.intersect(query, listener, context);
         }
