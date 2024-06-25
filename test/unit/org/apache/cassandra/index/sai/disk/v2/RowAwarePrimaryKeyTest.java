@@ -42,7 +42,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testHashCodeForDeferredPrimaryKey()
     {
-        var factory = Version.BA.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
+        var factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -69,7 +69,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testHashCodeForLoadedPrimaryKey()
     {
-        var factory = Version.BA.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
+        var factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -91,7 +91,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     public void testHashCodeForDeferedPrimaryKeyWithClusteringColumns()
     {
         var comparator = new ClusteringComparator(Int32Type.instance);
-        var factory = Version.BA.onDiskFormat().primaryKeyFactory(comparator);
+        var factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(comparator);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);

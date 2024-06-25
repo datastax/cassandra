@@ -1122,7 +1122,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
     public void createLinks(String snapshotDirectoryPath, RateLimiter rateLimiter)
     {
-        createLinks(descriptor, components, snapshotDirectoryPath, rateLimiter);
+        createLinks(descriptor, components(), snapshotDirectoryPath, rateLimiter);
     }
 
     public static void createLinks(Descriptor descriptor, Set<Component> components, String snapshotDirectoryPath)
@@ -2004,7 +2004,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     private long bytesOnDisk(boolean logical)
     {
         long bytes = 0;
-        for (Component component : components)
+        for (Component component : components())
         {
             // Only the data file is compressable.
             bytes += logical && component == Components.DATA && compression

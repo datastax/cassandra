@@ -23,8 +23,8 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -642,6 +642,12 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
+    public ImmutableSet<Component> components()
+    {
+        return delegate.components();
+    }
+
+    @Override
     public int getComponentSize()
     {
         return delegate.getComponentSize();
@@ -657,12 +663,6 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     public long logicalBytesOnDisk()
     {
         return delegate.logicalBytesOnDisk();
-    }
-
-    @Override
-    public Set<Component> getComponents()
-    {
-        return delegate.getComponents();
     }
 
     @Override

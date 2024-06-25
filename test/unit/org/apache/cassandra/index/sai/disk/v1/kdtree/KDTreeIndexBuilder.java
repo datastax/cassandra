@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
@@ -146,8 +147,8 @@ public class KDTreeIndexBuilder
         final SegmentMetadata metadata;
 
         IndexContext indexContext = SAITester.createIndexContext("test", Int32Type.instance);
-        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 TypeUtil.fixedSizeOf(type),
                                                                 maxSegmentRowId,
                                                                 size,
@@ -166,11 +167,11 @@ public class KDTreeIndexBuilder
                                            indexMetas);
         }
 
-        try (PerIndexFiles indexFiles = new PerIndexFiles(indexDescriptor, SAITester.createIndexContext("test", Int32Type.instance)))
+        try (PerIndexFiles indexFiles = new PerIndexFiles(components))
         {
             SSTableContext sstableContext = mock(SSTableContext.class);
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
-            when(sstableContext.indexDescriptor()).thenReturn(indexDescriptor);
+            when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
 
             IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
             assertThat(searcher, is(instanceOf(KDTreeIndexSearcher.class)));
