@@ -21,7 +21,9 @@ package org.apache.cassandra.index.sai.view;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -33,6 +35,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Pair;
 
@@ -81,7 +84,7 @@ public class IndexViewManager
         Pair<Set<SSTableIndex>, Set<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validate);
 
         View currentView, newView;
-        Collection<SSTableIndex> newViewIndexes = new HashSet<>();
+        Map<Descriptor, SSTableIndex> newViewIndexes = new HashMap<>();
         Collection<SSTableIndex> releasableIndexes = new ArrayList<>();
         Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
         
@@ -97,21 +100,18 @@ public class IndexViewManager
                 // but different SSTableReader java objects with different start positions. So we need to release them
                 // from existing view.  see DSP-19677
                 SSTableReader sstable = sstableIndex.getSSTable();
-                if (toRemove.contains(sstable) || newViewIndexes.contains(sstableIndex))
+                if (toRemove.contains(sstable))
                     releasableIndexes.add(sstableIndex);
                 else
-                    newViewIndexes.add(sstableIndex);
+                    addOrUpdateSSTableIndex(sstableIndex, newViewIndexes, releasableIndexes);
             }
 
             for (SSTableIndex sstableIndex : indexes.left)
             {
-                if (newViewIndexes.contains(sstableIndex))
-                    releasableIndexes.add(sstableIndex);
-                else
-                    newViewIndexes.add(sstableIndex);
+                addOrUpdateSSTableIndex(sstableIndex, newViewIndexes, releasableIndexes);
             }
 
-            newView = new View(context, newViewIndexes);
+            newView = new View(context, newViewIndexes.values());
         }
         while (!view.compareAndSet(currentView, newView));
 
@@ -123,7 +123,27 @@ public class IndexViewManager
         return indexes.right;
     }
 
-    public void drop(Collection<SSTableReader> sstablesToRebuild)
+    private static void addOrUpdateSSTableIndex(SSTableIndex ssTableIndex, Map<Descriptor, SSTableIndex> addTo, Collection<SSTableIndex> toRelease)
+    {
+        var descriptor = ssTableIndex.getSSTable().descriptor;
+        SSTableIndex previous = addTo.get(descriptor);
+        if (previous != null)
+        {
+            // If the new index use the same files that the exiting one (and the previous one is still complete, meaning
+            // that the files weren't corrupted), then keep the old one (no point in changing for the same thing).
+            if (previous.usedPerIndexComponents().isComplete() && ssTableIndex.usedPerIndexComponents().hasSameVersionAndGenerationThan(previous.usedPerIndexComponents()))
+            {
+                toRelease.add(ssTableIndex);
+                return;
+            }
+
+            // Otherwise, release the old, and we'll replace by the new one below.
+            toRelease.add(previous);
+        }
+        addTo.put(descriptor, ssTableIndex);
+    }
+
+    public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
     {
         View currentView = view.get();
 
@@ -134,7 +154,7 @@ public class IndexViewManager
             if (!toRemove.contains(sstable))
                 continue;
 
-            index.markObsolete();
+            index.release();
         }
 
         update(toRemove, Collections.emptyList(), false);
@@ -144,16 +164,17 @@ public class IndexViewManager
      * Called when index is dropped. Mark all {@link SSTableIndex} as released and per-column index files
      * will be removed when in-flight queries completed and {@code obsolete} is true.
      *
-     * @param obsolete true if index files should be deleted after invalidate; false otherwise.
+     * @param indexWasDropped true if the index is invalidated because it was dropped; false if the index is simply
+     *                        being unloaded.
      */
-    public void invalidate(boolean obsolete)
+    public void invalidate(boolean indexWasDropped)
     {
         View previousView = view.getAndSet(new View(context, Collections.emptyList()));
 
         for (SSTableIndex index : previousView)
         {
-            if (obsolete)
-                index.markObsolete();
+            if (indexWasDropped)
+                index.markIndexDropped();
             else
                 index.release();
         }

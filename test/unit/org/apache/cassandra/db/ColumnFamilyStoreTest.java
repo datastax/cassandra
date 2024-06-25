@@ -382,7 +382,7 @@ public class ColumnFamilyStoreTest
                                              CF_STANDARD1,
                                              liveSSTable.descriptor.id,
                                              liveSSTable.descriptor.version.format);
-            for (Component c : liveSSTable.getComponents())
+            for (Component c : liveSSTable.components())
                 assertTrue("Cannot find backed-up file:" + desc.fileFor(c), desc.fileFor(c).exists());
         }
     }
