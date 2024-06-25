@@ -36,7 +36,7 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
@@ -76,12 +76,12 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
         vectorsFile = indexFiles.vectors();
-        long vectorsSegmentOffset = this.componentMetadatas.get(IndexComponent.VECTOR).offset;
+        long vectorsSegmentOffset = this.componentMetadatas.get(IndexComponentType.VECTOR).offset;
 
-        SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponent.POSTING_LISTS);
+        SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
-        SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponent.TERMS_DATA);
+        SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         hnsw = new OnDiskHnswGraph(indexFiles.termsData(), termsMetadata.offset, termsMetadata.length, OFFSET_CACHE_MIN_BYTES);
         vectors = new OnDiskVectors(vectorsFile, vectorsSegmentOffset);
     }

@@ -58,9 +58,10 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexBuilder;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
@@ -904,22 +905,22 @@ public class NativeIndexDDLTest extends SAITester
                                              CorruptionType corruptionType,
                                              boolean rebuild) throws Throwable
     {
-        IndexContext numericIndexContext = createIndexContext(numericIndexName, Int32Type.instance);
-        IndexContext stringIndexContext = createIndexContext(stringIndexName, UTF8Type.instance);
+        IndexContext numericIndexContext = getIndexContext(numericIndexName);
+        IndexContext stringIndexContext = getIndexContext(stringIndexName);
 
-        for (IndexComponent component : Version.latest().onDiskFormat().perSSTableComponents())
+        for (IndexComponentType component : Version.latest().onDiskFormat().perSSTableComponentTypes())
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, null, corruptionType, true, true, rebuild);
 
-        for (IndexComponent component : Version.latest().onDiskFormat().perIndexComponents(numericIndexContext))
+        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponentTypes(numericIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, numericIndexContext, corruptionType, false, true, rebuild);
 
-        for (IndexComponent component : Version.latest().onDiskFormat().perIndexComponents(stringIndexContext))
+        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponentTypes(stringIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, stringIndexContext, corruptionType, true, false, rebuild);
     }
 
     private void verifyRebuildIndexComponent(IndexContext numericIndexContext,
                                              IndexContext stringIndexContext,
-                                             IndexComponent component,
+                                             IndexComponentType component,
                                              IndexContext corruptionContext,
                                              CorruptionType corruptionType,
                                              boolean failedStringIndex,
@@ -933,11 +934,11 @@ public class NativeIndexDDLTest extends SAITester
         // that are encryptable unless they have been removed because encrypted components aren't
         // checksum validated.
 
-        if (component == IndexComponent.PRIMARY_KEY_TRIE || component == IndexComponent.PRIMARY_KEY_BLOCKS || component == IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)
+        if (component == IndexComponentType.PRIMARY_KEY_TRIE || component == IndexComponentType.PRIMARY_KEY_BLOCKS || component == IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)
             return;
 
-        if (((component == IndexComponent.GROUP_COMPLETION_MARKER) ||
-             (component == IndexComponent.COLUMN_COMPLETION_MARKER)) &&
+        if (((component == IndexComponentType.GROUP_COMPLETION_MARKER) ||
+             (component == IndexComponentType.COLUMN_COMPLETION_MARKER)) &&
             (corruptionType != CorruptionType.REMOVED))
             return;
 
@@ -946,7 +947,7 @@ public class NativeIndexDDLTest extends SAITester
         // initial verification
         verifySSTableIndexes(numericIndexContext.getIndexName(), 1);
         verifySSTableIndexes(stringIndexContext.getIndexName(), 1);
-        verifyIndexFiles(numericIndexContext, stringIndexContext, 1, 1, 1, 1, 1);
+        verifyIndexComponentFiles(numericIndexContext, stringIndexContext);
         assertTrue(verifyChecksum(numericIndexContext));
         assertTrue(verifyChecksum(numericIndexContext));
 
@@ -961,15 +962,38 @@ public class NativeIndexDDLTest extends SAITester
         else
             corruptIndexComponent(component, corruptionType);
 
-        // If we are removing completion markers then the rest of the components should still have
-        // valid checksums.
-        boolean expectedNumericState = !failedNumericIndex || isBuildCompletionMarker(component);
-        boolean expectedLiteralState = !failedStringIndex || isBuildCompletionMarker(component);
+        // Reload all SSTable indexes to manifest the corruption:
+        reloadSSTableIndex();
 
-        assertEquals("Checksum verification for " + component + " should be " + expectedNumericState + " but was " + !expectedNumericState,
-                     expectedNumericState,
-                     verifyChecksum(numericIndexContext));
-        assertEquals(expectedLiteralState, verifyChecksum(stringIndexContext));
+        try
+        {
+            // If the corruption is that a file is missing entirely, the index won't be marked non-queryable...
+            rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+            // If we corrupted the index (and it's still queryable), we get either 0 or 2, depending on whether
+            // there is previous build of the index that gets automatically picked up. But mostly, we want to ensure
+            // the index does work if it's not corrupted.
+            if (!failedNumericIndex)
+                assertEquals(rowCount, rows.all().size());
+
+            //assertEquals(failedNumericIndex ? 0 : rowCount, rows.all().size());
+        }
+        catch (ReadFailureException e)
+        {
+            // ...but most kind of corruption will result in the index being non-queryable.
+        }
+
+        try
+        {
+            // If the corruption is that a file is missing entirely, the index won't be marked non-queryable...
+            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+            // Same as above
+            if (!failedStringIndex)
+                assertEquals(rowCount, rows.all().size());
+        }
+        catch (ReadFailureException e)
+        {
+            // ...but most kind of corruption will result in the index being non-queryable.
+        }
 
         if (rebuild)
         {
@@ -977,35 +1001,6 @@ public class NativeIndexDDLTest extends SAITester
         }
         else
         {
-            // Reload all SSTable indexes to manifest the corruption:
-            reloadSSTableIndex();
-
-            // Verify the index cannot be read:
-            verifySSTableIndexes(numericIndexContext.getIndexName(), Version.latest().onDiskFormat().perSSTableComponents().contains(component) ? 0 : 1, failedNumericIndex ? 0 : 1);
-            verifySSTableIndexes(stringIndexContext.getIndexName(), Version.latest().onDiskFormat().perSSTableComponents().contains(component) ? 0 : 1, failedStringIndex ? 0 : 1);
-
-            try
-            {
-                // If the corruption is that a file is missing entirely, the index won't be marked non-queryable...
-                rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
-                assertEquals(failedNumericIndex ? 0 : rowCount, rows.all().size());
-            }
-            catch (ReadFailureException e)
-            {
-                // ...but most kind of corruption will result in the index being non-queryable.
-            }
-
-            try
-            {
-                // If the corruption is that a file is missing entirely, the index won't be marked non-queryable...
-                rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
-                assertEquals(failedStringIndex ? 0 : rowCount, rows.all().size());
-            }
-            catch (ReadFailureException e)
-            {
-                // ...but most kind of corruption will result in the index being non-queryable.
-            }
-
             // Simulate the index repair that would occur on restart:
             runInitializationTask();
         }
@@ -1013,12 +1008,61 @@ public class NativeIndexDDLTest extends SAITester
         // verify indexes are recovered
         verifySSTableIndexes(numericIndexContext.getIndexName(), 1);
         verifySSTableIndexes(numericIndexContext.getIndexName(), 1);
-        verifyIndexFiles(numericIndexContext, stringIndexContext, 1, 1, 1, 1, 1);
+        verifyIndexComponentFiles(numericIndexContext, stringIndexContext);
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(rowCount, rows.all().size());
         rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
         assertEquals(rowCount, rows.all().size());
+    }
+
+
+    @Test
+    public void verifyCanRebuildAndReloadInPlaceToNewerVersion() throws Throwable
+    {
+        Version current = Version.latest();
+        try
+        {
+            SAIUtil.setLatestVersion(Version.AA);
+
+            // prepare schema and data
+            createTable(CREATE_TABLE_TEMPLATE);
+            String numericIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            String stringIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+            IndexContext numericIndexContext = getIndexContext(numericIndexName);
+            IndexContext stringIndexContext = getIndexContext(stringIndexName);
+
+            int rowCount = 2;
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+            flush();
+
+            // Sanity check first
+            ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+            assertEquals(rowCount, rows.all().size());
+            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+            assertEquals(rowCount, rows.all().size());
+
+            verifySAIVersionInUse(Version.AA, numericIndexContext, stringIndexContext);
+
+            SAIUtil.setLatestVersion(current);
+
+            rebuildIndexes(numericIndexName, stringIndexName);
+            reloadSSTableIndexInPlace();
+
+            // This should still work
+            rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+            assertEquals(rowCount, rows.all().size());
+            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+            assertEquals(rowCount, rows.all().size());
+
+            verifySAIVersionInUse(current, numericIndexContext, stringIndexContext);
+        }
+        finally
+        {
+            // If we haven't failed, we should already have done this, but if we did fail ...
+            SAIUtil.setLatestVersion(current);
+        }
     }
 
     @Test
@@ -1267,7 +1311,7 @@ public class NativeIndexDDLTest extends SAITester
 
         Injections.inject(delayIndexBuilderCompletion);
 
-        IndexContext numericIndexContext = createIndexContext(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
+        IndexContext numericIndexContext = getIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
 
         waitForAssert(() -> assertTrue(getCompactionTasks() > 0), 1000, TimeUnit.MILLISECONDS);
 

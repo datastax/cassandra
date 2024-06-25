@@ -21,6 +21,7 @@
 
 package org.apache.cassandra.index;
 
+import java.util.Collections;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -33,10 +34,12 @@ import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -66,6 +69,10 @@ public class SingletonIndexGroup implements Index.Group
     public void addIndex(Index index)
     {
         Preconditions.checkState(delegate == null);
+        // This class does not work for SAI because the `componentsForNewBuid` method would be incorrect (so more
+        // generally, it does not work for indexes that use dedicated sstable components, which is only SAI). See
+        // comments on `componentsForNewBuid` for more details.
+        Preconditions.checkState(!(index instanceof StorageAttachedIndex), "This shoudl not be used with SAI");
         delegate = index;
         indexes.add(index);
     }
@@ -114,9 +121,23 @@ public class SingletonIndexGroup implements Index.Group
     }
 
     @Override
-    public Set<Component> getComponents()
+    public Set<Component> componentsForNewSSTable()
     {
-        Preconditions.checkNotNull(delegate);
-        return delegate.getComponents();
+        // This class is only used for indexes that don't use per-sstable components, aka not-SAI (note that SASI uses
+        // some "file" per sstable, but it is not a `Component` in practice). We could add an equivalent
+        // `componentsForNewSSTable` method in `Index`, so that we can call `delegate.componentsForNewBuild` here, but
+        // this would kind of weird for SAI because of the per-sstable components: should they be returned by such
+        // method on `Index` or not? Tldr, for SAI, it's cleaner to deal with components created at the group level,
+        // which is what `StorageAttachedIndexGroup.componentsForNewBuild` does, and it's simpler to always use
+        // `StorageAttachedIndexGroup` for SAI, which is the case. So at that point, adding an
+        // `Index.componentsForNewSSTable` method would just be dead code, so let's avoid it.
+        return Collections.emptySet();
+    }
+
+    @Override
+    public Set<Component> activeComponents(SSTableReader sstable)
+    {
+        // Same rermarks as for `componentsForNewBuid`.
+        return Collections.emptySet();
     }
 }

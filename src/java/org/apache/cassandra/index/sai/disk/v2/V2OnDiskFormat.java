@@ -32,18 +32,16 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.lucene.store.IndexInput;
 
 /**
  * Updates SAI OnDiskFormat to include full PK -> offset mapping, and adds vector components.
@@ -52,18 +50,18 @@ public class V2OnDiskFormat extends V1OnDiskFormat
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static final Set<IndexComponent> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponent.GROUP_COMPLETION_MARKER,
-                                                                                 IndexComponent.GROUP_META,
-                                                                                 IndexComponent.TOKEN_VALUES,
-                                                                                 IndexComponent.PRIMARY_KEY_TRIE,
-                                                                                 IndexComponent.PRIMARY_KEY_BLOCKS,
-                                                                                 IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS);
+    private static final Set<IndexComponentType> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
+                                                                                     IndexComponentType.GROUP_META,
+                                                                                     IndexComponentType.TOKEN_VALUES,
+                                                                                     IndexComponentType.PRIMARY_KEY_TRIE,
+                                                                                     IndexComponentType.PRIMARY_KEY_BLOCKS,
+                                                                                     IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
 
-    public static final Set<IndexComponent> VECTOR_COMPONENTS_V2 = EnumSet.of(IndexComponent.COLUMN_COMPLETION_MARKER,
-                                                                              IndexComponent.META,
-                                                                              IndexComponent.VECTOR,
-                                                                              IndexComponent.TERMS_DATA,
-                                                                              IndexComponent.POSTING_LISTS);
+    public static final Set<IndexComponentType> VECTOR_COMPONENTS_V2 = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
+                                                                                  IndexComponentType.META,
+                                                                                  IndexComponentType.VECTOR,
+                                                                                  IndexComponentType.TERMS_DATA,
+                                                                                  IndexComponentType.POSTING_LISTS);
 
     public static final V2OnDiskFormat instance = new V2OnDiskFormat();
 
@@ -92,15 +90,15 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator)
     {
         return new RowAwarePrimaryKeyFactory(comparator);
     }
 
     @Override
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(indexDescriptor, sstable);
+        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
     }
 
     @Override
@@ -110,57 +108,26 @@ public class V2OnDiskFormat extends V1OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isVector())
-            return new V2VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
+            return new V2VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
     }
 
     @Override
     public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
     {
-        return new SSTableComponentsWriter(indexDescriptor);
+        return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
     }
 
     @Override
-    public boolean validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum)
-    {
-        for (IndexComponent indexComponent : perSSTableComponents())
-        {
-            if (isBuildCompletionMarker(indexComponent))
-                continue;
-
-            try (IndexInput input = indexDescriptor.openPerSSTableInput(indexComponent))
-            {
-                Version earliest = getExpectedEarliestVersion(indexComponent);
-                if (checksum)
-                    SAICodecUtils.validateChecksum(input, indexDescriptor.getVersion());
-                else
-                    SAICodecUtils.validate(input, earliest);
-            }
-            catch (Throwable e)
-            {
-                if (logger.isDebugEnabled())
-                {
-                    logger.debug(indexDescriptor.logMessage("{} failed for index component {} on SSTable {}"),
-                                 (checksum ? "Checksum validation" : "Validation"),
-                                 indexComponent,
-                                 indexDescriptor.descriptor);
-                }
-                return false;
-            }
-        }
-        return true;
-    }
-
-    @Override
-    public Set<IndexComponent> perIndexComponents(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
     {
         if (indexContext.isVector())
             return VECTOR_COMPONENTS_V2;
-        return super.perIndexComponents(indexContext);
+        return super.perIndexComponentTypes(indexContext);
     }
 
     @Override
-    public Set<IndexComponent> perSSTableComponents()
+    public Set<IndexComponentType> perSSTableComponentTypes()
     {
         return PER_SSTABLE_COMPONENTS;
     }
@@ -172,10 +139,10 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public ByteOrder byteOrderFor(IndexComponent indexComponent, IndexContext context)
+    public ByteOrder byteOrderFor(IndexComponentType indexComponentType, IndexContext context)
     {
         // The little-endian files are written by Lucene, and the upgrade to Lucene 9 switched the byte order from big to little.
-        switch (indexComponent)
+        switch (indexComponentType)
         {
             case META:
             case GROUP_META:

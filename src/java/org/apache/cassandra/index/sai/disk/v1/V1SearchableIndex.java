@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
@@ -73,18 +74,18 @@ public class V1SearchableIndex implements SearchableIndex
     private final long numRows;
     private PerIndexFiles indexFiles;
 
-    public V1SearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
+    public V1SearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        this.indexContext = indexContext;
+        this.indexContext = perIndexComponents.context();
         try
         {
-            this.indexFiles = new PerIndexFiles(sstableContext.indexDescriptor, indexContext);
+            this.indexFiles = new PerIndexFiles(perIndexComponents);
 
             ImmutableList.Builder<Segment> segmentsBuilder = ImmutableList.builder();
 
-            final MetadataSource source = MetadataSource.loadColumnMetadata(sstableContext.indexDescriptor, indexContext);
+            final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
-            metadatas = SegmentMetadata.load(source, sstableContext.indexDescriptor.primaryKeyFactory);
+            metadatas = SegmentMetadata.load(source, sstableContext.primaryKeyFactory());
 
             for (SegmentMetadata metadata : metadatas)
             {

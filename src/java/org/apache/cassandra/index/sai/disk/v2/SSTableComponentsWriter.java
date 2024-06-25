@@ -26,9 +26,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
@@ -39,31 +38,25 @@ public class SSTableComponentsWriter implements PerSSTableWriter
 {
     protected static final Logger logger = LoggerFactory.getLogger(SSTableComponentsWriter.class);
 
-    private final IndexDescriptor indexDescriptor;
+    private final IndexComponents.ForWrite perSSTableComponents;
     private final MetadataWriter metadataWriter;
     private final NumericValuesWriter tokenWriter;
-    private final IndexOutputWriter trieWriter;
-    private final IndexOutputWriter bytesWriter;
     private final NumericValuesWriter blockFPWriter;
     private final SortedTermsWriter sortedTermsWriter;
 
-    public SSTableComponentsWriter(IndexDescriptor indexDescriptor) throws IOException
+    public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
     {
-        this.indexDescriptor = indexDescriptor;
-        this.metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
-        this.tokenWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES),
-                                                   indexDescriptor.openPerSSTableOutput(IndexComponent.TOKEN_VALUES),
+        this.perSSTableComponents = perSSTableComponents;
+        this.metadataWriter = new MetadataWriter(perSSTableComponents);
+        this.tokenWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.TOKEN_VALUES),
                                                    metadataWriter, false);
-        this.trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
-        this.bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-        this.blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
-                                                     indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+
+        this.blockFPWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
                                                      metadataWriter, true);
-        this.sortedTermsWriter = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
+        this.sortedTermsWriter = new SortedTermsWriter(perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                        metadataWriter,
-                                                       bytesWriter,
                                                        blockFPWriter,
-                                                       trieWriter);
+                                                       perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE));
     }
 
     @Override
@@ -77,13 +70,13 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     public void complete(Stopwatch stopwatch) throws IOException
     {
         IOUtils.close(tokenWriter, sortedTermsWriter, metadataWriter);
-        indexDescriptor.createComponentOnDisk(IndexComponent.GROUP_COMPLETION_MARKER);
+        perSSTableComponents.markComplete();
     }
 
     @Override
     public void abort(Throwable accumulator)
     {
-        logger.debug(indexDescriptor.logMessage("Aborting per-SSTable index component writer for {}..."), indexDescriptor.descriptor);
-        indexDescriptor.deletePerSSTableIndexComponents();
+        logger.debug(perSSTableComponents.logMessage("Aborting per-SSTable index component writer for {}..."), perSSTableComponents.descriptor());
+        perSSTableComponents.forceDeleteAllComponents();
     }
 }
