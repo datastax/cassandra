@@ -91,12 +91,10 @@ import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
-import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -145,11 +143,11 @@ public class StorageAttachedIndex implements Index
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
-                                                          .filter(s -> !IndexDescriptor.createFrom(s).isPerIndexBuildComplete(indexContext))
+                                                          .filter(s -> !IndexDescriptor.isIndexBuildCompleteOnDisk(s, indexContext))
                                                           .collect(Collectors.toList());
                                 }
 
-                                group.dropIndexSSTables(ss, sai);
+                                group.prepareIndexSSTablesForRebuild(ss, sai);
 
                                 ss.forEach((sstable) ->
                                            {
@@ -524,9 +522,11 @@ public class StorageAttachedIndex implements Index
             valid = false;
 
             // in case of dropping table, SSTable indexes should already been removed by SSTableListChangedNotification.
-            Set<Component> toRemove = getComponents();
             for (SSTableIndex sstableIndex : indexContext.getView().getIndexes())
-                sstableIndex.getSSTable().unregisterComponents(toRemove, baseCfs.getTracker());
+            {
+                var components = sstableIndex.usedPerIndexComponents();
+                sstableIndex.getSSTable().unregisterComponents(components.allAsCustomComponents(), baseCfs.getTracker());
+            }
 
             indexContext.invalidate(true);
             return null;
@@ -736,8 +736,9 @@ public class StorageAttachedIndex implements Index
             //   1. The current view does not contain the SSTable
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
-            if (!view.containsSSTable(sstable) && !sstable.isMarkedCompacted() &&
-                !IndexDescriptor.createFrom(sstable).isPerIndexBuildComplete(indexContext))
+            if (!view.containsSSTable(sstable)
+                && !sstable.isMarkedCompacted()
+                && !IndexDescriptor.isIndexBuildCompleteOnDisk(sstable, indexContext))
             {
                 nonIndexed.add(sstable);
             }
@@ -807,17 +808,6 @@ public class StorageAttachedIndex implements Index
     public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker)
     {
         throw new UnsupportedOperationException("Storage-attached index flush observers should never be created directly.");
-    }
-
-    @Override
-    public Set<Component> getComponents()
-    {
-        return Version.latest().onDiskFormat()
-                             .perIndexComponents(indexContext)
-                             .stream()
-                             .map(c -> c.type.createComponent(Version.latest().fileNameFormatter().format(c, indexContext)))
-                             .collect(Collectors.toSet());
-
     }
 
     @Override

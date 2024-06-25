@@ -117,8 +117,8 @@ public class SSTableImporter
                                     String keyspace = cfs.getKeyspaceName();
                                     String table = cfs.getTableName();
 
-                                    IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, cfs.metadata().partitioner, cfs.metadata().comparator);
-                                    if (!indexDescriptor.isPerSSTableBuildComplete())
+                                    IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
+                                    if (!indexDescriptor.perSSTableComponents().isComplete())
                                         throw new IllegalStateException(String.format("Missing SAI index to import for SSTable %s on %s.%s",
                                                                                       descriptor.toString(),
                                                                                       keyspace,
@@ -137,7 +137,7 @@ public class SSTableImporter
                                                                                      target.right,
                                                                                      indexMetadata,
                                                                                      cfs);
-                                        if (!indexDescriptor.isPerIndexBuildComplete(indexContext))
+                                        if (!indexDescriptor.perIndexComponents(indexContext).isComplete())
                                             throw new IllegalStateException(String.format("Missing SAI index to import for index %s on %s.%s",
                                                                                           index.getIndexMetadata().name,
                                                                                           keyspace,

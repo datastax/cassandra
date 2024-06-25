@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
@@ -152,7 +153,8 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
-        try (InvertedIndexWriter writer = new InvertedIndexWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
             indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, termsEnum.iterator()));
         }
@@ -167,11 +169,11 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                                                                     wrap(termsEnum.get(terms - 1).left),
                                                                     indexMetas);
 
-        try (PerIndexFiles indexFiles = new PerIndexFiles(indexDescriptor, indexContext))
+        try (PerIndexFiles indexFiles = new PerIndexFiles(components))
         {
             SSTableContext sstableContext = mock(SSTableContext.class);
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
-            when(sstableContext.indexDescriptor()).thenReturn(indexDescriptor);
+            when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
             final IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext,
                                                                                           SAITester.createIndexContext(index, UTF8Type.instance),
                                                                                           indexFiles,
