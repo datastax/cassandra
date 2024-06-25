@@ -52,7 +52,7 @@ public class BtiTableScrubber extends SortedTableScrubber<BtiTableReader> implem
     {
         super(cfs, transaction, outputHandler, options);
 
-        boolean hasIndexFile = sstable.getComponents().contains(Components.PARTITION_INDEX);
+        boolean hasIndexFile = sstable.components().contains(Components.PARTITION_INDEX);
         this.isIndex = cfs.isIndex();
         this.partitionKeyType = cfs.metadata.get().partitionKeyType;
         if (!hasIndexFile)

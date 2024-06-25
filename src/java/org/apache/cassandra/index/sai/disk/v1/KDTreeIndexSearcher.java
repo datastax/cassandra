@@ -30,8 +30,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -53,14 +52,13 @@ public class KDTreeIndexSearcher extends IndexSearcher
     KDTreeIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                         PerIndexFiles perIndexFiles,
                         SegmentMetadata segmentMetadata,
-                        IndexDescriptor indexDescriptor,
                         IndexContext indexContext) throws IOException
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
+        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexContext);
 
-        final long bkdPosition = metadata.getIndexRoot(IndexComponent.KD_TREE);
+        final long bkdPosition = metadata.getIndexRoot(IndexComponentType.KD_TREE);
         assert bkdPosition >= 0;
-        final long postingsPosition = metadata.getIndexRoot(IndexComponent.KD_TREE_POSTING_LISTS);
+        final long postingsPosition = metadata.getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS);
         assert postingsPosition >= 0;
 
         bkdReader = new BKDReader(indexContext,
