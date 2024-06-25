@@ -27,7 +27,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 import static org.junit.Assert.assertEquals;
 
-public class RebuildWithoutImmutableComponentsTest extends AbstractRebuildAndImmutableComponentsTest
+public class RebuildWithoutImmutableComponentsTest extends AbstractRebuildAndImmutableComponentsTester
 {
     @Override
     protected boolean useImmutableComponents()

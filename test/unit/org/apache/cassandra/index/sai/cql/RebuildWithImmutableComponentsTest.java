@@ -35,7 +35,7 @@ import org.apache.cassandra.io.util.PathUtils;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class RebuildWithImmutableComponentsTest extends AbstractRebuildAndImmutableComponentsTest
+public class RebuildWithImmutableComponentsTest extends AbstractRebuildAndImmutableComponentsTester
 {
     @Override
     protected boolean useImmutableComponents()

@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -31,7 +32,8 @@ import org.apache.cassandra.index.sai.SAITester;
 import static org.apache.cassandra.config.CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS;
 import static org.junit.Assert.assertEquals;
 
-public abstract class AbstractRebuildAndImmutableComponentsTest extends SAITester
+@Ignore
+public abstract class AbstractRebuildAndImmutableComponentsTester extends SAITester
 {
      private Boolean defaultImmutableSetting;
 
