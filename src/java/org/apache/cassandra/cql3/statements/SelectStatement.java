@@ -1129,7 +1129,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      */
     public SortedRowsBuilder sortedRowsBuilder(int limit, int offset, QueryOptions options)
     {
-        if (!needsPostQueryOrdering() || orderingComparator == null)
+        assert (orderingComparator != null) == needsPostQueryOrdering();
+
+        if (orderingComparator == null)
         {
             return SortedRowsBuilder.create(limit, offset);
         }

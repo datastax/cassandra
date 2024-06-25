@@ -104,7 +104,7 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
     {
-        return new WithScore(limit, offset, scorer);
+        return new WithScorer(limit, offset, scorer);
     }
 
     /**
@@ -139,7 +139,7 @@ public abstract class SortedRowsBuilder
     /**
      * {@link SortedRowsBuilder} that orders the added rows based on a {@link Comparator}.
      */
-    private static class WithComparator extends WithCompare<WithCompare.DecoratedRow>
+    private static class WithComparator extends WithValuesOrder<WithValuesOrder.DecoratedRow>
     {
         private final Comparator<List<ByteBuffer>> comparator;
 
@@ -167,11 +167,11 @@ public abstract class SortedRowsBuilder
      * </p>
      * The rows are decorated with their scores, so we don't have to recompute them while sorting.
      */
-    private static class WithScore extends WithCompare<WithScore.ScoredRow>
+    private static class WithScorer extends WithValuesOrder<WithScorer.ScoredRow>
     {
         private final Index.Scorer scorer;
 
-        private WithScore(int limit, int offset, Index.Scorer scorer)
+        private WithScorer(int limit, int offset, Index.Scorer scorer)
         {
             super(limit, offset);
             this.scorer = scorer;
@@ -212,26 +212,26 @@ public abstract class SortedRowsBuilder
      * </p>
      * It keeps at most {@code limit + offset} rows in memory.
      */
-    private static abstract class WithCompare<T extends WithCompare.DecoratedRow> extends SortedRowsBuilder
+    private static abstract class WithValuesOrder<T extends WithValuesOrder.DecoratedRow> extends SortedRowsBuilder
     {
         private final PriorityQueue<T> queue = new PriorityQueue<>(this::compareReversedWithIdx);
         private int numAddedRows = 0;
         private boolean built = false;
 
-        private WithCompare(int limit, int offset)
+        private WithValuesOrder(int limit, int offset)
         {
             super(limit, offset);
         }
 
         abstract T decorate(List<ByteBuffer> row, int id);
 
+        abstract int compare(T indexedRow, T other);
+
         private int compareReversedWithIdx(T one, T other)
         {
             int cmp = compare(other, one);
             return cmp != 0 ? cmp : Integer.compare(other.id, one.id);
         }
-
-        abstract int compare(T indexedRow, T other);
 
         @Override
         public void add(List<ByteBuffer> row)
