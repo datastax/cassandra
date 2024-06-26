@@ -180,7 +180,8 @@ public class PartialMaskingFunction extends MaskingFunction
                      .collect(Collectors.toSet());
     }
 
-    private static FunctionFactory factory(Kind kind)
+    @VisibleForTesting
+    public static FunctionFactory factory(Kind kind)
     {
         return new MaskingFunction.Factory(kind.name(),
                                            FunctionParameter.string(),
