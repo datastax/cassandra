@@ -4,6 +4,9 @@
 # See jvm-server.options. This file is specific for Java 11 and newer.    #
 ###########################################################################
 
+-XX:ThreadPriorityPolicy=1
+-XX:+UseThreadPriorities
+
 #################
 #  GC SETTINGS  #
 #################
