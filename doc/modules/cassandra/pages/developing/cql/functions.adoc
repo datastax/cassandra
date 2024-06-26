@@ -288,6 +288,36 @@ A number of functions allow to obtain the similarity score between vectors of fl
 
 include::cassandra:partial$vector-search/vector_functions.adoc[]
 
+[[index-functions]]
+===== Index functions
+
+====== `sai_analyze`
+
+The `sai_analyze` functions returns the tokens that a SAI index will generate for a certain text value. The arguments
+are that text value and the JSON configuration of the SAI analyzer. This JSON configuration is the same as the one used
+to create the SAI index. For example, this function call:
+
+[source,cql]
+----
+sai_analyze('johnny apples seedlings',
+             '{
+                 "tokenizer": {"name": "whitespace"}
+              }')
+----
+Will return `['johnny', 'apples', 'seedlings']`
+
+This other function call:
+[source,cql]
+----
+sai_analyze('johnny apples seedlings',
+             '{
+                 "tokenizer": {"name": "whitespace"},
+                 "filters": [{"name": "porterstem"}]
+              }')
+----
+Will return `['johnni', 'appl', 'seedl']`
+
+
 [[vector-functions]]
 ===== Vector functions
 
