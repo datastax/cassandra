@@ -30,6 +30,8 @@
 # Disable biased locking as it does not benefit Cassandra.
 -XX:-UseBiasedLocking
 
+-XX:ThreadPriorityPolicy=1
+-XX:+UseThreadPriorities
 
 #################
 #  GC SETTINGS  #

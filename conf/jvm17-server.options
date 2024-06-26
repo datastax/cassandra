@@ -22,6 +22,9 @@
 # See jvm-server.options. This file is specific for Java 17 and newer.    #
 ###########################################################################
 
+-XX:ThreadPriorityPolicy=1
+-XX:+UseThreadPriorities
+
 #################
 #  GC SETTINGS  #
 #################

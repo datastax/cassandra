@@ -47,6 +47,7 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
+import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -67,6 +68,13 @@ import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 public abstract class SegmentBuilder
 {
     private static final Logger logger = LoggerFactory.getLogger(SegmentBuilder.class);
+
+    /** for parallelism within a single compaction */
+    public static final ForkJoinPool compactionFjp = new ForkJoinPool( // checkstyle: permit this instantiation
+                                                                      Runtime.getRuntime().availableProcessors(),
+                                                                      new LowPriorityThreadFactory(),
+                                                                      null,
+                                                                      false);
 
     // Served as safe net in case memory limit is not triggered or when merger merges small segments..
     public static final long LAST_VALID_SEGMENT_ROW_ID = ((long)Integer.MAX_VALUE / 2) - 1L;
@@ -256,7 +264,7 @@ public abstract class SegmentBuilder
                 return result.bytesUsed;
 
             updatesInFlight.incrementAndGet();
-            ForkJoinPool.commonPool().submit(() -> {
+            compactionFjp.submit(() -> {
                 try
                 {
                     long bytesAdded = result.bytesUsed + graphIndex.addGraphNode(result);
@@ -344,7 +352,7 @@ public abstract class SegmentBuilder
         protected long addInternalAsync(ByteBuffer term, int segmentRowId)
         {
             updatesInFlight.incrementAndGet();
-            ForkJoinPool.commonPool().submit(() -> {
+            compactionFjp.submit(() -> {
                 try
                 {
                     long bytesAdded = addInternal(term, segmentRowId);
