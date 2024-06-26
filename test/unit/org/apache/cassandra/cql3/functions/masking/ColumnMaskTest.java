@@ -193,12 +193,12 @@ public class ColumnMaskTest extends ColumnMaskTester
     {
         // create table
         createTableName();
-        assertInvalidMessage("Function system.mask_inner requires an argument of type int, but found argument 'a' of type ascii",
+        assertInvalidMessage("Function system.mask_inner(string, int, int, [text]) requires an argument of type int, but found argument 'b' of type ascii",
                              formatQuery("CREATE TABLE %s (k int PRIMARY KEY, v text MASKED WITH mask_inner('a', 'b'))"));
 
         // alter table
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        assertInvalidMessage("Function system.mask_inner requires an argument of type int, but found argument 'a' of type ascii",
+        assertInvalidMessage("Function system.mask_inner(string, int, int, [text]) requires an argument of type int, but found argument 'b' of type ascii",
                              "ALTER TABLE %s ALTER v MASKED WITH mask_inner('a', 'b')");
         assertTableColumnsAreNotMasked("k", "v");
     }
