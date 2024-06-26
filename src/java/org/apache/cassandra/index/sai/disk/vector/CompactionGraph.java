@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ForkJoinPool;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,10 +61,10 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
+import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -79,6 +80,11 @@ public class CompactionGraph implements Closeable, Accountable
 {
     private static final Logger logger = LoggerFactory.getLogger(CompactionGraph.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
+    private static final ForkJoinPool compactionFjp = new ForkJoinPool(Runtime.getRuntime().availableProcessors(), // checkstyle: permit this instantiation
+                                                                       new LowPriorityThreadFactory(),
+                                                                       null,
+                                                                       false);
 
     private final GraphIndexBuilder builder;
     private final VectorType.VectorSerializer serializer;
@@ -144,7 +150,7 @@ public class CompactionGraph implements Closeable, Accountable
                                         indexConfig.getConstructionBeamWidth(),
                                         1.2f,
                                         dimension > 3 ? 1.2f : 1.4f,
-                                        SegmentBuilder.compactionFjp, SegmentBuilder.compactionFjp);
+                                        compactionFjp, compactionFjp);
 
         var indexFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
         termsOffset = (indexFile.exists() ? indexFile.length() : 0)
