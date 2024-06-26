@@ -22,7 +22,8 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -47,7 +48,6 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
-import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -55,6 +55,7 @@ import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 
+import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 
 /**
@@ -70,11 +71,11 @@ public abstract class SegmentBuilder
     private static final Logger logger = LoggerFactory.getLogger(SegmentBuilder.class);
 
     /** for parallelism within a single compaction */
-    public static final ForkJoinPool compactionFjp = new ForkJoinPool( // checkstyle: permit this instantiation
-                                                                      Runtime.getRuntime().availableProcessors(),
-                                                                      new LowPriorityThreadFactory(),
-                                                                      null,
-                                                                      false);
+    public static final ExecutorService compactionExecutor = executorFactory().configurePooled("SegmentBuilder", Runtime.getRuntime().availableProcessors())
+                                                                                .withQueueLimit(10 * Runtime.getRuntime().availableProcessors())
+                                                                                .withKeepAlive(1, TimeUnit.MINUTES)
+                                                                                .withThreadPriority(Thread.MIN_PRIORITY)
+                                                                                .build();
 
     // Served as safe net in case memory limit is not triggered or when merger merges small segments..
     public static final long LAST_VALID_SEGMENT_ROW_ID = ((long)Integer.MAX_VALUE / 2) - 1L;
@@ -264,7 +265,7 @@ public abstract class SegmentBuilder
                 return result.bytesUsed;
 
             updatesInFlight.incrementAndGet();
-            compactionFjp.submit(() -> {
+            compactionExecutor.submit(() -> {
                 try
                 {
                     long bytesAdded = result.bytesUsed + graphIndex.addGraphNode(result);
@@ -352,7 +353,7 @@ public abstract class SegmentBuilder
         protected long addInternalAsync(ByteBuffer term, int segmentRowId)
         {
             updatesInFlight.incrementAndGet();
-            compactionFjp.submit(() -> {
+            compactionExecutor.submit(() -> {
                 try
                 {
                     long bytesAdded = addInternal(term, segmentRowId);
