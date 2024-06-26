@@ -222,8 +222,7 @@ public class StatementRestrictions
      */
     public StatementRestrictions addExternalRestrictions(Iterable<ExternalRestriction> restrictions)
     {
-        IndexRestrictions.Builder newIndexRestrictions = IndexRestrictions.builder()
-                                                                          .add(filterRestrictions);
+        IndexRestrictions.Builder newIndexRestrictions = IndexRestrictions.builder().add(filterRestrictions);
 
         for (ExternalRestriction restriction : restrictions)
             newIndexRestrictions.add(restriction);
@@ -314,7 +313,7 @@ public class StatementRestrictions
     /**
      * Build a <code>StatementRestrictions</code> from a <code>WhereClause</code> for a given
      * <code>StatementType</code>, <code>TableMetadata</code> and <code>VariableSpecifications</code>
-     *
+     * </p>
      * The validation rules for whether the <code>StatementRestrictions</code> are valid depend on a
      * number of considerations, including whether indexes are being used and whether filtering is being
      * used.
@@ -364,7 +363,6 @@ public class StatementRestrictions
             // since we're parsing these for restore and the base table or keyspace might not exist in the current schema.
             if (allowUseOfSecondaryIndices && type.allowUseOfSecondaryIndices())
                 indexRegistry = IndexRegistry.obtain(table);
-
 
             WhereClause.AndElement root = whereClause.root().conjunctiveForm();
             return doBuild(root, indexRegistry, 0);
@@ -492,8 +490,8 @@ public class StatementRestrictions
             boolean usesSecondaryIndexing = false;
             boolean isKeyRange = false;
 
-            boolean hasQueriableClusteringColumnIndex = false;
-            boolean hasQueriableIndex = false;
+            boolean hasQueryableClusteringColumnIndex = false;
+            boolean hasQueryableIndex = false;
 
             IndexRestrictions.Builder filterRestrictionsBuilder = IndexRestrictions.builder();
 
@@ -506,10 +504,10 @@ public class StatementRestrictions
                                                                                           indexRegistry);
                     filterRestrictionsBuilder.add(customExpression);
                 }
-    
-                hasQueriableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry);
-                hasQueriableIndex = element.containsCustomExpressions()
-                                    || hasQueriableClusteringColumnIndex
+
+                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry);
+                hasQueryableIndex = element.containsCustomExpressions()
+                                    || hasQueryableClusteringColumnIndex
                                     || partitionKeyRestrictions.hasSupportingIndex(indexRegistry)
                                     || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry);
             }
@@ -538,23 +536,23 @@ public class StatementRestrictions
                 if (partitionKeyRestrictions.isEmpty() && partitionKeyRestrictions.hasUnrestrictedPartitionKeyComponents(table))
                 {
                     isKeyRange = true;
-                    usesSecondaryIndexing = hasQueriableIndex;
+                    usesSecondaryIndexing = hasQueryableIndex;
                 }
-    
-                // If there is a queriable index, no special condition is required on the other restrictions.
+
+                // If there is a queryable index, no special condition is required on the other restrictions.
                 // But we still need to know 2 things:
-                // - If we don't have a queriable index, is the query ok
-                // - Is it queriable without 2ndary index, which is always more efficient
+                // - If we don't have a queryable index, is the query ok
+                // - Is it queryable without 2ndary index, which is always more efficient
                 // If a component of the partition key is restricted by a relation, all preceding
                 // components must have a EQ. Only the last partition key component can be in IN relation.
                 // If partition key restrictions exist and this is a disjunction then we may need filtering
                 if (partitionKeyRestrictions.needFiltering(table) || (!partitionKeyRestrictions.isEmpty() && element.isDisjunction()))
                 {
-                    if (!allowFiltering && !forView && !hasQueriableIndex && requiresAllowFilteringIfNotSpecified(table))
+                    if (!allowFiltering && !forView && !hasQueryableIndex && requiresAllowFilteringIfNotSpecified(table))
                         throw new InvalidRequestException(allowFilteringMessage(state));
     
                     isKeyRange = true;
-                    usesSecondaryIndexing = hasQueriableIndex;
+                    usesSecondaryIndexing = hasQueryableIndex;
                 }
             }
 
@@ -593,12 +591,12 @@ public class StatementRestrictions
             }
             else
             {
-                checkFalse(clusteringColumnsRestrictions.hasContains() && !hasQueriableIndex && !allowFiltering,
+                checkFalse(clusteringColumnsRestrictions.hasContains() && !hasQueryableIndex && !allowFiltering,
                            "Clustering columns can only be restricted with CONTAINS with a secondary index or filtering");
     
                 if (!clusteringColumnsRestrictions.isEmpty() && clusteringColumnsRestrictions.needFiltering())
                 {
-                    if (hasQueriableIndex || forView)
+                    if (hasQueryableIndex || forView)
                     {
                         usesSecondaryIndexing = true;
                     }
@@ -624,7 +622,7 @@ public class StatementRestrictions
             }
 
             // Covers indexes on the first clustering column (among others).
-            if (isKeyRange && hasQueriableClusteringColumnIndex)
+            if (isKeyRange && hasQueryableClusteringColumnIndex)
                 usesSecondaryIndexing = true;
 
             // Because an ANN queries limit the result set based within the SAI, clustering column restrictions
@@ -649,7 +647,7 @@ public class StatementRestrictions
                     throw invalidRequest("Non PRIMARY KEY columns found in where clause: %s ",
                                          Joiner.on(", ").join(nonPrimaryKeyColumns));
                 }
-                if (hasQueriableIndex)
+                if (hasQueryableIndex)
                     usesSecondaryIndexing = true;
                 else
                 {
@@ -677,7 +675,7 @@ public class StatementRestrictions
                     }
 
                     if (!allowFiltering  && requiresAllowFilteringIfNotSpecified(table))
-                        throwRequiresAllowFilteringError(table, columnRestrictions);
+                        throwRequiresAllowFilteringError(table, columnRestrictions, state);
                 }
                 filterRestrictionsBuilder.add(nonPrimaryKeyRestrictions);
             }
@@ -730,51 +728,6 @@ public class StatementRestrictions
             }
         }
 
-        private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
-        {
-            IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-            if (indexRegistry.listIndexes().isEmpty())
-                return Collections.emptySet();
-    
-            ImmutableSet.Builder<ColumnMetadata> builder = ImmutableSet.builder();
-    
-            for (Restriction restriction : restrictions)
-            {
-                if (!restriction.hasSupportingIndex(indexRegistry))
-                {
-                    for (Index index : indexRegistry.listIndexes())
-                    {
-                        // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction
-                        for (ColumnMetadata column : restriction.getColumnDefs())
-                        {
-                            if (index.dependsOn(column))
-                                builder.add(column);
-                        }
-                    }
-                }
-            }
-    
-            return builder.build();
-        }
-
-        private void throwRequiresAllowFilteringError(TableMetadata table, Iterable<Restriction> columnRestrictions)
-        {
-            Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, columnRestrictions);
-            if (unsupported.isEmpty())
-            {
-                throw new InvalidRequestException(allowFilteringMessage(state));
-            }
-            else
-            {
-                // If there's an index on these columns but the restriction is not supported on this index, throw a more specific error message
-                if (unsupported.size() == 1)
-                    throw invalidRequest(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, unsupported.iterator().next()));
-                else
-                    throw invalidRequest(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_MULTI, unsupported));
-            }
-        }
-
-
         private CustomIndexExpression prepareCustomIndexExpression(List<CustomIndexExpression> expressions,
                                                                    VariableSpecifications boundNames,
                                                                    IndexRegistry indexRegistry)
@@ -792,7 +745,7 @@ public class StatementRestrictions
             if (!table.indexes.has(expression.targetIndex.getName()))
                 throw IndexRestrictions.indexNotFound(expression.targetIndex, table);
 
-            Index index = indexRegistry.getIndex(table.indexes.get(expression.targetIndex.getName()).get());
+            Index index = indexRegistry.getIndex(table.indexes.get(expression.targetIndex.getName()).orElseThrow());
             if (!index.getIndexMetadata().isCustom())
                 throw IndexRestrictions.nonCustomIndexInExpression(expression.targetIndex);
 
@@ -856,7 +809,13 @@ public class StatementRestrictions
     {
         if (hasAnnRestriction())
             throw invalidRequest(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
-        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table);
+
+        throwRequiresAllowFilteringError(table, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions), state);
+    }
+
+    private static void throwRequiresAllowFilteringError(TableMetadata table, Iterable<Restriction> columnRestrictions, ClientState state)
+    {
+        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, columnRestrictions);
         if (unsupported.isEmpty())
         {
             if (requiresAllowFilteringIfNotSpecified(table))
@@ -1353,17 +1312,12 @@ public class StatementRestrictions
         return false;
     }
 
-    private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table)
-    {
-        return getColumnsWithUnsupportedIndexRestrictions(table, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions));
-    }
-
     private static Iterable<Restriction> allColumnRestrictions(ClusteringColumnRestrictions clusteringColumnsRestrictions, RestrictionSet nonPrimaryKeyRestrictions)
     {
         return Iterables.concat(clusteringColumnsRestrictions.restrictions(), nonPrimaryKeyRestrictions.restrictions());
     }
 
-    private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
+    private static Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         if (indexRegistry.listIndexes().isEmpty())
