@@ -46,6 +46,7 @@ public class PartialMaskingFunctionTest extends MaskingFunctionTester
 
     protected void testMaskingOnColumn(PartialMaskingFunction.Kind masker, String name, CQL3Type type, Object value) throws Throwable
     {
+        String functionSignature = PartialMaskingFunction.factory(masker).toString().toLowerCase();
         String functionName = SchemaConstants.SYSTEM_KEYSPACE_NAME + ".mask_" + masker.name().toLowerCase();
 
         if (type.getType() instanceof StringType)
@@ -91,9 +92,9 @@ public class PartialMaskingFunctionTest extends MaskingFunctionTester
         }
         else
         {
-            assertInvalidThrowMessage(format("Function %s requires an argument of type [text|varchar|ascii], " +
+            assertInvalidThrowMessage(format("Function %s requires an argument of type string, " +
                                              "but found argument %s of type %s",
-                                             functionName, name, type),
+                                             functionSignature, name, type),
                                       InvalidRequestException.class,
                                       format("SELECT %s(%s, 1, 2) FROM %%s", functionName, name));
         }
