@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -199,5 +200,14 @@ public class Segment implements Closeable, SegmentOrdering
     public String toString()
     {
         return String.format("Segment{metadata=%s}", metadata);
+    }
+
+    public int estimateAnnNodesVisited(int limit, int candidates)
+    {
+        IndexSearcher searcher = getIndexSearcher();
+        if (!(searcher instanceof V2VectorIndexSearcher))
+            throw new UnsupportedOperationException("Not a vector index segment");
+
+        return ((V2VectorIndexSearcher) searcher).estimateNodesVisited(limit, candidates);
     }
 }

@@ -65,7 +65,10 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
+import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
@@ -89,7 +92,7 @@ import org.apache.cassandra.utils.concurrent.Ref;
 import static java.lang.Math.max;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE;
 
-public class QueryController implements Plan.Executor
+public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
@@ -118,6 +121,8 @@ public class QueryController implements Plan.Executor
     private final PrimaryKey firstPrimaryKey;
 
     final Plan.Factory planFactory;
+
+    private HashMap<Expression, QueryViewBuilder.QueryView> queryViewCache = new HashMap<>();
 
     /**
      * Holds the primary key iterators for indexed expressions in the query (i.e. leaves of the expression tree).
@@ -164,7 +169,7 @@ public class QueryController implements Plan.Executor
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
-        this.planFactory = new Plan.Factory(tableMetrics);
+        this.planFactory = new Plan.Factory(tableMetrics, this);
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -429,14 +434,12 @@ public class QueryController implements Plan.Executor
     public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression)
     {
         assert expression.operator() == Operator.ANN;
-        var planExpression = new Expression(getContext(expression))
-                             .add(Operator.ANN, expression.getIndexValue().duplicate());
+        var planExpression = getPlanExpression(expression);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        var memtableResults = getContext(expression).orderMemtable(queryContext, planExpression, mergeRange, limit);
+        var memtableResults = planExpression.context.orderMemtable(queryContext, planExpression, mergeRange, limit);
 
-        var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
-
+        var queryView = getQueryView(planExpression);
         try
         {
             var sstableResults = orderSstables(queryView, Collections.emptyList());
@@ -488,14 +491,12 @@ public class QueryController implements Plan.Executor
         // Filter out PKs now. Each PK is passed to every segment of the ANN index, so filtering shadowed keys
         // eagerly can save some work when going from PK to row id for on disk segments.
         // Since the result is shared with multiple streams, we use an unmodifiable list.
-        var planExpression = new Expression(this.getContext(expression));
-        planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
+        var planExpression = getPlanExpression(expression);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        var memtableResults = this.getContext(expression)
-                                  .orderResultsBy(queryContext, sourceKeys, planExpression, limit);
-        var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
+        var memtableResults = planExpression.context.orderResultsBy(queryContext, sourceKeys, planExpression, limit);
 
+        var queryView = getQueryView(planExpression);
         try
         {
             var sstableScoredPrimaryKeyIterators = orderSstables(queryView, sourceKeys);
@@ -520,6 +521,19 @@ public class QueryController implements Plan.Executor
 
     }
 
+    private QueryViewBuilder.QueryView getQueryView(Expression planExpression)
+    {
+        return queryViewCache.computeIfAbsent(planExpression,
+                                              e -> new QueryViewBuilder(Collections.singleton(e), mergeRange).build());
+    }
+
+    private Expression getPlanExpression(RowFilter.Expression expression)
+    {
+        var planExpression = new Expression(this.getContext(expression));
+        planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
+        return planExpression;
+    }
+
     /**
      * Create the list of iterators over {@link ScoredPrimaryKey} from the given {@link QueryViewBuilder.QueryView}.
      * @param queryView The view to use to create the iterators.
@@ -532,12 +546,7 @@ public class QueryController implements Plan.Executor
         long totalRows = queryView.view.keySet().stream().mapToLong(sstable -> sstable.getTotalRows()).sum();
         queryView.view.forEach((sstable, expressions) ->
         {
-            // We expect the number of top results found in each sstable to be proportional to its number of rows
-            // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
-            int sstableLimit = V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
-                               ? max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)))
-                               : limit;
-
+            int sstableLimit = sstableLimit(sstable, limit, totalRows);
             QueryViewBuilder.IndexExpression annIndexExpression = null;
             try
             {
@@ -560,6 +569,18 @@ public class QueryController implements Plan.Executor
             }
         });
         return results;
+    }
+
+    /**
+     * Computes the ANN search limit to be used for searching in the sstable index.
+     * @param limit the desired number of TopK rows
+     * @param totalRows total number of rows in all sstables
+     */
+    private int sstableLimit(SSTableReader sstable, int limit, long totalRows)
+    {
+        return V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
+               ? max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)))
+               : limit;
     }
 
     public IndexFeatureSet indexFeatureSet()
@@ -838,5 +859,35 @@ public class QueryController implements Plan.Executor
             this.iterators = iterators;
             this.referencedIndexes = indexes;
         }
+    }
+
+    @Override
+    public int estimateAnnNodesVisited(RowFilter.Expression ordering, int limit, long candidates)
+    {
+        IndexContext context = getContext(ordering);
+        Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
+        QueryViewBuilder.QueryView queryView = getQueryView(getPlanExpression(ordering));
+
+        int annNodesCount = 0;
+        for (MemtableIndex index : memtables)
+        {
+            // TODO: maybe limit and candidates should be scaled proportionally by the size of the memtable?
+            int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
+            annNodesCount += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
+        }
+
+        long totalRowCount = queryView.view.keySet().stream().mapToLong(SSTableReader::getTotalRows).sum();
+        for (SSTableIndex index : queryView.referencedIndexes)
+        {
+            SSTableReader sstable = index.getSSTable();
+            int sstableLimit = sstableLimit(index.getSSTable(), limit, totalRowCount);
+            for (Segment segment : index.getSegments())
+            {
+                int segmentLimit = Math.max(1, (int) (sstableLimit * (double) segment.metadata.numRows / sstable.getTotalRows()));
+                int segmentCandidates = Math.max(1, (int) (candidates * (double) segment.metadata.numRows / totalRowCount));
+                annNodesCount += segment.estimateAnnNodesVisited(segmentLimit, segmentCandidates);
+            }
+        }
+        return annNodesCount;
     }
 }
