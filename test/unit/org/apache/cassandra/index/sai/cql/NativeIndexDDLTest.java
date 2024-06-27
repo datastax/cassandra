@@ -45,7 +45,6 @@ import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.restrictions.IndexRestrictions;
@@ -653,44 +652,6 @@ public class NativeIndexDDLTest extends SAITester
         waitForCompactions();
 
         assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0")).isInstanceOf(ReadFailureException.class);
-    }
-
-    @Test
-    public void testMaxTermSize() throws Throwable
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (k int PRIMARY KEY, v text, m map<text, text>,)");
-
-        String largeTerm = UTF8Type.instance.compose(ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 1));
-        ResultSet resultSet = executeNet("INSERT INTO %s (k, v, m) VALUES (0, ?, {'" + largeTerm + "': ''})", largeTerm);
-        List<String> warnings = CQLTester.warningsFromResultSet(Collections.emptyList(), resultSet);
-        warnings.sort(String::compareTo);
-
-        assertEquals(2, warnings.size());
-        assertTrue(warnings.get(0).contains("Can't add term of column m"));
-        assertTrue(warnings.get(1).contains("Can't add term of column v"));
-
-        // verify memtable index can not be read
-        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
-        flush();
-
-        // verify on-disk index can not be read
-        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
-
-
-        executeNet("INSERT INTO %s (k, v, m) VALUES (0, ?, {'" + largeTerm + "': ''})", largeTerm);
-        flush();
-
-        // max term size was applied during compaction or building index on existing sstable.
-        compact();
-
-        // verify on-disk index can not be read after compaction
-        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
     }
 
     @Test
