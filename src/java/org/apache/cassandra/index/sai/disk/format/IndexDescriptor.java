@@ -51,7 +51,6 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
@@ -227,7 +226,7 @@ public class IndexDescriptor
     {
         registerPerSSTableComponents();
         return components.get(null).stream()
-                         .map(c -> new Component(SSTableFormat.Components.Types.CUSTOM, componentFileName(c)))
+                         .map(c -> c.type.createComponent(componentFileName(c)))
                          .collect(Collectors.toSet());
     }
 
@@ -238,7 +237,7 @@ public class IndexDescriptor
         return components == null
                ? Collections.emptySet()
                : components.stream()
-                 .map(c -> new Component(SSTableFormat.Components.Types.CUSTOM, componentFileName(c, context)))
+                 .map(c -> c.type.createComponent(componentFileName(c, context)))
                  .collect(Collectors.toSet());
     }
 
@@ -573,14 +572,14 @@ public class IndexDescriptor
 
     private File createFile(IndexComponent component, IndexContext context)
     {
-        Component customComponent = new Component(SSTableFormat.Components.Types.CUSTOM, componentFileName(component, context));
+        Component customComponent = component.type.createComponent(componentFileName(component, context));
         return descriptor.fileFor(customComponent);
     }
 
     public static File fileFor(Descriptor descriptor, Version version, IndexComponent component, IndexContext context)
     {
         var componentFileName = version.fileNameFormatter().format(component, context);
-        var customComponent = new Component(SSTableFormat.Components.Types.CUSTOM, componentFileName);
+        Component customComponent = component.type.createComponent(componentFileName);
         return descriptor.fileFor(customComponent);
     }
 
