@@ -167,10 +167,10 @@ public class Component
             return Objects.requireNonNull(singleton);
         }
 
-        public Component createComponent(String repr)
+        public Component createComponent(String componentFileName)
         {
             Preconditions.checkArgument(singleton == null);
-            return new Component(this, repr);
+            return new Component(this, componentFileName);
         }
     }
 
@@ -241,7 +241,10 @@ public class Component
     @Override
     public String toString()
     {
-        return this.name();
+        return "Component{" +
+               "name='" + name + '\'' +
+               ", type=" + type +
+               '}';
     }
 
     @Override
