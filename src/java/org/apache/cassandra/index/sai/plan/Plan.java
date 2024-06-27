@@ -1058,10 +1058,13 @@ abstract public class Plan
         @Override
         protected KeysIterationCost estimateCost()
         {
-            return new KeysIterationCost(factory.tableMetrics.rows,
+            long rowCount = factory.tableMetrics.rows;
+            // TODO: get the real limit
+            int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering, 10, rowCount);
+            return new KeysIterationCost(rowCount,
                                          1.0,
-                                         0.0,
-                                         factory.tableMetrics.rows * CostCoefficients.ANN_SCORED_KEY_COST);
+                                         initNodesCount * ANN_NODE_COST,
+                                         rowCount * CostCoefficients.ANN_SCORED_KEY_COST);
         }
 
         @Override
@@ -1253,6 +1256,8 @@ abstract public class Plan
         /** Table metrics that affect cost estimates, e.g. row count, sstable count etc */
         public final TableMetrics tableMetrics;
 
+        public final CostEstimator costEstimator;
+
         /** A plan returning no keys */
         public final KeysIteration nothing;
 
@@ -1266,9 +1271,10 @@ abstract public class Plan
          * Creates a factory that produces Plan nodes.
          * @param tableMetrics allows the planner to adapt the cost estimates to the actual amount of data stored in the table
          */
-        public Factory(TableMetrics tableMetrics)
+        public Factory(TableMetrics tableMetrics, CostEstimator costEstimator)
         {
             this.tableMetrics = tableMetrics;
+            this.costEstimator = costEstimator;
             this.nothing = new Nothing(-1, this);
             this.everything = new Everything(-1, this);
         }
@@ -1464,6 +1470,22 @@ abstract public class Plan
     }
 
     /**
+     * Outsources more complex cost estimates to external components.
+     * Some components may collect stats on previous data execution and deliver more accurate estimates based
+     * on that state.
+     */
+    public interface CostEstimator
+    {
+        /**
+         * Returns the expected number of ANN index nodes that must be visited to get the list of candidates for top K.
+         *
+         * @param ordering allows to identify the proper index
+         * @param limit    number of expected
+         */
+        int estimateAnnNodesVisited(RowFilter.Expression ordering, int limit, long candidates);
+    }
+
+    /**
      * Data-independent cost coefficients.
      * They are likely going to change whenever storage engine algorithms change.
      */
@@ -1495,6 +1517,9 @@ abstract public class Plan
 
         /** Cost to get a scored key from DiskANN */
         public final static double ANN_SCORED_KEY_COST = 10.0;
+
+        /** Cost to visit a DiskANN index node */
+        public final static double ANN_NODE_COST = 20.0;
 
         /** Cost to fetch one row from storage */
         public final static double ROW_COST = 200.0;

@@ -61,7 +61,7 @@ public class PlanTest
     private final Plan.TableMetrics table1M = new Plan.TableMetrics(1_000_000, 7, 128, 3);
     private final Plan.TableMetrics table10M = new Plan.TableMetrics(10_000_000, 7, 128, 8);
     
-    private final Plan.Factory factory = new Plan.Factory(table1M);
+    private final Plan.Factory factory = new Plan.Factory(table1M, Mockito.mock(Plan.CostEstimator.class));
 
 
     private static Expression saiPred(String column, Expression.Op operation)
@@ -745,7 +745,7 @@ public class PlanTest
 
     private void testIntersectionsUnderLimit(Plan.TableMetrics metrics, List<Double> selectivities, List<Integer> expectedIndexScanCount)
     {
-        Plan.Factory factory = new Plan.Factory(metrics);
+        Plan.Factory factory = new Plan.Factory(metrics, Mockito.mock(Plan.CostEstimator.class));
         List<Plan.KeysIteration> indexScans = new ArrayList<>(selectivities.size());
         RowFilter.Builder rowFilterBuilder = RowFilter.builder();
         RowFilter.Expression[] predicates = new RowFilter.Expression[] { pred1, pred2, pred3, pred4 };
@@ -872,7 +872,7 @@ public class PlanTest
                                                List<Double> selectivities,
                                                List<Integer> expectedIndexScanCount)
     {
-        Plan.Factory factory = new Plan.Factory(metrics);
+        Plan.Factory factory = new Plan.Factory(metrics, Mockito.mock(Plan.CostEstimator.class));
         List<Plan.KeysIteration> indexScans = new ArrayList<>(selectivities.size());
         RowFilter.Builder rowFilterBuilder = RowFilter.builder();
         for (int i = 0; i < selectivities.size(); i++)
@@ -895,5 +895,22 @@ public class PlanTest
         assertTrue("original:\n" + origPlan.toStringRecursive() + "optimized:\n" + optimizedPlan.toStringRecursive(),
                      expectedIndexScanCount.contains(resultIndexScans.size()));
     }
-    
+
+    @Test
+    public void testExternalCostEstimator()
+    {
+        Plan.CostEstimator est1 = Mockito.mock(Plan.CostEstimator.class);
+        Mockito.when(est1.estimateAnnNodesVisited(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(1);
+        Plan.CostEstimator est2 = Mockito.mock(Plan.CostEstimator.class);
+        Mockito.when(est2.estimateAnnNodesVisited(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(1000);
+
+        Plan.Factory factory1 = new Plan.Factory(table1M, est1);
+        Plan scan1 = factory1.annScan(ordering);
+
+        Plan.Factory factory2 = new Plan.Factory(table1M, est2);
+        Plan scan2 = factory2.annScan(ordering);
+
+        assertTrue(scan2.initCost() > scan1.initCost());
+        assertTrue(scan2.fullCost() > scan1.fullCost());
+    }
 }
