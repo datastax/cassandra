@@ -133,4 +133,13 @@ public enum IndexComponent
                       + Pattern.quote(SAI_SEPARATOR + name + ".db");
         return Component.Type.create(componentName, repr, true, null);
     }
+
+    @Override
+    public String toString()
+    {
+        return "IndexComponent{" +
+               "representation='" + representation + '\'' +
+               ", type=" + type +
+               '}';
+    }
 }
