@@ -335,6 +335,11 @@ public class VectorMemtableIndex implements MemtableIndex
         return (int) min(max(limit, Plan.memoryToDiskFactor() * expectedComparisons), GLOBAL_BRUTE_FORCE_ROWS);
     }
 
+    public int estimateAnnNodesVisited(int limit, int nPermittedOrdinals)
+    {
+        return expectedNodesVisited(limit, nPermittedOrdinals, graph.size());
+    }
+
     /**
      * All parameters must be greater than zero.  nPermittedOrdinals may be larger than graphSize.
      */

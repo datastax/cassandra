@@ -434,6 +434,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
     }
 
+    public int estimateNodesVisited(int limit, int candidates)
+    {
+        return estimateCost(limit, candidates).expectedNodesVisited;
+    }
+
     private CostEstimate estimateCost(int limit, int candidates)
     {
         int rawExpectedNodes = getRawExpectedNodes(limit, candidates);
