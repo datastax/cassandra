@@ -532,19 +532,13 @@ public class QueryController implements Plan.Executor
         long totalRows = queryView.view.keySet().stream().mapToLong(sstable -> sstable.getTotalRows()).sum();
         queryView.view.forEach((sstable, expressions) ->
         {
-            // We expect the number of top results found in each sstable to be proportional to its number of rows
-            // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
-            int sstableLimit = V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
-                               ? max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)))
-                               : limit;
-
             QueryViewBuilder.IndexExpression annIndexExpression = null;
             try
             {
                 assert expressions.size() == 1 : "only one index is expected in ANN expression, found " + expressions.size() + " in " + expressions;
                 annIndexExpression = expressions.get(0);
-                var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, sstableLimit)
-                                                     : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, sstableLimit);
+                var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, limit, totalRows)
+                                                     : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, limit, totalRows);
                 results.addAll(iterators);
             }
             catch (Throwable ex)

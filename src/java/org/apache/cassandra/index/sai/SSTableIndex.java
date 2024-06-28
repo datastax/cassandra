@@ -196,9 +196,10 @@ public class SSTableIndex
     public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
                                                              AbstractBounds<PartitionPosition> keyRange,
                                                              QueryContext context,
-                                                             int limit) throws IOException
+                                                             int limit,
+                                                             long totalRows) throws IOException
     {
-        return searchableIndex.orderBy(expression, keyRange, context, limit);
+        return searchableIndex.orderBy(expression, keyRange, context, limit, totalRows);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)
@@ -286,9 +287,9 @@ public class SSTableIndex
         return Objects.hashCode(sstableContext, indexContext);
     }
 
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit, long totalRows) throws IOException
     {
-        return searchableIndex.orderResultsBy(context, keys, exp, limit);
+        return searchableIndex.orderResultsBy(context, keys, exp, limit, totalRows);
     }
 
     public String toString()
