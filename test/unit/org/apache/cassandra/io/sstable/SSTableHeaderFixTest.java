@@ -391,7 +391,7 @@ public class SSTableHeaderFixTest
         tableMetadata = cols.build();
 
         SerializationHeader.Component header = readHeader(sstable);
-        assertFrozenUdt(header, false, true);
+        assertFrozenUdt(header, false, false);
 
         SSTableHeaderFix headerFix = builder().withPath(sstable.toPath())
                                               .build();
