@@ -24,6 +24,7 @@ import java.util.Iterator;
 import org.assertj.core.api.Assertions;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
@@ -77,6 +78,7 @@ public class StrictFilteringTest extends TestBaseImpl
     }
 
     @Test
+    @Ignore("CNDB-9331: Address CC rebase conflicts with CASSANDRA-19018")
     public void shouldRejectNonStrictIN()
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.reject_in (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
@@ -100,6 +102,7 @@ public class StrictFilteringTest extends TestBaseImpl
     }
 
     @Test
+    @Ignore("CNDB-9331: Address CC rebase conflicts with CASSANDRA-19018")
     public void testPartialUpdates()
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
@@ -206,6 +209,7 @@ public class StrictFilteringTest extends TestBaseImpl
     }
 
     @Test
+    @Ignore("CNDB-9331: Address CC rebase conflicts with CASSANDRA-19018")
     public void testShortReadWithRegularColumns()
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates_short_read (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
@@ -271,6 +275,7 @@ public class StrictFilteringTest extends TestBaseImpl
     }
 
     @Test
+    @Ignore("CNDB-9331: Address CC rebase conflicts with CASSANDRA-19018")
     public void testShortReadWithStaticColumn()
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates_short_read_static (k int, c int, a int, b int static, PRIMARY KEY(k, c)) WITH read_repair = 'NONE'"));
@@ -291,6 +296,7 @@ public class StrictFilteringTest extends TestBaseImpl
     }
 
     @Test
+    @Ignore("CNDB-9331: Address CC rebase conflicts with CASSANDRA-19018")
     public void testTimestampCollision()
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.timestamp_collision (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
