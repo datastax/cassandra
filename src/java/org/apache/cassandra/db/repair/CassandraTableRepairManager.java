@@ -27,6 +27,9 @@ import java.util.concurrent.Future;
 
 import com.google.common.base.Predicate;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -43,6 +46,7 @@ import org.apache.cassandra.service.ActiveRepairService;
 
 public class CassandraTableRepairManager implements TableRepairManager
 {
+    private static final Logger logger = LoggerFactory.getLogger(CassandraTableRepairManager.class);
     private final ColumnFamilyStore cfs;
 
     public CassandraTableRepairManager(ColumnFamilyStore cfs)
@@ -73,6 +77,7 @@ public class CassandraTableRepairManager implements TableRepairManager
         if (pendingRepairSSTables.isEmpty())
             return;
 
+        logger.debug("Number of sstables in pending repair: {} for session {}", pendingRepairSSTables.size(), sessionID);
         LifecycleTransaction txn = cfs.getTracker().tryModify(pendingRepairSSTables, OperationType.COMPACTION);
         if (txn == null)
             return;
