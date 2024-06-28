@@ -55,6 +55,7 @@ import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -275,7 +276,7 @@ public class CompactionGraph implements Closeable, Accountable
             // write postings asynchronously while we run cleanup().  this requires the index header to be present
             writer.writeHeader();
             long postingsOffset = postingsOutput.getFilePointer();
-            var es = Executors.newSingleThreadExecutor();
+            var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
             var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createFileHandle();
             var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset);
             var postingsFuture = es.submit(() -> {
