@@ -411,8 +411,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             }
 
             // We don't support offset for top-k queries.
-            int offset = getOffset(options);
-            checkFalse(offset > 0, String.format(TOPK_OFFSET_ERROR, offset));
+            checkFalse(userOffset > 0, String.format(TOPK_OFFSET_ERROR, userOffset));
         }
 
         return query;
