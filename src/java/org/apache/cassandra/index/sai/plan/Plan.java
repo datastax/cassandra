@@ -126,11 +126,18 @@ abstract public class Plan
      */
     final Factory factory;
 
+    /**
+     * The number of rows/keys expected to be fetched from the result set of this node.
+     * This should be included in the full cost estimate.
+     */
+    final long limit;
 
-    private Plan(Factory factory, int id)
+
+    private Plan(Factory factory, int id, long limit)
     {
         this.id = id;
         this.factory = factory;
+        this.limit = limit;
     }
     /**
      * Returns a new list containing subplans of this node.
@@ -231,6 +238,13 @@ abstract public class Plan
      * @return a new plan if any of the subplans has been replaced, this otherwise
      */
     protected abstract Plan withUpdatedSubplans(Function<Plan, Plan> updater);
+
+    /**
+     * Reconstruct the node with a different limit.
+     * The limit denotes the expected number of keys or rows fetched from the result set of the node.
+     * @param limit new limit
+     */
+    protected abstract Plan limit(long limit);
 
     /**
      * Returns an object describing detailed cost information about running this plan,
@@ -429,8 +443,8 @@ abstract public class Plan
 
         public String toString()
         {
-            return String.format("sel: %.9f, keys: %.1f, cost/key: %.1f, cost: %.1f..%.1f",
-                                 selectivity, expectedKeys, costPerKey(), initCost, fullCost());
+            return String.format("keys: %.1f, cost/key: %.1f, cost: %.1f..%.1f",
+                                 expectedKeys, costPerKey(), initCost, fullCost());
         }
 
         @Override
@@ -499,8 +513,8 @@ abstract public class Plan
 
         public String toString()
         {
-            return String.format("sel: %.9f, rows: %.1f, cost/row: %.1f, cost: %.1f..%.1f",
-                                 selectivity, expectedRows, costPerRow(), initCost, fullCost());
+            return String.format("rows: %.1f, cost/row: %.1f, cost: %.1f..%.1f",
+                                 expectedRows, costPerRow(), initCost, fullCost());
         }
 
         @Override
@@ -532,9 +546,9 @@ abstract public class Plan
          */
         private KeysIterationCost cost;
 
-        protected KeysIteration(Factory factory, int id)
+        protected KeysIteration(Factory factory, int id, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
         }
 
         @Override
@@ -561,6 +575,7 @@ abstract public class Plan
 
         protected abstract Iterator<? extends PrimaryKey> execute(Executor executor);
 
+        protected abstract KeysIteration limit(long limit);
 
         final double expectedKeys()
         {
@@ -579,9 +594,9 @@ abstract public class Plan
      */
     abstract static class Leaf extends KeysIteration
     {
-        protected Leaf(Factory factory, int id)
+        protected Leaf(Factory factory, int id, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
         }
 
         @Override
@@ -605,7 +620,7 @@ abstract public class Plan
     {
         protected Nothing(int id, Factory factory)
         {
-            super(factory, id);
+            super(factory, id, 0);
         }
 
         @Nonnull
@@ -626,6 +641,13 @@ abstract public class Plan
         {
             return RangeIterator.empty();
         }
+
+        @Override
+        protected Nothing limit(long limit)
+        {
+            // limit does not matter for Nothing node because it always returns 0 keys
+            return this;
+        }
     }
 
     /**
@@ -635,9 +657,9 @@ abstract public class Plan
      */
     static class Everything extends Leaf
     {
-        protected Everything(int id, Factory factory)
+        protected Everything(int id, Factory factory, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
         }
 
         @Nonnull
@@ -645,8 +667,10 @@ abstract public class Plan
         protected KeysIterationCost estimateCost()
         {
             // We set the cost to infinity so this node is never present in the optimized plan.
+            // We don't want to have those nodes in the final plan,
+            // because currently we have no way to execute it efficiently.
             // In the future we may want to change it, when we have a way to return all rows without using an index.
-            return new KeysIterationCost(factory.tableMetrics.rows,
+            return new KeysIterationCost(Math.min(factory.tableMetrics.rows, limit),
                                          1.0,
                                          Double.POSITIVE_INFINITY,
                                          Double.POSITIVE_INFINITY);
@@ -667,6 +691,14 @@ abstract public class Plan
             // e.g. we may get such node after removing some nodes from a valid, executable plan.
             throw new UnsupportedOperationException("Returning an iterator over all keys is not supported.");
         }
+
+        @Override
+        protected Everything limit(long limit)
+        {
+            return limit == this.limit
+                   ? this
+                   : new Everything(id, factory, limit);
+        }
     }
 
     abstract static class IndexScan extends Leaf
@@ -674,9 +706,9 @@ abstract public class Plan
         protected final Expression predicate;
         protected final long matchingKeysCount;
 
-        public IndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount)
+        public IndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
             this.predicate = predicate;
             this.matchingKeysCount = matchingKeysCount;
         }
@@ -684,16 +716,18 @@ abstract public class Plan
         @Override
         protected final String description()
         {
-            return "of " + predicate.getIndexName() + " using " + predicate;
+            return String.format("of %s using %s (sel: %.9f)", predicate.getIndexName(), predicate, selectivity());
         }
 
         @Override
         protected final KeysIterationCost estimateCost()
         {
-            double expectedKeys = (double) matchingKeysCount;
+            double expectedKeys = (double) Math.min(matchingKeysCount, limit);
             double costPerKey = CostCoefficients.SAI_KEY_COST;
             double iterCost = expectedKeys * costPerKey;
-            double selectivity = factory.tableMetrics.rows > 0 ? (expectedKeys / factory.tableMetrics.rows) : 0.0;
+            double selectivity = factory.tableMetrics.rows > 0
+                                 ? ((double) matchingKeysCount / factory.tableMetrics.rows)
+                                 : 0.0;
             return new KeysIterationCost(expectedKeys, selectivity, costPerKey, iterCost);
         }
 
@@ -711,7 +745,7 @@ abstract public class Plan
             // In the future we probably will need to take more index metrics into account
             // (e.g. number of distinct values).
 
-            double expectedKeysPerSSTable = expectedKeys() / factory.tableMetrics.sstables;
+            double keysPerSSTable = (double) matchingKeysCount / factory.tableMetrics.sstables;
 
             double skipCostFactor;
             double postingsCountFactor;
@@ -737,9 +771,9 @@ abstract public class Plan
 
             // divide by exponent so the derivative at 1.0 equals postingsCountFactor
             double dKeys = postingsCountFactor / postingsCountExponent;
-            double postingsCountPenalty = dKeys * Math.pow(expectedKeysPerSSTable, postingsCountExponent);
+            double postingsCountPenalty = dKeys * Math.pow(keysPerSSTable, postingsCountExponent);
 
-            double distanceInPostings = Math.min(expectedKeys(), distance * expectedKeys());
+            double distanceInPostings = Math.min(matchingKeysCount, distance * matchingKeysCount);
             // divide by exponent so the derivative at 1.0 equals skipDistanceFactor
             double dPostings = skipDistanceFactor / skipDistanceExponent;
             double distancePenalty = dPostings * Math.pow(distanceInPostings, skipDistanceExponent);
@@ -761,9 +795,18 @@ abstract public class Plan
      */
     static class NumericIndexScan extends IndexScan
     {
-        public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount)
+        public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, long limit)
         {
-            super(factory, id, predicate, matchingKeysCount);
+            super(factory, id, predicate, matchingKeysCount, limit);
+        }
+
+        @Override
+        protected NumericIndexScan limit(long limit)
+        {
+            return limit == this.limit || limit >= matchingKeysCount && this.limit >= matchingKeysCount
+                   ? this
+                   : new NumericIndexScan(factory, id, predicate, matchingKeysCount, limit);
+
         }
     }
 
@@ -772,9 +815,18 @@ abstract public class Plan
      */
     static class LiteralIndexScan extends IndexScan
     {
-        public LiteralIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount)
+        public LiteralIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, long limit)
         {
-            super(factory, id, predicate, matchingKeysCount);
+            super(factory, id, predicate, matchingKeysCount, limit);
+        }
+
+        @Override
+        protected LiteralIndexScan limit(long limit)
+        {
+            return limit == this.limit || limit >= matchingKeysCount && this.limit >= matchingKeysCount
+                   ? this
+                   : new LiteralIndexScan(factory, id, predicate, matchingKeysCount, limit);
+
         }
     }
 
@@ -786,12 +838,40 @@ abstract public class Plan
     {
         private final List<KeysIteration> subplans;
 
-        Union(Factory factory, int id, List<KeysIteration> subplans)
+        Union(Factory factory, int id, List<KeysIteration> subplans, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
             Preconditions.checkArgument(!subplans.isEmpty(), "Subplans must not be empty");
-            this.subplans = Collections.unmodifiableList(subplans);
+            this.subplans = Collections.unmodifiableList(propagateLimit(subplans, limit));
         }
+
+        private static ArrayList<KeysIteration> propagateLimit(List<KeysIteration> subplans, long limit)
+        {
+            double selectivity = computeSelectivity(subplans);
+            ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
+            for (KeysIteration subplan : subplans)
+            {
+                // MAX_VALUE limit is special by meaning "unlimited".
+                // Even though it's probably large enough, we don't want to accidentally make it smaller.
+                // Usually we don't need to do this, but Union is one of the very few (only?) operators
+                // that can return more keys than any of its child nodes.
+                long sublimit = (limit == Long.MAX_VALUE)
+                                ? Long.MAX_VALUE
+                                : Math.round(limit * subplan.selectivity() / selectivity);
+
+                newSubplans.add(subplan.limit(sublimit));
+            }
+            return newSubplans;
+        }
+
+        private static double computeSelectivity(List<KeysIteration> subplans)
+        {
+            double inverseSelectivity = 1.0;
+            for (KeysIteration plan : subplans)
+                inverseSelectivity *= (1.0 - plan.selectivity());
+            return 1.0 - inverseSelectivity;
+        }
+
 
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
@@ -813,7 +893,15 @@ abstract public class Plan
 
             return newSubplans.equals(subplans)
                    ? this
-                   : factory.union(newSubplans, id);
+                   : factory.union(newSubplans, id).limit(limit);
+        }
+
+        @Override
+        protected Union limit(long limit)
+        {
+            return (limit == this.limit)
+                ? this
+                : new Union(factory, id, subplans, limit);
         }
 
         @Override
@@ -832,7 +920,7 @@ abstract public class Plan
                 initCost += subplan.initCost();
                 iterCost += subplan.iterCost();
             }
-            double expectedKeys = factory.tableMetrics.rows * selectivity;
+            double expectedKeys = Math.min(factory.tableMetrics.rows * selectivity, limit);
             return new KeysIterationCost(expectedKeys, selectivity, initCost, iterCost);
         }
 
@@ -874,11 +962,39 @@ abstract public class Plan
     {
         private final List<KeysIteration> subplans;
 
-        private Intersection(Factory factory, int id, List<KeysIteration> subplans)
+        private Intersection(Factory factory, int id, List<KeysIteration> subplans, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
             Preconditions.checkArgument(!subplans.isEmpty(), "Subplans must not be empty");
-            this.subplans = Collections.unmodifiableList(subplans);
+
+            this.subplans = Collections.unmodifiableList(propagateLimit(subplans, limit));
+        }
+
+        private static ArrayList<KeysIteration> propagateLimit(List<KeysIteration> subplans, long limit)
+        {
+            double selectivity = computeSelectivity(subplans);
+            double loops = subplans.get(0).selectivity() / selectivity;
+
+            ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
+            newSubplans.add(subplans.get(0).limit(Math.round(limit * loops)));
+
+            double matchProbability = 1.0;
+            for (int i = 1; i < subplans.size(); i++)
+            {
+                KeysIteration subplan = subplans.get(i);
+                long sublimit = Math.round(limit * loops * matchProbability);
+                newSubplans.add(subplan.limit(sublimit));
+                matchProbability *= subplan.selectivity();
+            }
+            return newSubplans;
+        }
+
+        private static double computeSelectivity(List<KeysIteration> subplans)
+        {
+            double selectivity = 1.0;
+            for (KeysIteration plan : subplans)
+                selectivity *= plan.selectivity();
+            return selectivity;
         }
 
         @Override
@@ -901,7 +1017,16 @@ abstract public class Plan
 
             return newSubplans.equals(subplans)
                    ? this
-                   : factory.intersection(newSubplans, id);
+                   : factory.intersection(newSubplans, id).limit(limit);
+        }
+
+        @Override
+        protected Intersection limit(long limit)
+        {
+            if (limit == this.limit)
+                return this;
+
+            return new Intersection(factory, id, subplans, limit);
         }
 
         @Override
@@ -918,7 +1043,7 @@ abstract public class Plan
                 initCost += subplan.initCost();
                 costPerKey += subplan.costPerKey();
             }
-            double expectedKeyCount = factory.tableMetrics.rows * selectivity;
+            double expectedKeyCount = Math.min(factory.tableMetrics.rows * selectivity, limit);
 
             // Compute the additional cost of skipping keys:
             if (subplans.size() > 1)
@@ -940,7 +1065,7 @@ abstract public class Plan
                 for (int i = 1; i < subplans.size(); i++)
                 {
                     KeysIteration subplan = subplans.get(i);
-                    double skipDistance = Math.min(1.0, 1.0 / (max(1.0, subplan0.expectedKeys()) * matchProbability));
+                    double skipDistance = Math.min(1.0, 1.0 / (max(1.0, subplan0.selectivity() * factory.tableMetrics.rows) * matchProbability));
                     costPerKey += matchProbability * loops * (subplan.estimateCostPerSkip(skipDistance) + subplan.costPerKey());
                     matchProbability *= subplan.selectivity();
                 }
@@ -985,7 +1110,7 @@ abstract public class Plan
             if (subplans.size() <= clauseLimit)
                 return this;
             List<Plan.KeysIteration> newSubplans = new ArrayList<>(subplans.subList(0, clauseLimit));
-            return factory.intersection(newSubplans, id);
+            return factory.intersection(newSubplans, id).limit(limit);
         }
     }
 
@@ -999,9 +1124,9 @@ abstract public class Plan
         final RowFilter.Expression ordering;
 
 
-        protected AnnSort(Factory factory, int id, KeysIteration source, RowFilter.Expression ordering)
+        protected AnnSort(Factory factory, int id, KeysIteration source, RowFilter.Expression ordering, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
             this.source = source;
             this.ordering = ordering;
         }
@@ -1015,16 +1140,17 @@ abstract public class Plan
         @Override
         protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
         {
-            return factory.annSort((KeysIteration) updater.apply(source), ordering, id);
+            return factory.annSort((KeysIteration) updater.apply(source), ordering, id).limit(limit);
         }
 
         @Override
         protected KeysIterationCost estimateCost()
         {
-            return new KeysIterationCost(source.expectedKeys(),
+            double expectedKeys = Math.min(source.expectedKeys(), limit);
+            return new KeysIterationCost(expectedKeys,
                                          source.selectivity(),
                                          source.fullCost() + source.expectedKeys() * CostCoefficients.ANN_INPUT_KEY_COST,
-                                         source.expectedKeys() * CostCoefficients.ANN_SCORED_KEY_COST);
+                                          expectedKeys * CostCoefficients.ANN_SCORED_KEY_COST);
         }
 
         @Override
@@ -1039,6 +1165,13 @@ abstract public class Plan
             return executor.getTopKRows((RangeIterator) source.execute(executor), ordering);
         }
 
+        @Override
+        protected AnnSort limit(long limit)
+        {
+            return limit != this.limit
+                ? new AnnSort(factory, id, source, ordering, limit)
+                : this;
+        }
     }
 
     /**
@@ -1049,22 +1182,23 @@ abstract public class Plan
     {
         final RowFilter.Expression ordering;
 
-        protected AnnScan(Factory factory, int id, RowFilter.Expression ordering)
+        protected AnnScan(Factory factory, int id, RowFilter.Expression ordering, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
             this.ordering = ordering;
         }
 
         @Override
         protected KeysIterationCost estimateCost()
         {
-            long rowCount = factory.tableMetrics.rows;
-            // TODO: get the real limit
-            int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering, 10, rowCount);
-            return new KeysIterationCost(rowCount,
+            long keysCount = Math.min(factory.tableMetrics.rows, limit);
+            int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering,
+                                                                               (int) Math.min(Integer.MAX_VALUE, limit),
+                                                                               keysCount);
+            return new KeysIterationCost(keysCount,
                                          1.0,
                                          initNodesCount * ANN_NODE_COST,
-                                         rowCount * CostCoefficients.ANN_SCORED_KEY_COST);
+                                         keysCount * CostCoefficients.ANN_SCORED_KEY_COST);
         }
 
         @Override
@@ -1078,6 +1212,14 @@ abstract public class Plan
         {
             return executor.getTopKRows(ordering);
         }
+
+        @Override
+        protected KeysIteration limit(long limit)
+        {
+            return limit != this.limit
+                   ? new AnnScan(factory, id, ordering, limit)
+                   : this;
+        }
     }
 
 
@@ -1085,9 +1227,9 @@ abstract public class Plan
     {
         private RowsIterationCost cost;
 
-        private RowsIteration(Factory factory, int id)
+        private RowsIteration(Factory factory, int id, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
         }
 
         @Override
@@ -1100,6 +1242,7 @@ abstract public class Plan
 
         protected abstract RowsIterationCost estimateCost();
 
+        protected abstract RowsIteration limit(long limit);
 
         final double costPerRow()
         {
@@ -1119,10 +1262,10 @@ abstract public class Plan
     {
         private final KeysIteration source;
 
-        private Fetch(Factory factory, int id, KeysIteration keysIteration)
+        private Fetch(Factory factory, int id, KeysIteration keysIteration, long limit)
         {
-            super(factory, id);
-            this.source = keysIteration;
+            super(factory, id, limit);
+            this.source = keysIteration.limit(limit);
         }
 
 
@@ -1136,7 +1279,7 @@ abstract public class Plan
         protected Fetch withUpdatedSubplans(Function<Plan, Plan> updater)
         {
             Plan.KeysIteration updatedSource = (KeysIteration) updater.apply(source);
-            return updatedSource == source ? this : new Fetch(factory, id, updatedSource);
+            return updatedSource == source ? this : new Fetch(factory, id, updatedSource, limit);
         }
 
         @Override
@@ -1147,10 +1290,19 @@ abstract public class Plan
                                   + CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow
                                   + CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow;
 
-            return new RowsIterationCost(source.expectedKeys(),
+            double expectedKeys = Math.min(source.expectedKeys(), limit);
+            return new RowsIterationCost(expectedKeys,
                                          source.selectivity(),
                                          source.initCost(),
-                                         source.iterCost() + source.expectedKeys() * rowFetchCost);
+                                         source.iterCost() + expectedKeys * rowFetchCost);
+        }
+
+        @Override
+        protected Fetch limit(long limit)
+        {
+            return (limit != this.limit)
+                ? new Fetch(factory, id, source, limit)
+                : this;
         }
     }
 
@@ -1165,11 +1317,12 @@ abstract public class Plan
         private final RowsIteration source;
         private final double targetSelectivity;
 
-        Filter(Factory factory, int id, RowFilter filter, RowsIteration source, double targetSelectivity)
+        Filter(Factory factory, int id, RowFilter filter, RowsIteration source, double targetSelectivity, long limit)
         {
-            super(factory, id);
+            super(factory, id, limit);
+            long sourceLimit = Math.round(limit * source.selectivity() / targetSelectivity);
             this.filter = filter;
-            this.source = source;
+            this.source = source.limit(sourceLimit);
             this.targetSelectivity = targetSelectivity;
         }
 
@@ -1185,20 +1338,28 @@ abstract public class Plan
             Plan.RowsIteration updatedSource = (RowsIteration) updater.apply(source);
             return updatedSource == source
                    ? this
-                   : new Filter(factory, id, filter, updatedSource, targetSelectivity);
+                   : new Filter(factory, id, filter, updatedSource, targetSelectivity, limit);
         }
 
         @Override
         protected RowsIterationCost estimateCost()
         {
-            double expectedRows = factory.tableMetrics.rows * targetSelectivity;
+            double expectedRows = Math.min(limit, factory.tableMetrics.rows * targetSelectivity);
             return new RowsIterationCost(expectedRows, targetSelectivity, source.initCost(), source.iterCost());
+        }
+
+        @Override
+        protected Filter limit(long limit)
+        {
+            return limit == this.limit
+                ? this
+                : new Filter(factory, id, filter, source, targetSelectivity, limit);
         }
 
         @Override
         protected String description()
         {
-            return filter.toString();
+            return String.format("%s (sel: %.9f)", filter, selectivity() / source.selectivity());
         }
     }
 
@@ -1209,13 +1370,11 @@ abstract public class Plan
     static class Limit extends RowsIteration
     {
         private final RowsIteration source;
-        private final long limit;
 
         private Limit(Factory factory, int id, RowsIteration source, long limit)
         {
-            super(factory, id);
-            this.source = source;
-            this.limit = limit;
+            super(factory, id, limit);
+            this.source = source.limit(limit);
         }
 
         @Override
@@ -1235,11 +1394,19 @@ abstract public class Plan
         protected RowsIterationCost estimateCost()
         {
             double expectedRows = Math.min(limit, source.cost().expectedRows);
-            double selectivity = expectedRows / factory.tableMetrics.rows;
+            double selectivity = source.selectivity();
             double iterCost = (limit >= source.cost().expectedRows)
                               ? source.iterCost()
                               : source.iterCost() * limit / source.expectedRows();
             return new RowsIterationCost(expectedRows, selectivity, source.initCost(), iterCost);
+        }
+
+        @Override
+        protected RowsIteration limit(long limit)
+        {
+            return limit != this.limit
+                   ? new Limit(factory, id, source, limit)
+                   : this;
         }
     }
 
@@ -1276,7 +1443,7 @@ abstract public class Plan
             this.tableMetrics = tableMetrics;
             this.costEstimator = costEstimator;
             this.nothing = new Nothing(-1, this);
-            this.everything = new Everything(-1, this);
+            this.everything = new Everything(-1, this, Long.MAX_VALUE);
         }
 
         /**
@@ -1291,7 +1458,7 @@ abstract public class Plan
             Preconditions.checkNotNull(predicate, "predicate must not be null");
             Preconditions.checkArgument(matchingKeysCount >= 0, "matchingKeyCount must not be negative");
             Preconditions.checkArgument(matchingKeysCount <= tableMetrics.rows, "matchingKeyCount must not exceed totalKeyCount");
-            return new NumericIndexScan(this, nextId++, predicate, matchingKeysCount);
+            return new NumericIndexScan(this, nextId++, predicate, matchingKeysCount, Long.MAX_VALUE);
         }
 
         /**
@@ -1307,7 +1474,7 @@ abstract public class Plan
             Preconditions.checkNotNull(predicate, "predicate must not be null");
             Preconditions.checkArgument(matchingKeysCount >= 0, "matchingKeyCount must not be negative");
             Preconditions.checkArgument(matchingKeysCount <= tableMetrics.rows, "matchingKeyCount must not exceed totalKeyCount");
-            return new LiteralIndexScan(this, nextId++, predicate, matchingKeysCount);
+            return new LiteralIndexScan(this, nextId++, predicate, matchingKeysCount, Long.MAX_VALUE);
         }
 
         /**
@@ -1330,7 +1497,7 @@ abstract public class Plan
             if (subplans.isEmpty())
                 return nothing;
 
-            return new Union(this, id, subplans);
+            return new Union(this, id, subplans, Long.MAX_VALUE);
         }
 
         /**
@@ -1353,8 +1520,8 @@ abstract public class Plan
             if (subplans.isEmpty())
                 return everything;
 
-            subplans.sort(Comparator.comparing(KeysIteration::expectedKeys));
-            return new Intersection(this, id, subplans);
+            subplans.sort(Comparator.comparing(KeysIteration::selectivity));
+            return new Intersection(this, id, subplans, Long.MAX_VALUE);
         }
 
         public Builder unionBuilder()
@@ -1378,8 +1545,8 @@ abstract public class Plan
         private KeysIteration annSort(@Nonnull KeysIteration source, @Nonnull RowFilter.Expression ordering, int id)
         {
             return (source instanceof Everything)
-                ? new AnnScan(this, id, ordering)
-                : new AnnSort(this, id, source, ordering);
+                ? new AnnScan(this, id, ordering, Long.MAX_VALUE)
+                : new AnnSort(this, id, source, ordering, Long.MAX_VALUE);
         }
 
         /**
@@ -1387,7 +1554,7 @@ abstract public class Plan
          */
         public KeysIteration annScan(@Nonnull RowFilter.Expression ordering)
         {
-            return new AnnScan(this, nextId++, ordering);
+            return new AnnScan(this, nextId++, ordering, Long.MAX_VALUE);
         }
 
         /**
@@ -1395,7 +1562,7 @@ abstract public class Plan
          */
         public RowsIteration fetch(@Nonnull KeysIteration keysIterationPlan)
         {
-            return new Fetch(this, nextId++, keysIterationPlan);
+            return new Fetch(this, nextId++, keysIterationPlan, Long.MAX_VALUE);
         }
 
         /**
@@ -1404,7 +1571,7 @@ abstract public class Plan
          */
         public RowsIteration recheckFilter(@Nonnull RowFilter filter, @Nonnull RowsIteration source)
         {
-            return new Filter(this, nextId++, filter, source, source.cost().selectivity);
+            return new Filter(this, nextId++, filter, source, source.cost().selectivity, Long.MAX_VALUE);
         }
 
         /**
@@ -1430,7 +1597,7 @@ abstract public class Plan
             RowsIterationCost sourceCost = source.cost();
             Preconditions.checkArgument(targetSelectivity >= 0.0, "selectivity must not be negative");
             Preconditions.checkArgument(targetSelectivity <= sourceCost.selectivity, "selectivity must not exceed source selectivity of " + sourceCost.selectivity);
-            return new Filter(this, nextId++, filter, source, targetSelectivity);
+            return new Filter(this, nextId++, filter, source, targetSelectivity, Long.MAX_VALUE);
         }
 
         /**
