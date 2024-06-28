@@ -277,7 +277,7 @@ public class CompactionGraph implements Closeable, Accountable
             // write postings asynchronously while we run cleanup().  this requires the index header to be present
             writer.writeHeader();
             long postingsOffset = postingsOutput.getFilePointer();
-            var es = ExecutorFactory.Global.executorFactory().sequential("SAI-CompactionGraph");
+            var es = ExecutorFactory.Global.executorFactory().sequential("CompactionGraphPostingsWriter");
             var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createFileHandle();
             var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset);
             var postingsFuture = es.submit(() -> {
