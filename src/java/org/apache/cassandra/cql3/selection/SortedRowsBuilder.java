@@ -177,9 +177,13 @@ public abstract class SortedRowsBuilder
         {
             assert !built : "Cannot add more rows after calling build()";
             T candidate = decorator.apply(row, numAddedRows++);
-            queue.offer(candidate);
-            if (queue.size() > limit + offset)
-                queue.poll();
+            boolean queueIsFull = queue.size() >= limit + offset;
+            if (!queueIsFull || queue.comparator().compare(candidate, queue.peek()) > 0)
+            {
+                queue.offer(candidate);
+                if (queueIsFull)
+                    queue.poll();
+            }
         }
 
         @Override
