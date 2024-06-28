@@ -27,6 +27,8 @@ import io.github.jbellis.jvector.graph.SearchResult;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 
+import static java.lang.Math.max;
+
 /**
  * An iterator over {@link SearchResult.NodeScore} backed by a {@link SearchResult} that resumes search
  * when the backing {@link SearchResult} is exhausted.
@@ -63,7 +65,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         this.nodeScores = Arrays.stream(result.getNodes()).iterator();
         this.cumulativeNodesVisited = result.getVisitedCount();
         this.nodesVisitedConsumer = nodesVisitedConsumer;
-        this.limit = limit;
+        this.limit = max(1, limit / 2); // we shouldn't need as many results on resume
         this.rerankK = rerankK;
         this.inMemory = inMemory;
     }
