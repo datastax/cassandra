@@ -329,11 +329,15 @@ public class PlanTest
         Plan.RowsIteration filter = factory.recheckFilter(rowFilter, fetch);
         Plan.RowsIteration limit = factory.limit(filter, 3);
 
-        assertEquals(List.of(s2, s1, s3), limit.nodesOfType(Plan.NumericIndexScan.class));
-        assertEquals(List.of(union), limit.nodesOfType(Plan.Union.class));
-        assertEquals(List.of(fetch), limit.nodesOfType(Plan.Fetch.class));
-        assertEquals(List.of(filter), limit.nodesOfType(Plan.Filter.class));
+        assertEquals(List.of(s2, s1, s3), filter.nodesOfType(Plan.NumericIndexScan.class));
+        assertEquals(List.of(union), filter.nodesOfType(Plan.Union.class));
+        assertEquals(List.of(fetch), filter.nodesOfType(Plan.Fetch.class));
+        assertEquals(List.of(filter), filter.nodesOfType(Plan.Filter.class));
+
+        // Nodes under limit may be different instances because of limit push-down:
         assertEquals(List.of(limit), limit.nodesOfType(Plan.Limit.class));
+        assertEquals(1, limit.nodesOfType(Plan.Filter.class).size());
+        assertEquals(1, limit.nodesOfType(Plan.Union.class).size());
     }
 
 
@@ -479,15 +483,15 @@ public class PlanTest
 
         String prettyStr = limit.toStringRecursive();
 
-        assertEquals("Limit (sel: 0.000003000, rows: 3.0, cost/row: 213.4, cost: 61099.3..61739.7)\n" +
-                     " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 0.001999000, rows: 1999.0, cost/row: 213.4, cost: 61099.3..487765.9)\n" +
-                     "     └─ Fetch (sel: 0.001999000, rows: 1999.0, cost/row: 213.4, cost: 61099.3..487765.9)\n" +
-                     "         └─ AnnSort (sel: 0.001999000, keys: 1999.0, cost/key: 10.0, cost: 61099.3..81089.3)\n" +
-                     "             └─ Union (sel: 0.001999000, keys: 1999.0, cost/key: 25.6, cost: 3.0..51104.3)\n" +
-                     "                 ├─ Intersection (sel: 0.001000000, keys: 1000.0, cost/key: 50.1, cost: 2.0..50103.3)\n" +
-                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, keys: 2000.0, cost/key: 1.0, cost: 1.0..2001.0)\n" +
-                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, keys: 500000.0, cost/key: 1.0, cost: 1.0..500001.0)\n" +
-                     "                 └─ LiteralIndexScan of pred3_idx using RANGE(pred3) (sel: 0.001000000, keys: 1000.0, cost/key: 1.0, cost: 1.0..1001.0)\n", prettyStr);
+        assertEquals("Limit (rows: 3.0, cost/row: 213.4, cost: 61099.3..61739.7)\n" +
+                     " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 1.000000000) (rows: 3.0, cost/row: 213.4, cost: 61099.3..61739.7)\n" +
+                     "     └─ Fetch (rows: 3.0, cost/row: 213.4, cost: 61099.3..61739.7)\n" +
+                     "         └─ AnnSort (keys: 3.0, cost/key: 10.0, cost: 61099.3..61129.3)\n" +
+                     "             └─ Union (keys: 1999.0, cost/key: 25.6, cost: 3.0..51104.3)\n" +
+                     "                 ├─ Intersection (keys: 1000.0, cost/key: 50.1, cost: 2.0..50103.3)\n" +
+                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000) (keys: 2000.0, cost/key: 1.0, cost: 1.0..2001.0)\n" +
+                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000) (keys: 500000.0, cost/key: 1.0, cost: 1.0..500001.0)\n" +
+                     "                 └─ LiteralIndexScan of pred3_idx using RANGE(pred3) (sel: 0.001000000) (keys: 1000.0, cost/key: 1.0, cost: 1.0..1001.0)\n", prettyStr);
     }
 
     @Test
@@ -577,6 +581,7 @@ public class PlanTest
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
 
         Plan optimizedPlan = origPlan.optimize();
+
         assertTrue(optimizedPlan.contains(p -> p instanceof Plan.AnnScan));
         assertEquals(0.0, optimizedPlan.cost().initCost(), 0.0);
 
