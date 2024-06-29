@@ -21,10 +21,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.function.BiFunction;
 
 import org.apache.cassandra.index.Index;
+import org.apache.lucene.util.PriorityQueue;
 
 /**
  * Builds a list of query result rows applying the specified order, limit and offset.
@@ -168,8 +168,18 @@ public abstract class SortedRowsBuilder
                                Comparator<T> comparator)
         {
             super(limit, offset);
-            queue = new PriorityQueue<>(comparator.thenComparingInt(one -> one.id).reversed());
             this.decorator = decorator;
+            queue = new PriorityQueue<>(limit + offset)
+            {
+                @Override
+                protected boolean lessThan(T t1, T t2)
+                {
+                    // Reverse compare rows, so the worst stays at the top of the heap.
+                    // Ties are solved by favoring the row which id indicates that it was inserted first.
+                    int cmp = comparator.compare(t1, t2);
+                    return cmp == 0 ? t1.id > t2.id : cmp > 0;
+                }
+            };
         }
 
         @Override
@@ -177,13 +187,7 @@ public abstract class SortedRowsBuilder
         {
             assert !built : "Cannot add more rows after calling build()";
             T candidate = decorator.apply(row, numAddedRows++);
-            boolean queueIsFull = queue.size() >= limit + offset;
-            if (!queueIsFull || queue.comparator().compare(candidate, queue.peek()) > 0)
-            {
-                queue.offer(candidate);
-                if (queueIsFull)
-                    queue.poll();
-            }
+            queue.insertWithOverflow(candidate);
         }
 
         @Override
@@ -196,8 +200,8 @@ public abstract class SortedRowsBuilder
                 return Collections.emptyList();
 
             ArrayList<List<ByteBuffer>> rows = new ArrayList<>(toPeek);
-            while (!queue.isEmpty() && toPeek-- > 0)
-                rows.add(queue.poll().row);
+            while (toPeek-- > 0)
+                rows.add(queue.pop().row);
 
             Collections.reverse(rows);
             return rows;
