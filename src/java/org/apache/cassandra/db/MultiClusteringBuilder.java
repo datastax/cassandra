@@ -408,7 +408,10 @@ public class MultiClusteringBuilder
         for (ClusteringElements element: clusterings)
         {
             assert element.kind == ClusteringElements.Kind.POINT : String.format("Not a point: %s", element);
-            set.add(builder.buildWith(element.values));
+            if (!element.values.isEmpty())
+                set.add(builder.buildWith(element.values));
+            else
+                set.add(Clustering.EMPTY);
         }
         return set.build();
     }
