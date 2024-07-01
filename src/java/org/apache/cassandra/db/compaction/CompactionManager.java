@@ -979,7 +979,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         // here we compute the task off the compaction executor, so having that present doesn't
         // confuse runWithCompactionsDisabled -- i.e., we don't want to deadlock ourselves, waiting
         // for ourselves to finish/acknowledge cancellation before continuing.
-        CompactionTasks tasks = cfStore.getCompactionStrategy().getMaximalTasks(gcBefore, splitOutput);
+        CompactionTasks tasks = cfStore.getCompactionStrategy().getMaximalTasks(gcBefore, splitOutput, operationType);
 
         if (tasks.isEmpty())
             return Collections.emptyList();
