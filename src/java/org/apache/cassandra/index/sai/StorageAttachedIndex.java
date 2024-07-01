@@ -314,7 +314,7 @@ public class StorageAttachedIndex implements Index
             for (ColumnMetadata column : metadata.primaryKeyColumns())
             {
                 if (column.name.equals(target.left.name))
-                    throw new InvalidRequestException("Cannot specify index analyzer on primary key column: " + target.left);
+                    logger.warn("Schema should be fixed to remove invalid index analyzer on primary key column: " + target.left);
             }
         }
 
