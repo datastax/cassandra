@@ -36,6 +36,7 @@ interface NativeLibraryWrapper
     int callMunlockall() throws UnsatisfiedLinkError, RuntimeException;
     int callFcntl(int fd, int command, long flags) throws UnsatisfiedLinkError, RuntimeException;
     int callPosixFadvise(int fd, long offset, int len, int flag) throws UnsatisfiedLinkError, RuntimeException;
+    int callPosixMadvise(long addr, long length, int advice) throws UnsatisfiedLinkError, RuntimeException;
     int callOpen(String path, int flags) throws UnsatisfiedLinkError, RuntimeException;
     int callFsync(int fd) throws UnsatisfiedLinkError, RuntimeException;
     int callClose(int fd) throws UnsatisfiedLinkError, RuntimeException;

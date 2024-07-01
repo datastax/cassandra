@@ -89,6 +89,12 @@ public class NativeLibraryWindows implements NativeLibraryWrapper
         throw new UnsatisfiedLinkError();
     }
 
+    @Override
+    public int callPosixMadvise(long addr, long length, int advice) throws UnsatisfiedLinkError, RuntimeException
+    {
+        throw new UnsatisfiedLinkError();
+    }
+
     public int callOpen(String path, int flags) throws UnsatisfiedLinkError, RuntimeException
     {
         throw new UnsatisfiedLinkError();

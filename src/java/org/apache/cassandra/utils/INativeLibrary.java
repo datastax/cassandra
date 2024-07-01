@@ -18,6 +18,7 @@
 package org.apache.cassandra.utils;
 
 import java.io.FileDescriptor;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 
@@ -84,9 +85,9 @@ public interface INativeLibrary
     void trySkipCache(int fd, long offset, int len, String fileName);
 
     /**
-     * advise the OS to expect random i/o performed against the fd (avoiding readahead)
+     * advise the OS to expect random i/o performed against the mapped address
      */
-    void adviseRandom(int fd, long offset, long len, String fileName);
+    void adviseRandom(MappedByteBuffer buffer, long len);
 
     /**
      * execute OS file control command
