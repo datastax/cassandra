@@ -475,7 +475,10 @@ public interface Index
         /**
          * @return {@code true} if higher scores are considered better, {@code false} otherwise
          */
-        boolean reversed();
+        default boolean reversed()
+        {
+            return false;
+        }
     }
 
     /**

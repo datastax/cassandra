@@ -58,25 +58,34 @@ public class SortedRowsBuilderTest
             for (int offset = 0; offset <= values.length + 1; offset++)
             {
                 // with insertion order
-                test(rows, SortedRowsBuilder.create(limit, offset), null, limit, offset);
+                test(rows, SortedRowsBuilder.create(limit, offset), null);
 
                 // with comparator
-                test(rows, SortedRowsBuilder.create(limit, offset, comparator), comparator, limit, offset);
-                test(rows, SortedRowsBuilder.create(limit, offset, reverseComparator), reverseComparator, limit, offset);
+                test(rows, SortedRowsBuilder.WithList.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithList.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.WithPriorityQueue.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithPriorityQueue.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, reverseComparator), reverseComparator);
 
                 // with index scorer
-                test(rows, SortedRowsBuilder.create(limit, offset, scorer(false)), comparator, limit, offset);
-                test(rows, SortedRowsBuilder.create(limit, offset, scorer(true)), reverseComparator, limit, offset);
+                test(rows, SortedRowsBuilder.WithList.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithList.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.WithPriorityQueue.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithPriorityQueue.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, scorer(true)), reverseComparator);
             }
         }
     }
 
     private static void test(List<List<ByteBuffer>> rows,
                              SortedRowsBuilder builder,
-                             @Nullable Comparator<List<ByteBuffer>> comparator,
-                             int limit,
-                             int offset)
+                             @Nullable Comparator<List<ByteBuffer>> comparator)
     {
+        int limit = builder.limit;
+        int offset = builder.offset;
+
         // get the expected values...
         List<List<ByteBuffer>> expecetedRows = new ArrayList<>(rows);
         if (comparator != null)

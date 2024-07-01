@@ -22,6 +22,8 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.apache.cassandra.index.Index;
 import org.apache.lucene.util.PriorityQueue;
@@ -38,8 +40,8 @@ import org.apache.lucene.util.PriorityQueue;
  */
 public abstract class SortedRowsBuilder
 {
-    protected final int limit;
-    protected final int offset;
+    public final int limit;
+    public final int offset;
 
     private SortedRowsBuilder(int limit, int offset)
     {
@@ -92,9 +94,7 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
     {
-        return new WithComparator<>(limit, offset,
-                                    WithComparator.DecoratedRow::new,
-                                    (x, y) -> comparator.compare(x.row, y.row));
+        return WithListAndPriorityQueue.create(limit, offset, comparator);
     }
 
     /**
@@ -107,11 +107,7 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
     {
-        return new WithComparator<>(limit, offset,
-                                    (row, id) -> new ScoredRow(row, id, scorer.score(row)),
-                                    (x, y) ->  scorer.reversed()
-                                                ? Float.compare(y.score, x.score)
-                                                : Float.compare(x.score, y.score));
+        return WithListAndPriorityQueue.create(limit, offset, scorer);
     }
 
     /**
@@ -146,35 +142,125 @@ public abstract class SortedRowsBuilder
     /**
      * {@link SortedRowsBuilder} that orders rows based on the provided comparator.
      * </p>
+     * It simply stores all the rows in a list, and sorts and trims it when {@link #build()} is called. As such, it can
+     * consume a bunch of resources if the number of rows is high. However, it has good performance for cases where
+     * number of rows is close to {@code limit + offset}, as it's the case of partition-directed queries.
+     * </p>
+     * The rows can be decorated with any other value used for the comparator, so it doesn't need to recalculate that
+     * value in every comparison.
+     */
+    public static class WithList<T> extends SortedRowsBuilder
+    {
+        private final List<T> rows = new ArrayList<>();
+        private final Function<List<ByteBuffer>, T> decorator;
+        private final Function<T, List<ByteBuffer>> undecorator;
+        private final Comparator<T> comparator;
+        private boolean built = false;
+
+        public static WithList<List<ByteBuffer>> create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
+        {
+            return new WithList<>(limit, offset, r -> r, r -> r, comparator);
+        }
+
+        public static WithList<RowWithScore> create(int limit, int offset, Index.Scorer scorer)
+        {
+            return new WithList<>(limit, offset,
+                                  r -> new RowWithScore(r, scorer.score(r)),
+                                  rs -> rs.row,
+                                  (x, y) -> scorer.reversed()
+                                            ? Float.compare(y.score, x.score)
+                                            : Float.compare(x.score, y.score));
+        }
+
+        private WithList(int limit,
+                         int offset,
+                         Function<List<ByteBuffer>, T> decorator,
+                         Function<T, List<ByteBuffer>> undecorator,
+                         Comparator<T> comparator)
+        {
+            super(limit, offset);
+            this.comparator = comparator;
+            this.decorator = decorator;
+            this.undecorator = undecorator;
+        }
+
+        @Override
+        public void add(List<ByteBuffer> row)
+        {
+            assert !built : "Cannot add more rows after calling build()";
+            rows.add(decorator.apply(row));
+        }
+
+        @Override
+        public List<List<ByteBuffer>> build()
+        {
+            built = true;
+
+            rows.sort(comparator);
+
+            // trim the results and undecorate them
+            List<List<ByteBuffer>> result = new ArrayList<>();
+            for (int i = 0; i < rows.size(); i++)
+            {
+                if (i < offset)
+                    continue;
+                if (i >= limit + offset)
+                    break;
+                result.add(undecorator.apply(rows.get(i)));
+            }
+
+            return result;
+        }
+    }
+
+    /**
+     * {@link SortedRowsBuilder} that orders rows based on the provided comparator.
+     * </p>
      * It's possible for the comparison to produce ties. To deal with these ties, the rows are decorated with their
      * position in the sequence of calls to {@link #add(List)}, so we can use that identifying position to solve ties by
      * favoring the row that was inserted first.
      * </p>
-     * The rows can be decorated with any other value used for the comparator, so it doesn't need to reclaculate that
+     * The rows can be decorated with any other value used for the comparator, so it doesn't need to recalculate that
      * value in every comparison.
      * </p>
      * It keeps at most {@code limit + offset} rows in memory.
      */
-    private static class WithComparator<T extends WithComparator.DecoratedRow> extends SortedRowsBuilder
+    public static class WithPriorityQueue<T extends RowWithId> extends SortedRowsBuilder
     {
         private final BiFunction<List<ByteBuffer>, Integer, T> decorator;
-        private final PriorityQueue<T> queue;
+        private final PriorityQueue<T> rows;
         private int numAddedRows = 0;
         private boolean built = false;
 
-        private WithComparator(int limit,
-                               int offset,
-                               BiFunction<List<ByteBuffer>, Integer, T> decorator,
-                               Comparator<T> comparator)
+        public static WithPriorityQueue<RowWithId> create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
+        {
+            return new WithPriorityQueue<>(limit, offset,
+                                           RowWithId::new,
+                                           (x, y) -> comparator.compare(x.row, y.row));
+        }
+
+        public static WithPriorityQueue<RowWithScoreAndId> create(int limit, int offset, Index.Scorer scorer)
+        {
+            return new WithPriorityQueue<>(limit, offset,
+                                           (row, id) -> new RowWithScoreAndId(row, id, scorer.score(row)),
+                                           (x, y) -> scorer.reversed()
+                                                     ? Float.compare(y.score, x.score)
+                                                     : Float.compare(x.score, y.score));
+        }
+
+        private WithPriorityQueue(int limit,
+                                  int offset,
+                                  BiFunction<List<ByteBuffer>, Integer, T> decorator,
+                                  Comparator<T> comparator)
         {
             super(limit, offset);
             this.decorator = decorator;
-            queue = new PriorityQueue<>(limit + offset)
+            rows = new PriorityQueue<>(limit + offset)
             {
                 @Override
                 protected boolean lessThan(T t1, T t2)
                 {
-                    // Reverse compare rows, so the worst stays at the top of the heap.
+                    // Reverse compare rows, so the worst stays at the top of the queue.
                     // Ties are solved by favoring the row which id indicates that it was inserted first.
                     int cmp = comparator.compare(t1, t2);
                     return cmp == 0 ? t1.id > t2.id : cmp > 0;
@@ -187,7 +273,7 @@ public abstract class SortedRowsBuilder
         {
             assert !built : "Cannot add more rows after calling build()";
             T candidate = decorator.apply(row, numAddedRows++);
-            queue.insertWithOverflow(candidate);
+            rows.insertWithOverflow(candidate);
         }
 
         @Override
@@ -195,44 +281,131 @@ public abstract class SortedRowsBuilder
         {
             built = true;
 
-            int toPeek = queue.size() - offset;
+            int toPeek = rows.size() - offset;
             if (toPeek <= 0)
                 return Collections.emptyList();
 
-            ArrayList<List<ByteBuffer>> rows = new ArrayList<>(toPeek);
+            ArrayList<List<ByteBuffer>> result = new ArrayList<>(toPeek);
             while (toPeek-- > 0)
-                rows.add(queue.pop().row);
+                result.add(rows.pop().row);
 
-            Collections.reverse(rows);
-            return rows;
-        }
-
-        /**
-         * A row decorated with its position in the sequence of calls to {@link #add(List)}, so we can use it to solve ties
-         * in comparisons.
-         */
-        static class DecoratedRow
-        {
-            protected final List<ByteBuffer> row;
-            protected final int id;
-
-            DecoratedRow(List<ByteBuffer> row, int id)
-            {
-                this.row = row;
-                this.id = id;
-            }
+            Collections.reverse(result);
+            return result;
         }
     }
 
     /**
-     * A {@link WithComparator.DecoratedRow} that is also decorated with a score assigned by a {@link Index.Scorer},
+     * {@link SortedRowsBuilder} that tries to combine the benefits of {@link WithList} and {@link WithPriorityQueue}.
+     * </p>
+     * It uses a {@link WithList} to store the first {@code limit + offset} rows, and then swaps to a {@link WithPriorityQueue}
+     * if more rows are added.
+     */
+    public static class WithListAndPriorityQueue<L, Q extends RowWithId> extends SortedRowsBuilder
+    {
+        private final Supplier<WithPriorityQueue<Q>> queueSupplier;
+        private WithList<L> list;
+        private WithPriorityQueue<Q> queue;
+
+        public static SortedRowsBuilder create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
+        {
+            return new WithListAndPriorityQueue<>(limit, offset,
+                                                  WithList.create(limit, offset, comparator),
+                                                  () -> WithPriorityQueue.create(limit, offset, comparator));
+        }
+
+        public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
+        {
+            return new WithListAndPriorityQueue<>(limit, offset,
+                                                  WithList.create(limit, offset, scorer),
+                                                  () -> WithPriorityQueue.create(limit, offset, scorer));
+        }
+
+        private WithListAndPriorityQueue(int limit, int offset, WithList<L> list, Supplier<WithPriorityQueue<Q>> queueSupplier)
+        {
+            super(limit, offset);
+            this.list = list;
+            this.queueSupplier = queueSupplier;
+        }
+
+        @Override
+        public void add(List<ByteBuffer> row)
+        {
+            if (list != null && list.rows.size() < limit + offset)
+            {
+                list.add(row);
+            }
+            else
+            {
+                if (queue == null)
+                    swapToQueue();
+                queue.add(row);
+            }
+        }
+
+        /** Initializes the queue with the contents of the list and drops the list. */
+        private void swapToQueue()
+        {
+            queue = queueSupplier.get();
+            for (int i = limit + offset - 1; i >= 0; i--)
+            {
+                L listRow = list.rows.remove(i);
+                List<ByteBuffer> row = list.undecorator.apply(listRow);
+
+                Q queueRow = queue.decorator.apply(row, i);
+                queue.rows.add(queueRow);
+                queue.numAddedRows++;
+            }
+            list = null;
+        }
+
+        @Override
+        public List<List<ByteBuffer>> build()
+        {
+            return list != null ? list.build() : queue.build();
+        }
+    }
+
+    /**
+     * A row decorated with its position in the sequence of calls to {@link #add(List)}, so we can use it to solve ties
+     * in comparisons.
+     */
+    private static class RowWithId
+    {
+        protected final List<ByteBuffer> row;
+        protected final int id;
+
+        private RowWithId(List<ByteBuffer> row, int id)
+        {
+            this.row = row;
+            this.id = id;
+        }
+    }
+
+    /**
+     * A row decorated with its score assigned by a {@link Index.Scorer},
      * so we don't need to recalculate that score in every comparison.
      */
-    private static final class ScoredRow extends WithComparator.DecoratedRow
+    private static final class RowWithScore
+    {
+        private final List<ByteBuffer> row;
+        private final float score;
+
+        private RowWithScore(List<ByteBuffer> row, float score)
+        {
+            this.row = row;
+            this.score = score;
+        }
+    }
+
+    /**
+     * A {@link RowWithId} that is also decorated with a score assigned by a {@link Index.Scorer},
+     * so we don't need to recalculate that score in every comparison.
+     */
+    private static final class RowWithScoreAndId extends RowWithId
     {
         private final float score;
 
-        private ScoredRow(List<ByteBuffer> row, int id, float score)
+        private RowWithScoreAndId(List<ByteBuffer> row, int id, float score)
         {
             super(row, id);
             this.score = score;
