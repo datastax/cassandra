@@ -274,6 +274,47 @@ public class NativeLibrary implements INativeLibrary
         }
     }
 
+    public void adviseRandom(int fd, long offset, long len, String fileName) {
+        if (len == 0) {
+            adviseRandom(fd, 0, 0, fileName);
+            return;
+        }
+
+        while (len > 0) {
+            int sublen = (int) Math.min(Integer.MAX_VALUE, len);
+            adviseRandom(fd, offset, sublen, fileName);
+            len -= sublen;
+            offset += sublen;
+        }
+    }
+
+    public void adviseRandom(int fd, long offset, int len, String fileName) {
+        if (fd < 0) return;
+
+        try {
+            if (osType == LINUX) {
+                int result = wrappedLibrary.callPosixFadvise(fd, offset, len, POSIX_FADV_RANDOM);
+                if (result != 0) {
+                    NoSpamLogger.log(
+                    logger,
+                    NoSpamLogger.Level.WARN,
+                    10,
+                    TimeUnit.MINUTES,
+                    "Failed adviseRandom on file: {} Error: " + wrappedLibrary.callStrerror(result).getString(0),
+                    fileName
+                    );
+                }
+            }
+        } catch (UnsatisfiedLinkError e) {
+            // if JNA is unavailable just skipping Direct I/O
+            // instance of this class will act like normal RandomAccessFile
+        } catch (RuntimeException e) {
+            if (!(e instanceof LastErrorException)) throw e;
+
+            logger.warn("posix_fadvise({}, {}) failed, errno ({}).", fd, offset, errno(e));
+        }
+    }
+
     @Override
     public int tryFcntl(int fd, int command, int flags)
     {
