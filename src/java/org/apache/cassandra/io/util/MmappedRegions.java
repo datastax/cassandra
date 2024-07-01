@@ -360,7 +360,7 @@ public class MmappedRegions extends SharedCloseableImpl
         private void add(long pos, long size)
         {
             ByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - onDiskSliceOffset, size);
-            channel.trySkipCache(pos - onDiskSliceOffset, size);
+            channel.adviseRandom(pos - onDiskSliceOffset, size);
 
             ++last;
 

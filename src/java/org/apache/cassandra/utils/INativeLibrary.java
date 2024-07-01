@@ -84,6 +84,11 @@ public interface INativeLibrary
     void trySkipCache(int fd, long offset, int len, String fileName);
 
     /**
+     * advise the OS to expect random i/o performed against the fd (avoiding readahead)
+     */
+    void adviseRandom(int fd, long offset, long len, String fileName);
+
+    /**
      * execute OS file control command
      */
     int tryFcntl(int fd, int command, int flags);
