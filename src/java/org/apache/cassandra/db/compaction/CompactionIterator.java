@@ -300,7 +300,8 @@ public class CompactionIterator implements UnfilteredPartitionIterator
 
                 mergedPartitionsHistogram[numVersions - 1] += 1;
 
-                final CompactionTransaction indexTransaction = getIndexTransaction(partitionKey,versions);
+                final CompactionTransaction indexTransaction = rowProcessingNeeded() ? getIndexTransaction(partitionKey,versions)
+                                                                                     : null;
 
                 return new UnfilteredRowIterators.MergeListener()
                 {
@@ -341,9 +342,6 @@ public class CompactionIterator implements UnfilteredPartitionIterator
 
     private CompactionTransaction getIndexTransaction(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
     {
-        if (type != OperationType.COMPACTION || !controller.realm.getIndexManager().handles(IndexTransaction.Type.COMPACTION))
-            return null;
-
         Columns statics = Columns.NONE;
         Columns regulars = Columns.NONE;
         for (int i=0, isize=versions.size(); i<isize; i++)
