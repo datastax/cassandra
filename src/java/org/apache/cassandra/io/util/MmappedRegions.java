@@ -314,13 +314,15 @@ public class MmappedRegions extends SharedCloseableImpl
           * refers to position on disk, not the uncompressed data) */
         private final long onDiskSliceOffset;
 
-        /** whether to apply fadv_random to mapped regions */
-        private boolean adviseRandom;
-
         private State(ChannelProxy channel, long onDiskSliceOffset, boolean adviseRandom)
         {
             this.channel = channel.sharedCopy();
-            this.adviseRandom = adviseRandom;
+
+            // this isn't quite semantically correct since it ignores onDiskSliceOffset,
+            // but "0, 0" seems to be the only thing that actually works on Linux
+            if (adviseRandom)
+                channel.adviseRandom(0, 0);
+
             this.buffers = new ByteBuffer[REGION_ALLOC_SIZE];
             this.offsets = new long[REGION_ALLOC_SIZE];
             this.length = 0;
@@ -331,7 +333,6 @@ public class MmappedRegions extends SharedCloseableImpl
         private State(State original)
         {
             this.channel = original.channel;
-            this.adviseRandom = original.adviseRandom;
             this.buffers = original.buffers;
             this.offsets = original.offsets;
             this.length = original.length;
@@ -374,8 +375,6 @@ public class MmappedRegions extends SharedCloseableImpl
         private void add(long pos, long size)
         {
             ByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - onDiskSliceOffset, size);
-            if (adviseRandom)
-                channel.adviseRandom(pos - onDiskSliceOffset, size);
 
             ++last;
 
