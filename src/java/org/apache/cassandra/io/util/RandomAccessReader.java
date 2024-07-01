@@ -24,6 +24,8 @@ import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import javax.annotation.concurrent.NotThreadSafe;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.primitives.Ints;
 
@@ -33,6 +35,7 @@ import org.apache.cassandra.io.util.Rebufferer.BufferHolder;
 @NotThreadSafe
 public class RandomAccessReader extends RebufferingInputStream implements FileDataInput, io.github.jbellis.jvector.disk.RandomAccessReader
 {
+    private final static Logger logger = LoggerFactory.getLogger(RandomAccessReader.class);
     // The default buffer size when the client doesn't specify it
     public static final int DEFAULT_BUFFER_SIZE = 4096;
 
@@ -119,6 +122,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
 
         int bytesToRead = Float.BYTES * count;
+        logger.debug("BYTES TO READ (float): {}", bytesToRead);
         if (count > floatBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
@@ -158,6 +162,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
 
         int bytesToRead = Long.BYTES * dest.length;
+        logger.debug("BYTES TO READ (readFully): {}", bytesToRead);
         if (bytesToRead > longBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
@@ -210,6 +215,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
 
         int bytesToRead = Integer.BYTES * count;
+        logger.debug("BYTES TO READ (int): {}", bytesToRead);
         if (count > intBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
