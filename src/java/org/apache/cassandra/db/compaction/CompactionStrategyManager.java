@@ -1002,13 +1002,13 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     @Override
     public CompactionTasks getMaximalTasks(final long gcBefore, final boolean splitOutput)
     {
+        return this.getMaximalTasks(gcBefore, splitOutput, OperationType.MAJOR_COMPACTION);
+    }
+
+    @Override
+    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType)
+    {
         maybeReloadDiskBoundaries();
-
-        // FIXME STAR-13 - workaround for getMaximalTasks being defined in the CompactionStrategy interface
-        // and not havine an OpertionType parameter. When this is called from CompactionManager, the current
-        // callstack will always pass in MAJOR_COMPACTION, so we can just hardcode that here.
-        OperationType operationType = OperationType.MAJOR_COMPACTION;
-
         // runWithCompactionsDisabled cancels active compactions and disables them, then we are able
         // to make the repaired/unrepaired strategies mark their own sstables as compacting. Once the
         // sstables are marked the compactions are re-enabled
