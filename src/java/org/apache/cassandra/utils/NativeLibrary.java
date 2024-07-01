@@ -20,6 +20,8 @@ package org.apache.cassandra.utils;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.Buffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.TimeUnit;
@@ -28,6 +30,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sun.jna.LastErrorException;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
@@ -62,6 +66,12 @@ public class NativeLibrary implements INativeLibrary
     private static final int POSIX_FADV_WILLNEED   = 3; /* fadvise.h */
     private static final int POSIX_FADV_DONTNEED   = 4; /* fadvise.h */
     private static final int POSIX_FADV_NOREUSE    = 5; /* fadvise.h */
+
+    private static final int MADV_NORMAL     = 0; /* mman.h */
+    private static final int MADV_RANDOM     = 1; /* mman.h */
+    private static final int MADV_SEQUENTIAL = 2; /* mman.h */
+    private static final int MADV_WILLNEED   = 3; /* mman.h */
+    private static final int MADV_DONTNEED   = 4; /* mman.h */
 
     private static final NativeLibraryWrapper wrappedLibrary;
     private static boolean jnaLockable = false;
@@ -271,6 +281,45 @@ public class NativeLibrary implements INativeLibrary
                 throw e;
 
             logger.warn("posix_fadvise({}, {}) failed, errno ({}).", fd, offset, errno(e));
+        }
+    }
+
+    /**
+     * @param buffer
+     * @param length
+     * @param filename -- source file backing buffer; logged on error
+     * <p>
+     * adviseRandom works even on buffers that are not aligned to page boundaries (which is the
+     * common case for how MmappedRegions is used).
+     */
+    public void adviseRandom(MappedByteBuffer buffer, long length, String filename) {
+        assert buffer != null;
+
+        var rawAddress = Native.getDirectBufferPointer(buffer);
+        // align to the nearest lower page boundary
+        var alignedAddress = new Pointer(Pointer.nativeValue(rawAddress) & -PageAware.PAGE_SIZE);
+        // we want to advise the whole buffer, so if the aligned address is lower than the raw one,
+        // we need to pad the length accordingly.  (we do not need to align `length`, Linux
+        // takes care of rounding it up for us.)
+        length += Pointer.nativeValue(rawAddress) - Pointer.nativeValue(alignedAddress);
+
+        try {
+            int result = wrappedLibrary.callPosixMadvise(alignedAddress, length, MADV_RANDOM);
+            if (result != 0) {
+                NoSpamLogger.log(logger,
+                                 NoSpamLogger.Level.WARN,
+                                 10,
+                                 TimeUnit.MINUTES,
+                                 "Failed madvise on file {}. Error: " + wrappedLibrary.callStrerror(result).getString(0),
+                                 filename);
+            }
+        } catch (UnsatisfiedLinkError e) {
+            logger.warn("madvise not supported on this platform.", e);
+        } catch (RuntimeException e) {
+            if (!(e instanceof LastErrorException)) {
+                throw e;
+            }
+            logger.warn("madvise({}, {}, {}) failed, errno ({}).", alignedAddress, length, MADV_RANDOM, errno(e));
         }
     }
 

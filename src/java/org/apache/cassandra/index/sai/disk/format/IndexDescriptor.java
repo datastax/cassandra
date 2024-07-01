@@ -585,9 +585,24 @@ public class IndexDescriptor
             @Override
             public FileHandle createFileHandle()
             {
-                try (final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this))
+                try (var builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
-                    return builder.order(byteOrder()).complete();
+                    var b = builder.order(byteOrder());
+                    // Comments on why we don't use adviseRandom for some components where you might expect it:
+                    //
+                    // KD_TREE: no adviseRandom because we do a large bulk read on startup, queries later may
+                    //     benefit from adviseRandom but there's no way to split those apart
+                    // POSTINGS_LISTS: for common terms with 1000s of rows, adviseRandom seems likely to
+                    //     make it slower; no way to get cardinality at this point in the code
+                    //     (and we already have shortcut code for the common 1:1 vector case)
+                    //     so we leave it alone here
+                    if (component == IndexComponentType.TERMS_DATA
+                        || component == IndexComponentType.VECTOR
+                        || component == IndexComponentType.PRIMARY_KEY_TRIE)
+                    {
+                        b = b.adviseRandom();
+                    }
+                    return b.complete();
                 }
             }
 
