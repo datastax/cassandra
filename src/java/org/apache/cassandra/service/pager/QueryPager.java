@@ -157,4 +157,36 @@ public interface QueryPager
     {
         return false;
     }
+
+    /**
+     * Reads all the rows in this pager using paging internally.
+     * </p>
+     * Pages will be lazily fetched according to the provided page size as the returned {@link PartitionIterator} is
+     * consumed.
+     *
+     * @param pageSize the maximum number of elements to be fetched on each internal page.
+     * @param consistency the consistency level to achieve for the query.
+     * @param queryState the {@code QueryState} for the query. In practice, this can be null unless {@code consistency}
+     * is a serial consistency.
+     * @return all the rows in this pager.
+     */
+    default PartitionIterator readAll(PageSize pageSize, ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime)
+    {
+        return new PagedPartitionIterator.Distributed(this, pageSize, consistency, queryState, queryStartNanoTime);
+    }
+
+    /**
+     * Reads all the rows in this pager using paging internally, using local queries.
+     * </p>
+     * Pages will be lazily fetched according to the provided page size as the returned {@link PartitionIterator} is
+     * consumed.
+     *
+     * @param pageSize the maximum number of elements to be fetched on each internal page.
+     * @param executionController the {@code ReadExecutionController} protecting the read.
+     * @return all the rows in this pager.
+     */
+    default PartitionIterator readAllInternal(PageSize pageSize, ReadExecutionController executionController)
+    {
+        return new PagedPartitionIterator.Internal(this, pageSize, executionController);
+    }
 }

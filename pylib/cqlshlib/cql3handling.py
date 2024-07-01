@@ -714,7 +714,7 @@ syntax_rules += r'''
                           ( "GROUP" "BY" <groupByClause> ( "," <groupByClause> )* )?
                           ( "ORDER" "BY" <orderByClause> ( "," <orderByClause> )* )?
                           ( "PER" "PARTITION" "LIMIT" perPartitionLimit=<wholenumber> )?
-                          ( "LIMIT" limit=<wholenumber> )?
+                          ( "LIMIT" limit=<wholenumber> ( "OFFSET" offset=<wholenumber> )? )?
                           ( "ALLOW" "FILTERING" )?
                     ;
 <whereClause> ::= <relation> ( "AND" <relation> )*
