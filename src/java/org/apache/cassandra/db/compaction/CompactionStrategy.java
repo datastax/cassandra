@@ -87,6 +87,8 @@ public interface CompactionStrategy extends CompactionObserver
     @SuppressWarnings("resource")
     CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput);
 
+    CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType);
+
     /**
      * @param sstables SSTables to compact. Must be marked as compacting.
      * @param gcBefore throw away tombstones older than this
