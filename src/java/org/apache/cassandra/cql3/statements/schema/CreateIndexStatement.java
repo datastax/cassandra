@@ -396,7 +396,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             // USING, make sure the appropriate custom index is created.
             if (attrs.customClass != null)
             {
-                if (!attrs.isCustom && attrs.customClass.equalsIgnoreCase(CassandraIndex.NAME))
+                boolean isLegacyLocalTable = attrs.customClass.equalsIgnoreCase(CassandraIndex.NAME);
+                if (isLegacyLocalTable)
                     attrs.customClass = null;
                 else
                     attrs.isCustom = true;
