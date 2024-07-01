@@ -190,15 +190,6 @@ public final class ChannelProxy extends SharedCloseableImpl
         INativeLibrary.instance.trySkipCache(fd, offset, length, file.absolutePath());
     }
 
-    /**
-     * Apply FADV_RANDOM to the file region.
-     */
-    public void adviseRandom(long offset, long length)
-    {
-        int fd = INativeLibrary.instance.getfd(channel);
-        INativeLibrary.instance.adviseRandom(fd, offset, length, file.absolutePath());
-    }
-
     @Override
     public String toString()
     {

@@ -99,6 +99,12 @@ public class NativeLibraryDarwin implements NativeLibraryWrapper
         throw new UnsatisfiedLinkError();
     }
 
+    @Override
+    public int callPosixMadvise(long addr, long length, int advice) throws UnsatisfiedLinkError, RuntimeException
+    {
+        throw new UnsatisfiedLinkError();
+    }
+
     public int callOpen(String path, int flags) throws UnsatisfiedLinkError, RuntimeException
     {
         return open(path, flags);

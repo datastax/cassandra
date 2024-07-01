@@ -20,6 +20,8 @@ package org.apache.cassandra.utils;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.Buffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.TimeUnit;
@@ -63,12 +65,19 @@ public class NativeLibrary implements INativeLibrary
     private static final int POSIX_FADV_DONTNEED   = 4; /* fadvise.h */
     private static final int POSIX_FADV_NOREUSE    = 5; /* fadvise.h */
 
+    private static final int MADV_NORMAL     = 0; /* mman.h */
+    private static final int MADV_RANDOM     = 1; /* mman.h */
+    private static final int MADV_SEQUENTIAL = 2; /* mman.h */
+    private static final int MADV_WILLNEED   = 3; /* mman.h */
+    private static final int MADV_DONTNEED   = 4; /* mman.h */
+
     private static final NativeLibraryWrapper wrappedLibrary;
     private static boolean jnaLockable = false;
 
     private static final Field FILE_DESCRIPTOR_FD_FIELD;
     private static final Field FILE_CHANNEL_FD_FIELD;
     private static final Field FILE_ASYNC_CHANNEL_FD_FIELD;
+    private static final Field BUFFER_ADDRESS_FIELD;
 
     static
     {
@@ -82,6 +91,8 @@ public class NativeLibrary implements INativeLibrary
         {
             throw new RuntimeException(e);
         }
+
+        BUFFER_ADDRESS_FIELD = FBUtilities.getProtectedField(Buffer.class, "address");
 
         // detect the OS type the JVM is running on and then set the CLibraryWrapper
         // instance to a compatable implementation of CLibraryWrapper for that OS type
@@ -274,44 +285,35 @@ public class NativeLibrary implements INativeLibrary
         }
     }
 
-    public void adviseRandom(int fd, long offset, long len, String fileName) {
-        if (len == 0) {
-            adviseRandom(fd, 0, 0, fileName);
-            return;
-        }
-
-        while (len > 0) {
-            int sublen = (int) Math.min(Integer.MAX_VALUE, len);
-            adviseRandom(fd, offset, sublen, fileName);
-            len -= sublen;
-            offset += sublen;
+    private static long getAddress(MappedByteBuffer buffer) {
+        try {
+            return BUFFER_ADDRESS_FIELD.getLong(buffer);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
-    public void adviseRandom(int fd, long offset, int len, String fileName) {
-        if (fd < 0) return;
+    public void adviseRandom(MappedByteBuffer buffer, long length) {
+        assert buffer != null;
 
+        long address = getAddress(buffer);
         try {
-            if (osType == LINUX) {
-                int result = wrappedLibrary.callPosixFadvise(fd, offset, len, POSIX_FADV_RANDOM);
-                if (result != 0) {
-                    NoSpamLogger.log(
-                    logger,
-                    NoSpamLogger.Level.WARN,
-                    10,
-                    TimeUnit.MINUTES,
-                    "Failed adviseRandom on file: {} Error: " + wrappedLibrary.callStrerror(result).getString(0),
-                    fileName
-                    );
-                }
+            int result = wrappedLibrary.callPosixMadvise(address, length, MADV_RANDOM);
+            if (result != 0) {
+                NoSpamLogger.log(logger,
+                                 NoSpamLogger.Level.WARN,
+                                 10,
+                                 TimeUnit.MINUTES,
+                                 "Failed madvise on address: {} Error: " + wrappedLibrary.callStrerror(result).getString(0),
+                                 address);
             }
         } catch (UnsatisfiedLinkError e) {
-            // if JNA is unavailable just skipping Direct I/O
-            // instance of this class will act like normal RandomAccessFile
+            logger.warn("madvise not supported on this platform.", e);
         } catch (RuntimeException e) {
-            if (!(e instanceof LastErrorException)) throw e;
-
-            logger.warn("posix_fadvise({}, {}) failed, errno ({}).", fd, offset, errno(e));
+            if (!(e instanceof LastErrorException)) {
+                throw e;
+            }
+            logger.warn("madvise({}, {}, {}) failed, errno ({}).", address, length, MADV_RANDOM, errno(e));
         }
     }
 
