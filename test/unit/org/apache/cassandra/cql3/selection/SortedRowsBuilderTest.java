@@ -61,20 +61,12 @@ public class SortedRowsBuilderTest
                 test(rows, SortedRowsBuilder.create(limit, offset), null);
 
                 // with comparator
-                test(rows, SortedRowsBuilder.WithList.create(limit, offset, comparator), comparator);
-                test(rows, SortedRowsBuilder.WithList.create(limit, offset, reverseComparator), reverseComparator);
-                test(rows, SortedRowsBuilder.WithPriorityQueue.create(limit, offset, comparator), comparator);
-                test(rows, SortedRowsBuilder.WithPriorityQueue.create(limit, offset, reverseComparator), reverseComparator);
-                test(rows, SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, comparator), comparator);
-                test(rows, SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.create(limit, offset, reverseComparator), reverseComparator);
 
                 // with index scorer
-                test(rows, SortedRowsBuilder.WithList.create(limit, offset, scorer(false)), comparator);
-                test(rows, SortedRowsBuilder.WithList.create(limit, offset, scorer(true)), reverseComparator);
-                test(rows, SortedRowsBuilder.WithPriorityQueue.create(limit, offset, scorer(false)), comparator);
-                test(rows, SortedRowsBuilder.WithPriorityQueue.create(limit, offset, scorer(true)), reverseComparator);
-                test(rows, SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, scorer(false)), comparator);
-                test(rows, SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.create(limit, offset, scorer(true)), reverseComparator);
             }
         }
     }

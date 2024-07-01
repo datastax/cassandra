@@ -19,6 +19,7 @@ package org.apache.cassandra.test.microbench;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -44,33 +45,32 @@ public class SortedRowsBuilderBench extends CQLTester
     private static final int NUM_COLUMNS = 10;
     private static final int SORTED_COLUMN_CARDINALITY = 1000;
     private static final Index.Scorer SCORER = row -> Int32Type.instance.compose(row.get(0));
+    private static final Comparator<List<ByteBuffer>> COMPARATOR = (o1, o2) -> Int32Type.instance.compare(o1.get(0), o2.get(0));
     private static final Random RANDOM = new Random();
 
-    @Param({ "1", "2", "3", "4", "6", "8", "16", "32" })
-    public int numReplicas;
+    @Param({ "1", "2", "3", "4", "6", "8", "16" })
+    public int nodes;
 
     @Param({ "100", "10000" })
     public int limit;
 
-    @Param({ "0" })
-    public int offset;
+    @Param({ "0", "0.1", "0.5", "1" })
+    public float offsetRatio;
+
+    private int offset;
 
     private List<List<ByteBuffer>> rows;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        int numRows = limit * numReplicas;
-        rows = new ArrayList<>(numRows);
-        for (int r = 0; r < numRows; r++)
+        int rowsPerNode = limit + offset;
+        int rowsPerCoordinator = rowsPerNode * nodes;
+        offset = (int) (rowsPerNode * offsetRatio);
+        rows = new ArrayList<>(rowsPerCoordinator);
+        for (int r = 0; r < rowsPerCoordinator; r++)
         {
-            List<ByteBuffer> row = new ArrayList<>(NUM_COLUMNS);
-            rows.add(row);
-
-            for (int c = 0; c < NUM_COLUMNS; c++)
-            {
-                row.add(Int32Type.instance.decompose(RANDOM.nextInt(SORTED_COLUMN_CARDINALITY)));
-            }
+            rows.add(randomRow());
         }
     }
 
@@ -81,26 +81,30 @@ public class SortedRowsBuilderBench extends CQLTester
     }
 
     @Benchmark
-    public Object list()
+    public Object comparator()
     {
-        return test(SortedRowsBuilder.WithList.create(limit, offset, SCORER));
+        return test(SortedRowsBuilder.create(limit, offset, COMPARATOR));
     }
 
     @Benchmark
-    public Object queue()
+    public Object scorer()
     {
-        return test(SortedRowsBuilder.WithPriorityQueue.create(limit, offset, SCORER));
-    }
-
-    @Benchmark
-    public Object hybrid()
-    {
-        return test(SortedRowsBuilder.WithListAndPriorityQueue.create(limit, offset, SCORER));
+        return test(SortedRowsBuilder.create(limit, offset, SCORER));
     }
 
     private List<List<ByteBuffer>> test(SortedRowsBuilder builder)
     {
         rows.forEach(builder::add);
         return builder.build();
+    }
+
+    private static List<ByteBuffer> randomRow()
+    {
+        List<ByteBuffer> row = new ArrayList<>(NUM_COLUMNS);
+        for (int c = 0; c < NUM_COLUMNS; c++)
+        {
+            row.add(Int32Type.instance.decompose(RANDOM.nextInt(SORTED_COLUMN_CARDINALITY)));
+        }
+        return row;
     }
 }
