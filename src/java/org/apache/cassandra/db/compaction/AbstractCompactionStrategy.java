@@ -185,6 +185,12 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
         return CompactionTasks.create(Collections.singleton(createCompactionTask(gcBefore, txn, true, splitOutput)));
     }
 
+    @Override
+    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType)
+    {
+        return getMaximalTasks(gcBefore, splitOutput);
+    }
+
     /**
      * @param sstables SSTables to compact. Must be marked as compacting.
      * @param gcBefore throw away tombstones older than this
