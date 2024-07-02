@@ -604,7 +604,7 @@ public class Schema implements SchemaProvider
     public synchronized void mergeAndUpdateVersion(SchemaTransformationResult result, boolean dropData)
     {
         result = localDiff(result);
-        assert CassandraRelevantProperties.TEST_ALLOW_LOCALSTRATEGY.getBoolean()
+        assert CassandraRelevantProperties.TEST_ALLOW_LOCAL_STRATEGY.getBoolean()
                || result.after.getKeyspaces().stream().noneMatch(ksm -> ksm.params.replication.klass == LocalStrategy.class) : "LocalStrategy should not be used";
         schemaChangeNotifier.notifyPreChanges(result);
         merge(result.diff, dropData);
