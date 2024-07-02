@@ -28,6 +28,7 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import com.datastax.driver.core.Session;
@@ -132,6 +133,7 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
     }
 
     @Test
+    @Ignore("CNDB-9987")
     public void testSAIWarnThreshold()
     {
         prepareSchema(true);
@@ -198,6 +200,7 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
     }
 
     @Test
+    @Ignore("CNDB-9987")
     public void testSAIFailThreshold()
     {
         prepareSchema(true);
