@@ -34,13 +34,14 @@ import org.apache.cassandra.utils.Pair;
 
 public class VectorPostingsWriter<T>
 {
+    // true if vectors rows are 1:1 (all vectors are associated with exactly 1 row, and each row has a non-null vector)
+    private final boolean oneToOne;
 
-    private final boolean canFastFindRows;
-
+    // given a rowId, return the graph ordinal of the vector associated with that row
     private final IntUnaryOperator reverseOrdinalsMapper;
 
-    public VectorPostingsWriter(boolean canFastFindRows, IntUnaryOperator mapper) {
-        this.canFastFindRows = canFastFindRows;
+    public VectorPostingsWriter(boolean oneToOne, IntUnaryOperator mapper) {
+        this.oneToOne = oneToOne;
         this.reverseOrdinalsMapper = mapper;
     }
 
@@ -50,8 +51,6 @@ public class VectorPostingsWriter<T>
                               Set<Integer> deletedOrdinals) throws IOException
     {
         writeDeletedOrdinals(writer, deletedOrdinals);
-        // VSTODO if we're willing to write non-sequentially then we can save a lot of getVector and postingsMap.get calls,
-        // which are expensive when both are on-disk
         writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
         writeRowIdToNodeOrdinalMapping(writer, vectorValues, postingsMap);
 
@@ -60,7 +59,7 @@ public class VectorPostingsWriter<T>
 
     private void writeDeletedOrdinals(SequentialWriter writer, Set<Integer> deletedOrdinals) throws IOException
     {
-        if (canFastFindRows) {
+        if (oneToOne) {
             assert deletedOrdinals.isEmpty();
             // -1 indicates that fast mapping of ordinal to rowId can be used
             writer.writeInt(-1);

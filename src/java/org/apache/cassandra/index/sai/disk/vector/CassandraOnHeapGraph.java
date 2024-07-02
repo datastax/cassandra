@@ -346,13 +346,25 @@ public class CassandraOnHeapGraph<T> implements Accountable
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
         // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
-        // null if remapping is not possible
-        final BiMap <Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
-        boolean canFastFindRows = ordinalMap != null;
-        IntUnaryOperator reverseOrdinalMapper = canFastFindRows
-                                                ? x -> ordinalMap.inverse().getOrDefault(x, x)
-                                                : x -> x;
-        var finalOrdinalMap = ordinalMap == null ? OnDiskGraphIndexWriter.sequentialRenumbering(builder.getGraph()) : ordinalMap;
+        // null if remapping is not possible because vectors:rows are not 1:1
+        final BiMap<Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
+        boolean postingsOneToOne = ordinalMap != null;
+        IntUnaryOperator reverseOrdinalMapper; // rowid -> ordinal
+        Map<Integer, Integer> finalOrdinalMap;
+        if (postingsOneToOne)
+        {
+            // we have a 1:1 correspondence between vectors and rows, so we can simplify the question of
+            // "what rowid does this ordinal correspond to" by remapping the graph ordinals to their corresponding rowid
+            reverseOrdinalMapper = x -> ordinalMap.inverse().get(x);
+            finalOrdinalMap = ordinalMap;
+        }
+        else
+        {
+            // vectors:rows are not 1:1 so there is no point in renumbering the ordinals, we're going to have to
+            // write the ordinal<->rowid mapping out explicitly
+            reverseOrdinalMapper = x -> x;
+            finalOrdinalMap = OnDiskGraphIndexWriter.sequentialRenumbering(builder.getGraph());
+        }
 
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         var indexFile = termsDataComponent.file();
@@ -381,7 +393,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
-            long postingsPosition = new VectorPostingsWriter<T>(canFastFindRows, reverseOrdinalMapper)
+            long postingsPosition = new VectorPostingsWriter<T>(postingsOneToOne, reverseOrdinalMapper)
                                             .writePostings(postingsOutput.asSequentialWriter(),
                                                            vectorValues, postingsMap, deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
@@ -453,6 +465,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return cvi;
     }
 
+    /**
+     * @return a map of vector ordinal to row id, or null if the vectors are not 1:1 with rows
+     */
     private BiMap <Integer, Integer> buildOrdinalMap()
     {
         BiMap <Integer, Integer> ordinalMap = HashBiMap.create();
@@ -462,22 +477,20 @@ public class CassandraOnHeapGraph<T> implements Accountable
         {
             if (vectorPostings.getRowIds().size() != 1)
             {
+                // multiple rows associated with this vector
                 return null;
             }
             int rowId = vectorPostings.getRowIds().getInt(0);
             int ordinal = vectorPostings.getOrdinal();
             minRow = Math.min(minRow, rowId);
             maxRow = Math.max(maxRow, rowId);
-            if (ordinalMap.containsKey(ordinal))
-            {
-                return null;
-            } else {
-                ordinalMap.put(ordinal, rowId);
-            }
+            assert !ordinalMap.containsKey(ordinal); // vector <-> ordinal should be unique
+            ordinalMap.put(ordinal, rowId);
         }
 
         if (minRow != 0 || maxRow != postingsMap.values().size() - 1)
         {
+            // not every row had a vector associated with it
             return null;
         }
         return ordinalMap;
