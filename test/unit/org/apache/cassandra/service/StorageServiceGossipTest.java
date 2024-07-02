@@ -39,6 +39,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -95,6 +96,8 @@ public class StorageServiceGossipTest
     @BeforeClass
     public static void setUpClass() throws Exception
     {
+        CassandraRelevantProperties.TEST_ALLOW_LOCAL_STRATEGY.setBoolean(true);
+
         aAddress = InetAddressAndPort.getByName("127.0.0.1");
         bAddress = InetAddressAndPort.getByName("127.0.0.2");
         cAddress = InetAddressAndPort.getByName("127.0.0.3");
