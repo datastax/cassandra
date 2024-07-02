@@ -206,7 +206,7 @@ public class V1SearchableIndex implements SearchableIndex
 
     private static int getSegmentLimit(int limit, long totalRows, Segment segment)
     {
-        // We expect the number of top results found in each sstable to be proportional to its number of rows
+        // We expect the number of top results found in each segment to be proportional to its number of rows
         // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
         long segmentRows = 1 + segment.metadata.maxSSTableRowId - segment.metadata.minSSTableRowId;
         return V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
