@@ -148,10 +148,8 @@ public class QueryTimeoutTest extends SAITester
                         .doAction("throw new org.apache.cassandra.index.sai.utils.AbortedOperationException();"))
                 .build();
         Injections.inject(abortedOperationException);
-
         assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v2 = '1'"))
-                .matches(e -> e instanceof ReadFailureException
-                    && ((ReadFailureException) e).getFailuresMap().containsValue(RequestFailureReason.TIMEOUT.code)
+                .matches(e -> e instanceof ReadTimeoutException
         );
 
         waitForEquals(queryCountName, queryTimeoutsName);
