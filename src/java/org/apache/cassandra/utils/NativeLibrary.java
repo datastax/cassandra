@@ -30,6 +30,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sun.jna.LastErrorException;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
@@ -77,7 +79,6 @@ public class NativeLibrary implements INativeLibrary
     private static final Field FILE_DESCRIPTOR_FD_FIELD;
     private static final Field FILE_CHANNEL_FD_FIELD;
     private static final Field FILE_ASYNC_CHANNEL_FD_FIELD;
-    private static final Field BUFFER_ADDRESS_FIELD;
 
     static
     {
@@ -91,8 +92,6 @@ public class NativeLibrary implements INativeLibrary
         {
             throw new RuntimeException(e);
         }
-
-        BUFFER_ADDRESS_FIELD = FBUtilities.getProtectedField(Buffer.class, "address");
 
         // detect the OS type the JVM is running on and then set the CLibraryWrapper
         // instance to a compatable implementation of CLibraryWrapper for that OS type
@@ -285,25 +284,27 @@ public class NativeLibrary implements INativeLibrary
         }
     }
 
-    private static long getAddress(MappedByteBuffer buffer) {
-        try {
-            return BUFFER_ADDRESS_FIELD.getLong(buffer);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     /**
      * @param buffer
      * @param length
      * @param filename -- source file backing buffer; logged on error
+     * <p>
+     * adviseRandom works even on buffers that are not aligned to page boundaries (which is the
+     * common case for how MmappedRegions is used).
      */
     public void adviseRandom(MappedByteBuffer buffer, long length, String filename) {
         assert buffer != null;
 
-        long address = getAddress(buffer);
+        var rawAddress = Native.getDirectBufferPointer(buffer);
+        // align to the nearest lower page boundary
+        var alignedAddress = new Pointer(Pointer.nativeValue(rawAddress) & -PageAware.PAGE_SIZE);
+        // we want to advise the whole buffer, so if the aligned address is lower than the raw one,
+        // we need to pad the length accordingly.  (we do not need to align `length`, Linux
+        // takes care of rounding it up for us.)
+        length += Pointer.nativeValue(rawAddress) - Pointer.nativeValue(alignedAddress);
+
         try {
-            int result = wrappedLibrary.callPosixMadvise(address, length, MADV_RANDOM);
+            int result = wrappedLibrary.callPosixMadvise(alignedAddress, length, MADV_RANDOM);
             if (result != 0) {
                 NoSpamLogger.log(logger,
                                  NoSpamLogger.Level.WARN,
@@ -318,7 +319,7 @@ public class NativeLibrary implements INativeLibrary
             if (!(e instanceof LastErrorException)) {
                 throw e;
             }
-            logger.warn("madvise({}, {}, {}) failed, errno ({}).", address, length, MADV_RANDOM, errno(e));
+            logger.warn("madvise({}, {}, {}) failed, errno ({}).", alignedAddress, length, MADV_RANDOM, errno(e));
         }
     }
 

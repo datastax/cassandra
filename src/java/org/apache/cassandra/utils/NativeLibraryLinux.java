@@ -73,7 +73,7 @@ public class NativeLibraryLinux implements NativeLibraryWrapper
     private static native int munlockall() throws LastErrorException;
     private static native int fcntl(int fd, int command, long flags) throws LastErrorException;
     private static native int posix_fadvise(int fd, long offset, int len, int flag) throws LastErrorException;
-    private static native int posix_madvise(long addr, long length, int advice) throws LastErrorException;
+    private static native int posix_madvise(Pointer addr, long length, int advice) throws LastErrorException;
     private static native int open(String path, int flags) throws LastErrorException;
     private static native int fsync(int fd) throws LastErrorException;
     private static native int close(int fd) throws LastErrorException;
@@ -100,7 +100,7 @@ public class NativeLibraryLinux implements NativeLibraryWrapper
         return posix_fadvise(fd, offset, len, flag);
     }
 
-    public int callPosixMadvise(long addr, long length, int advice) throws UnsatisfiedLinkError, RuntimeException
+    public int callPosixMadvise(Pointer addr, long length, int advice) throws UnsatisfiedLinkError, RuntimeException
     {
         return posix_madvise(addr, length, advice);
     }
