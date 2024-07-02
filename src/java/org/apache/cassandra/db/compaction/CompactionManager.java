@@ -941,7 +941,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                 // ranges are normalized - no wrap around - if first and last are contained we know that all tokens are contained in the range
                 if (r.contains(sstable.getFirst().getToken()) && r.contains(sstable.getLast().getToken()))
                 {
-                    logger.info("{} SSTable {} fully contained in range {}, mutating repairedAt instead of anticompacting", PreviewKind.NONE.logPrefix(parentRepairSession), sstable, r);
+                    logger.info("{} SSTable {} fully contained in range {}, mutating repairedAt to unrepaired instead of anticompacting", PreviewKind.NONE.logPrefix(parentRepairSession), sstable, r);
                     fullyContainedSSTables.add(sstable);
                     sstableIterator.remove();
                     break;
