@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -60,13 +61,11 @@ import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
  * <h1>Cost estimation</h1>
  * A plan can estimate its execution cost and result set size which is useful to select the best plan among
  * the semantically equivalent candidate plans. Operations represented by nodes may be pipelined, so their actual
- * runtime cost may depend on how many rows are read from the top level node. However, in this design, the cost of
- * the node can depend only on the node itself and its children (subplans), but not the parent nodes. This invariant
- * vastly simplifies the design and allows us to avoid mutating nodes after construction. In order to make
- * the cost of operations like LIMIT correct, the cost computations are performed mostly in terms of marginal costs like
- * cost-per-key or cost-per-row instead of total cost. This way the total cost of execution can be computed by
- * multiplying the marginal costs by the number of rows retrieved. Hence, the LIMIT node and the nodes above it
- * may have a lower full cost than the nodes below it.
+ * runtime cost may depend on how many rows are read from the top level node. Upon construction, each plan node
+ * gets an {@link Access} object which describes the way how the node results are going to be used by the parent nodes:
+ * how many rows will be requested or what skip operations are going to be performed on the iterator.
+ * The access objects get propagated down the tree to the leaves. This way we get an accurate cost of execution
+ * at the leave nodes, taking into account any top-level limit or intersections.
  * <p>
  * Some nodes cannot be pipelined, e.g. nodes that represent sorting. To make cost estimation for such nodes possible,
  * each node maintains an initial cost (initCost) of the operation - that is the cost of preparation before the first
@@ -90,18 +89,17 @@ import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
  * <h1>Example</h1>
  * The CQL query
  * <pre>
- * SELECT * FROM table WHERE score1 < 0.001 AND score2 < 0.1 ORDER BY vector ANN OF [34.02, 64.2, ... ] LIMIT 3
+ * SELECT * FROM table WHERE  a < 0.01 AND b < 0.2 LIMIT 10
  * </pre>
  *
  * can be represented by the following query execution plan:
  * <pre>
- * Limit (sel: 0.000003000, rows: 3.0, cost/row: 105.0, cost: 9600.0..9915.0)
- *  └─ Filter score1 < 0.001 AND score2 < 0.1 (sel: 0.000100000, rows: 100.0, cost/row: 105.0, cost: 9600.0..20100.0)
- *      └─ Fetch (sel: 0.000100000, rows: 100.0, cost/row: 105.0, cost: 9600.0..20100.0)
- *          └─ AnnSort vector (sel: 0.000100000, keys: 100.0, cost/key: 5.0, cost: 9600.0..10100.0)
- *              └─ Intersection (sel: 0.000100000, keys: 100.0, cost/key: 96.0, cost: 0.0..9600.0)
- *                  ├─ NumericIndexScan score1 (sel: 0.001000000, keys: 1000.0, cost/key: 1.0, cost: 0.0..1000.0)
- *                  └─ NumericIndexScan score2 (sel: 0.100000000, keys: 100000.0, cost/key: 1.0, cost: 0.0..100000.0)*
+ * Limit 10 (rows: 10.0, cost/row: 265.2, cost: 80.0..2732.2)
+ *  └─ Filter a < 0.2 AND b < 0.01 (sel: 1.000000000) (rows: 10.0, cost/row: 265.2, cost: 80.0..2732.2)
+ *      └─ Fetch (rows: 10.0, cost/row: 265.2, cost: 80.0..2732.2)
+ *          └─ Intersection (keys: 10.0, cost/key: 58.2, cost: 80.0..662.1)
+ *              ├─ NumericIndexScan of vector_b_idx using Expression{ ... } (sel: 0.010010000, step: 1.0) (keys: 50.2, cost/key: 1.0, cost: 40.0..90.2)
+ *              └─ NumericIndexScan of vector_a_idx using Expression{ ... } (sel: 0.199230000, step: 19.9) (keys: 50.2, cost/key: 10.6, cost: 40.0..571.9)
  * </pre>
  */
 abstract public class Plan
@@ -127,17 +125,17 @@ abstract public class Plan
     final Factory factory;
 
     /**
-     * The number of rows/keys expected to be fetched from the result set of this node.
-     * This should be included in the full cost estimate.
+     * Describes how this node is going to be used.
+     * Very likely affects the cost.
      */
-    final long limit;
+    final Access access;
 
 
-    private Plan(Factory factory, int id, long limit)
+    private Plan(Factory factory, int id, Access access)
     {
         this.id = id;
         this.factory = factory;
-        this.limit = limit;
+        this.access = access;
     }
     /**
      * Returns a new list containing subplans of this node.
@@ -238,13 +236,6 @@ abstract public class Plan
      * @return a new plan if any of the subplans has been replaced, this otherwise
      */
     protected abstract Plan withUpdatedSubplans(Function<Plan, Plan> updater);
-
-    /**
-     * Reconstruct the node with a different limit.
-     * The limit denotes the expected number of keys or rows fetched from the result set of the node.
-     * @param limit new limit
-     */
-    protected abstract Plan limit(long limit);
 
     /**
      * Returns an object describing detailed cost information about running this plan,
@@ -546,9 +537,9 @@ abstract public class Plan
          */
         private KeysIterationCost cost;
 
-        protected KeysIteration(Factory factory, int id, long limit)
+        protected KeysIteration(Factory factory, int id, Access access)
         {
-            super(factory, id, limit);
+            super(factory, id, access);
         }
 
         @Override
@@ -561,22 +552,10 @@ abstract public class Plan
 
         protected abstract KeysIterationCost estimateCost();
 
-        /**
-         * Estimates the cost of advancing the key set iterator to a different key.
-         * This has to be a function, because the skipping cost may depend on the amount of data
-         * and the distance of the skip.
-         *
-         * @param distance distance of the skip expressed as the fraction of the whole key set;
-         *                 the distance of 1.0 means jumping to the end of the key stream,
-         *                 the distance of 1.0 / expectedKeys() means jumping to the next key.
-         * @return estimated cost
-         */
-        protected abstract double estimateCostPerSkip(double distance);
-
         protected abstract Iterator<? extends PrimaryKey> execute(Executor executor);
 
-        protected abstract KeysIteration limit(long limit);
-
+        protected abstract KeysIteration withAccess(Access patterns);
+        
         final double expectedKeys()
         {
             return cost().expectedKeys;
@@ -594,9 +573,9 @@ abstract public class Plan
      */
     abstract static class Leaf extends KeysIteration
     {
-        protected Leaf(Factory factory, int id, long limit)
+        protected Leaf(Factory factory, int id, Access accesses)
         {
-            super(factory, id, limit);
+            super(factory, id, accesses);
         }
 
         @Override
@@ -620,7 +599,7 @@ abstract public class Plan
     {
         protected Nothing(int id, Factory factory)
         {
-            super(factory, id, 0);
+            super(factory, id, null);
         }
 
         @Nonnull
@@ -631,23 +610,18 @@ abstract public class Plan
         }
 
         @Override
-        protected double estimateCostPerSkip(double distance)
-        {
-            return 0.0;
-        }
-
-        @Override
         protected RangeIterator execute(Executor executor)
         {
             return RangeIterator.empty();
         }
 
         @Override
-        protected Nothing limit(long limit)
+        protected Nothing withAccess(Access patterns)
         {
             // limit does not matter for Nothing node because it always returns 0 keys
             return this;
         }
+        
     }
 
     /**
@@ -657,9 +631,9 @@ abstract public class Plan
      */
     static class Everything extends Leaf
     {
-        protected Everything(int id, Factory factory, long limit)
+        protected Everything(int id, Factory factory, Access accesses)
         {
-            super(factory, id, limit);
+            super(factory, id, accesses);
         }
 
         @Nonnull
@@ -670,16 +644,10 @@ abstract public class Plan
             // We don't want to have those nodes in the final plan,
             // because currently we have no way to execute it efficiently.
             // In the future we may want to change it, when we have a way to return all rows without using an index.
-            return new KeysIterationCost(Math.min(factory.tableMetrics.rows, limit),
+            return new KeysIterationCost(access.totalCount(factory.tableMetrics.rows),
                                          1.0,
                                          Double.POSITIVE_INFINITY,
                                          Double.POSITIVE_INFINITY);
-        }
-
-        @Override
-        protected double estimateCostPerSkip(double distance)
-        {
-            return Double.POSITIVE_INFINITY;
         }
 
         @Override
@@ -693,11 +661,11 @@ abstract public class Plan
         }
 
         @Override
-        protected Everything limit(long limit)
+        protected Everything withAccess(Access access)
         {
-            return limit == this.limit
+            return Objects.equals(access, this.access)
                    ? this
-                   : new Everything(id, factory, limit);
+                   : new Everything(id, factory, access);
         }
     }
 
@@ -706,9 +674,9 @@ abstract public class Plan
         protected final Expression predicate;
         protected final long matchingKeysCount;
 
-        public IndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, long limit)
+        public IndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access)
         {
-            super(factory, id, limit);
+            super(factory, id, access);
             this.predicate = predicate;
             this.matchingKeysCount = matchingKeysCount;
         }
@@ -716,23 +684,23 @@ abstract public class Plan
         @Override
         protected final String description()
         {
-            return String.format("of %s using %s (sel: %.9f)", predicate.getIndexName(), predicate, selectivity());
+            return String.format("of %s using %s (sel: %.9f, step: %.1f)", predicate.getIndexName(), predicate, selectivity(), access.meanDistance());
         }
 
         @Override
         protected final KeysIterationCost estimateCost()
         {
-            double expectedKeys = (double) Math.min(matchingKeysCount, limit);
-            double costPerKey = CostCoefficients.SAI_KEY_COST;
+            double expectedKeys = access.totalCount(matchingKeysCount);
+            double costPerKey = access.unitCost(SAI_KEY_COST, this::estimateCostPerSkip);
+            double initCost = SAI_OPEN_COST * factory.tableMetrics.sstables;
             double iterCost = expectedKeys * costPerKey;
             double selectivity = factory.tableMetrics.rows > 0
                                  ? ((double) matchingKeysCount / factory.tableMetrics.rows)
                                  : 0.0;
-            return new KeysIterationCost(expectedKeys, selectivity, costPerKey, iterCost);
+            return new KeysIterationCost(expectedKeys, selectivity, initCost, iterCost);
         }
 
-        @Override
-        protected final double estimateCostPerSkip(double distance)
+        private double estimateCostPerSkip(double step)
         {
             // This is the first very rough approximation of the cost model for skipTo operation.
             // It is likely not a very accurate model.
@@ -773,10 +741,9 @@ abstract public class Plan
             double dKeys = postingsCountFactor / postingsCountExponent;
             double postingsCountPenalty = dKeys * Math.pow(keysPerSSTable, postingsCountExponent);
 
-            double distanceInPostings = Math.min(matchingKeysCount, distance * matchingKeysCount);
             // divide by exponent so the derivative at 1.0 equals skipDistanceFactor
             double dPostings = skipDistanceFactor / skipDistanceExponent;
-            double distancePenalty = dPostings * Math.pow(distanceInPostings, skipDistanceExponent);
+            double distancePenalty = dPostings * Math.pow(step, skipDistanceExponent);
 
             return skipCostFactor
                    * (1.0 + distancePenalty)
@@ -795,18 +762,17 @@ abstract public class Plan
      */
     static class NumericIndexScan extends IndexScan
     {
-        public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, long limit)
+        public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access)
         {
-            super(factory, id, predicate, matchingKeysCount, limit);
+            super(factory, id, predicate, matchingKeysCount, access);
         }
 
         @Override
-        protected NumericIndexScan limit(long limit)
+        protected NumericIndexScan withAccess(Access access)
         {
-            return limit == this.limit || limit >= matchingKeysCount && this.limit >= matchingKeysCount
+            return Objects.equals(this.access, access)
                    ? this
-                   : new NumericIndexScan(factory, id, predicate, matchingKeysCount, limit);
-
+                   : new NumericIndexScan(factory, id, predicate, matchingKeysCount, access);
         }
     }
 
@@ -815,17 +781,17 @@ abstract public class Plan
      */
     static class LiteralIndexScan extends IndexScan
     {
-        public LiteralIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, long limit)
+        public LiteralIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access)
         {
-            super(factory, id, predicate, matchingKeysCount, limit);
+            super(factory, id, predicate, matchingKeysCount, access);
         }
 
         @Override
-        protected LiteralIndexScan limit(long limit)
+        protected LiteralIndexScan withAccess(Access access)
         {
-            return limit == this.limit || limit >= matchingKeysCount && this.limit >= matchingKeysCount
+            return Objects.equals(this.access, access)
                    ? this
-                   : new LiteralIndexScan(factory, id, predicate, matchingKeysCount, limit);
+                   : new LiteralIndexScan(factory, id, predicate, matchingKeysCount, this.access);
 
         }
     }
@@ -838,28 +804,21 @@ abstract public class Plan
     {
         private final List<KeysIteration> subplans;
 
-        Union(Factory factory, int id, List<KeysIteration> subplans, long limit)
+        Union(Factory factory, int id, List<KeysIteration> subplans, Access access)
         {
-            super(factory, id, limit);
+            super(factory, id, access);
             Preconditions.checkArgument(!subplans.isEmpty(), "Subplans must not be empty");
-            this.subplans = Collections.unmodifiableList(propagateLimit(subplans, limit));
+            this.subplans = Collections.unmodifiableList(propagateAccess(subplans));
         }
 
-        private static ArrayList<KeysIteration> propagateLimit(List<KeysIteration> subplans, long limit)
+        private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
             double selectivity = computeSelectivity(subplans);
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
             for (KeysIteration subplan : subplans)
             {
-                // MAX_VALUE limit is special by meaning "unlimited".
-                // Even though it's probably large enough, we don't want to accidentally make it smaller.
-                // Usually we don't need to do this, but Union is one of the very few (only?) operators
-                // that can return more keys than any of its child nodes.
-                long sublimit = (limit == Long.MAX_VALUE)
-                                ? Long.MAX_VALUE
-                                : Math.round(limit * subplan.selectivity() / selectivity);
-
-                newSubplans.add(subplan.limit(sublimit));
+                Access access = this.access.scaleCount(subplan.selectivity() / selectivity);
+                newSubplans.add(subplan.withAccess(access));
             }
             return newSubplans;
         }
@@ -893,15 +852,15 @@ abstract public class Plan
 
             return newSubplans.equals(subplans)
                    ? this
-                   : factory.union(newSubplans, id).limit(limit);
+                   : factory.union(newSubplans, id).withAccess(access);
         }
 
         @Override
-        protected Union limit(long limit)
+        protected Union withAccess(Access access)
         {
-            return (limit == this.limit)
+            return Objects.equals(access, this.access)
                 ? this
-                : new Union(factory, id, subplans, limit);
+                : new Union(factory, id, subplans, access);
         }
 
         @Override
@@ -920,7 +879,7 @@ abstract public class Plan
                 initCost += subplan.initCost();
                 iterCost += subplan.iterCost();
             }
-            double expectedKeys = Math.min(factory.tableMetrics.rows * selectivity, limit);
+            double expectedKeys = access.totalCount(factory.tableMetrics.rows * selectivity);
             return new KeysIterationCost(expectedKeys, selectivity, initCost, iterCost);
         }
 
@@ -940,16 +899,6 @@ abstract public class Plan
                 throw t;
             }
         }
-
-        @Override
-        protected double estimateCostPerSkip(double distance)
-        {
-            // Skipping propagates to all the branches equally
-            double costPerSkip = 0.0;
-            for (KeysIteration plan : subplans)
-                costPerSkip += plan.estimateCostPerSkip(distance);
-            return costPerSkip;
-        }
     }
 
     /**
@@ -962,28 +911,39 @@ abstract public class Plan
     {
         private final List<KeysIteration> subplans;
 
-        private Intersection(Factory factory, int id, List<KeysIteration> subplans, long limit)
+        private Intersection(Factory factory, int id, List<KeysIteration> subplans, Access access)
         {
-            super(factory, id, limit);
+            super(factory, id, access);
             Preconditions.checkArgument(!subplans.isEmpty(), "Subplans must not be empty");
 
-            this.subplans = Collections.unmodifiableList(propagateLimit(subplans, limit));
+            this.subplans = Collections.unmodifiableList(propagateAccess(subplans));
         }
 
-        private static ArrayList<KeysIteration> propagateLimit(List<KeysIteration> subplans, long limit)
+        private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
             double selectivity = computeSelectivity(subplans);
-            double loops = subplans.get(0).selectivity() / selectivity;
+            double loops = selectivity != 0 ? subplans.get(0).selectivity() / selectivity : 1.0;
 
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
-            newSubplans.add(subplans.get(0).limit(Math.round(limit * loops)));
+            newSubplans.add(subplans.get(0).withAccess(access.scaleDistance(loops).convolute(loops, 1.0)));
 
             double matchProbability = 1.0;
             for (int i = 1; i < subplans.size(); i++)
             {
                 KeysIteration subplan = subplans.get(i);
-                long sublimit = Math.round(limit * loops * matchProbability);
-                newSubplans.add(subplan.limit(sublimit));
+                double cumulativeSelectivity = subplans.get(0).selectivity() * matchProbability;
+                if (cumulativeSelectivity > 0.0)
+                {
+                    double skipDistance = subplan.selectivity() / cumulativeSelectivity;
+                    Access subAccess = access.scaleDistance(subplan.selectivity() / selectivity)
+                                             .convolute(loops * matchProbability, skipDistance)
+                                             .forceSkip();
+                    newSubplans.add(subplan.withAccess(subAccess));
+                }
+                else
+                {
+                    newSubplans.add(subplan.withAccess(Access.EMPTY));
+                }
                 matchProbability *= subplan.selectivity();
             }
             return newSubplans;
@@ -1017,16 +977,15 @@ abstract public class Plan
 
             return newSubplans.equals(subplans)
                    ? this
-                   : factory.intersection(newSubplans, id).limit(limit);
+                   : factory.intersection(newSubplans, id).withAccess(access);
         }
 
         @Override
-        protected Intersection limit(long limit)
+        protected Intersection withAccess(Access access)
         {
-            if (limit == this.limit)
-                return this;
-
-            return new Intersection(factory, id, subplans, limit);
+            return Objects.equals(access, this.access)
+                ? this
+                : new Intersection(factory, id, subplans, access);
         }
 
         @Override
@@ -1036,42 +995,15 @@ abstract public class Plan
 
             double selectivity = 1.0;
             double initCost = 0.0;
-            double costPerKey = 0.0;
+            double iterCost = 0.0;
             for (KeysIteration subplan : subplans)
             {
                 selectivity *= subplan.selectivity();
                 initCost += subplan.initCost();
-                costPerKey += subplan.costPerKey();
+                iterCost += subplan.iterCost();
             }
-            double expectedKeyCount = Math.min(factory.tableMetrics.rows * selectivity, limit);
-
-            // Compute the additional cost of skipping keys:
-            if (subplans.size() > 1)
-            {
-                Plan.KeysIteration subplan0 = subplans.get(0);
-
-                // The expected number of main loop steps.
-                double loops = selectivity != 0
-                               ? Math.min(subplan0.expectedKeys(), subplan0.selectivity() / selectivity)
-                               : 1.0;
-
-                // To get the first key, we just need to advance the iterator to the next key, but if we don't get a match,
-                // all subsequent attempts will cause skipping to the value given by the second iterator.
-                costPerKey += max(loops - 1, 0) * (subplan0.estimateCostPerSkip(0.0) + subplan0.costPerKey());
-
-                // Additional cost of skipping on the remaining iterators.
-                // Note that we may do fewer skips on the iterator at indexes >= 2 because we short circuit if there is no match.
-                double matchProbability = 1.0;
-                for (int i = 1; i < subplans.size(); i++)
-                {
-                    KeysIteration subplan = subplans.get(i);
-                    double skipDistance = Math.min(1.0, 1.0 / (max(1.0, subplan0.selectivity() * factory.tableMetrics.rows) * matchProbability));
-                    costPerKey += matchProbability * loops * (subplan.estimateCostPerSkip(skipDistance) + subplan.costPerKey());
-                    matchProbability *= subplan.selectivity();
-                }
-            }
-
-            return new KeysIterationCost(expectedKeyCount, selectivity, initCost, expectedKeyCount * costPerKey);
+            double expectedKeyCount = access.totalCount(factory.tableMetrics.rows * selectivity);
+            return new KeysIterationCost(expectedKeyCount, selectivity, initCost, iterCost);
         }
 
         @Override
@@ -1092,16 +1024,6 @@ abstract public class Plan
             }
         }
 
-        @Override
-        protected double estimateCostPerSkip(double distance)
-        {
-            // Skipping propagates to all the branches equally
-            double costPerSkip = 0.0;
-            for (KeysIteration plan : subplans)
-                costPerSkip += plan.estimateCostPerSkip(distance);
-            return costPerSkip;
-        }
-
         /**
          * Limits the number of intersected subplans
          */
@@ -1110,7 +1032,7 @@ abstract public class Plan
             if (subplans.size() <= clauseLimit)
                 return this;
             List<Plan.KeysIteration> newSubplans = new ArrayList<>(subplans.subList(0, clauseLimit));
-            return factory.intersection(newSubplans, id).limit(limit);
+            return factory.intersection(newSubplans, id).withAccess(access);
         }
     }
 
@@ -1124,9 +1046,9 @@ abstract public class Plan
         final RowFilter.Expression ordering;
 
 
-        protected AnnSort(Factory factory, int id, KeysIteration source, RowFilter.Expression ordering, long limit)
+        protected AnnSort(Factory factory, int id, KeysIteration source, RowFilter.Expression ordering, Access access)
         {
-            super(factory, id, limit);
+            super(factory, id, access);
             this.source = source;
             this.ordering = ordering;
         }
@@ -1140,23 +1062,20 @@ abstract public class Plan
         @Override
         protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
         {
-            return factory.annSort((KeysIteration) updater.apply(source), ordering, id).limit(limit);
+            return factory.annSort((KeysIteration) updater.apply(source), ordering, id).withAccess(access);
         }
 
         @Override
         protected KeysIterationCost estimateCost()
         {
-            double expectedKeys = Math.min(source.expectedKeys(), limit);
+            double expectedKeys = access.totalCount(source.expectedKeys());
+            double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables
+                              + source.fullCost()
+                              + source.expectedKeys() * CostCoefficients.ANN_INPUT_KEY_COST;
             return new KeysIterationCost(expectedKeys,
                                          source.selectivity(),
-                                         source.fullCost() + source.expectedKeys() * CostCoefficients.ANN_INPUT_KEY_COST,
+                                         initCost,
                                           expectedKeys * CostCoefficients.ANN_SCORED_KEY_COST);
-        }
-
-        @Override
-        protected double estimateCostPerSkip(double distance)
-        {
-            throw new UnsupportedOperationException("AnnSort doesn't support skipping");
         }
 
         @Override
@@ -1166,11 +1085,11 @@ abstract public class Plan
         }
 
         @Override
-        protected AnnSort limit(long limit)
+        protected AnnSort withAccess(Access access)
         {
-            return limit != this.limit
-                ? new AnnSort(factory, id, source, ordering, limit)
-                : this;
+            return Objects.equals(access, this.access)
+                ? this
+                : new AnnSort(factory, id, source, ordering, access);
         }
     }
 
@@ -1182,29 +1101,24 @@ abstract public class Plan
     {
         final RowFilter.Expression ordering;
 
-        protected AnnScan(Factory factory, int id, RowFilter.Expression ordering, long limit)
+        protected AnnScan(Factory factory, int id, RowFilter.Expression ordering, Access access)
         {
-            super(factory, id, limit);
+            super(factory, id, access);
             this.ordering = ordering;
         }
 
         @Override
         protected KeysIterationCost estimateCost()
         {
-            long keysCount = Math.min(factory.tableMetrics.rows, limit);
+            int keysCount = Math.round((float) access.totalCount(factory.tableMetrics.rows));
             int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering,
-                                                                               (int) Math.min(Integer.MAX_VALUE, limit),
-                                                                               keysCount);
+                                                                               keysCount,
+                                                                               factory.tableMetrics.rows);
+            double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables + initNodesCount * ANN_NODE_COST;
             return new KeysIterationCost(keysCount,
                                          1.0,
                                          initNodesCount * ANN_NODE_COST,
                                          keysCount * CostCoefficients.ANN_SCORED_KEY_COST);
-        }
-
-        @Override
-        protected double estimateCostPerSkip(double distance)
-        {
-            throw new UnsupportedOperationException("AnnScan doesn't support skipping");
         }
 
         @Override
@@ -1214,11 +1128,12 @@ abstract public class Plan
         }
 
         @Override
-        protected KeysIteration limit(long limit)
+        protected KeysIteration withAccess(Access access)
         {
-            return limit != this.limit
-                   ? new AnnScan(factory, id, ordering, limit)
-                   : this;
+            return Objects.equals(access, this.access)
+                   ? this
+                   : new AnnScan(factory, id, ordering, access);
+
         }
     }
 
@@ -1227,9 +1142,9 @@ abstract public class Plan
     {
         private RowsIterationCost cost;
 
-        private RowsIteration(Factory factory, int id, long limit)
+        private RowsIteration(Factory factory, int id, Access access)
         {
-            super(factory, id, limit);
+            super(factory, id, access);
         }
 
         @Override
@@ -1242,7 +1157,7 @@ abstract public class Plan
 
         protected abstract RowsIterationCost estimateCost();
 
-        protected abstract RowsIteration limit(long limit);
+        protected abstract RowsIteration withAccess(Access patterns);
 
         final double costPerRow()
         {
@@ -1262,10 +1177,10 @@ abstract public class Plan
     {
         private final KeysIteration source;
 
-        private Fetch(Factory factory, int id, KeysIteration keysIteration, long limit)
+        private Fetch(Factory factory, int id, KeysIteration keysIteration, Access access)
         {
-            super(factory, id, limit);
-            this.source = keysIteration.limit(limit);
+            super(factory, id, access);
+            this.source = keysIteration.withAccess(access);
         }
 
 
@@ -1279,7 +1194,7 @@ abstract public class Plan
         protected Fetch withUpdatedSubplans(Function<Plan, Plan> updater)
         {
             Plan.KeysIteration updatedSource = (KeysIteration) updater.apply(source);
-            return updatedSource == source ? this : new Fetch(factory, id, updatedSource, limit);
+            return updatedSource == source ? this : new Fetch(factory, id, updatedSource, access);
         }
 
         @Override
@@ -1290,7 +1205,7 @@ abstract public class Plan
                                   + CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow
                                   + CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow;
 
-            double expectedKeys = Math.min(source.expectedKeys(), limit);
+            double expectedKeys = access.totalCount(source.expectedKeys());
             return new RowsIterationCost(expectedKeys,
                                          source.selectivity(),
                                          source.initCost(),
@@ -1298,11 +1213,12 @@ abstract public class Plan
         }
 
         @Override
-        protected Fetch limit(long limit)
+        protected Fetch withAccess(Access access)
         {
-            return (limit != this.limit)
-                ? new Fetch(factory, id, source, limit)
-                : this;
+            return Objects.equals(access, this.access)
+                ? this
+                : new Fetch(factory, id, source, access);
+
         }
     }
 
@@ -1317,12 +1233,11 @@ abstract public class Plan
         private final RowsIteration source;
         private final double targetSelectivity;
 
-        Filter(Factory factory, int id, RowFilter filter, RowsIteration source, double targetSelectivity, long limit)
+        Filter(Factory factory, int id, RowFilter filter, RowsIteration source, double targetSelectivity, Access access)
         {
-            super(factory, id, limit);
-            long sourceLimit = Math.round(limit * source.selectivity() / targetSelectivity);
+            super(factory, id, access);
             this.filter = filter;
-            this.source = source.limit(sourceLimit);
+            this.source = source.withAccess(access.scaleCount(targetSelectivity > 0 ? source.selectivity() / targetSelectivity : 1.0));
             this.targetSelectivity = targetSelectivity;
         }
 
@@ -1338,22 +1253,22 @@ abstract public class Plan
             Plan.RowsIteration updatedSource = (RowsIteration) updater.apply(source);
             return updatedSource == source
                    ? this
-                   : new Filter(factory, id, filter, updatedSource, targetSelectivity, limit);
+                   : new Filter(factory, id, filter, updatedSource, targetSelectivity, access);
         }
 
         @Override
         protected RowsIterationCost estimateCost()
         {
-            double expectedRows = Math.min(limit, factory.tableMetrics.rows * targetSelectivity);
+            double expectedRows = access.totalCount(factory.tableMetrics.rows * targetSelectivity);
             return new RowsIterationCost(expectedRows, targetSelectivity, source.initCost(), source.iterCost());
         }
 
         @Override
-        protected Filter limit(long limit)
+        protected Filter withAccess(Access access)
         {
-            return limit == this.limit
+            return Objects.equals(access, this.access)
                 ? this
-                : new Filter(factory, id, filter, source, targetSelectivity, limit);
+                : new Filter(factory, id, filter, source, targetSelectivity, access);
         }
 
         @Override
@@ -1370,11 +1285,13 @@ abstract public class Plan
     static class Limit extends RowsIteration
     {
         private final RowsIteration source;
+        private final long limit;
 
-        private Limit(Factory factory, int id, RowsIteration source, long limit)
+        private Limit(Factory factory, int id, RowsIteration source, long limit, Access access)
         {
-            super(factory, id, limit);
-            this.source = source.limit(limit);
+            super(factory, id, access);
+            this.limit = limit;
+            this.source = source.withAccess(access.limit(limit));
         }
 
         @Override
@@ -1387,13 +1304,13 @@ abstract public class Plan
         protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
         {
             Plan.RowsIteration updatedSource = (RowsIteration) updater.apply(source);
-            return updatedSource == source ? this : new Limit(factory, id, updatedSource, limit);
+            return updatedSource == source ? this : new Limit(factory, id, updatedSource, limit, access);
         }
 
         @Override
         protected RowsIterationCost estimateCost()
         {
-            double expectedRows = Math.min(limit, source.cost().expectedRows);
+            double expectedRows = access.totalCount(source.expectedRows());
             double selectivity = source.selectivity();
             double iterCost = (limit >= source.cost().expectedRows)
                               ? source.iterCost()
@@ -1402,11 +1319,17 @@ abstract public class Plan
         }
 
         @Override
-        protected RowsIteration limit(long limit)
+        protected RowsIteration withAccess(Access access)
         {
-            return limit != this.limit
-                   ? new Limit(factory, id, source, limit)
-                   : this;
+            return Objects.equals(access, this.access)
+                   ? this
+                   : new Limit(factory, id, source, limit, access);
+        }
+
+        @Override
+        protected String description()
+        {
+            return "" + limit;
         }
     }
 
@@ -1431,6 +1354,9 @@ abstract public class Plan
         /** A plan returning all keys in the table */
         public final KeysIteration everything;
 
+        /** Default access pattern is to read all rows/keys without skipping until the end of the iterator */
+        private final Access defaultAccess;
+
         /** Id of the next new node created by this factory */
         private int nextId = 0;
 
@@ -1443,7 +1369,8 @@ abstract public class Plan
             this.tableMetrics = tableMetrics;
             this.costEstimator = costEstimator;
             this.nothing = new Nothing(-1, this);
-            this.everything = new Everything(-1, this, Long.MAX_VALUE);
+            this.defaultAccess = Access.sequential(tableMetrics.rows);
+            this.everything = new Everything(-1, this, defaultAccess);
         }
 
         /**
@@ -1458,7 +1385,7 @@ abstract public class Plan
             Preconditions.checkNotNull(predicate, "predicate must not be null");
             Preconditions.checkArgument(matchingKeysCount >= 0, "matchingKeyCount must not be negative");
             Preconditions.checkArgument(matchingKeysCount <= tableMetrics.rows, "matchingKeyCount must not exceed totalKeyCount");
-            return new NumericIndexScan(this, nextId++, predicate, matchingKeysCount, Long.MAX_VALUE);
+            return new NumericIndexScan(this, nextId++, predicate, matchingKeysCount, defaultAccess);
         }
 
         /**
@@ -1474,7 +1401,7 @@ abstract public class Plan
             Preconditions.checkNotNull(predicate, "predicate must not be null");
             Preconditions.checkArgument(matchingKeysCount >= 0, "matchingKeyCount must not be negative");
             Preconditions.checkArgument(matchingKeysCount <= tableMetrics.rows, "matchingKeyCount must not exceed totalKeyCount");
-            return new LiteralIndexScan(this, nextId++, predicate, matchingKeysCount, Long.MAX_VALUE);
+            return new LiteralIndexScan(this, nextId++, predicate, matchingKeysCount, defaultAccess);
         }
 
         /**
@@ -1497,7 +1424,7 @@ abstract public class Plan
             if (subplans.isEmpty())
                 return nothing;
 
-            return new Union(this, id, subplans, Long.MAX_VALUE);
+            return new Union(this, id, subplans, defaultAccess);
         }
 
         /**
@@ -1521,7 +1448,7 @@ abstract public class Plan
                 return everything;
 
             subplans.sort(Comparator.comparing(KeysIteration::selectivity));
-            return new Intersection(this, id, subplans, Long.MAX_VALUE);
+            return new Intersection(this, id, subplans, defaultAccess);
         }
 
         public Builder unionBuilder()
@@ -1545,8 +1472,8 @@ abstract public class Plan
         private KeysIteration annSort(@Nonnull KeysIteration source, @Nonnull RowFilter.Expression ordering, int id)
         {
             return (source instanceof Everything)
-                ? new AnnScan(this, id, ordering, Long.MAX_VALUE)
-                : new AnnSort(this, id, source, ordering, Long.MAX_VALUE);
+                ? new AnnScan(this, id, ordering, defaultAccess)
+                : new AnnSort(this, id, source, ordering, defaultAccess);
         }
 
         /**
@@ -1554,7 +1481,7 @@ abstract public class Plan
          */
         public KeysIteration annScan(@Nonnull RowFilter.Expression ordering)
         {
-            return new AnnScan(this, nextId++, ordering, Long.MAX_VALUE);
+            return new AnnScan(this, nextId++, ordering, defaultAccess);
         }
 
         /**
@@ -1562,7 +1489,7 @@ abstract public class Plan
          */
         public RowsIteration fetch(@Nonnull KeysIteration keysIterationPlan)
         {
-            return new Fetch(this, nextId++, keysIterationPlan, Long.MAX_VALUE);
+            return new Fetch(this, nextId++, keysIterationPlan, defaultAccess);
         }
 
         /**
@@ -1571,7 +1498,7 @@ abstract public class Plan
          */
         public RowsIteration recheckFilter(@Nonnull RowFilter filter, @Nonnull RowsIteration source)
         {
-            return new Filter(this, nextId++, filter, source, source.cost().selectivity, Long.MAX_VALUE);
+            return new Filter(this, nextId++, filter, source, source.cost().selectivity, defaultAccess);
         }
 
         /**
@@ -1597,7 +1524,7 @@ abstract public class Plan
             RowsIterationCost sourceCost = source.cost();
             Preconditions.checkArgument(targetSelectivity >= 0.0, "selectivity must not be negative");
             Preconditions.checkArgument(targetSelectivity <= sourceCost.selectivity, "selectivity must not exceed source selectivity of " + sourceCost.selectivity);
-            return new Filter(this, nextId++, filter, source, targetSelectivity, Long.MAX_VALUE);
+            return new Filter(this, nextId++, filter, source, targetSelectivity, defaultAccess);
         }
 
         /**
@@ -1606,7 +1533,7 @@ abstract public class Plan
          */
         public RowsIteration limit(@Nonnull RowsIteration source, long limit)
         {
-            return new Limit(this, nextId++, source, limit);
+            return new Limit(this, nextId++, source, limit, defaultAccess);
         }
     }
 
@@ -1676,8 +1603,14 @@ abstract public class Plan
         public final static double POINT_LOOKUP_SKIP_COST_DISTANCE_FACTOR = 0.1;
         public final static double POINT_LOOKUP_SKIP_COST_DISTANCE_EXPONENT = 0.5;
 
+        /** Cost to open the per-sstable index, read metadata and obtain the iterators. */
+        public final static double SAI_OPEN_COST = 10.0;
+
         /** Cost to advance the index iterator to the next key and load the key. Common for literal and numeric indexes. */
         public final static double SAI_KEY_COST = 1.0;
+
+        /** Cost to open the vector index and get ready for the search */
+        public final static double ANN_OPEN_COST = 10.0;
 
         /** Additional overhead needed by processing each input key fed to the ANN index searcher */
         public final static double ANN_INPUT_KEY_COST = 5.0;
@@ -1740,5 +1673,176 @@ abstract public class Plan
     {
         double hitRate = ChunkCache.instance == null ? 1.0 : ChunkCache.instance.metrics.hitRate();
         return 0.25 * (Double.isFinite(hitRate) ? max(0.1, hitRate) : 1.0);
+    }
+    
+    /**
+     * Describes the usage pattern of the result of the plan node.
+     * Modelled by the number of accesses and the distribution of skip distances.
+     * Distance = 1.0 means sequential scan over all rows/keys.
+     */
+    protected static final class Access
+    {
+        final static Access EMPTY = Access.sequential(0);
+
+        final double[] counts;
+        final double[] distances;
+
+        final double totalCount;
+        final double totalDistance;
+        final boolean forceSkip;
+
+
+        private Access(double[] count, double[] distance, boolean forceSkip)
+        {
+            assert count.length == distance.length;
+            this.counts = count;
+            this.distances = distance;
+            this.forceSkip = forceSkip;
+
+            double totalDistance = 0.0;
+            double totalCount = 0.0;
+            for (int i = 0; i < counts.length; i++)
+            {
+                totalCount += counts[i];
+                totalDistance += counts[i] * distances[i];
+            }
+
+            this.totalDistance = totalDistance;
+            this.totalCount = totalCount;
+        }
+
+        static Access sequential(double count)
+        {
+            return new Access(new double[] { count }, new double[] { 1.0 }, false);
+        }
+
+        /** Scales the counts so that the total count does not exceed given limit */
+        Access limit(long limit)
+        {
+            double totalCount = 0.0;
+            for (int i = 0; i < counts.length; i++)
+                totalCount += counts[i];
+
+            return limit > totalCount
+               ? this
+               : this.scaleCount(limit / totalCount);
+        }
+
+        /** Multiplies all counts by a constant without changing the distribution */
+        Access scaleCount(double factor)
+        {
+            assert !Double.isNaN(factor) : "Count multiplier must not be NaN";
+
+            double[] counts = Arrays.copyOf(this.counts, this.counts.length);
+            double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length);
+            for (int i = 0; i < counts.length; i++)
+                counts[i] *= factor;
+            return new Access(counts, skipDistances, forceSkip);
+        }
+
+        /**
+         * Multiplies all skip distances by a constant
+         * (if constant is > 1, it spreads accesses further away from each other)
+         */
+        Access scaleDistance(double factor)
+        {
+            assert !Double.isNaN(factor) : "Distance multiplier must not be NaN";
+
+            double[] counts = Arrays.copyOf(this.counts, this.counts.length);
+            double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length);
+            for (int i = 0; i < counts.length; i++)
+                skipDistances[i] *= factor;
+            return new Access(counts, skipDistances, forceSkip);
+        }
+
+        /**
+         * Multiplicates each access at the last level to count accesses with given skip distance.
+         * <p>
+         * Example (a star denotes a single access):
+         * <pre>
+         * Access.sequential(4).scaleDistance(6):
+         * *     *     *     *
+         * Access.sequential(4).scaleDistance(6).convolute(3, 1):
+         * ***   ***   ***   ***
+         * </pre>
+         * */
+        Access convolute(double count, double skipDistance)
+        {
+            assert !Double.isNaN(count) : "Count must not be NaN";
+            assert !Double.isNaN(skipDistance) : "Skip distance must not be NaN";
+
+            double[] counts = Arrays.copyOf(this.counts, this.counts.length + 1);
+            double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length + 1);
+
+            if (count <= 1.0)
+                return scaleCount(count);
+
+            counts[counts.length - 1] = (count - 1) * totalCount;
+            skipDistances[skipDistances.length - 1] = skipDistance;
+
+            // Because we added new accesses, we need to adjust the distance of the remaining points
+            // in a way that the total distance stays the same:
+            for (int i = 0; i < skipDistances.length - 1; i++)
+                skipDistances[i] -= (count - 1) * skipDistance;
+
+            return new Access(counts, skipDistances, forceSkip);
+        }
+
+        /** Forces using skipTo cost even if skipping distance is not greater than 1 item */
+        Access forceSkip()
+        {
+            return new Access(counts, distances, true);
+        }
+
+        /** Returns the total expected number of items (rows or keys) to be retrieved from the node */
+        double totalCount(double availableCount)
+        {
+            return totalCount == 0 || totalDistance <= availableCount
+                   ? totalCount
+                   : availableCount / totalDistance * totalCount;
+        }
+
+        /**
+         * Computes the expected cost of fetching one item (row or key).
+         * This is computed as an arithmetic mean of costs of skipping by each distance, weighted by counts.
+         * @param nextCost the cost of fetching one item from the plan node as a function of the skip distance
+         *                 (measured in rows or keys)
+         */
+        double unitCost(double nextCost, Function<Double, Double> skipCostFn)
+        {
+            if (totalCount == 0)
+                return 0.0;  // we don't want NaNs ;)
+
+            double totalCost = 0.0;
+            double totalWeight = 0.0;
+            for (int i = 0; i < counts.length; i++)
+            {
+                double skipCost = (distances[i] > 1.0 || forceSkip) ? skipCostFn.apply(distances[i]) : 0.0;
+                totalCost += counts[i] * (nextCost + skipCost);
+                totalWeight += counts[i];
+            }
+            return totalCost / totalWeight;
+        }
+
+        public double meanDistance()
+        {
+            return totalCount > 0.0 ? totalDistance / totalCount : 0.0;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Access that = (Access) o;
+            return Arrays.equals(counts, that.counts) && Arrays.equals(distances, that.distances);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(Arrays.hashCode(counts), Arrays.hashCode(distances));
+        }
+
     }
 }

@@ -25,6 +25,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import org.junit.Test;
@@ -39,6 +40,7 @@ import org.mockito.Mockito;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SCORED_KEY_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ROW_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_KEY_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_OPEN_COST;
 import static org.junit.Assert.*;
 
 public class PlanTest
@@ -63,6 +65,11 @@ public class PlanTest
     
     private final Plan.Factory factory = new Plan.Factory(table1M, Mockito.mock(Plan.CostEstimator.class));
 
+
+    static {
+        // For consistent display of plan trees
+        Locale.setDefault(Locale.ENGLISH);
+    }
 
     private static Expression saiPred(String column, Expression.Op operation)
     {
@@ -131,7 +138,7 @@ public class PlanTest
         Plan.KeysIteration plan = factory.intersection(Lists.newArrayList(a1, a2));
         assertEquals(0.0, plan.selectivity(), 0.0001);
         assertEquals(0.0, plan.expectedKeys(), 0.0001);
-        assertTrue(plan.fullCost() <= SAI_KEY_COST * 2);
+        assertTrue(plan.fullCost() <= 2 * factory.tableMetrics.sstables * SAI_OPEN_COST + SAI_KEY_COST * 2);
     }
 
     @Test
@@ -181,7 +188,7 @@ public class PlanTest
         Plan.KeysIteration i1 = factory.intersection(Lists.newArrayList(s1, nested));
         Plan.KeysIteration i2 = factory.intersection(Lists.newArrayList(s1, s2, s3));
         assertEquals(i1.initCost(), i2.initCost(), 0.01);
-        assertTrue(i1.fullCost() > i2.fullCost());
+        assertEquals(i1.fullCost(), i2.fullCost(), 0.01);
     }
 
     @Test
@@ -202,6 +209,7 @@ public class PlanTest
         Plan.KeysIteration li = factory.intersection(Lists.newArrayList(l1, l2));
 
         assertEquals(li.expectedKeys(), ni.expectedKeys(), 0.01);
+
         assertTrue(li.fullCost() < ni.fullCost());
     }
 
@@ -329,10 +337,10 @@ public class PlanTest
         Plan.RowsIteration filter = factory.recheckFilter(rowFilter, fetch);
         Plan.RowsIteration limit = factory.limit(filter, 3);
 
-        assertEquals(List.of(s2, s1, s3), filter.nodesOfType(Plan.NumericIndexScan.class));
-        assertEquals(List.of(union), filter.nodesOfType(Plan.Union.class));
-        assertEquals(List.of(fetch), filter.nodesOfType(Plan.Fetch.class));
-        assertEquals(List.of(filter), filter.nodesOfType(Plan.Filter.class));
+        assertEquals(List.of(s2.id, s1.id, s3.id), ids(filter.nodesOfType(Plan.NumericIndexScan.class)));
+        assertEquals(List.of(union.id), ids(filter.nodesOfType(Plan.Union.class)));
+        assertEquals(List.of(fetch.id), ids(filter.nodesOfType(Plan.Fetch.class)));
+        assertEquals(List.of(filter.id), ids(filter.nodesOfType(Plan.Filter.class)));
 
         // Nodes under limit may be different instances because of limit push-down:
         assertEquals(List.of(limit), limit.nodesOfType(Plan.Limit.class));
@@ -353,11 +361,11 @@ public class PlanTest
         assertNotSame(plan1, plan2);
         assertEquals(plan1.id, plan2.id);  // although the result plan is different object, the nodes must retain their ids
         assertTrue(plan2 instanceof Plan.Intersection);
-        assertEquals(Lists.newArrayList(s1, s3), plan2.subplans());
-        assertNotSame(plan1.cost(), plan2.cost());
+        assertEquals(Lists.newArrayList(s1.id, s3.id), ids(plan2.subplans()));
+        assertNotEquals(plan1.cost(), plan2.cost());
 
         Plan plan3 = plan2.remove(s1.id);
-        assertEquals(s3, plan3);
+        assertEquals(s3.id, plan3.id);
 
         Plan plan4 = plan3.remove(s3.id);
         assertTrue(plan4 instanceof Plan.Everything);
@@ -399,17 +407,17 @@ public class PlanTest
         Plan plan3 = plan.limitIntersectedClauses(3);
         Plan.Intersection intersection3 = plan3.firstNodeOfType(Plan.Intersection.class);
         assertNotNull(intersection3);
-        assertEquals(List.of(s3, s4, s1), intersection3.subplans());
+        assertEquals(List.of(s3.id, s4.id, s1.id), ids(intersection3.subplans()));
 
         Plan plan2 = plan.limitIntersectedClauses(2);
         Plan.Intersection intersection2 = plan2.firstNodeOfType(Plan.Intersection.class);
         assertNotNull(intersection2);
-        assertEquals(List.of(s3, s4), intersection2.subplans());
+        assertEquals(List.of(s3.id, s4.id), ids(intersection2.subplans()));
 
         Plan plan1 = plan.limitIntersectedClauses(1);
         Plan.Fetch fetch = plan1.firstNodeOfType(Plan.Fetch.class);
         assertNotNull(fetch);
-        assertSame(s3, fetch.subplans().get(0));
+        assertSame(s3.id, fetch.subplans().get(0).id);
     }
 
     @Test
@@ -471,7 +479,6 @@ public class PlanTest
     @Test
     public void prettyPrint()
     {
-        Locale.setDefault(Locale.ENGLISH);
         Plan.KeysIteration s1 = factory.numericIndexScan(saiPred1, (long) (0.5 * factory.tableMetrics.rows));
         Plan.KeysIteration s2 = factory.numericIndexScan(saiPred2, (long) (0.002 * factory.tableMetrics.rows));
         Plan.KeysIteration s3 = factory.literalIndexScan(saiPred3, (long) (0.001 * factory.tableMetrics.rows));
@@ -483,15 +490,15 @@ public class PlanTest
 
         String prettyStr = limit.toStringRecursive();
 
-        assertEquals("Limit (rows: 3.0, cost/row: 213.4, cost: 61099.3..61739.7)\n" +
-                     " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 1.000000000) (rows: 3.0, cost/row: 213.4, cost: 61099.3..61739.7)\n" +
-                     "     └─ Fetch (rows: 3.0, cost/row: 213.4, cost: 61099.3..61739.7)\n" +
-                     "         └─ AnnSort (keys: 3.0, cost/key: 10.0, cost: 61099.3..61129.3)\n" +
-                     "             └─ Union (keys: 1999.0, cost/key: 25.6, cost: 3.0..51104.3)\n" +
-                     "                 ├─ Intersection (keys: 1000.0, cost/key: 50.1, cost: 2.0..50103.3)\n" +
-                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000) (keys: 2000.0, cost/key: 1.0, cost: 1.0..2001.0)\n" +
-                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000) (keys: 500000.0, cost/key: 1.0, cost: 1.0..500001.0)\n" +
-                     "                 └─ LiteralIndexScan of pred3_idx using RANGE(pred3) (sel: 0.001000000) (keys: 1000.0, cost/key: 1.0, cost: 1.0..1001.0)\n", prettyStr);
+        assertEquals("Limit (limit = 3) (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
+                     " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 1.000000000) (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
+                     "     └─ Fetch (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
+                     "         └─ AnnSort (keys: 3.0, cost/key: 10.0, cost: 58616.9..58646.9)\n" +
+                     "             └─ Union (keys: 1999.0, cost/key: 24.3, cost: 90.0..48591.9)\n" +
+                     "                 ├─ Intersection (keys: 1000.0, cost/key: 47.5, cost: 60.0..47561.9)\n" +
+                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 1.0, cost: 30.0..2030.0)\n" +
+                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 22.8, cost: 30.0..45531.9)\n" +
+                     "                 └─ LiteralIndexScan of pred3_idx using RANGE(pred3) (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 1.0, cost: 30.0..1030.0)\n", prettyStr);
     }
 
     @Test
@@ -508,8 +515,8 @@ public class PlanTest
         Plan.RowsIteration origPlan = factory.fetch(intersect);
 
         Plan optimizedPlan = origPlan.optimize();
-        assertEquals(List.of(s2, s3, s4, s1), intersect.subplans()); // subplans must be sorted by selectivity
-        assertEquals(List.of(s2), optimizedPlan.subplans()); // look ma, no intersection under the fetch node
+        assertEquals(List.of(s2.id, s3.id, s4.id, s1.id), ids(intersect.subplans())); // subplans must be sorted by selectivity
+        assertEquals(List.of(s2.id), ids(optimizedPlan.subplans())); // look ma, no intersection under the fetch node
     }
 
     @Test
@@ -519,7 +526,7 @@ public class PlanTest
         Plan.KeysIteration a2 = factory.numericIndexScan(saiPred2, (long)(0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration plan = factory.intersection(Lists.newArrayList(a1, a2));
         Plan optimized = plan.optimize();
-        assertSame(optimized, a1);
+        assertEquals(optimized.id, a1.id);
     }
 
     @Test
@@ -643,7 +650,7 @@ public class PlanTest
 
         Plan.Intersection optimizedIntersection = optimizedPlan.firstNodeOfType(Plan.Intersection.class);
         assertNotNull(optimizedIntersection);
-        assertEquals(List.of(indexScan1, indexScan2), optimizedIntersection.subplans());
+        assertEquals(List.of(indexScan1.id, indexScan2.id), ids(optimizedIntersection.subplans()));
     }
 
     @Test
@@ -661,7 +668,7 @@ public class PlanTest
         Plan optimizedPlan = origPlan.optimize();
         Plan.Intersection optimizedIntersection = optimizedPlan.firstNodeOfType(Plan.Intersection.class);
         assertNotNull(optimizedIntersection);
-        assertEquals(List.of(indexScan1, indexScan2, indexScan3), optimizedIntersection.subplans());
+        assertEquals(List.of(indexScan1.id, indexScan2.id, indexScan3.id), ids(optimizedIntersection.subplans()));
     }
 
     @Test
@@ -741,7 +748,7 @@ public class PlanTest
         testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.001, 1.0), List.of(2));
 
 
-        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.0001, 0.0001), List.of(3));
+        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.0001, 0.0001), List.of(2, 3));
         testIntersectionsUnderLimit(table10M, List.of(0.001, 0.001, 0.001), List.of(3));
         testIntersectionsUnderLimit(table10M, List.of(0.002, 0.002, 0.002), List.of(3));
         testIntersectionsUnderLimit(table10M, List.of(0.005, 0.005, 0.005), List.of(3));
@@ -840,16 +847,16 @@ public class PlanTest
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.002, 1.0), List.of(2));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.001, 1.0), List.of(2));
 
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(3));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(2, 3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(2, 3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.001, 0.001), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.002, 0.002, 0.002), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.005, 0.005, 0.005), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.008, 0.008, 0.008), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.01), List.of(3));
 
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(3));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(3));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(2, 3));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(2, 3));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.001, 0.001), List.of(3));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.002, 0.002, 0.002), List.of(3));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.005, 0.005, 0.005), List.of(3));
@@ -918,4 +925,23 @@ public class PlanTest
         assertTrue(scan2.initCost() > scan1.initCost());
         assertTrue(scan2.fullCost() > scan1.fullCost());
     }
+
+    @Test
+    public void testAccessConvolution()
+    {
+        Plan.Access access = Plan.Access.sequential(100);
+        Plan.Access conv = access.scaleDistance(10.0)
+                                 .convolute(10, 1.0)
+                                 .scaleDistance(5.0)
+                                 .convolute(3, 1.0);
+        assertEquals(access.totalDistance * 50.0, conv.totalDistance, 0.001);
+        assertEquals(3000.0, conv.totalCount, 0.1);
+    }
+
+
+    private List<Integer> ids(List<? extends Plan> subplans)
+    {
+        return subplans.stream().map(p -> p.id).collect(Collectors.toList());
+    }
+
 }
