@@ -45,45 +45,45 @@ public class CollectionFctsTest extends CQLTester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v uuid, l list<text>, s set<boolean>, fl frozen<list<text>>, fs frozen<set<boolean>>)");
 
         // sum
-        assertInvalidThrowMessage("Function system.collection_sum requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_sum(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument v of type uuid",
                                   InvalidRequestException.class,
                                   "SELECT collection_sum(v) FROM %s");
-        assertInvalidThrowMessage("Function system.collection_sum requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_sum(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument l of type list<text>",
                                   InvalidRequestException.class,
                                   "SELECT collection_sum(l) FROM %s");
-        assertInvalidThrowMessage("Function system.collection_sum requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_sum(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument s of type set<boolean>",
                                   InvalidRequestException.class,
                                   "SELECT collection_sum(s) FROM %s");
-        assertInvalidThrowMessage("Function system.collection_sum requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_sum(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument fl of type frozen<list<text>>",
                                   InvalidRequestException.class,
                                   "SELECT collection_sum(fl) FROM %s");
-        assertInvalidThrowMessage("Function system.collection_sum requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_sum(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument fs of type frozen<set<boolean>>",
                                   InvalidRequestException.class,
                                   "SELECT collection_sum(fs) FROM %s");
 
         // avg
-        assertInvalidThrowMessage("Function system.collection_avg requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_avg(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument v of type uuid",
                                   InvalidRequestException.class,
                                   "SELECT collection_avg(v) FROM %s");
-        assertInvalidThrowMessage("Function system.collection_avg requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_avg(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument l of type list<text>",
                                   InvalidRequestException.class,
                                   "SELECT collection_avg(l) FROM %s");
-        assertInvalidThrowMessage("Function system.collection_avg requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_avg(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument s of type set<boolean>",
                                   InvalidRequestException.class,
                                   "SELECT collection_avg(s) FROM %s");
-        assertInvalidThrowMessage("Function system.collection_avg requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_avg(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument fl of type frozen<list<text>>",
                                   InvalidRequestException.class,
                                   "SELECT collection_avg(fl) FROM %s");
-        assertInvalidThrowMessage("Function system.collection_avg requires a numeric set/list argument, " +
+        assertInvalidThrowMessage("Function system.collection_avg(numeric_set_or_list) requires a numeric set/list argument, " +
                                   "but found argument fs of type frozen<set<boolean>>",
                                   InvalidRequestException.class,
                                   "SELECT collection_avg(fs) FROM %s");
