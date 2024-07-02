@@ -277,7 +277,7 @@ public class Operation
         {
             OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
             for (RowFilter.Expression expression : expressions)
-                node.add(buildExpression(expression));
+                node.add(buildExpression(expression, isDisjunction));
             for (RowFilter.FilterElement child : children)
                 node.add(buildTree(child));
             return node;
@@ -288,7 +288,7 @@ public class Operation
             return buildTree(filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
         }
 
-        static Node buildExpression(RowFilter.Expression expression)
+        static Node buildExpression(RowFilter.Expression expression, boolean isDisjunction)
         {
             if (expression.operator() == Operator.IN)
             {
@@ -309,6 +309,12 @@ public class Operation
                     return node.children().get(0);
                 if (node.children().isEmpty())
                     return new EmptyNode();
+                return node;
+            }
+            else if (expression.operator() == Operator.ANALYZER_MATCHES && isDisjunction)
+            {
+                OperatorNode node = new AndNode();
+                node.add(new ExpressionNode(expression));
                 return node;
             }
             else
