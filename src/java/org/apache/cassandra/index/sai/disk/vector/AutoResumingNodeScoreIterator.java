@@ -27,6 +27,8 @@ import io.github.jbellis.jvector.graph.SearchResult;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 
+import static java.lang.Math.max;
+
 /**
  * An iterator over {@link SearchResult.NodeScore} backed by a {@link SearchResult} that resumes search
  * when the backing {@link SearchResult} is exhausted.
@@ -63,7 +65,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         this.nodeScores = Arrays.stream(result.getNodes()).iterator();
         this.cumulativeNodesVisited = result.getVisitedCount();
         this.nodesVisitedConsumer = nodesVisitedConsumer;
-        this.limit = limit;
+        this.limit = max(1, limit / 2); // we shouldn't need as many results on resume
         this.rerankK = rerankK;
         this.inMemory = inMemory;
     }
@@ -86,9 +88,9 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     {
         if (!Tracing.isTracing())
             return;
-        String msg = inMemory ? "ANN resumed search and visited {} in-memory nodes to return {} results"
-                              : "DiskANN resumed search and visited {} nodes to return {} results";
-        Tracing.trace(msg, result.getVisitedCount(), result.getNodes().length);
+        String msg = inMemory ? "ANN resumed search for {}/{} visited {} nodes and reranked {} to return {} results"
+                              : "DiskANN resumed search for {}/{} visited {} nodes and reranked {} to return {} results";
+        Tracing.trace(msg, limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
     }
 
     @Override

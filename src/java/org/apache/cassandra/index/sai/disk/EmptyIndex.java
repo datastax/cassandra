@@ -96,7 +96,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit, long totalRows) throws IOException
     {
         return List.of();
     }
@@ -124,7 +124,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit, long totalRows) throws IOException
     {
         return List.of();
     }
