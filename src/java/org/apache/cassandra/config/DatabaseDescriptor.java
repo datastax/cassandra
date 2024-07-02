@@ -2047,7 +2047,7 @@ public class DatabaseDescriptor
     {
         IPartitioner old = partitioner;
         partitioner = newPartitioner;
-        partitionerName = partitioner.getClass().getCanonicalName();
+        partitionerName = partitioner != null ? partitioner.getClass().getCanonicalName() : null;
         return old;
     }
 
