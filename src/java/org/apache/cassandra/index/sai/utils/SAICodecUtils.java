@@ -20,7 +20,7 @@ package org.apache.cassandra.index.sai.utils;
 import java.io.IOException;
 import java.io.OutputStream;
 
-import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
+import io.github.jbellis.jvector.disk.RandomAccessWriter;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.io.compress.CorruptBlockException;
@@ -75,7 +75,7 @@ public class SAICodecUtils
         writeChecksum(out);
     }
 
-    public static void writeFooter(BufferedRandomAccessWriter braw, long checksum) throws IOException
+    public static void writeFooter(RandomAccessWriter braw, long checksum) throws IOException
     {
         var out = toLuceneOutput(braw);
         writeBEInt(out, FOOTER_MAGIC);

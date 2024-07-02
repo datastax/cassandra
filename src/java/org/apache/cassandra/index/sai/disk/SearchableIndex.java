@@ -71,12 +71,13 @@ public interface SearchableIndex extends Closeable
     public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
                                                              AbstractBounds<PartitionPosition> keyRange,
                                                              QueryContext context,
-                                                             int limit) throws IOException;
+                                                             int limit,
+                                                             long totalRows) throws IOException;
 
     public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context,
                                                                     List<PrimaryKey> keys,
                                                                     Expression exp,
-                                                                    int limit) throws IOException;
+                                                                    int limit, long totalRows) throws IOException;
 
     List<Segment> getSegments();
 
