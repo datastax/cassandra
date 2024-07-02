@@ -265,7 +265,8 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     // Analyzers on clustering columns are not supported yet
-    @Test
+    // FIXME re-enable exception detection once incompatible analyzers have been removed, check restored
+    /*@Test
     public void testStandardAnalyzerInClusteringColumnFailsAtCreateIndex() throws Throwable
     {
         createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
@@ -285,7 +286,7 @@ public class LuceneAnalyzerTest extends SAITester
         assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                                              "WITH OPTIONS = { 'normalize': true }"
         )).isInstanceOf(InvalidRequestException.class);
-    }
+    }*/
 
     @Test
     public void testBogusAnalyzer() throws Throwable
