@@ -87,7 +87,7 @@ public interface INativeLibrary
     /**
      * advise the OS to expect random i/o performed against the mapped address
      */
-    void adviseRandom(MappedByteBuffer buffer, long len);
+    void adviseRandom(MappedByteBuffer buffer, long len, String s);
 
     /**
      * execute OS file control command

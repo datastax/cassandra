@@ -376,7 +376,7 @@ public class MmappedRegions extends SharedCloseableImpl
         {
             var buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - onDiskSliceOffset, size);
             if (adviseRandom)
-                INativeLibrary.instance.adviseRandom(buffer, size);
+                INativeLibrary.instance.adviseRandom(buffer, size, channel.filePath());
 
             ++last;
 

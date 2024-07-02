@@ -293,7 +293,12 @@ public class NativeLibrary implements INativeLibrary
         }
     }
 
-    public void adviseRandom(MappedByteBuffer buffer, long length) {
+    /**
+     * @param buffer
+     * @param length
+     * @param filename -- source file backing buffer; logged on error
+     */
+    public void adviseRandom(MappedByteBuffer buffer, long length, String filename) {
         assert buffer != null;
 
         long address = getAddress(buffer);
@@ -304,8 +309,8 @@ public class NativeLibrary implements INativeLibrary
                                  NoSpamLogger.Level.WARN,
                                  10,
                                  TimeUnit.MINUTES,
-                                 "Failed madvise on address: {} Error: " + wrappedLibrary.callStrerror(result).getString(0),
-                                 address);
+                                 "Failed madvise on file {}. Error: " + wrappedLibrary.callStrerror(result).getString(0),
+                                 filename);
             }
         } catch (UnsatisfiedLinkError e) {
             logger.warn("madvise not supported on this platform.", e);
