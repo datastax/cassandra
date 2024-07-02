@@ -87,22 +87,36 @@ public class VectorPostingsWriter<T>
         for (var i = 0; i < vectorValues.size(); i++) {
             // (ordinal is implied; don't need to write it)
             writer.writeLong(nextOffset);
-
-            var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
-
-            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-            nextOffset += 4 + (rowIds.size() * 4L); // 4 bytes for size and 4 bytes for each integer in the list
+            int postingListSize;
+            if (oneToOne)
+            {
+                postingListSize = 1;
+            }
+            else
+            {
+                var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
+                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+                postingListSize = rowIds.size();
+            }
+            nextOffset += 4 + (postingListSize * 4L); // 4 bytes for size and 4 bytes for each integer in the list
         }
         assert writer.position() == offsetsStartAt : "writer.position()=" + writer.position() + " offsetsStartAt=" + offsetsStartAt;
 
         // Write postings lists
         for (var i = 0; i < vectorValues.size(); i++) {
-            var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
-            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-
-            writer.writeInt(rowIds.size());
-            for (int r = 0; r < rowIds.size(); r++)
-                writer.writeInt(rowIds.getInt(r));
+            if (oneToOne)
+            {
+                writer.writeInt(1);
+                writer.writeInt(i);
+            }
+            else
+            {
+                var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
+                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+                writer.writeInt(rowIds.size());
+                for (int r = 0; r < rowIds.size(); r++)
+                    writer.writeInt(rowIds.getInt(r));
+            }
         }
         assert writer.position() == nextOffset;
     }
@@ -111,28 +125,39 @@ public class VectorPostingsWriter<T>
                                                RandomAccessVectorValues vectorValues,
                                                Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
-        List<Pair<Integer, Integer>> pairs = new ArrayList<>();
-
-        // Collect all (rowId, vectorOrdinal) pairs
-        for (var i = 0; i < vectorValues.size(); i++) {
-            // if it's an on-disk Map then this is an expensive assert, only do it when in memory
-            if (postingsMap instanceof ConcurrentSkipListMap)
-                assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
-
-            int ord = reverseOrdinalsMapper.applyAsInt(i);
-            var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
-            for (int r = 0; r < rowIds.size(); r++)
-                pairs.add(Pair.create(rowIds.getInt(r), i));
-        }
-
-        // Sort the pairs by rowId
-        pairs.sort(Comparator.comparingInt(Pair::left));
-
-        // Write the pairs to the file
         long startOffset = writer.position();
-        for (var pair : pairs) {
-            writer.writeInt(pair.left);
-            writer.writeInt(pair.right);
+
+        if (oneToOne)
+        {
+            for (var i = 0; i < vectorValues.size(); i++)
+            {
+                writer.writeInt(i);
+                writer.writeInt(i);
+            }
+        }
+        else
+        {
+            // Collect all (rowId, vectorOrdinal) pairs
+            List<Pair<Integer, Integer>> pairs = new ArrayList<>();
+            for (var i = 0; i < vectorValues.size(); i++) {
+                // if it's an on-disk Map then this is an expensive assert, only do it when in memory
+                if (postingsMap instanceof ConcurrentSkipListMap)
+                    assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
+
+                int ord = reverseOrdinalsMapper.applyAsInt(i);
+                var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
+                for (int r = 0; r < rowIds.size(); r++)
+                    pairs.add(Pair.create(rowIds.getInt(r), i));
+            }
+
+            // Sort the pairs by rowId
+            pairs.sort(Comparator.comparingInt(Pair::left));
+
+            // Write the pairs to the file
+            for (var pair : pairs) {
+                writer.writeInt(pair.left);
+                writer.writeInt(pair.right);
+            }
         }
 
         // write the position of the beginning of rowid -> ordinals mappings to the end
