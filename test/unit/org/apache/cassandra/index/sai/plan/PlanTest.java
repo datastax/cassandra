@@ -319,8 +319,7 @@ public class PlanTest
     {
         Plan.KeysIteration i = factory.annScan(ordering);
         assertEquals(factory.tableMetrics.rows, i.expectedKeys(), 0.01);
-        assertEquals(0.0, i.initCost(), 0.01);
-        assertEquals(factory.tableMetrics.rows * ANN_SCORED_KEY_COST, i.fullCost(), 0.01);
+        assertEquals(i.initCost() + factory.tableMetrics.rows * ANN_SCORED_KEY_COST, i.fullCost(), 0.01);
     }
 
     @Test
@@ -490,7 +489,7 @@ public class PlanTest
 
         String prettyStr = limit.toStringRecursive();
 
-        assertEquals("Limit (limit = 3) (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
+        assertEquals("Limit 3 (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
                      " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 1.000000000) (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
                      "     └─ Fetch (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
                      "         └─ AnnSort (keys: 3.0, cost/key: 10.0, cost: 58616.9..58646.9)\n" +
@@ -590,7 +589,6 @@ public class PlanTest
         Plan optimizedPlan = origPlan.optimize();
 
         assertTrue(optimizedPlan.contains(p -> p instanceof Plan.AnnScan));
-        assertEquals(0.0, optimizedPlan.cost().initCost(), 0.0);
 
         // The optimized plan should finish before the original plan even gets the first row out ;)
         assertTrue(optimizedPlan.cost().fullCost() < origPlan.cost().initCost());
@@ -610,7 +608,6 @@ public class PlanTest
 
         Plan optimizedPlan = origPlan.optimize();
         assertTrue(optimizedPlan.contains(p -> p instanceof Plan.AnnScan));
-        assertEquals(0.0, optimizedPlan.cost().initCost(), 0.0);
 
         // The optimized plan should finish before the original plan even gets the first row out ;)
         assertTrue(optimizedPlan.cost().fullCost() < origPlan.cost().initCost());
@@ -938,6 +935,25 @@ public class PlanTest
         assertEquals(3000.0, conv.totalCount, 0.1);
     }
 
+    @Test
+    public void testLazyAccessPropagation()
+    {
+        Plan.KeysIteration indexScan1 = Mockito.mock(Plan.KeysIteration.class);
+        Mockito.when(indexScan1.withAccess(Mockito.any())).thenReturn(indexScan1);
+        Mockito.when(indexScan1.estimateCost()).thenReturn(new Plan.KeysIterationCost(20, 0.01, 0.0, 0.5));
+        Mockito.when(indexScan1.description()).thenReturn("");
+
+        Plan.KeysIteration indexScan2 = factory.numericIndexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
+        Plan.KeysIteration indexScan3 = factory.numericIndexScan(saiPred3, (long) (0.5 * factory.tableMetrics.rows));
+        Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2, indexScan3));
+        Plan.RowsIteration fetch = factory.fetch(intersection);
+        Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
+        Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
+        origPlan.cost();
+
+        Mockito.verify(indexScan1, Mockito.atMost(2)).withAccess(Mockito.any());
+        Mockito.verify(indexScan1, Mockito.atMost(1)).estimateCost();
+    }
 
     private List<Integer> ids(List<? extends Plan> subplans)
     {

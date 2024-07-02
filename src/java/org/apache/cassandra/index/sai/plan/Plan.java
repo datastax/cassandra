@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -102,6 +101,7 @@ import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
  *              └─ NumericIndexScan of vector_a_idx using Expression{ ... } (sel: 0.199230000, step: 19.9) (keys: 50.2, cost/key: 10.6, cost: 40.0..571.9)
  * </pre>
  */
+@NotThreadSafe
 abstract public class Plan
 {
     private static final Logger logger = LoggerFactory.getLogger(Plan.class);
@@ -802,13 +802,17 @@ abstract public class Plan
      */
     static final class Union extends KeysIteration
     {
-        private final List<KeysIteration> subplans;
+        private final LazyTransform<List<KeysIteration>> subplansSupplier;
 
         Union(Factory factory, int id, List<KeysIteration> subplans, Access access)
         {
             super(factory, id, access);
             Preconditions.checkArgument(!subplans.isEmpty(), "Subplans must not be empty");
-            this.subplans = Collections.unmodifiableList(propagateAccess(subplans));
+
+            // We propagate Access lazily just before we need the subplans.
+            // This is because there may be several requests to change the access pattern from the top,
+            // and we don't want to reconstruct the whole subtree each time
+            this.subplansSupplier = new LazyTransform<>(subplans, this::propagateAccess);
         }
 
         private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
@@ -835,7 +839,7 @@ abstract public class Plan
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
         {
-            for (Plan s : subplans)
+            for (Plan s : subplansSupplier.get())
             {
                 if (function.apply(s) == ControlFlow.Break)
                     return ControlFlow.Break;
@@ -846,6 +850,7 @@ abstract public class Plan
         @Override
         protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
         {
+            List<KeysIteration> subplans = subplansSupplier.get();
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
             for (Plan subplan : subplans)
                 newSubplans.add((KeysIteration) updater.apply(subplan));
@@ -860,7 +865,7 @@ abstract public class Plan
         {
             return Objects.equals(access, this.access)
                 ? this
-                : new Union(factory, id, subplans, access);
+                : new Union(factory, id, subplansSupplier.orig, access);
         }
 
         @Override
@@ -869,6 +874,7 @@ abstract public class Plan
             double selectivity = 0.0;
             double initCost = 0.0;
             double iterCost = 0.0;
+            List<KeysIteration> subplans = subplansSupplier.get();
             for (int i = 0; i < subplans.size(); i++)
             {
                 KeysIteration subplan = subplans.get(i);
@@ -889,7 +895,7 @@ abstract public class Plan
             RangeIterator.Builder builder = RangeUnionIterator.builder();
             try
             {
-                for (KeysIteration plan : subplans)
+                for (KeysIteration plan : subplansSupplier.get())
                     builder.add((RangeIterator) plan.execute(executor));
                 return builder.build();
             }
@@ -909,14 +915,17 @@ abstract public class Plan
      */
     static final class Intersection extends KeysIteration
     {
-        private final List<KeysIteration> subplans;
+        private final LazyTransform<List<KeysIteration>> subplansSupplier;
 
         private Intersection(Factory factory, int id, List<KeysIteration> subplans, Access access)
         {
             super(factory, id, access);
             Preconditions.checkArgument(!subplans.isEmpty(), "Subplans must not be empty");
 
-            this.subplans = Collections.unmodifiableList(propagateAccess(subplans));
+            // We propagate Access lazily just before we need the subplans.
+            // This is because there may be several requests to change the access pattern from the top,
+            // and we don't want to reconstruct the whole subtree each time
+            this.subplansSupplier = new LazyTransform<>(subplans, this::propagateAccess);
         }
 
         private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
@@ -960,7 +969,7 @@ abstract public class Plan
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
         {
-            for (Plan s : subplans)
+            for (Plan s : subplansSupplier.get())
             {
                 if (function.apply(s) == ControlFlow.Break)
                     return ControlFlow.Break;
@@ -971,6 +980,7 @@ abstract public class Plan
         @Override
         protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
         {
+            List<KeysIteration> subplans = subplansSupplier.get();
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
             for (Plan subplan : subplans)
                 newSubplans.add((KeysIteration) updater.apply(subplan));
@@ -985,12 +995,13 @@ abstract public class Plan
         {
             return Objects.equals(access, this.access)
                 ? this
-                : new Intersection(factory, id, subplans, access);
+                : new Intersection(factory, id, subplansSupplier.orig, access);
         }
 
         @Override
         protected KeysIterationCost estimateCost()
         {
+            List<KeysIteration> subplans = subplansSupplier.get();
             assert !subplans.isEmpty() : "Expected at least one subplan here. An intersection of 0 plans should have been optimized out.";
 
             double selectivity = 1.0;
@@ -1012,7 +1023,7 @@ abstract public class Plan
             RangeIterator.Builder builder = RangeIntersectionIterator.builder();
             try
             {
-                for (KeysIteration plan : subplans)
+                for (KeysIteration plan : subplansSupplier.get())
                     builder.add((RangeIterator) plan.execute(executor));
 
                 return builder.build();
@@ -1029,9 +1040,9 @@ abstract public class Plan
          */
         public Plan stripSubplans(int clauseLimit)
         {
-            if (subplans.size() <= clauseLimit)
+            if (subplansSupplier.orig.size() <= clauseLimit)
                 return this;
-            List<Plan.KeysIteration> newSubplans = new ArrayList<>(subplans.subList(0, clauseLimit));
+            List<Plan.KeysIteration> newSubplans = new ArrayList<>(subplansSupplier.orig.subList(0, clauseLimit));
             return factory.intersection(newSubplans, id).withAccess(access);
         }
     }
@@ -1117,7 +1128,7 @@ abstract public class Plan
             double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables + initNodesCount * ANN_NODE_COST;
             return new KeysIterationCost(keysCount,
                                          1.0,
-                                         initNodesCount * ANN_NODE_COST,
+                                         initCost,
                                          keysCount * CostCoefficients.ANN_SCORED_KEY_COST);
         }
 
@@ -1175,26 +1186,26 @@ abstract public class Plan
      */
     static final class Fetch extends RowsIteration
     {
-        private final KeysIteration source;
+        private final LazyTransform<KeysIteration> source;
 
         private Fetch(Factory factory, int id, KeysIteration keysIteration, Access access)
         {
             super(factory, id, access);
-            this.source = keysIteration.withAccess(access);
+            this.source = new LazyTransform<>(keysIteration, k -> k.withAccess(access));
         }
 
 
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
         {
-            return function.apply(source);
+            return function.apply(source.get());
         }
 
         @Override
         protected Fetch withUpdatedSubplans(Function<Plan, Plan> updater)
         {
-            Plan.KeysIteration updatedSource = (KeysIteration) updater.apply(source);
-            return updatedSource == source ? this : new Fetch(factory, id, updatedSource, access);
+            Plan.KeysIteration updatedSource = (KeysIteration) updater.apply(source.get());
+            return updatedSource == source.get() ? this : new Fetch(factory, id, updatedSource, access);
         }
 
         @Override
@@ -1205,11 +1216,12 @@ abstract public class Plan
                                   + CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow
                                   + CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow;
 
-            double expectedKeys = access.totalCount(source.expectedKeys());
+            KeysIteration src = source.get();
+            double expectedKeys = access.totalCount(src.expectedKeys());
             return new RowsIterationCost(expectedKeys,
-                                         source.selectivity(),
-                                         source.initCost(),
-                                         source.iterCost() + expectedKeys * rowFetchCost);
+                                         src.selectivity(),
+                                         src.initCost(),
+                                         src.iterCost() + expectedKeys * rowFetchCost);
         }
 
         @Override
@@ -1217,7 +1229,7 @@ abstract public class Plan
         {
             return Objects.equals(access, this.access)
                 ? this
-                : new Fetch(factory, id, source, access);
+                : new Fetch(factory, id, source.orig, access);
 
         }
     }
@@ -1230,28 +1242,34 @@ abstract public class Plan
     static class Filter extends RowsIteration
     {
         private final RowFilter filter;
-        private final RowsIteration source;
+        private final LazyTransform<RowsIteration> source;
         private final double targetSelectivity;
 
         Filter(Factory factory, int id, RowFilter filter, RowsIteration source, double targetSelectivity, Access access)
         {
             super(factory, id, access);
             this.filter = filter;
-            this.source = source.withAccess(access.scaleCount(targetSelectivity > 0 ? source.selectivity() / targetSelectivity : 1.0));
+            this.source = new LazyTransform<>(source, this::propagateAccess);
             this.targetSelectivity = targetSelectivity;
+        }
+
+        private RowsIteration propagateAccess(RowsIteration source)
+        {
+            Access scaledAccess = access.scaleCount(targetSelectivity > 0 ? source.selectivity() / targetSelectivity : 1.0);
+            return source.withAccess(scaledAccess);
         }
 
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
         {
-            return function.apply(source);
+            return function.apply(source.get());
         }
 
         @Override
         protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
         {
-            Plan.RowsIteration updatedSource = (RowsIteration) updater.apply(source);
-            return updatedSource == source
+            Plan.RowsIteration updatedSource = (RowsIteration) updater.apply(source.get());
+            return updatedSource == source.get()
                    ? this
                    : new Filter(factory, id, filter, updatedSource, targetSelectivity, access);
         }
@@ -1260,7 +1278,10 @@ abstract public class Plan
         protected RowsIterationCost estimateCost()
         {
             double expectedRows = access.totalCount(factory.tableMetrics.rows * targetSelectivity);
-            return new RowsIterationCost(expectedRows, targetSelectivity, source.initCost(), source.iterCost());
+            return new RowsIterationCost(expectedRows,
+                                         targetSelectivity,
+                                         source.get().initCost(),
+                                         source.get().iterCost());
         }
 
         @Override
@@ -1268,13 +1289,13 @@ abstract public class Plan
         {
             return Objects.equals(access, this.access)
                 ? this
-                : new Filter(factory, id, filter, source, targetSelectivity, access);
+                : new Filter(factory, id, filter, source.orig, targetSelectivity, access);
         }
 
         @Override
         protected String description()
         {
-            return String.format("%s (sel: %.9f)", filter, selectivity() / source.selectivity());
+            return String.format("%s (sel: %.9f)", filter, selectivity() / source.get().selectivity());
         }
     }
 
@@ -1284,38 +1305,39 @@ abstract public class Plan
      */
     static class Limit extends RowsIteration
     {
-        private final RowsIteration source;
+        private final LazyTransform<RowsIteration> source;
         private final long limit;
 
         private Limit(Factory factory, int id, RowsIteration source, long limit, Access access)
         {
             super(factory, id, access);
             this.limit = limit;
-            this.source = source.withAccess(access.limit(limit));
+            this.source = new LazyTransform<>(source, s -> s.withAccess(access.limit(limit)));
         }
 
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
         {
-            return function.apply(source);
+            return function.apply(source.get());
         }
 
         @Override
         protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
         {
-            Plan.RowsIteration updatedSource = (RowsIteration) updater.apply(source);
-            return updatedSource == source ? this : new Limit(factory, id, updatedSource, limit, access);
+            Plan.RowsIteration updatedSource = (RowsIteration) updater.apply(source.get());
+            return updatedSource == source.get() ? this : new Limit(factory, id, updatedSource, limit, access);
         }
 
         @Override
         protected RowsIterationCost estimateCost()
         {
-            double expectedRows = access.totalCount(source.expectedRows());
-            double selectivity = source.selectivity();
-            double iterCost = (limit >= source.cost().expectedRows)
-                              ? source.iterCost()
-                              : source.iterCost() * limit / source.expectedRows();
-            return new RowsIterationCost(expectedRows, selectivity, source.initCost(), iterCost);
+            RowsIteration src = source.get();
+            double expectedRows = access.totalCount(src.expectedRows());
+            double selectivity = src.selectivity();
+            double iterCost = (limit >= src.expectedRows())
+                              ? src.iterCost()
+                              : src.iterCost() * limit / src.expectedRows();
+            return new RowsIterationCost(expectedRows, selectivity, src.initCost(), iterCost);
         }
 
         @Override
@@ -1323,7 +1345,7 @@ abstract public class Plan
         {
             return Objects.equals(access, this.access)
                    ? this
-                   : new Limit(factory, id, source, limit, access);
+                   : new Limit(factory, id, source.orig, limit, access);
         }
 
         @Override
@@ -1843,6 +1865,29 @@ abstract public class Plan
         {
             return Objects.hash(Arrays.hashCode(counts), Arrays.hashCode(distances));
         }
+    }
 
+    /**
+     * Applies given function to given object lazily, only when the result is needed.
+     * Caches the result for subsequent executions.
+     */
+    static class LazyTransform<T>
+    {
+        final T orig;
+        final Function<T, T> transform;
+        private T result;
+
+        LazyTransform(T orig, Function<T, T> transform)
+        {
+            this.orig = orig;
+            this.transform = transform;
+        }
+
+        public T get()
+        {
+            if (result == null)
+                result = transform.apply(orig);
+            return result;
+        }
     }
 }
