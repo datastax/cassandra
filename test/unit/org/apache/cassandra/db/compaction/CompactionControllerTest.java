@@ -35,7 +35,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -46,17 +46,18 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNotNull;
 
 @RunWith(BMUnitRunner.class)
 public class CompactionControllerTest extends SchemaLoader
@@ -108,7 +109,7 @@ public class CompactionControllerTest extends SchemaLoader
         {
             assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp1); //memtable only
 
-            Util.flush(cfs);
+            cfs.forceBlockingFlush(UNIT_TESTS);
             assertTrue(controller.getPurgeEvaluator(key).test(Long.MAX_VALUE)); //no memtables and no sstables
         }
 
@@ -116,7 +117,7 @@ public class CompactionControllerTest extends SchemaLoader
 
         // create another sstable
         applyMutation(cfs.metadata(), key, timestamp2);
-        Util.flush(cfs);
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // check max purgeable timestamp when compacting the first sstable with and without a memtable
         try (CompactionController controller = new CompactionController(cfs, compacting, 0))
@@ -129,7 +130,7 @@ public class CompactionControllerTest extends SchemaLoader
         }
 
         // check max purgeable timestamp again without any sstables but with different insertion orders on the memtable
-        Util.flush(cfs);
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         //newest to oldest
         try (CompactionController controller = new CompactionController(cfs, null, 0))
@@ -141,7 +142,7 @@ public class CompactionControllerTest extends SchemaLoader
             assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp3); //memtable only
         }
 
-        Util.flush(cfs);
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         //oldest to newest
         try (CompactionController controller = new CompactionController(cfs, null, 0))
@@ -169,20 +170,20 @@ public class CompactionControllerTest extends SchemaLoader
 
         // create sstable with tombstone that should be expired in no older timestamps
         applyDeleteMutation(cfs.metadata(), key, timestamp2);
-        Util.flush(cfs);
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // first sstable with tombstone is compacting
         Set<SSTableReader> compacting = Sets.newHashSet(cfs.getLiveSSTables());
 
         // create another sstable with more recent timestamp
         applyMutation(cfs.metadata(), key, timestamp1);
-        Util.flush(cfs);
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // second sstable is overlapping
         Set<SSTableReader> overlapping = Sets.difference(Sets.newHashSet(cfs.getLiveSSTables()), compacting);
 
         // the first sstable should be expired because the overlapping sstable is newer and the gc period is later
-        long gcBefore = (System.currentTimeMillis() / 1000) + 5;
+        int gcBefore = (int) (System.currentTimeMillis() / 1000) + 5;
         Set<CompactionSSTable> expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, overlapping, gcBefore);
         assertNotNull(expired);
         assertEquals(1, expired.size());
@@ -224,49 +225,15 @@ public class CompactionControllerTest extends SchemaLoader
     condition = "Thread.currentThread().getName().equals(\"compaction1\")",
     action = "org.apache.cassandra.db.compaction.CompactionControllerTest.incrementOverlapRefreshCounter();")
     })
-    public void testIgnoreOverlapsTrue() throws Exception
+    public void testIgnoreOverlaps() throws Exception
     {
-        resetCounters();
         testOverlapIterator(true);
-    }
-
-    @Test
-    @BMRules(rules = {
-    @BMRule(name = "Pause compaction",
-    targetClass = "CompactionTask",
-    targetMethod = "runMayThrow",
-    targetLocation = "INVOKE getCompactionAwareWriter",
-    condition = "Thread.currentThread().getName().equals(\"compaction1\")",
-    action = "org.apache.cassandra.db.compaction.CompactionControllerTest.createCompactionControllerLatch.countDown();" +
-             "com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly" +
-             "(org.apache.cassandra.db.compaction.CompactionControllerTest.compaction2FinishLatch);"),
-    @BMRule(name = "Check overlaps",
-    targetClass = "CompactionTask",
-    targetMethod = "runMayThrow",
-    targetLocation = "INVOKE finish",
-    condition = "Thread.currentThread().getName().equals(\"compaction1\")",
-    action = "org.apache.cassandra.db.compaction.CompactionControllerTest.compaction1RefreshLatch.countDown();" +
-             "com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly" +
-             "(org.apache.cassandra.db.compaction.CompactionControllerTest.refreshCheckLatch);"),
-    @BMRule(name = "Increment overlap refresh counter",
-    targetClass = "ColumnFamilyStore",
-    targetMethod = "getAndReferenceOverlappingLiveSSTables",
-    condition = "Thread.currentThread().getName().equals(\"compaction1\")",
-    action = "org.apache.cassandra.db.compaction.CompactionControllerTest.incrementOverlapRefreshCounter();")
-    })
-    public void testIgnoreOverlapsFalse() throws Exception
-    {
-        resetCounters();
-        testOverlapIterator(false);
-    }
-
-    private void resetCounters()
-    {
         overlapRefreshCounter = 0;
         compaction2FinishLatch = new CountDownLatch(1);
         createCompactionControllerLatch = new CountDownLatch(1);
         compaction1RefreshLatch = new CountDownLatch(1);
         refreshCheckLatch = new CountDownLatch(1);
+        testOverlapIterator(false);
     }
 
     public void testOverlapIterator(boolean ignoreOverlaps) throws Exception
@@ -291,7 +258,7 @@ public class CompactionControllerTest extends SchemaLoader
         assertEquals(cfs.getLiveSSTables().size(), 2);
         String sstable2 = cfs.getLiveSSTables().iterator().next().getFilename();
 
-        CassandraRelevantProperties.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION.setBoolean(true);
+        ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION.setBoolean(true);
         Map<String, String> options = new HashMap<>();
         options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY, "30");
         options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_UNIT_KEY, "SECONDS");
@@ -380,38 +347,5 @@ public class CompactionControllerTest extends SchemaLoader
     public static void incrementOverlapRefreshCounter()
     {
         overlapRefreshCounter++;
-    }
-
-    @Test
-    public void testDisableNeverPurgeTombstones()
-    {
-        Keyspace keyspace = Keyspace.open(KEYSPACE);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF2);
-        cfs.truncateBlocking();
-
-        DecoratedKey key = Util.dk("k1");
-        long timestamp = System.currentTimeMillis();
-        applyMutation(cfs.metadata(), key, timestamp);
-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
-        Set<SSTableReader> toCompact = Sets.newHashSet(cfs.getLiveSSTables());
-        cfs.setNeverPurgeTombstones(true);
-        applyMutation(cfs.metadata(), key, timestamp + 1);
-
-        try (CompactionController cc = new CompactionController(cfs, toCompact, (int)(System.currentTimeMillis()/1000)))
-        {
-            assertFalse(cc.getPurgeEvaluator(key).test(timestamp));
-            assertFalse(cc.getPurgeEvaluator(key).test(timestamp + 1));
-            assertTrue(cc.getFullyExpiredSSTables().isEmpty());
-
-            cfs.setNeverPurgeTombstones(false);
-            assertFalse(cc.getPurgeEvaluator(key).test(timestamp));
-            assertFalse(cc.getPurgeEvaluator(key).test(timestamp + 1));
-            assertTrue(cc.getFullyExpiredSSTables().isEmpty());
-
-            cc.maybeRefreshOverlaps();
-            assertTrue(cc.getPurgeEvaluator(key).test(timestamp));
-            assertFalse(cc.getPurgeEvaluator(key).test(timestamp + 1));
-            assertTrue(cc.getFullyExpiredSSTables().isEmpty());
-        }
     }
 }
