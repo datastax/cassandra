@@ -19,8 +19,6 @@ package org.apache.cassandra.index.sai.cql;
 
 import javax.management.ObjectName;
 
-import com.datastax.driver.core.exceptions.ReadFailureException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.junit.After;
@@ -148,10 +146,8 @@ public class QueryTimeoutTest extends SAITester
                         .doAction("throw new org.apache.cassandra.index.sai.utils.AbortedOperationException();"))
                 .build();
         Injections.inject(abortedOperationException);
-
         assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v2 = '1'"))
-                .matches(e -> e instanceof ReadFailureException
-                    && ((ReadFailureException) e).getFailuresMap().containsValue(RequestFailureReason.TIMEOUT.code)
+                .matches(e -> e instanceof ReadTimeoutException
         );
 
         waitForEquals(queryCountName, queryTimeoutsName);
