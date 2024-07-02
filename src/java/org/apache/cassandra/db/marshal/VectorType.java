@@ -320,6 +320,12 @@ public final class VectorType<T> extends AbstractType<List<T>>
         return sb.toString();
     }
 
+    @Override
+    public int getDimension()
+    {
+        return dimension;
+    }
+
     private void check(List<?> values)
     {
         if (values.size() != dimension)

@@ -322,6 +322,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return false;
     }
 
+    public int getDimension()
+    {
+        return -1;
+    }
+
     public static AbstractType<?> parseDefaultParameters(AbstractType<?> baseType, TypeParser parser) throws SyntaxException
     {
         Map<String, String> parameters = parser.getKeyValueParameters();
