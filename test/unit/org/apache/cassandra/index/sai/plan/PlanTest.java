@@ -940,7 +940,8 @@ public class PlanTest
     {
         Plan.KeysIteration indexScan1 = Mockito.mock(Plan.KeysIteration.class);
         Mockito.when(indexScan1.withAccess(Mockito.any())).thenReturn(indexScan1);
-        Mockito.when(indexScan1.estimateCost()).thenReturn(new Plan.KeysIterationCost(20, 0.01, 0.0, 0.5));
+        Mockito.when(indexScan1.estimateCost()).thenReturn(new Plan.KeysIterationCost(20,0.0, 0.5));
+        Mockito.when(indexScan1.estimateSelectivity()).thenReturn(0.001);
         Mockito.when(indexScan1.description()).thenReturn("");
 
         Plan.KeysIteration indexScan2 = factory.numericIndexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
@@ -951,8 +952,8 @@ public class PlanTest
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
         origPlan.cost();
 
-        Mockito.verify(indexScan1, Mockito.atMost(2)).withAccess(Mockito.any());
-        Mockito.verify(indexScan1, Mockito.atMost(1)).estimateCost();
+        Mockito.verify(indexScan1, Mockito.times(1)).withAccess(Mockito.any());
+        Mockito.verify(indexScan1, Mockito.times(1)).estimateCost();
     }
 
     private List<Integer> ids(List<? extends Plan> subplans)
