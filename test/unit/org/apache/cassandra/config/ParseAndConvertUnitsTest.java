@@ -41,12 +41,12 @@ public class ParseAndConvertUnitsTest
         //Confirm duration parameters were successfully parsed with the default values in cassandra.yaml
         assertEquals(new DurationSpec.IntMillisecondsBound(10800000), config.max_hint_window);
         assertEquals(new DurationSpec.LongMillisecondsBound(0), config.native_transport_idle_timeout);
-        assertEquals(new DurationSpec.LongMillisecondsBound(10000), config.request_timeout);
-        assertEquals(new DurationSpec.LongMillisecondsBound(5000), config.read_request_timeout);
-        assertEquals(new DurationSpec.LongMillisecondsBound(10000), config.range_request_timeout);
-        assertEquals(new DurationSpec.LongMillisecondsBound(2000), config.write_request_timeout);
-        assertEquals(new DurationSpec.LongMillisecondsBound(5000), config.counter_write_request_timeout);
-        assertEquals(new DurationSpec.LongMillisecondsBound(1800), config.cas_contention_timeout);
+        assertEquals(new DurationSpec.LongMillisecondsBound(20000), config.request_timeout);
+        assertEquals(new DurationSpec.LongMillisecondsBound(20000), config.read_request_timeout);
+        assertEquals(new DurationSpec.LongMillisecondsBound(20000), config.range_request_timeout);
+        assertEquals(new DurationSpec.LongMillisecondsBound(20000), config.write_request_timeout);
+        assertEquals(new DurationSpec.LongMillisecondsBound(20000), config.counter_write_request_timeout);
+        assertEquals(new DurationSpec.LongMillisecondsBound(20000), config.cas_contention_timeout);
         assertEquals(new DurationSpec.LongMillisecondsBound(60000), config.truncate_request_timeout);
         assertEquals(new DurationSpec.IntSecondsBound(300), config.streaming_keep_alive_period);
         assertEquals(new DurationSpec.LongMillisecondsBound(500), config.slow_query_log_timeout);
