@@ -65,6 +65,26 @@ public final class Throwables
         return cause.test(t) || (t.getCause() != null && cause.test(t.getCause()));
     }
 
+    /**
+     * Returns an Optional containing the provided throwable if it is of the provided class or the first throwable in the
+     * cause chain that is of the provided class.
+     *
+     * @param t the {@link Throwable} to check.
+     * @param causeClass the class to check if the Throwable is an instance of, or is caused by.
+     * @return Optional containing the provided throwable if it is of the provided class or the first throwable in the
+     * cause chain that is of the provided class, or an empty Optional if no such throwable is found.
+     */
+    public static <T extends Throwable> Optional<T> getCauseOfType(Throwable t, Class<T> causeClass)
+    {
+        while (t != null)
+        {
+            if (causeClass.isInstance(t))
+                return Optional.of(causeClass.cast(t));
+            t = t.getCause();
+        }
+        return Optional.empty();
+    }
+
     public static boolean anyCauseMatches(Throwable t, Predicate<Throwable> cause)
     {
         do
