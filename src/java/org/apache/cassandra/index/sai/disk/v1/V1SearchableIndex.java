@@ -208,6 +208,13 @@ public class V1SearchableIndex implements SearchableIndex
     {
         if (!V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES)
             return limit;
+
+        // Note: it is tempting to think that we should max out results for the first segment
+        // since that's where we're establishing our rerank floor.  This *does* reduce the number
+        // of calls to resume, but it's 10-15% slower overall, so don't do it.
+        // if (context.getAnnRerankFloor() == 0 && V3OnDiskFormat.ENABLE_RERANK_FLOOR)
+        //    return limit;
+
         // We expect the number of top results found in each segment to be proportional to its number of rows.
         // (We don't pad this number more because resuming a search if we guess too low is very very inexpensive.)
         long segmentRows = 1 + segment.metadata.maxSSTableRowId - segment.metadata.minSSTableRowId;
