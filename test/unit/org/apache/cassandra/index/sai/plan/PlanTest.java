@@ -32,6 +32,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.utils.LongIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -63,7 +64,7 @@ public class PlanTest
     private final Plan.TableMetrics table1M = new Plan.TableMetrics(1_000_000, 7, 128, 3);
     private final Plan.TableMetrics table10M = new Plan.TableMetrics(10_000_000, 7, 128, 8);
     
-    private final Plan.Factory factory = new Plan.Factory(table1M, Mockito.mock(Plan.CostEstimator.class));
+    private final Plan.Factory factory = new Plan.Factory(table1M, new CostEstimator(table1M));
 
 
     static {
@@ -754,7 +755,7 @@ public class PlanTest
 
     private void testIntersectionsUnderLimit(Plan.TableMetrics metrics, List<Double> selectivities, List<Integer> expectedIndexScanCount)
     {
-        Plan.Factory factory = new Plan.Factory(metrics, Mockito.mock(Plan.CostEstimator.class));
+        Plan.Factory factory = new Plan.Factory(metrics, new CostEstimator(metrics));
         List<Plan.KeysIteration> indexScans = new ArrayList<>(selectivities.size());
         RowFilter.Builder rowFilterBuilder = RowFilter.builder();
         RowFilter.Expression[] predicates = new RowFilter.Expression[] { pred1, pred2, pred3, pred4 };
@@ -881,7 +882,7 @@ public class PlanTest
                                                List<Double> selectivities,
                                                List<Integer> expectedIndexScanCount)
     {
-        Plan.Factory factory = new Plan.Factory(metrics, Mockito.mock(Plan.CostEstimator.class));
+        Plan.Factory factory = new Plan.Factory(metrics, new CostEstimator(metrics));
         List<Plan.KeysIteration> indexScans = new ArrayList<>(selectivities.size());
         RowFilter.Builder rowFilterBuilder = RowFilter.builder();
         for (int i = 0; i < selectivities.size(); i++)
@@ -959,6 +960,26 @@ public class PlanTest
     private List<Integer> ids(List<? extends Plan> subplans)
     {
         return subplans.stream().map(p -> p.id).collect(Collectors.toList());
+    }
+
+    static class CostEstimator implements Plan.CostEstimator
+    {
+        final Plan.TableMetrics metrics;
+
+        CostEstimator(Plan.TableMetrics metrics)
+        {
+            this.metrics = metrics;
+        }
+
+
+        @Override
+        public int estimateAnnNodesVisited(RowFilter.Expression ordering, int limit, long candidates)
+        {
+            return metrics.sstables * VectorMemtableIndex.expectedNodesVisited(
+            limit / metrics.sstables,
+            (int) candidates / metrics.sstables,
+            500000);  // taken from a sample database with 10M 16-dimensional vectors
+        }
     }
 
 }
