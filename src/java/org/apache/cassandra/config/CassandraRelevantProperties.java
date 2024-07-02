@@ -665,7 +665,7 @@ public enum CassandraRelevantProperties
     // Determines if table metrics should be also exported to shared global metric
     TABLE_METRICS_EXPORT_GLOBALS("cassandra.table_metrics_export_globals", "true"),
 
-    TEST_ALLOW_LOCALSTRATEGY("test.allow.localstrategy"),
+    TEST_ALLOW_LOCAL_STRATEGY("test.allow.local_strategy"),
     TEST_BBFAILHELPER_ENABLED("test.bbfailhelper.enabled"),
     TEST_BLOB_SHARED_SEED("cassandra.test.blob.shared.seed"),
     TEST_BYTEMAN_TRANSFORMATIONS_DEBUG("cassandra.test.byteman.transformations.debug"),

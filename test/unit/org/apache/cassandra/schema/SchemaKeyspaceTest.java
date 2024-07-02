@@ -332,7 +332,7 @@ public class SchemaKeyspaceTest
     @Test
     public void testIsKeyspaceWithLocalStrategy()
     {
-        try (WithProperties properties = new WithProperties().set(CassandraRelevantProperties.TEST_ALLOW_LOCALSTRATEGY, true))
+        try (WithProperties properties = new WithProperties().set(CassandraRelevantProperties.TEST_ALLOW_LOCAL_STRATEGY, true))
         {
             assertTrue(Schema.isKeyspaceWithLocalStrategy("system"));
             assertTrue(Schema.isKeyspaceWithLocalStrategy(Schema.instance.getKeyspaceMetadata("system")));
