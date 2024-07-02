@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
@@ -46,6 +47,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Throwables;
 
+import static java.lang.Math.max;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COLUMN_NAME;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COMPONENT_METADATA;
@@ -186,26 +188,41 @@ public class V1SearchableIndex implements SearchableIndex
     public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
                                                              AbstractBounds<PartitionPosition> keyRange,
                                                              QueryContext context,
-                                                             int limit) throws IOException
+                                                             int limit,
+                                                             long totalRows) throws IOException
     {
         var iterators = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(segments.size());
         for (Segment segment : segments)
         {
             if (segment.intersects(keyRange))
             {
-                iterators.add(segment.orderBy(expression, keyRange, context, limit));
+                var segmentLimit = getSegmentLimit(limit, totalRows, segment);
+                iterators.add(segment.orderBy(expression, keyRange, context, segmentLimit));
             }
         }
 
         return iterators;
     }
 
+    private static int getSegmentLimit(int limit, long totalRows, Segment segment)
+    {
+        // We expect the number of top results found in each segment to be proportional to its number of rows
+        // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
+        long segmentRows = 1 + segment.metadata.maxSSTableRowId - segment.metadata.minSSTableRowId;
+        return V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
+                           ? max(1, (int) (limit * ((double) segmentRows / totalRows)))
+                           : limit;
+    }
+
     @Override
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit, long totalRows) throws IOException
     {
         List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>(segments.size());
         for (Segment segment : segments)
-            results.add(segment.orderResultsBy(context, keys, exp, limit));
+        {
+            int segmentLimit = getSegmentLimit(limit, totalRows, segment);
+            results.add(segment.orderResultsBy(context, keys, exp, segmentLimit));
+        }
 
         return results;
     }
