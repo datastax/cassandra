@@ -4,7 +4,7 @@ select_statement::= SELECT [ JSON | DISTINCT ] ( select_clause | '*' )
 	[ GROUP BY `group_by_clause` ]  
 	[ ORDER BY `ordering_clause` ]  
 	[ PER PARTITION LIMIT (`integer` | `bind_marker`) ]  
-	[ LIMIT (`integer` | `bind_marker`) ]  
+	[ LIMIT (`integer` | `bind_marker`) [ OFFSET (`integer` | `bind_marker`) ] ]
 	[ ALLOW FILTERING ]
 select_clause::= `selector` [ AS `identifier` ] ( ',' `selector` [ AS `identifier` ] ) 
 selector::== `column_name` 

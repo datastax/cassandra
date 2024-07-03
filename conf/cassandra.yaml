@@ -2238,6 +2238,12 @@ drop_compact_storage_enabled: false
 # sai_vector_term_size_warn_threshold: 16KiB
 # sai_vector_term_size_fail_threshold: 32KiB
 
+# Guardrail to warn or fail when using LIMIT/OFFSET paging skipping more rows than threshold.
+# Default offset_rows_warn_threshold is 10000, may differ if emulate_dbaas_defaults is enabled
+# Default offset_rows_failure_threshold is 20000, may differ if emulate_dbaas_defaults is enabled
+# offset_rows_warn_threshold: 10000
+# offset_rows_failure_threshold: 20000
+
 # The default secondary index implementation when CREATE INDEX does not specify one via USING.
 # ex. "legacy_local_table" - (default) legacy secondary index, implemented as a hidden table
 # ex. "sai" - "storage-attched" index, implemented via optimized SSTable/Memtable-attached indexes

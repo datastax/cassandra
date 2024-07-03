@@ -957,7 +957,7 @@ public interface GuardrailsMBean
     void setNonPartitionRestrictedQueryEnabled(boolean enabled);
 
     /**
-     * @return true if a client warning is emitted for a filtering query with an intersection on mutable columns at a 
+     * @return true if a client warning is emitted for a filtering query with an intersection on mutable columns at a
      *         consistency level requiring coordinator reconciliation
      */
     boolean getIntersectFilteringQueryWarned();
@@ -971,4 +971,22 @@ public interface GuardrailsMBean
     boolean getIntersectFilteringQueryEnabled();
     
     void setIntersectFilteringQueryEnabled(boolean value);
+
+    /**
+     * @return the warning threshold for the offset rows used in SELECT queries
+     * -1 means disabled.
+     */
+    int getOffsetRowsWarnThreshold();
+
+    /**
+     * @return the failure threshold for the offset rows used in SELECT queries
+     * -1 means disabled.
+     */
+    int getOffsetRowsFailThreshold();
+
+    /**
+     * @param warn the warning threshold for the offset rows used in SELECT queries. -1 means disabled.
+     * @param fail the failure threshold for the offset rows used in SELECT queries. -1 means disabled.
+     */
+    void setOffsetRowsThreshold(int warn, int fail);
 }

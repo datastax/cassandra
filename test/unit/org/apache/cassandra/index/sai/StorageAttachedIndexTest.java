@@ -23,7 +23,6 @@ package org.apache.cassandra.index.sai;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -39,9 +38,9 @@ import org.apache.cassandra.cql3.Lists;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
+import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -136,7 +135,6 @@ public class StorageAttachedIndexTest
 
     @Test
     public void testOrderResults() {
-        ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(new ArrayList<>(cfs.metadata.get().columns()));
         QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ONE,
                                                         byteBufferList,
                                                         false,
@@ -147,12 +145,12 @@ public class StorageAttachedIndexTest
                                                         KEYSPACE);
         List<List<ByteBuffer>> rows = new ArrayList<>();
         rows.add(byteBufferList);
-        ResultSet resultSet = new ResultSet(resultMetadata, rows);
 
         SelectStatement selectStatementInstance = (SelectStatement) QueryProcessor.prepareInternal("SELECT key, value FROM " + KEYSPACE + '.' + TABLE).statement;
-        selectStatementInstance.orderResults(resultSet, queryOptions);
 
-        List<List<ByteBuffer>> sortedRows = resultSet.rows;
+        SortedRowsBuilder builder = selectStatementInstance.sortedRowsBuilder(Integer.MAX_VALUE, 0, queryOptions);
+        rows.forEach(builder::add);
+        List<List<ByteBuffer>> sortedRows = builder.build();
 
         Comparator<List<ByteBuffer>> descendingComparator = (o1, o2) -> {
             ByteBuffer value1 = o1.get(0);
@@ -160,7 +158,7 @@ public class StorageAttachedIndexTest
             return value2.compareTo(value1);
         };
 
-        Collections.sort(rows, descendingComparator);
+        rows.sort(descendingComparator);
 
         for (int i = 0; i < sortedRows.size(); i++) {
             List<ByteBuffer> expectedRow = rows.get(i);

@@ -1079,3 +1079,11 @@ class TestCqlshCompletion(CqlshCompletionCase):
 
     def test_complete_in_tracing(self):
         self.trycompletions('TRACING ', choices=[';', '<enter>', 'OFF', 'ON'])
+
+    def test_complete_in_select_limit_clause(self):
+        self.trycompletions('SELECT * FROM system.peers LI', immediate='MIT ')
+        self.trycompletions('SELECT * FROM system.peers LIMIT', choices=['<wholenumber>'])
+        self.trycompletions('SELECT * FROM system.peers LIMIT 1 ', choices=[';', 'ALLOW', 'OFFSET'])
+        self.trycompletions('SELECT * FROM system.peers LIMIT 1 OF', immediate='FSET ')
+        self.trycompletions('SELECT * FROM system.peers LIMIT 1 OFFSET', choices=['<wholenumber>'])
+        self.trycompletions('SELECT * FROM system.peers LIMIT 1 OFFSET 1 ', choices=[';', 'ALLOW'])
