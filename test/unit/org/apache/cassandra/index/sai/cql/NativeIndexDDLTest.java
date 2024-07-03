@@ -320,6 +320,7 @@ public class NativeIndexDDLTest extends SAITester
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
         assertEquals(1, execute("SELECT id FROM %s WHERE val : 'camel'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'camel'").size());
     }
 
     @Test
