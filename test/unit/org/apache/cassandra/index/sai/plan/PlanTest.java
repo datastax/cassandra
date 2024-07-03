@@ -442,13 +442,13 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering)
+            public Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering)
+            public Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
@@ -594,6 +594,22 @@ public class PlanTest
         // The optimized plan should finish before the original plan even gets the first row out ;)
         assertTrue(optimizedPlan.cost().fullCost() < origPlan.cost().initCost());
     }
+
+    @Test
+    public void notReplaceAnnSortWithAnnScan()
+    {
+        // Test for CNDB-9898
+        Plan.KeysIteration indexScan = factory.numericIndexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));
+        Plan.KeysIteration sort = factory.annSort(indexScan, ordering);
+        Plan.RowsIteration fetch = factory.fetch(sort);
+        Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter1, fetch);
+        Plan.RowsIteration origPlan = factory.limit(postFilter, 1);
+
+        Plan optimizedPlan = origPlan.optimize();
+        assertFalse(optimizedPlan.contains(p -> p instanceof Plan.AnnScan));
+        assertTrue(optimizedPlan.contains(p -> p instanceof Plan.AnnSort));
+    }
+
 
     @Test
     public void replaceIntersectionAndAnnSortWithAnnScan()

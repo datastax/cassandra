@@ -40,6 +40,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -1101,7 +1102,9 @@ abstract public class Plan
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
-            return executor.getTopKRows((RangeIterator) source.execute(executor), ordering);
+            RangeIterator sourceIterator = (RangeIterator) source.execute(executor);
+            int softLimit = Math.round((float) access.totalCount);
+            return executor.getTopKRows(sourceIterator, ordering, softLimit);
         }
 
         @Override
@@ -1130,7 +1133,7 @@ abstract public class Plan
         @Override
         protected KeysIterationCost estimateCost()
         {
-            int keysCount = Math.round((float) access.totalCount(factory.tableMetrics.rows));
+            int keysCount = keysCount();
             int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering,
                                                                                keysCount,
                                                                                factory.tableMetrics.rows);
@@ -1143,7 +1146,7 @@ abstract public class Plan
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
-            return executor.getTopKRows(ordering);
+            return executor.getTopKRows(ordering, keysCount());
         }
 
         @Override
@@ -1159,6 +1162,11 @@ abstract public class Plan
         protected double estimateSelectivity()
         {
             return 1.0;
+        }
+
+        private int keysCount()
+        {
+            return Math.round((float) access.totalCount(factory.tableMetrics.rows));
         }
     }
 
@@ -1610,8 +1618,8 @@ abstract public class Plan
     public interface Executor
     {
         Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
-        Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering);
-        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering);
+        Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering, int softLimit);
+        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit);
     }
 
     /**
