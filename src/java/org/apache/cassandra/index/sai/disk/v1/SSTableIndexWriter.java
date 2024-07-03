@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -31,21 +32,24 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.pq.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -319,7 +323,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
     }
 
-    private SegmentBuilder newSegmentBuilder(long rowIdOffset)
+    private SegmentBuilder newSegmentBuilder(long rowIdOffset) throws IOException
     {
         SegmentBuilder builder;
 
@@ -327,12 +331,44 @@ public class SSTableIndexWriter implements PerIndexWriter
         {
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
-            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION) {
-                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
-            } else {
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter, pqi.pq, pqi.unitVectors.get());
+            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
+            if (pqi == null && segments.size() > 0)
+            {
+                // No PQ instance available in completed indexes, so check if we just wrote one
+                var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
+                assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
+                try (var fh = pqComponent.createFileHandle();
+                     var reader = fh.createReader())
+                {
+                    var sm = segments.get(segments.size() - 1);
+                    long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;
+                    // close parallel to code in CassandraDiskANN constructor, but different enough
+                    // (we only want the PQ codebook) that it's difficult to extract into a common method
+                    reader.seek(offset);
+                    boolean unitVectors;
+                    if (reader.readInt() == CassandraDiskAnn.PQ_MAGIC)
+                    {
+                        reader.readInt(); // skip over version
+                        unitVectors = reader.readBoolean();
+                    }
+                    else
+                    {
+                        unitVectors = true;
+                        reader.seek(offset);
+                    }
+                    var compressionType = CompressionType.values()[reader.readByte()];
+                    if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
+                    {
+                        var pq = ProductQuantization.load(reader);
+                        pqi = new CassandraOnHeapGraph.PqInfo(pq, Optional.of(unitVectors));
+                    }
+                }
             }
+
+            if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+            else
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter, pqi.pq, pqi.unitVectors.get());
         }
         else if (indexContext.isLiteral())
         {

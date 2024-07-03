@@ -34,7 +34,12 @@ import java.util.stream.IntStream;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class VectorSiftSmallTest extends VectorTester
@@ -103,6 +108,43 @@ public class VectorSiftSmallTest extends VectorTester
             var recall = testRecall(topK, queryVectors, groundTruth);
             assertTrue("Post-compaction recall is " + recall, recall > 0.975);
         }
+    }
+
+    // exercise the path where we use the PQ from the first segment (constructed on-heap)
+    // to construct the others off-heap
+    @Test
+    public void testMultiSegmentBuild() throws Throwable
+    {
+        var baseVectors = readFvecs(String.format("test/data/%s/%s_base.fvecs", DATASET, DATASET));
+        var queryVectors = readFvecs(String.format("test/data/%s/%s_query.fvecs", DATASET, DATASET));
+        var groundTruth = readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", DATASET, DATASET));
+
+        // Create table and index
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
+
+        // we're going to compact manually, so disable background compactions to avoid interference
+        disableCompaction();
+
+        insertVectors(baseVectors, 0);
+        // single big sstable before creating index
+        flush();
+        compact();
+
+        SegmentBuilder.updateLastValidSegmentRowId(2000); // 2000 rows per segment, enough for PQ to be created
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        waitForTableIndexesQueryable();
+
+        // verify that we got the expected number of segments and that PQ is present in all of them
+        var sim = getCurrentColumnFamilyStore().getIndexManager();
+        var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        var searchableIndex = index.getIndexContext().getView().getIndexes().iterator().next();
+        var segments = searchableIndex.getSegments();
+        assertEquals(5, segments.size());
+        for (int i = 0; i < 5; i++)
+            assertNotNull(((V2VectorIndexSearcher) segments.get(0).getIndexSearcher()).getPQ());
+
+        var recall = testRecall(100, queryVectors, groundTruth);
+        assertTrue("Post-compaction recall is " + recall, recall > 0.975);
     }
 
     public static ArrayList<float[]> readFvecs(String filePath) throws IOException
