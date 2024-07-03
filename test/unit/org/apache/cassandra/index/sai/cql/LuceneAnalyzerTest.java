@@ -264,16 +264,15 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
     }
 
-    // Analyzers on clustering columns are not supported yet
     @Test
-    public void testStandardAnalyzerInClusteringColumnFailsAtCreateIndex() throws Throwable
+    public void testStandardAnalyzerInClusteringColumns() throws Throwable
     {
         createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
 
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                                             "WITH OPTIONS = { 'index_analyzer': 'standard' }"
-        )).isInstanceOf(InvalidRequestException.class);
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        waitForTableIndexesQueryable();
 
         assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) WITH OPTIONS = { 'ascii': true }"
         )).isInstanceOf(InvalidRequestException.class);
