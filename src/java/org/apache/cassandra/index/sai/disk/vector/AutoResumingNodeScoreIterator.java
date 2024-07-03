@@ -88,8 +88,8 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     {
         if (!Tracing.isTracing())
             return;
-        String msg = inMemory ? "ANN resumed search for {}/{} visited {} nodes and reranked {} to return {} results"
-                              : "DiskANN resumed search for {}/{} visited {} nodes and reranked {} to return {} results";
+        String msg = inMemory ? "ANN resume for {}/{} visited {} nodes, reranked {} to return {} results"
+                              : "DiskANN resume for {}/{} visited {} nodes, reranked {} to return {} results";
         Tracing.trace(msg, limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
     }
 
