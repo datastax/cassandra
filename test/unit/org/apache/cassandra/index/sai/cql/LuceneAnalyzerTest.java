@@ -264,7 +264,6 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
     }
 
-    // Analyzers on clustering columns are not supported yet
     @Test
     public void testStandardAnalyzerInClusteringColumns() throws Throwable
     {
