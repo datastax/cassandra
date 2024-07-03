@@ -36,13 +36,15 @@ public class VectorPostingsWriter<T>
 {
     // true if vectors rows are 1:1 (all vectors are associated with exactly 1 row, and each row has a non-null vector)
     private final boolean oneToOne;
+    // the size of the post-cleanup graph (so NOT necessarily the same as the VectorValues size, which contains entries for obsoleted ordinals)
+    private final int graphSize;
+    // given a "new" ordinal (0..size), return the ordinal it corresponds to in the original graph and VectorValues
+    private final IntUnaryOperator newToOldMapper;
 
-    // given a rowId, return the graph ordinal of the vector associated with that row
-    private final IntUnaryOperator reverseOrdinalsMapper;
-
-    public VectorPostingsWriter(boolean oneToOne, IntUnaryOperator mapper) {
+    public VectorPostingsWriter(boolean oneToOne, int graphSize, IntUnaryOperator mapper) {
         this.oneToOne = oneToOne;
-        this.reverseOrdinalsMapper = mapper;
+        this.graphSize = graphSize;
+        this.newToOldMapper = mapper;
     }
 
     public long writePostings(SequentialWriter writer,
@@ -79,12 +81,12 @@ public class VectorPostingsWriter<T>
         long ordToRowOffset = writer.getOnDiskFilePointer();
 
         // total number of vectors
-        writer.writeInt(vectorValues.size());
+        writer.writeInt(graphSize);
 
         // Write the offsets of the postings for each ordinal
-        var offsetsStartAt = ordToRowOffset + 4L + 8L * vectorValues.size();
+        var offsetsStartAt = ordToRowOffset + 4L + 8L * graphSize;
         var nextOffset = offsetsStartAt;
-        for (var i = 0; i < vectorValues.size(); i++) {
+        for (var i = 0; i < graphSize; i++) {
             // (ordinal is implied; don't need to write it)
             writer.writeLong(nextOffset);
             int postingListSize;
@@ -94,7 +96,7 @@ public class VectorPostingsWriter<T>
             }
             else
             {
-                var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
+                var originalOrdinal = newToOldMapper.applyAsInt(i);
                 var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
                 postingListSize = rowIds.size();
             }
@@ -103,7 +105,7 @@ public class VectorPostingsWriter<T>
         assert writer.position() == offsetsStartAt : "writer.position()=" + writer.position() + " offsetsStartAt=" + offsetsStartAt;
 
         // Write postings lists
-        for (var i = 0; i < vectorValues.size(); i++) {
+        for (var i = 0; i < graphSize; i++) {
             if (oneToOne)
             {
                 writer.writeInt(1);
@@ -111,7 +113,7 @@ public class VectorPostingsWriter<T>
             }
             else
             {
-                var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
+                var originalOrdinal = newToOldMapper.applyAsInt(i);
                 var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
                 writer.writeInt(rowIds.size());
                 for (int r = 0; r < rowIds.size(); r++)
@@ -129,7 +131,7 @@ public class VectorPostingsWriter<T>
 
         if (oneToOne)
         {
-            for (var i = 0; i < vectorValues.size(); i++)
+            for (var i = 0; i < graphSize; i++)
             {
                 writer.writeInt(i);
                 writer.writeInt(i);
@@ -139,12 +141,12 @@ public class VectorPostingsWriter<T>
         {
             // Collect all (rowId, vectorOrdinal) pairs
             List<Pair<Integer, Integer>> pairs = new ArrayList<>();
-            for (var i = 0; i < vectorValues.size(); i++) {
+            for (var i = 0; i < graphSize; i++) {
                 // if it's an on-disk Map then this is an expensive assert, only do it when in memory
                 if (postingsMap instanceof ConcurrentSkipListMap)
                     assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
 
-                int ord = reverseOrdinalsMapper.applyAsInt(i);
+                int ord = newToOldMapper.applyAsInt(i);
                 var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
                 for (int r = 0; r < rowIds.size(); r++)
                     pairs.add(Pair.create(rowIds.getInt(r), i));
