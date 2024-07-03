@@ -648,6 +648,18 @@ public final class Guardrails implements GuardrailsMBean
                                                 "atomicity, or asynchronous writes for performance.",
                                                 v, what.contains(", ") ? "s" : "", what));
 
+    /**
+     * Guardrail on the number of rows that a SELECT query with LIMIT/OFFSET can skip.
+     */
+    public static final Threshold offsetRows =
+    new MaxThreshold("offset_rows",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getOffsetRowsWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getOffsetRowsFailThreshold(),
+                     (isWarning, what, v, t) -> isWarning
+                                                ? format("%s requested to skip %s rows, this exceeds the warning threshold of %s.", what, v, t)
+                                                : format("%s requested to skip %s rows, this exceeds the failure threshold of %s.", what, v, t));
+
     private Guardrails()
     {
         MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
@@ -1563,6 +1575,24 @@ public final class Guardrails implements GuardrailsMBean
     public void setIntersectFilteringQueryEnabled(boolean value)
     {
         DEFAULT_CONFIG.setIntersectFilteringQueryEnabled(value);
+    }
+
+    @Override
+    public int getOffsetRowsWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getOffsetRowsWarnThreshold();
+    }
+
+    @Override
+    public int getOffsetRowsFailThreshold()
+    {
+        return DEFAULT_CONFIG.getOffsetRowsFailThreshold();
+    }
+
+    @Override
+    public void setOffsetRowsThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setOffsetRowsThreshold(warn, fail);
     }
 
     private static String toCSV(Set<String> values)
