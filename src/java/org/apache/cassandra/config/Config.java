@@ -977,6 +977,10 @@ public class Config
     public volatile DurationSpec.LongMicrosecondsBound minimum_timestamp_warn_threshold = null;
     public volatile DurationSpec.LongMicrosecondsBound minimum_timestamp_fail_threshold = null;
 
+    // Limit the offset used in SELECT queries
+    public volatile int offset_rows_warn_threshold = -1;
+    public volatile int offset_rows_fail_threshold = -1;
+
     /**
      * The variants of paxos implementation and semantics supported by Cassandra.
      */

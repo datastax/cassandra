@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3.selection;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.cassandra.cql3.ResultSet;
@@ -34,7 +33,8 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 public final class ResultSetBuilder
 {
-    private final ResultSet resultSet;
+    private final ResultMetadata metadata;
+    private final SortedRowsBuilder rows;
 
     /**
      * As multiple thread can access a <code>Selection</code> instance each <code>ResultSetBuilder</code> will use
@@ -57,17 +57,21 @@ public final class ResultSetBuilder
      */
     private Selector.InputRow inputRow;
 
+    private boolean hasResults = false;
+    private int readRowsSize = 0;
+
     private long size = 0;
     private boolean sizeWarningEmitted = false;
 
     public ResultSetBuilder(ResultMetadata metadata, Selectors selectors, boolean unmask)
     {
-        this(metadata, selectors, unmask, null);
+        this(metadata, selectors, unmask, null, SortedRowsBuilder.create());
     }
 
-    public ResultSetBuilder(ResultMetadata metadata, Selectors selectors, boolean unmask, GroupMaker groupMaker)
+    public ResultSetBuilder(ResultMetadata metadata, Selectors selectors, boolean unmask, GroupMaker groupMaker, SortedRowsBuilder rows)
     {
-        this.resultSet = new ResultSet(metadata.copy(), new ArrayList<>());
+        this.metadata = metadata.copy();
+        this.rows = rows;
         this.selectors = selectors;
         this.groupMaker = groupMaker;
         this.unmask = unmask;
@@ -130,15 +134,10 @@ public final class ResultSetBuilder
         if (inputRow != null)
         {
             selectors.addInputRow(inputRow);
+            inputRow.reset(!selectors.hasProcessing());
             if (isNewAggregate)
             {
-                resultSet.addRow(getOutputRow());
-                inputRow.reset(!selectors.hasProcessing());
-                selectors.reset();
-            }
-            else
-            {
-                inputRow.reset(!selectors.hasProcessing());
+                addRow();
             }
         }
         else
@@ -159,15 +158,22 @@ public final class ResultSetBuilder
         if (inputRow  != null)
         {
             selectors.addInputRow(inputRow);
-            resultSet.addRow(getOutputRow());
             inputRow.reset(!selectors.hasProcessing());
-            selectors.reset();
+            addRow();
         }
 
         // For aggregates we need to return a row even it no records have been found
-        if (resultSet.isEmpty() && groupMaker != null && groupMaker.returnAtLeastOneRow())
-            resultSet.addRow(getOutputRow());
-        return resultSet;
+        if (!hasResults && groupMaker != null && groupMaker.returnAtLeastOneRow())
+        {
+            addRow();
+        }
+
+        return new ResultSet(metadata, rows.build());
+    }
+
+    public int readRowsSize()
+    {
+        return readRowsSize;
     }
 
     private List<ByteBuffer> getOutputRow()
@@ -175,5 +181,20 @@ public final class ResultSetBuilder
         List<ByteBuffer> row = selectors.getOutputRow();
         addSize(row);
         return row;
+    }
+
+    private void addRow()
+    {
+        List<ByteBuffer> row = getOutputRow();
+        selectors.reset();
+
+        hasResults = true;
+        for (int i = 0, isize = row.size(); i < isize; i++)
+        {
+            ByteBuffer value = row.get(i);
+            readRowsSize += value != null ? value.remaining() : 0;
+        }
+
+        rows.add(row);
     }
 }
