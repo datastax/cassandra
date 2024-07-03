@@ -638,4 +638,14 @@ public interface GuardrailsConfig
      * @return The threshold to fail when the numner of unlogged batch partitions is more than threshold.
      */
     long getUnloggedBatchAcrossPartitionsFailThreshold();
+
+    /**
+     * @return the warning threshold for the offset rows used in SELECT queries
+     */
+    int getOffsetRowsWarnThreshold();
+
+    /**
+     * @return the failure threshold for the offset rows used in SELECT queries
+     */
+    int getOffsetRowsFailThreshold();
 }
