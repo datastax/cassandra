@@ -257,6 +257,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
     @init {
         Term.Raw limit = null;
         Term.Raw perPartitionLimit = null;
+        Term.Raw offset = null;
         List<Ordering.Raw> orderings = new ArrayList<>();
         List<Selectable.Raw> groups = new ArrayList<>();
         boolean allowFiltering = false;
@@ -270,7 +271,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
       ( K_GROUP K_BY groupByClause[groups] ( ',' groupByClause[groups] )* )?
       ( K_ORDER K_BY orderByClause[orderings] ( ',' orderByClause[orderings] )* )?
       ( K_PER K_PARTITION K_LIMIT rows=intValue { perPartitionLimit = rows; } )?
-      ( K_LIMIT rows=intValue { limit = rows; } )?
+      ( K_LIMIT rows=intValue { limit = rows; } ( K_OFFSET rows=intValue { offset = rows; } )? )?
       ( K_ALLOW K_FILTERING  { allowFiltering = true; } )?
       {
           SelectStatement.Parameters params = new SelectStatement.Parameters(orderings,
@@ -279,7 +280,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
                                                                              allowFiltering,
                                                                              isJson);
           WhereClause where = wclause == null ? WhereClause.empty() : wclause.build();
-          $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit);
+          $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit, offset);
       }
     ;
 
@@ -2073,5 +2074,6 @@ basic_unreserved_keyword returns [String str]
         | K_COLUMN
         | K_RECORD
         | K_ANN_OF
+        | K_OFFSET
         ) { $str = $k.text; }
     ;
