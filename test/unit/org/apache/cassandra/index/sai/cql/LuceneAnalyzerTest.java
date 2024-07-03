@@ -53,6 +53,7 @@ public class LuceneAnalyzerTest extends SAITester
         flush();
 
         assertEquals(0, execute("SELECT * FROM %s WHERE val : 'query'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'query'").size());
     }
 
     @Test
@@ -203,11 +204,10 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'dog')").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'missing')").size());
 
-        // EQ operator is not supported for analyzed columns unless ALLOW FILTERING is used
-        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val = 'dog'")).isInstanceOf(InvalidRequestException.class);
+        // EQ operator support is reintroduced for analyzed columns, it should work as ':' operator
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'The quick brown fox jumps over the lazy DOG.' ALLOW FILTERING").size());
-        // EQ is a raw equality check, so a token like 'dog' should not return any results
-        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'dog' ALLOW FILTERING").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog' ALLOW FILTERING").size());
     }
 
     @Test
@@ -571,6 +571,18 @@ public class LuceneAnalyzerTest extends SAITester
 
         assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE some_num : 1"))
         .isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    public void testLegacyEqQueryOnNormalizedTextColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'ascii': 'true', 'case_sensitive': 'false', 'normalize': 'true'}");
+        waitForTableIndexesQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES (1, 'Aaą')");
+
+        beforeAndAfterFlush(() -> assertEquals(1, execute("SELECT * FROM %s WHERE val = 'aaa'").size()));
     }
 
     @Test
