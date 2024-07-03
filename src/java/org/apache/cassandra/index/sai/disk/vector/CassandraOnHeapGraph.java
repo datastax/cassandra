@@ -314,7 +314,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
         var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
         var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
-        Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+        Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results",
+                      limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
         // Threshold based searches do not support resuming the search.
         return threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
