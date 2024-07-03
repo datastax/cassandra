@@ -1146,7 +1146,11 @@ abstract public class Plan
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
-            return executor.getTopKRows(ordering, keysCount());
+            // Divide soft limit by 10, so we can terminate search earlier if it
+            // occurs that we collected enough rows. keysCount() gives us the
+            // average expected number of rows that will be needed but
+            // many queries will need fewer than that.
+            return executor.getTopKRows(ordering, keysCount() / 10);
         }
 
         @Override
