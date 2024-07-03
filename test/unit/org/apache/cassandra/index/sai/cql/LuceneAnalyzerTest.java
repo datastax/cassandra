@@ -265,16 +265,11 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     // Analyzers on clustering columns are not supported yet
-    // FIXME re-enable exception detection for first index once incompatible analyzers have been removed, check restored
     @Test
-    public void testStandardAnalyzerInClusteringColumnFailsAtCreateIndex() throws Throwable
+    public void testStandardAnalyzerInClusteringColumns() throws Throwable
     {
         createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
 
-        /*assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                                             "WITH OPTIONS = { 'index_analyzer': 'standard' }"
-        )).isInstanceOf(InvalidRequestException.class);*/
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
