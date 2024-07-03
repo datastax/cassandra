@@ -353,6 +353,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
             deletedOrdinals = Set.of();
         }
+        builder.cleanup();
 
         // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
         // null if remapping is not possible because vectors:rows are not 1:1
@@ -407,9 +408,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                                            vectorValues, postingsMap, deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
 
-            // complete (internal clean up) and write the graph
-            builder.cleanup();
-
+            // write the graph
             var start = System.nanoTime();
             var suppliers = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
             indexWriter.write(suppliers);
