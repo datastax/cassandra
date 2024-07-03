@@ -68,6 +68,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.ByteSequence;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -345,9 +346,17 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                                                                   postingsMap.keySet().size(), vectorValues.size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
+        // remove deleted ordinals from the graph.  this is not done at remove() time, because the same vector
+        // could be added back again, "undeleting" the ordinal, and the concurrency gets tricky
+        if (V3OnDiskFormat.ENABLE_JVECTOR_DELETES)
+        {
+            deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
+            deletedOrdinals = Set.of();
+        }
+
         // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
         // null if remapping is not possible because vectors:rows are not 1:1
-        final BiMap<Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
+        final BiMap<Integer, Integer> ordinalMap = buildOrdinalMap();
         boolean postingsOneToOne = ordinalMap != null;
         IntUnaryOperator reverseOrdinalMapper; // rowid -> ordinal
         Map<Integer, Integer> finalOrdinalMap;
