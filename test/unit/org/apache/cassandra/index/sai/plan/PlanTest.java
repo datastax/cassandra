@@ -490,14 +490,14 @@ public class PlanTest
 
         String prettyStr = limit.toStringRecursive();
 
-        assertEquals("Limit 3 (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
-                     " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 1.000000000) (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
-                     "     └─ Fetch (rows: 3.0, cost/row: 213.4, cost: 58616.9..59257.2)\n" +
-                     "         └─ AnnSort (keys: 3.0, cost/key: 10.0, cost: 58616.9..58646.9)\n" +
-                     "             └─ Union (keys: 1999.0, cost/key: 24.3, cost: 90.0..48591.9)\n" +
-                     "                 ├─ Intersection (keys: 1000.0, cost/key: 47.5, cost: 60.0..47561.9)\n" +
+        assertEquals("Limit 3 (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
+                     " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 1.000000000) (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
+                     "     └─ Fetch (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
+                     "         └─ AnnSort (keys: 3.0, cost/key: 10.0, cost: 40118.3..40148.3)\n" +
+                     "             └─ Union (keys: 1999.0, cost/key: 17.0, cost: 90.0..34091.3)\n" +
+                     "                 ├─ Intersection (keys: 1000.0, cost/key: 33.0, cost: 60.0..33061.3)\n" +
                      "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 1.0, cost: 30.0..2030.0)\n" +
-                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 22.8, cost: 30.0..45531.9)\n" +
+                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 15.5, cost: 30.0..31031.3)\n" +
                      "                 └─ LiteralIndexScan of pred3_idx using RANGE(pred3) (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 1.0, cost: 30.0..1030.0)\n", prettyStr);
     }
 

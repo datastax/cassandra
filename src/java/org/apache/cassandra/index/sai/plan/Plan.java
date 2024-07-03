@@ -1645,7 +1645,7 @@ abstract public class Plan
     public static class CostCoefficients
     {
         /** The constant cost of performing skipTo on posting lists returned from range scans */
-        public final static double RANGE_SCAN_SKIP_COST = 0.3;
+        public final static double RANGE_SCAN_SKIP_COST = 0.2;
 
         /** The coefficient controlling the increase of the skip cost with the distance of the skip. */
         public final static double RANGE_SCAN_SKIP_COST_DISTANCE_FACTOR = 0.1;
@@ -1656,7 +1656,7 @@ abstract public class Plan
         public final static double RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_EXPONENT = 0.33;
 
         /** The constant cost of performing skipTo on literal indexes */
-        public final static double POINT_LOOKUP_SKIP_COST = 0.8;
+        public final static double POINT_LOOKUP_SKIP_COST = 0.5;
 
         /** The coefficient controlling the increase of the skip cost with the total size of the posting list for point lookup queries. */
         public final static double POINT_LOOKUP_SKIP_COST_DISTANCE_FACTOR = 0.1;
@@ -1672,7 +1672,7 @@ abstract public class Plan
         public final static double ANN_OPEN_COST = 10.0;
 
         /** Additional overhead needed by processing each input key fed to the ANN index searcher */
-        public final static double ANN_INPUT_KEY_COST = 5.0;
+        public final static double ANN_INPUT_KEY_COST = 3.0;
 
         /** Cost to get a scored key from DiskANN */
         public final static double ANN_SCORED_KEY_COST = 10.0;
@@ -1681,7 +1681,7 @@ abstract public class Plan
         public final static double ANN_NODE_COST = 20.0;
 
         /** Cost to fetch one row from storage */
-        public final static double ROW_COST = 200.0;
+        public final static double ROW_COST = 80.0;
 
         /** Additional cost added to row fetch cost per each row cell */
         public final static double ROW_CELL_COST = 0.4;
