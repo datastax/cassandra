@@ -214,9 +214,10 @@ or the reverse
 [[limit-clause]]
 === Limiting results
 
-The `LIMIT` option to a `SELECT` statement limits the number of rows
-returned by a query. The `PER PARTITION LIMIT` option limits the
-number of rows returned for a given partition by the query. Both types of limits can used in the same statement.
+The `LIMIT` option in a `SELECT` statement limits the number of rows returned by a query.
+The `LIMIT` option can include an `OFFSET` option to skip the first rows of the query result.
+The `PER PARTITION LIMIT` option limits the number of rows returned for a given partition by the query.
+Note that both types of limits can used in the same statement.
 
 [[allow-filtering]]
 === Allowing filtering
