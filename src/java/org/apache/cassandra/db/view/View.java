@@ -179,6 +179,7 @@ public class View
                                                  selectClause(),
                                                  definition.whereClause,
                                                  null,
+                                                 null,
                                                  null);
 
             rawSelect.setBindVariables(Collections.emptyList());
