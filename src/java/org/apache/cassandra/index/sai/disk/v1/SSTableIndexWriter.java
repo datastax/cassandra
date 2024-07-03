@@ -122,7 +122,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         long elapsed;
 
         boolean emptySegment = currentBuilder == null || currentBuilder.isEmpty();
-        logger.debug(indexContext.logMessage("Completing index flush with {}buffered data..."), emptySegment ? "no " : "");
+        logger.debug("Completing index flush with {}buffered data...", emptySegment ? "no " : "");
 
         try
         {
@@ -131,7 +131,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             {
                 flushSegment();
                 elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
-                logger.debug(indexContext.logMessage("Completed flush of final segment for SSTable {}. Duration: {} ms. Total elapsed: {} ms"),
+                logger.debug("Completed flush of final segment for SSTable {}. Duration: {} ms. Total elapsed: {} ms",
                              perIndexComponents.descriptor(),
                              elapsed - start,
                              elapsed);
@@ -142,7 +142,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             {
                 long bytesAllocated = currentBuilder.totalBytesAllocated();
                 long globalBytesUsed = currentBuilder.release(indexContext);
-                logger.debug(indexContext.logMessage("Flushing final segment for SSTable {} released {}. Global segment memory usage now at {}."),
+                logger.debug("Flushing final segment for SSTable {} released {}. Global segment memory usage now at {}",
                              perIndexComponents.descriptor(), FBUtilities.prettyPrintMemory(bytesAllocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
             }
 
@@ -165,7 +165,7 @@ public class SSTableIndexWriter implements PerIndexWriter
     {
         aborted = true;
 
-        logger.warn(indexContext.logMessage("Aborting SSTable index flush for {}..."), perIndexComponents.descriptor(), cause);
+        logger.warn("Aborting SSTable index flush for {}...", perIndexComponents.descriptor(), cause);
 
         // It's possible for the current builder to be unassigned after we flush a final segment.
         if (currentBuilder != null)
@@ -174,7 +174,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             // flush, we will end up here, and we need to free up builder memory tracked by the limiter:
             long allocated = currentBuilder.totalBytesAllocated();
             long globalBytesUsed = currentBuilder.release(indexContext);
-            logger.debug(indexContext.logMessage("Aborting index writer for SSTable {} released {}. Global segment memory usage now at {}."),
+            logger.debug("Aborting index writer for SSTable {} released {}. Global segment memory usage now at {}",
                          perIndexComponents.descriptor(), FBUtilities.prettyPrintMemory(allocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
         }
 
@@ -230,8 +230,8 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         if (reachMemoryLimit)
         {
-            logger.debug(indexContext.logMessage("Global limit of {} and minimum flush size of {} exceeded. " +
-                                                 "Current builder usage is {} for {} rows. Global Usage is {}. Flushing..."),
+            logger.debug("Global limit of {} and minimum flush size of {} exceeded. " +
+                         "Current builder usage is {} for {} rows. Global Usage is {}. Flushing...",
                          FBUtilities.prettyPrintMemory(limiter.limitBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.getMinimumFlushBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.totalBytesAllocated()),
@@ -261,9 +261,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         try
         {
             long bytesAllocated = currentBuilder.totalBytesAllocated();
-
             SegmentMetadata segmentMetadata = currentBuilder.flush();
-
             long flushMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
 
             if (segmentMetadata != null)
@@ -278,7 +276,7 @@ public class SSTableIndexWriter implements PerIndexWriter
                 if (indexContext.getIndexMetrics() != null)
                     indexContext.getIndexMetrics().compactionSegmentBytesPerSecond.update((long)(segmentBytes / flushMillis * 1000.0));
 
-                logger.debug(indexContext.logMessage("Flushed segment with {} cells for a total of {} in {} ms."),
+                logger.debug("Flushed segment with {} cells for a total of {} in {} ms",
                              (long) rowCount, FBUtilities.prettyPrintMemory((long) segmentBytes), flushMillis);
             }
 
@@ -288,13 +286,13 @@ public class SSTableIndexWriter implements PerIndexWriter
             // that abort logic will release the current builder's memory against the limiter.
             long globalBytesUsed = currentBuilder.release(indexContext);
             currentBuilder = null;
-            logger.debug(indexContext.logMessage("Flushing index segment for SSTable {} released {}. Global segment memory usage now at {}."),
+            logger.debug("Flushing index segment for SSTable {} released {}. Global segment memory usage now at {}",
                          perIndexComponents.descriptor(), FBUtilities.prettyPrintMemory(bytesAllocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
 
         }
         catch (Throwable t)
         {
-            logger.error(indexContext.logMessage("Failed to build index for SSTable {}."), perIndexComponents.descriptor(), t);
+            logger.error("Failed to build index for SSTable {}", perIndexComponents.descriptor(), t);
             perIndexComponents.forceDeleteAllComponents();
 
             indexContext.getIndexMetrics().segmentFlushErrors.inc();
@@ -344,7 +342,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
 
         long globalBytesUsed = limiter.increment(builder.totalBytesAllocated());
-        logger.debug(indexContext.logMessage("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {}."),
+        logger.debug("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {}",
                      perIndexComponents.descriptor(),
                      FBUtilities.prettyPrintMemory(globalBytesUsed));
 
