@@ -612,7 +612,7 @@ public class IndexContext
         if (op.isLike() || op == Operator.LIKE) return false;
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operator is ANALYZER_MATCHES.
-        if (isAnalyzed || op == Operator.ANALYZER_MATCHES) return isAnalyzed && op == Operator.ANALYZER_MATCHES;
+        if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;
 
         // ANN is only supported against vectors.
         // BOUNDED_ANN is only supported against vectors with a Euclidean similarity function.
