@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_EDGES_CACHE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_JVECTOR_DELETES;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_LTM_CONSTRUCTION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_RERANK_FLOOR;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_REDUCE_TOPK_ACROSS_SSTABLES;
@@ -50,6 +51,7 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     public static final boolean REDUCE_TOPK_ACROSS_SSTABLES = SAI_REDUCE_TOPK_ACROSS_SSTABLES.getBoolean();
     public static final boolean ENABLE_RERANK_FLOOR = SAI_ENABLE_RERANK_FLOOR.getBoolean();
     public static final boolean ENABLE_EDGES_CACHE = SAI_ENABLE_EDGES_CACHE.getBoolean();
+    public static final boolean ENABLE_JVECTOR_DELETES = SAI_ENABLE_JVECTOR_DELETES.getBoolean();
 
     public static volatile boolean WRITE_JVECTOR3_FORMAT = SAI_WRITE_JVECTOR3_FORMAT.getBoolean();
     public static final boolean ENABLE_LTM_CONSTRUCTION = SAI_ENABLE_LTM_CONSTRUCTION.getBoolean();
