@@ -338,7 +338,7 @@ public class PartitionUpdate extends AbstractBTreePartition
             }
         }
 
-        for (Row row : this)
+        for (Row row : rows())
         {
             size += row.clustering().dataSize();
             for (ColumnData cd : row)
@@ -378,7 +378,7 @@ public class PartitionUpdate extends AbstractBTreePartition
      */
     public void validate()
     {
-        for (Row row : this)
+        for (Row row : rows())
         {
             metadata().comparator.validate(row.clustering());
             for (ColumnData cd : row)
@@ -394,7 +394,7 @@ public class PartitionUpdate extends AbstractBTreePartition
     public long maxTimestamp()
     {
         long maxTimestamp = deletionInfo.maxTimestamp();
-        for (Row row : this)
+        for (Row row : rows())
         {
             maxTimestamp = Math.max(maxTimestamp, row.primaryKeyLivenessInfo().timestamp());
             for (ColumnData cd : row)
@@ -446,7 +446,7 @@ public class PartitionUpdate extends AbstractBTreePartition
         // update is now immutable for all intent and purposes.
         List<CounterMark> marks = new ArrayList<>();
         addMarksForRow(staticRow(), marks);
-        for (Row row : this)
+        for (Row row : rows())
             addMarksForRow(row, marks);
         return marks;
     }

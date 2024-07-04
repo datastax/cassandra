@@ -45,7 +45,7 @@ public class FilteredPartition extends ImmutableBTreePartition
 
     public RowIterator rowIterator()
     {
-        final Iterator<Row> iter = iterator();
+        final Iterator<Row> iter = super.rowIterator();
         return new RowIterator()
         {
             public TableMetadata metadata()

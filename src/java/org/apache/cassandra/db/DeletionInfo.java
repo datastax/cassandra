@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.util.Iterator;
+import java.util.SortedSet;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -51,6 +52,8 @@ public interface DeletionInfo extends IMeasurableMemory
     public Iterator<RangeTombstone> rangeIterator(boolean reversed);
 
     public Iterator<RangeTombstone> rangeIterator(Slice slice, boolean reversed);
+
+    public Iterator<RangeTombstone> rangeIterator(SortedSet<Clustering<?>> names, boolean isRevered);
 
     public RangeTombstone rangeCovering(Clustering<?> name);
 

@@ -794,9 +794,9 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         }
 
         @Override
-        public Iterator<Row> iterator()
+        public Iterator<Row> rowIterator()
         {
-            return ensureOnHeap.applyToPartition(super.iterator());
+            return ensureOnHeap.applyToPartition(super.rowIterator());
         }
     }
 

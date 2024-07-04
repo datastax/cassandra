@@ -361,7 +361,7 @@ public class RowAndDeletionMergeIteratorTest
 
         Assert.assertEquals(3, rtl.size());
 
-        try (UnfilteredRowIterator partition = createMergeIterator(update.iterator(), rtl.iterator(), false))
+        try (UnfilteredRowIterator partition = createMergeIterator(update.rowIterator(), rtl.iterator(), false))
         {
             assertRtMarker(partition.next(), ClusteringPrefix.Kind.INCL_START_BOUND, 0);
             assertRtMarker(partition.next(), ClusteringPrefix.Kind.INCL_END_BOUND, 8);
@@ -397,7 +397,7 @@ public class RowAndDeletionMergeIteratorTest
         for (int i = 0; i < 5; i++)
             addRow(update, i, i);
 
-        return update.build().iterator();
+        return update.build().rowIterator();
     }
 
     private UnfilteredRowIterator createMergeIterator(Iterator<Row> rows, Iterator<RangeTombstone> tombstones, boolean reversed)

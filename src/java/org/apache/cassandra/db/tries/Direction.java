@@ -173,4 +173,9 @@ public enum Direction
     public abstract boolean isForward();
 
     public abstract Direction opposite();
+
+    public static Direction fromBoolean(boolean reversed)
+    {
+        return reversed ? REVERSE : FORWARD;
+    }
 }

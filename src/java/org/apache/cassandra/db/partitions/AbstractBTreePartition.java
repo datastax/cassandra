@@ -35,7 +35,7 @@ import org.apache.cassandra.utils.btree.BTree;
 
 import static org.apache.cassandra.utils.btree.BTree.Dir.desc;
 
-public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
+public abstract class AbstractBTreePartition implements Partition
 {
     protected final DecoratedKey partitionKey;
 
@@ -379,7 +379,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return BTree.size(holder().tree);
     }
 
-    public Iterator<Row> iterator()
+    public Iterator<Row> rowIterator()
     {
         return BTree.<Row>iterator(holder().tree);
     }

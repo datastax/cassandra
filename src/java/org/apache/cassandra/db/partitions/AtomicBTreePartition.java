@@ -232,9 +232,9 @@ public final class AtomicBTreePartition extends AbstractBTreePartition
     }
 
     @Override
-    public Iterator<Row> iterator()
+    public Iterator<Row> rowIterator()
     {
-        return allocator.ensureOnHeap().applyToPartition(super.iterator());
+        return allocator.ensureOnHeap().applyToPartition(super.rowIterator());
     }
 
     private boolean shouldLock(OpOrder.Group writeOp)

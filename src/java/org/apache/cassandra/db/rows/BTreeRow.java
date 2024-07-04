@@ -618,6 +618,14 @@ public class BTreeRow extends AbstractRow
         }
     }
 
+    /**
+     * Exposed for TrieBackedPartition.
+     */
+    public Object[] getBTree()
+    {
+        return btree;
+    }
+
     private class CellIterator extends AbstractIterator<Cell<?>>
     {
         private Iterator<ColumnData> columnData = iterator();
