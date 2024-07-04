@@ -110,6 +110,30 @@ public class RequestSensors
         }
     }
 
+    /**
+     * Avoids using additional ConcurrentHashmap as that turns out to be
+     * a performance bottlneck (in particular hashCode operations on Sensor were taking a lots of CPU cycles)
+     */
+    public void syncAllSensorsNew()
+    {
+        updateLock.writeLock().lock();
+        try
+        {
+            sensors.values().forEach(sensor -> {
+                double cur = sensor.getValue();
+                if (cur > 0)
+                {
+                    sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), cur);
+                    sensor.reset();
+                }
+            });
+        }
+        finally
+        {
+            updateLock.writeLock().unlock();
+        }
+    }
+
     @Override
     public boolean equals(Object o)
     {
