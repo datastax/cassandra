@@ -32,7 +32,7 @@ public interface MemoryAllocationStrategy
      * Get a free index. This is either a new index, allocated via the passed index producer functions, or one that
      * has been previously recycled.
      */
-    int allocate() throws InMemoryTrie.SpaceExhaustedException;
+    int allocate() throws TrieSpaceExhaustedException;
 
     /**
      * Marks the given index for recycling.
@@ -71,10 +71,10 @@ public interface MemoryAllocationStrategy
 
     interface Allocator extends ListAllocator
     {
-        int allocate() throws InMemoryTrie.SpaceExhaustedException;
+        int allocate() throws TrieSpaceExhaustedException;
 
         @Override
-        default void allocate(int[] indexList) throws InMemoryTrie.SpaceExhaustedException
+        default void allocate(int[] indexList) throws TrieSpaceExhaustedException
         {
             for (int i = indexList.length - 1; i >= 0; --i)
                 indexList[i] = allocate();
@@ -93,7 +93,7 @@ public interface MemoryAllocationStrategy
             this.allocator = allocator;
         }
 
-        public int allocate() throws InMemoryTrie.SpaceExhaustedException
+        public int allocate() throws TrieSpaceExhaustedException
         {
             return allocator.allocate();
         }
@@ -123,7 +123,7 @@ public interface MemoryAllocationStrategy
 
     interface ListAllocator
     {
-        void allocate(int[] indexList) throws InMemoryTrie.SpaceExhaustedException;
+        void allocate(int[] indexList) throws TrieSpaceExhaustedException;
     }
 
     /**
@@ -203,14 +203,14 @@ public interface MemoryAllocationStrategy
                 allocator.allocate(free.indexes);
                 free.count = free.indexes.length;
             }
-            catch (InMemoryTrie.SpaceExhaustedException e)
+            catch (TrieSpaceExhaustedException e)
             {
                 throw new AssertionError(e);    // unexpected, initial size can't trigger this
             }
         }
 
         @Override
-        public int allocate() throws InMemoryTrie.SpaceExhaustedException
+        public int allocate() throws TrieSpaceExhaustedException
         {
             if (free.count == 0)
             {

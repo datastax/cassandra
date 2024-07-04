@@ -22,6 +22,7 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.db.tries.InMemoryTrie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -53,7 +54,7 @@ public class InMemoryTrieWriteBench
     final static boolean PRINT_SIZES = false;
 
     @Benchmark
-    public void putSequential(Blackhole bh) throws InMemoryTrie.SpaceExhaustedException
+    public void putSequential(Blackhole bh) throws TrieSpaceExhaustedException
     {
         InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         ByteBuffer buf = ByteBuffer.allocate(keyLength);
@@ -74,7 +75,7 @@ public class InMemoryTrieWriteBench
     }
 
     @Benchmark
-    public void putRandom(Blackhole bh) throws InMemoryTrie.SpaceExhaustedException
+    public void putRandom(Blackhole bh) throws TrieSpaceExhaustedException
     {
         InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         Random rand = new Random(1);
@@ -95,7 +96,7 @@ public class InMemoryTrieWriteBench
     }
 
     @Benchmark
-    public void applySequential(Blackhole bh) throws InMemoryTrie.SpaceExhaustedException
+    public void applySequential(Blackhole bh) throws TrieSpaceExhaustedException
     {
         InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         ByteBuffer buf = ByteBuffer.allocate(keyLength);
@@ -116,7 +117,7 @@ public class InMemoryTrieWriteBench
     }
 
     @Benchmark
-    public void applyRandom(Blackhole bh) throws InMemoryTrie.SpaceExhaustedException
+    public void applyRandom(Blackhole bh) throws TrieSpaceExhaustedException
     {
         InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         Random rand = new Random(1);

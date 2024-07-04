@@ -757,7 +757,7 @@ public abstract class InMemoryTrieTestBase
                               (existing, update) -> existing != null ? resolver.resolve(existing, update) : update,
                               usePut);
         }
-        catch (InMemoryTrie.SpaceExhaustedException e)
+        catch (TrieSpaceExhaustedException e)
         {
             throw Throwables.propagate(e);
         }

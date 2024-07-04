@@ -246,7 +246,7 @@ public class CellReuseTest
 
     static InMemoryTrie<Object> makeInMemoryTrie(ByteComparable[] src,
                                                  Function<OpOrder, InMemoryTrie<Object>> creator,
-                                                 Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate) throws InMemoryTrie.SpaceExhaustedException
+                                                 Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate) throws TrieSpaceExhaustedException
     {
         OpOrder order = new OpOrder();
         InMemoryTrie<Object> trie = creator.apply(order);
@@ -262,7 +262,7 @@ public class CellReuseTest
 
     static void addToInMemoryTrie(ByteComparable[] src,
                                   InMemoryTrie<Object> trie,
-                                  Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate) throws InMemoryTrie.SpaceExhaustedException
+                                  Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate) throws TrieSpaceExhaustedException
     {
         for (ByteComparable b : src)
         {
@@ -284,7 +284,7 @@ public class CellReuseTest
 
     static void addThrowingEntry(ByteComparable b,
                                  InMemoryTrie<Object> trie,
-                                 Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate) throws InMemoryTrie.SpaceExhaustedException
+                                 Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate) throws TrieSpaceExhaustedException
     {
         int payload = asString(b).hashCode();
         ByteBuffer v = ByteBufferUtil.bytes(payload);
@@ -316,7 +316,7 @@ public class CellReuseTest
     public static <T> void applyUpdating(InMemoryTrie<T> trie,
                                          Trie<T> mutation,
                                          final Predicate<InMemoryTrie.NodeFeatures<T>> needsForcedCopy)
-    throws InMemoryTrie.SpaceExhaustedException
+    throws TrieSpaceExhaustedException
     {
         trie.apply(mutation, (x, y) -> y, needsForcedCopy);
     }

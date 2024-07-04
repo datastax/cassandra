@@ -57,6 +57,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IncludingExcludingBounds;
@@ -571,7 +572,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                                           updater::mergePartitions,
                                           key.getKeyLength() < MAX_RECURSIVE_KEY_LENGTH);
                     }
-                    catch (InMemoryTrie.SpaceExhaustedException e)
+                    catch (TrieSpaceExhaustedException e)
                     {
                         // This should never really happen as a flush would be triggered long before this limit is reached.
                         throw Throwables.propagate(e);

@@ -33,7 +33,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.primitives.Bytes;
 import org.junit.Test;
 
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -235,7 +234,7 @@ public class PrefixTailTrieTest
                                                        b.asByteComparableArray(VERSION)));
     }
 
-    private Trie<Object> prepareSplitInTailTrie(int splits, ByteComparable[] prefixes, Map<ByteComparable, Tail> data) throws InMemoryTrie.SpaceExhaustedException
+    private Trie<Object> prepareSplitInTailTrie(int splits, ByteComparable[] prefixes, Map<ByteComparable, Tail> data) throws TrieSpaceExhaustedException
     {
         InMemoryTrie<Object>[] tries = new InMemoryTrie[splits];
         for (int i = 0; i < splits; ++i)
@@ -264,7 +263,7 @@ public class PrefixTailTrieTest
     }
 
 
-    private Trie<Object> prepareSplitInHeadTrie(int splits, ByteComparable[] prefixes, Map<ByteComparable, Tail> data) throws InMemoryTrie.SpaceExhaustedException
+    private Trie<Object> prepareSplitInHeadTrie(int splits, ByteComparable[] prefixes, Map<ByteComparable, Tail> data) throws TrieSpaceExhaustedException
     {
         InMemoryTrie<Object>[] tries = new InMemoryTrie[splits];
         for (int i = 0; i < splits; ++i)
