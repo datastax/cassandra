@@ -38,6 +38,7 @@ import io.github.jbellis.jvector.graph.disk.FusedADC;
 import io.github.jbellis.jvector.graph.disk.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.pq.ProductQuantization;
@@ -158,7 +159,7 @@ public class CompactionGraph implements Closeable, Accountable
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
                             .withStartOffset(termsOffset)
                             .with(new InlineVectors(dimension))
-                            .withMapper(new OnDiskGraphIndexWriter.IdentityMapper());
+                            .withMapper(new OrdinalMapper.IdentityMapper());
         if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
         {
             writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getMaximumNodeConnections(), compressor));
@@ -283,7 +284,7 @@ public class CompactionGraph implements Closeable, Accountable
             var postingsFuture = es.submit(() -> {
                 try (var view = index.getView())
                 {
-                    return new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
+                    return new VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
                            .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
                 }
             });
