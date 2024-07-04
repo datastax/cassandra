@@ -49,7 +49,8 @@ public class Sensor
         this.value = new AtomicDouble();
     }
 
-    protected void increment(double value)
+    @VisibleForTesting
+    public void increment(double value)
     {
         this.value.addAndGet(value);
     }
