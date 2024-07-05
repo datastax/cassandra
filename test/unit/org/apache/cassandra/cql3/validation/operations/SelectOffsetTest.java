@@ -328,43 +328,46 @@ public class SelectOffsetTest extends CQLTester
         execute("INSERT INTO %s (k, v) VALUES (4, [3])");
         execute("INSERT INTO %s (k, v) VALUES (5, [2])");
 
-        // offset 0 is equivalent to no offset, so it's allowed
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 0"),
+        // limit without an explicit offset should work
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10"),
                    row(1, vector(1f)),
                    row(5, vector(2f)),
                    row(3, vector(2f)),
                    row(4, vector(3f)),
                    row(2, vector(4f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 5 OFFSET 0"),
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 5"),
                    row(1, vector(1f)),
                    row(5, vector(2f)),
                    row(3, vector(2f)),
                    row(4, vector(3f)),
                    row(2, vector(4f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 4 OFFSET 0"),
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 4"),
                    row(1, vector(1f)),
                    row(5, vector(2f)),
                    row(3, vector(2f)),
                    row(4, vector(3f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 3 OFFSET 0"),
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 3"),
                    row(1, vector(1f)),
                    row(5, vector(2f)),
                    row(3, vector(2f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2 OFFSET 0"),
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 2"),
                    row(1, vector(1f)),
                    row(3, vector(2f)));
-        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 1 OFFSET 0"),
+        assertRows(execute("SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 1"),
                    row(1, vector(1f)));
 
-        // offset > 0 is not allowed
-        String query = "SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET 1";
-        String error = String.format(SelectStatement.TOPK_OFFSET_ERROR, 1);
-        Assertions.assertThatThrownBy(() -> execute(query))
-                  .isInstanceOf(InvalidRequestException.class)
-                  .hasMessage(error);
-        Assertions.assertThatThrownBy(() -> executeNet(query))
-                  .isInstanceOf(InvalidQueryException.class)
-                  .hasMessage(error);
+        // offset >= 0 is not allowed
+        for (int offset : Arrays.asList(0, 1, 2))
+        {
+            String query = "SELECT * FROM %s ORDER BY v ANN OF [0] LIMIT 10 OFFSET " + offset;
+            String error = String.format(SelectStatement.TOPK_OFFSET_ERROR, offset);
+            Assertions.assertThatThrownBy(() -> execute(query))
+                      .isInstanceOf(InvalidRequestException.class)
+                      .hasMessage(error);
+            Assertions.assertThatThrownBy(() -> executeNet(query))
+                      .isInstanceOf(InvalidQueryException.class)
+                      .hasMessage(error);
+        }
     }
 
     @SafeVarargs
@@ -422,7 +425,7 @@ public class SelectOffsetTest extends CQLTester
                 ResultSet rs = executeNetWithPaging(queryWithLimitAndOffset, pageSize);
 
                 // key-based paging should be disabled when limit/offset paging is used
-                if (offset != null && offset > 0)
+                if (offset != null)
                 {
                     Assert.assertTrue(rs.isFullyFetched());
                     Assert.assertNull(rs.getExecutionInfo().getPagingState());
