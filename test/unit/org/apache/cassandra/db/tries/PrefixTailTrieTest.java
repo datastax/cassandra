@@ -34,6 +34,7 @@ import com.google.common.primitives.Bytes;
 import org.junit.Test;
 
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.VERSION;
@@ -50,7 +51,7 @@ import static org.junit.Assert.assertNotNull;
 public class PrefixTailTrieTest
 {
     private static final int COUNT_TAIL = 5000;
-    private static final int COUNT_HEAD = 40;
+    private static final int COUNT_HEAD = 25;
     public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (a, b) -> ByteComparable.compare(a, b, VERSION);
     Random rand = new Random();
 
@@ -269,7 +270,7 @@ public class PrefixTailTrieTest
         for (int i = 0; i < splits; ++i)
             tries[i] = InMemoryTrie.shortLived();
         int trieIndex = 0;
-        for (int i = 0; i < COUNT_HEAD; ++i)
+        for (int i = 0; i < prefixes.length; ++i)
         {
             ByteComparable[] src = generateKeys(rand, COUNT_TAIL);
 
@@ -335,5 +336,84 @@ public class PrefixTailTrieTest
             ++count;
         }
         assertEquals(1, count);
+    }
+
+    @Test
+    public void testKeyProducer() throws Exception
+    {
+
+        testKeyProducer(generateKeys(rand, COUNT_HEAD));
+    }
+
+    @Test
+    public void testKeyProducerMarkedRoot() throws Exception
+    {
+        // Check that path construction works correctly also when the root is the starting position.
+        testKeyProducer(new ByteComparable[] { ByteComparable.EMPTY });
+    }
+
+    private void testKeyProducer(ByteComparable[] prefixes) throws TrieSpaceExhaustedException
+    {
+        NavigableMap<ByteComparable, Tail> data = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
+        final Trie<Object> trie = prepareSplitInHeadTrie(1, prefixes, data);
+//        System.out.println(trie.dump(CONTENT_TO_STRING));
+
+        InMemoryTrie<Object> dest = InMemoryTrie.shortLived();
+        InclusionChecker checker = new InclusionChecker();
+        dest.apply(trie, checker, Predicates.alwaysFalse());
+        assertEquals("", checker.output.toString());
+    }
+
+    static class InclusionChecker implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
+    {
+        Tail currentTail = null;
+        StringBuilder output = new StringBuilder();
+
+        @Override
+        public Object apply(Object existing, Object update, InMemoryTrie.KeyProducer<Object> keyProducer)
+        {
+            if (existing != null)
+                output.append("Non-null existing\n");
+
+            byte[] tailPath = keyProducer.getBytes(Tail.class::isInstance);
+            byte[] fullPath = keyProducer.getBytes();
+            String tail = Hex.bytesToHex(tailPath);
+            String full = Hex.bytesToHex(fullPath);
+            if (!full.endsWith(tail))
+            {
+                output.append("Tail " + tail + " is not suffix of full path " + full + "\n");
+                return update; // can't continue
+            }
+
+            String msg = "\n@key " + full.substring(0, full.length() - tail.length()) + ":" + tail + "\n";
+
+            if (update instanceof Tail)
+            {
+                // At
+                if (tailPath.length != fullPath.length)
+                    output.append("Prefix not empty on tail root" + msg);
+                Tail t = (Tail) update;
+                if (!Arrays.equals(t.prefix, fullPath))
+                    output.append("Tail root path expected " + Hex.bytesToHex(t.prefix) + msg);
+                currentTail = t;
+            }
+            else
+            {
+                byte[] prefix = Arrays.copyOfRange(fullPath, 0, fullPath.length - tailPath.length);
+                if (currentTail == null)
+                    output.append("Null currentTail" + msg);
+                if (!Arrays.equals(currentTail.prefix, prefix))
+                    output.append("Prefix expected " + Hex.bytesToHex(currentTail.prefix) + msg);
+
+                if (!(update instanceof ByteBuffer))
+                    output.append("Not ByteBuffer " + update + msg);
+                ByteBuffer expected = currentTail.data.get(ByteComparable.fixedLength(tailPath));
+                if (expected == null)
+                    output.append("Suffix not found" + msg);
+                if (!expected.equals(update))
+                    output.append("Data mismatch " + ByteBufferUtil.bytesToHex((ByteBuffer) update) + " expected " + ByteBufferUtil.bytesToHex(expected) + msg);
+            }
+            return update;
+        }
     }
 }

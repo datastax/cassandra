@@ -876,7 +876,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * and we reuse the same object. The latter is safe because memtable tries cannot be mutated in parallel by multiple
      * writers.
      */
-    class ApplyState
+    class ApplyState implements KeyProducer<T>
     {
         int[] data = new int[16 * 5];
         int currentDepth = -1;
@@ -935,6 +935,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         {
             data[currentDepth * 5 + 3] = transition;
         }
+        int transitionAtDepth(int stackDepth)
+        {
+            return data[stackDepth * 5 + 3];
+        }
 
         /**
          * The compiled content index. Needed because we can only access a cursor's content on the way down but we can't
@@ -947,6 +951,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         void setContentId(int value)
         {
             data[currentDepth * 5 + 4] = value;
+        }
+        int contentIdAtDepth(int stackDepth)
+        {
+            return data[stackDepth * 5 + 4];
         }
 
         ApplyState start()
@@ -1186,6 +1194,61 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 root = updatedPreContentNode;
             }
         }
+
+        public byte[] getBytes()
+        {
+            int arrSize = currentDepth;
+            byte[] data = new byte[arrSize];
+            int pos = 0;
+            for (int i = 0; i < currentDepth; ++i)
+            {
+                int trans = transitionAtDepth(i);
+                data[pos++] = (byte) trans;
+            }
+            return data;
+        }
+
+        public byte[] getBytes(Predicate<T> shouldStop)
+        {
+            if (currentDepth == 0)
+                return new byte[0];
+
+            int arrSize = 1;
+            int i;
+            for (i = currentDepth - 1; i > 0; --i)
+            {
+                int content = contentIdAtDepth(i);
+                if (!isNull(content) && shouldStop.test(InMemoryTrie.this.getContent(content)))
+                    break;
+                ++arrSize;
+            }
+            assert i > 0 || arrSize == currentDepth; // if the loop covers the whole stack, the array must cover the full depth
+
+            byte[] data = new byte[arrSize];
+            int pos = 0;
+            for (; i < currentDepth; ++i)
+            {
+                int trans = transitionAtDepth(i);
+                data[pos++] = (byte) trans;
+            }
+            return data;
+        }
+    }
+
+    public interface KeyProducer<T>
+    {
+        /**
+         * Get the bytes of the path leading to this node.
+         */
+        byte[] getBytes();
+
+        /**
+         * Get the bytes of the path leading to this node from the closest ancestor whose content, after any new inserts
+         * have been applied, satisfies the given predicate.
+         * Note that the predicate is not called for the current position, because its content is not yet prepared when
+         * the method is being called.
+         */
+        byte[] getBytes(Predicate<T> shouldStop);
     }
 
     /**
@@ -1196,7 +1259,30 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * @param <T> The content type for this {@link InMemoryTrie}.
      * @param <U> The type of the new content being applied to this {@link InMemoryTrie}.
      */
-    public interface UpsertTransformer<T, U>
+    public interface UpsertTransformerWithKeyProducer<T, U>
+    {
+        /**
+         * Called when there's content in the updating trie.
+         *
+         * @param existing Existing content for this key, or null if there isn't any.
+         * @param update   The update, always non-null.
+         * @param keyState An interface that can be used to retrieve the path of the value being updated.
+         * @return The combined value to use.
+         */
+        T apply(T existing, U update, KeyProducer<T> keyState);
+    }
+
+    /**
+     * Somewhat similar to {@link Trie.MergeResolver}, this encapsulates logic to be applied whenever new content is
+     * being upserted into a {@link InMemoryTrie}. Unlike {@link Trie.MergeResolver}, {@link UpsertTransformer} will be
+     * applied no matter if there's pre-existing content for that trie key/path or not.
+     * <p>
+     * A version of the above that does not use a {@link KeyProducer}.
+     *
+     * @param <T> The content type for this {@link InMemoryTrie}.
+     * @param <U> The type of the new content being applied to this {@link InMemoryTrie}.
+     */
+    public interface UpsertTransformer<T, U> extends UpsertTransformerWithKeyProducer<T, U>
     {
         /**
          * Called when there's content in the updating trie.
@@ -1206,6 +1292,19 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
          * @return The combined value to use. Cannot be null.
          */
         T apply(T existing, U update);
+
+        /**
+         * Version of the above that also provides the path of a value being updated.
+         *
+         * @param existing Existing content for this key, or null if there isn't any.
+         * @param update   The update, always non-null.
+         * @param keyState An interface that can be used to retrieve the path of the value being updated.
+         * @return The combined value to use. Cannot be null.
+         */
+        default T apply(T existing, U update, KeyProducer<T> keyState)
+        {
+            return apply(existing, update);
+        }
     }
 
     /**
@@ -1237,13 +1336,13 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     static class Mutation<T, U> implements NodeFeatures<U>
     {
-        final UpsertTransformer<T, U> transformer;
+        final UpsertTransformerWithKeyProducer<T, U> transformer;
         final Predicate<NodeFeatures<U>> needsForcedCopy;
         final Cursor<U> mutationCursor;
         final InMemoryTrie<T>.ApplyState state;
         int forcedCopyDepth;
 
-        Mutation(UpsertTransformer<T, U> transformer,
+        Mutation(UpsertTransformerWithKeyProducer<T, U> transformer,
                  Predicate<NodeFeatures<U>> needsForcedCopy,
                  Cursor<U> mutationCursor,
                  InMemoryTrie<T>.ApplyState state)
@@ -1279,7 +1378,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             if (content != null)
             {
                 T existingContent = state.getContent();
-                T combinedContent = transformer.apply(existingContent, content);
+                T combinedContent = transformer.apply(existingContent, content, state);
                 state.setContent(combinedContent, // can be null
                                  state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
             }
@@ -1321,7 +1420,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * concurrent readers. See NodeFeatures for details.
      */
     public <U> void apply(Trie<U> mutation,
-                          final UpsertTransformer<T, U> transformer,
+                          final UpsertTransformerWithKeyProducer<T, U> transformer,
                           final Predicate<NodeFeatures<U>> needsForcedCopy)
     throws TrieSpaceExhaustedException
     {
@@ -1342,6 +1441,23 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
+    /**
+     * Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
+     * with the given function before being placed in this trie (even if there's no pre-existing content in this trie).
+     * @param mutation the mutation to be applied, given in the form of a trie. Note that its content can be of type
+     * different than the element type for this memtable trie.
+     * @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+     * value. Applied even if there's no pre-existing value in the memtable trie.
+     * @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
+     * concurrent readers. See NodeFeatures for details.
+     */
+    public <U> void apply(Trie<U> mutation,
+                          final UpsertTransformer<T, U> transformer,
+                          final Predicate<NodeFeatures<U>> needsForcedCopy)
+    throws TrieSpaceExhaustedException
+    {
+        apply(mutation, (UpsertTransformerWithKeyProducer<T, U>) transformer, needsForcedCopy);
+    }
 
     /**
      * Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct
