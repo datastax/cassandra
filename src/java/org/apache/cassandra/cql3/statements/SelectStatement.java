@@ -111,7 +111,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                                 "Downgrading the consistency level to %s.";
     public static final String TOPK_OFFSET_ERROR = "Top-K queries cannot be run with an offset. Offset was set to %d.";
 
-    private static final int NO_OFFSET = -1; // sentinel value meaning no offset has been explicitlu requested
+    private static final int NO_OFFSET = -1; // sentinel value meaning no offset has been explicitly requested
 
     private final String rawCQLStatement;
     public final VariableSpecifications bindVariables;
