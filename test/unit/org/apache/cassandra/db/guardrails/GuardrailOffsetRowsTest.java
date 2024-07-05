@@ -23,12 +23,12 @@ import static java.lang.String.format;
 /**
  * Tests the guardrail for the number of rows that a LIMIT/OFFSET SELECT query can skip, {@link Guardrails#offsetRows}.
  */
-public class GuardrailOffsetLimitRowsTest extends ThresholdTester
+public class GuardrailOffsetRowsTest extends ThresholdTester
 {
     private static final int WARN_THRESHOLD = 2;
     private static final int FAIL_THRESHOLD = 4;
 
-    public GuardrailOffsetLimitRowsTest()
+    public GuardrailOffsetRowsTest()
     {
         super(WARN_THRESHOLD,
               FAIL_THRESHOLD,
