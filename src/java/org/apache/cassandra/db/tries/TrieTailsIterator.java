@@ -35,6 +35,13 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
     private T next;
     private boolean gotNext;
 
+    public TrieTailsIterator(Trie<T> trie, Direction direction, Predicate<T> predicate)
+    {
+        this.cursor = trie.cursor(direction);
+        this.predicate = predicate;
+        assert cursor.depth() == 0;
+    }
+
     TrieTailsIterator(Trie.Cursor<T> cursor, Predicate<T> predicate)
     {
         this.cursor = cursor;
@@ -79,10 +86,10 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
         gotNext = false;
         T v = next;
         next = null;
-        return mapContent(v, keyBytes, keyPos);
+        return mapContent(v, cursor.tailTrie(), keyBytes, keyPos);
     }
 
-    protected abstract V mapContent(T content, byte[] bytes, int byteLength);
+    protected abstract V mapContent(T value, Trie<T> tailTrie, byte[] bytes, int byteLength);
 
     /**
      * Iterator representing the content of the trie a sequence of (path, content) pairs.
@@ -95,10 +102,10 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
         }
 
         @Override
-        protected Map.Entry<ByteComparable, Trie<T>> mapContent(T content, byte[] bytes, int byteLength)
+        protected Map.Entry<ByteComparable, Trie<T>> mapContent(T value, Trie<T> tailTrie, byte[] bytes, int byteLength)
         {
             ByteComparable key = toByteComparable(bytes, byteLength);
-            return new AbstractMap.SimpleImmutableEntry<>(key, cursor.tailTrie());
+            return new AbstractMap.SimpleImmutableEntry<>(key, tailTrie);
         }
     }
 }

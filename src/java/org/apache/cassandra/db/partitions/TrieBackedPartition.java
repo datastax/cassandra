@@ -24,7 +24,6 @@ import java.util.NavigableSet;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +59,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.TrieEntriesIterator;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -221,17 +221,25 @@ public class TrieBackedPartition implements Partition
                : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, trie, metadata, true, ensureOnHeap);
     }
 
-    private static Iterator<Map.Entry<ByteComparable, RowData>> rowDataIterator(Trie<Object> trie, Direction direction)
+    class RowIterator extends TrieEntriesIterator<Object, Row>
     {
-        return trie.filteredEntryIterator(direction, RowData.class);
+        public RowIterator(Trie<Object> trie, Direction direction)
+        {
+            super(trie, direction, RowData.class::isInstance);
+        }
+
+        @Override
+        protected Row mapContent(Object content, byte[] bytes, int byteLength)
+        {
+            var rd = (RowData) content;
+            return toRow(rd, metadata.comparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
+                                                                              ByteComparable.fixedLength(bytes, 0, byteLength)));
+        }
     }
 
     private Iterator<Row> rowIterator(Trie<Object> trie, Direction direction)
     {
-        // TODO: Maybe replace with custom TrieEntriesIterator descendant to avoid some copying and extra objects.
-        return Iterators.transform(rowDataIterator(trie, direction),
-                                   e -> toRow(e.getValue(), metadata.comparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
-                                                                                                             e.getKey())));
+        return new RowIterator(trie, direction);
     }
 
     static RowData rowToData(Row row)
@@ -354,7 +362,7 @@ public class TrieBackedPartition implements Partition
 
     public boolean hasRows()
     {
-        return rowDataIterator(nonStaticSubtrie(), Direction.FORWARD).hasNext();
+        return rowIterator(nonStaticSubtrie(), Direction.FORWARD).hasNext();
     }
 
     /**

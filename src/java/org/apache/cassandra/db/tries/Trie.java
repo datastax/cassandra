@@ -409,6 +409,37 @@ public abstract class Trie<T>
     }
 
     /**
+     * Process the trie using the given Walker.
+     */
+    public <R> R processSkippingBranches(Walker<T, R> walker, Direction direction)
+    {
+        return processSkippingBranches(walker, cursor(direction));
+    }
+
+    static <T, R> R processSkippingBranches(Walker<T, R> walker, Cursor<T> cursor)
+    {
+        assert cursor.depth() == 0 : "The provided cursor has already been advanced.";
+        T content = cursor.content();   // handle content on the root node
+        if (content != null)
+        {
+            walker.content(content);
+            return walker.complete();
+        }
+        content = cursor.advanceToContent(walker);
+
+        while (content != null)
+        {
+            walker.content(content);
+            if (cursor.skipTo(cursor.depth(), cursor.incomingTransition() + cursor.direction().increase) < 0)
+                break;
+            content = cursor.content();
+            if (content == null)
+                content = cursor.advanceToContent(walker);
+        }
+        return walker.complete();
+    }
+
+    /**
      * Map-like get by key.
      */
     public T get(ByteComparable key)

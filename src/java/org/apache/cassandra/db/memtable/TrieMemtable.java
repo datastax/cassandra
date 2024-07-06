@@ -56,7 +56,10 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.TrieEntriesIterator;
+import org.apache.cassandra.db.tries.TrieEntriesWalker;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
+import org.apache.cassandra.db.tries.TrieTailsIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IncludingExcludingBounds;
@@ -502,21 +505,35 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         }
     }
 
-    public FlushCollection<TrieBackedPartition> getFlushSet(PartitionPosition from, PartitionPosition to)
+
+    static class KeySizeAndCountCollector extends TrieEntriesWalker<Object, Void>
     {
-        Trie<Object> toFlush = mergedTrie.subtrie(from, true, to, false);
-        var toFlushIterable = toFlush.tailTries(Direction.FORWARD, PartitionData.class);
         long keySize = 0;
         int keyCount = 0;
 
-        for (Map.Entry<ByteComparable, Trie<Object>> en : toFlushIterable)
+        @Override
+        public Void complete()
         {
-            byte[] keyBytes = DecoratedKey.keyFromByteComparable(en.getKey(), BYTE_COMPARABLE_VERSION, metadata().partitioner);
-            keySize += keyBytes.length;
-            keyCount++;
+            return null;
         }
-        long partitionKeySize = keySize;
-        int partitionCount = keyCount;
+
+        @Override
+        protected void content(Object content, byte[] bytes, int byteLength)
+        {
+            assert content instanceof PartitionData;
+            ++keyCount;
+            keySize += byteLength;  // this should be a good enough approximation (it includes token and possibly some escaping)
+        }
+    }
+
+    public FlushCollection<TrieBackedPartition> getFlushSet(PartitionPosition from, PartitionPosition to)
+    {
+        Trie<Object> toFlush = mergedTrie.subtrie(from, true, to, false);
+
+        var counter = new KeySizeAndCountCollector(); // need to jump over tails keys
+        toFlush.processSkippingBranches(counter, Direction.FORWARD);
+        long partitionKeySize = counter.keySize;
+        int partitionCount = counter.keyCount;
 
         return new AbstractFlushCollection<TrieBackedPartition>()
         {
@@ -542,11 +559,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
             public Iterator<TrieBackedPartition> iterator()
             {
-                // TODO: avoid the transform by using a TailTrieIterator subclass
-                return Iterators.transform(toFlushIterable.iterator(),
-                                           // During flushing we are certain the memtable will remain at least until
-                                           // the flush completes. No copying to heap is necessary.
-                                           entry -> getPartitionFromTrieEntry(metadata(), EnsureOnHeap.NOOP, entry));
+                return new PartitionIterator(toFlush, metadata(), EnsureOnHeap.NOOP);
             }
 
             public long partitionKeySize()
@@ -740,11 +753,35 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         }
     }
 
+    static class PartitionIterator extends TrieTailsIterator<Object, TrieBackedPartition>
+    {
+        final TableMetadata metadata;
+        final EnsureOnHeap ensureOnHeap;
+        PartitionIterator(Trie<Object> source, TableMetadata metadata, EnsureOnHeap ensureOnHeap)
+        {
+            super(source, Direction.FORWARD, PartitionData.class::isInstance);
+            this.metadata = metadata;
+            this.ensureOnHeap = ensureOnHeap;
+        }
+
+        @Override
+        protected TrieBackedPartition mapContent(Object content, Trie<Object> tailTrie, byte[] bytes, int byteLength)
+        {
+            PartitionData pd = (PartitionData) content;
+            DecoratedKey key = getPartitionKeyFromPath(metadata, ByteComparable.fixedLength(bytes, 0, byteLength));
+            return TrieBackedPartition.create(key,
+                                              pd.columns(),
+                                              pd.stats(),
+                                              tailTrie,
+                                              metadata,
+                                              ensureOnHeap);
+        }
+    }
+
     static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements Memtable.MemtableUnfilteredPartitionIterator
     {
         private final TableMetadata metadata;
-        private final EnsureOnHeap ensureOnHeap;
-        private final Iterator<Map.Entry<ByteComparable, Trie<Object>>> iter;
+        private final Iterator<TrieBackedPartition> iter;
         private final ColumnFilter columnFilter;
         private final DataRange dataRange;
         private final int minLocalDeletionTime;
@@ -756,10 +793,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                                                    DataRange dataRange,
                                                    int minLocalDeletionTime)
         {
+            this.iter = new PartitionIterator(source, metadata, ensureOnHeap);
             this.metadata = metadata;
-            this.ensureOnHeap = ensureOnHeap;
-            // TODO: avoid the transform by using a TailTrieIterator subclass
-            this.iter = source.tailTries(Direction.FORWARD, PartitionData.class).iterator();
             this.columnFilter = columnFilter;
             this.dataRange = dataRange;
             this.minLocalDeletionTime = minLocalDeletionTime;
@@ -782,7 +817,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
         public UnfilteredRowIterator next()
         {
-            Partition partition = getPartitionFromTrieEntry(metadata(), ensureOnHeap, iter.next());
+            Partition partition = iter.next();
             DecoratedKey key = partition.partitionKey();
             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 

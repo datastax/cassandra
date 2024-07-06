@@ -37,6 +37,11 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
     T next;
     boolean gotNext;
 
+    public TrieEntriesIterator(Trie<T> trie, Direction direction, Predicate<T> predicate)
+    {
+        this(trie.cursor(direction), predicate);
+    }
+
     TrieEntriesIterator(Trie.Cursor<T> cursor, Predicate<T> predicate)
     {
         this.cursor = cursor;
