@@ -77,7 +77,6 @@ import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.MergeScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -431,7 +430,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression, int softLimit)
     {
         assert expression.operator() == Operator.ANN;
-        var planExpression = getPlanExpression(expression);
+        var planExpression = getAnnPlanExpression(expression);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
         var memtableResults = planExpression.context.orderMemtable(queryContext, planExpression, mergeRange, softLimit);
@@ -492,7 +491,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // Filter out PKs now. Each PK is passed to every segment of the ANN index, so filtering shadowed keys
         // eagerly can save some work when going from PK to row id for on disk segments.
         // Since the result is shared with multiple streams, we use an unmodifiable list.
-        var planExpression = getPlanExpression(expression);
+        var planExpression = getAnnPlanExpression(expression);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
         var memtableResults = planExpression.context.orderResultsBy(queryContext, sourceKeys, planExpression, softLimit);
@@ -527,7 +526,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
     }
 
-    private Expression getPlanExpression(RowFilter.Expression expression)
+    private Expression getAnnPlanExpression(RowFilter.Expression expression)
     {
         var planExpression = new Expression(this.getContext(expression));
         planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
