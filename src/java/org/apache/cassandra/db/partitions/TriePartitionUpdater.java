@@ -58,7 +58,6 @@ public final class TriePartitionUpdater implements InMemoryTrie.UpsertTransforme
         this.metadata = metadata;
         this.cloner = cloner;
         this.owner = owner;
-        indexer.start();
     }
 
     public Object apply(Object existing, Object update, InMemoryTrie.KeyProducer keyState)
