@@ -392,6 +392,7 @@ abstract public class Plan
     {
         if (selectivity == -1)
             selectivity = estimateSelectivity();
+        assert 0.0 <= selectivity && selectivity <= 1.0 : "Invalid selectivity: " + selectivity;
         return selectivity;
     }
 
@@ -1794,6 +1795,8 @@ abstract public class Plan
         Access scaleCount(double factor)
         {
             assert !Double.isNaN(factor) : "Count multiplier must not be NaN";
+            if (Double.isInfinite(factor))
+                return EMPTY;
 
             double[] counts = Arrays.copyOf(this.counts, this.counts.length);
             double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length);
@@ -1809,6 +1812,8 @@ abstract public class Plan
         Access scaleDistance(double factor)
         {
             assert !Double.isNaN(factor) : "Distance multiplier must not be NaN";
+            if (Double.isInfinite(factor))
+                return EMPTY;
 
             double[] counts = Arrays.copyOf(this.counts, this.counts.length);
             double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length);
