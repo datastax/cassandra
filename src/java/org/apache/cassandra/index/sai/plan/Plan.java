@@ -1815,19 +1815,19 @@ abstract public class Plan
         public final static double SAI_KEY_COST = 1.0;
 
         /** Cost to open the vector index and get ready for the search */
-        public final static double ANN_OPEN_COST = 10.0;
+        public final static double ANN_OPEN_COST = 1.0;
 
         /** Additional overhead needed by processing each input key fed to the ANN index searcher */
         public final static double ANN_INPUT_KEY_COST = 3.0;
 
-        /** Cost to get a scored key from DiskANN */
-        public final static double ANN_SCORED_KEY_COST = 10.0;
+        /** Cost to get a scored key from DiskANN (~rerank cost). */
+        public final static double ANN_SCORED_KEY_COST = 100.0;
 
         /** Cost to visit a DiskANN index node */
-        public final static double ANN_NODE_COST = 20.0;
+        public final static double ANN_NODE_COST = 25.0;
 
         /** Cost to fetch one row from storage */
-        public final static double ROW_COST = 80.0;
+        public final static double ROW_COST = 400.0;
 
         /** Additional cost added to row fetch cost per each row cell */
         public final static double ROW_CELL_COST = 0.4;
