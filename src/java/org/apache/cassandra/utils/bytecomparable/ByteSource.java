@@ -67,7 +67,7 @@ public interface ByteSource
 
     /**
      * Escape value. Used, among other things, to mark the end of subcomponents (so that shorter compares before anything longer).
-     * Actual zeros in input need to be escaped if this is in use (see BufferReinterpreter).
+     * Actual zeros in input need to be escaped if this is in use (see {@link AbstractEscaper}).
      */
     int ESCAPE = 0x00;
 
@@ -81,76 +81,107 @@ public interface ByteSource
 
     // Next component marker.
     int NEXT_COMPONENT = 0x40;
+    // Marker used to present null values represented by empty buffers (e.g. by Int32Type), as well as nulls in
+    // collections.
     int NEXT_COMPONENT_NULL = 0x3F;
     int NEXT_COMPONENT_NULL_REVERSED = 0x41;
+    // Marker for null components in clustering keys. Null clusterings are normally encoded by empty buffers (which end
+    // up using NEXT_COMPONENT_EMPTY above), but in some cases (secondary indexes and compact storage) we may get null
+    // pointers that compare differently.
+    int NEXT_CLUSTERING_NULL = 0x3E;
+
+    // Section for next component markers which is not allowed for use
+    int MIN_NEXT_COMPONENT = 0x3C;
+    int MAX_NEXT_COMPONENT = 0x44;
+
     // Default terminator byte in sequences. Smaller than NEXT_COMPONENT_NULL, but larger than LT_NEXT_COMPONENT to
     // ensure lexicographic compares go in the correct direction
     int TERMINATOR = 0x38;
-    // These are special endings, for exclusive/inclusive bounds (i.e. smaller than anything with more components, bigger than anything with more components)
+    // These are special endings, for exclusive/inclusive bounds (i.e. smaller than anything with more components,
+    // bigger than anything with more components)
     int LT_NEXT_COMPONENT = 0x20;
     int GT_NEXT_COMPONENT = 0x60;
 
     // Unsupported, for artificial bounds
-    int LTLT_NEXT_COMPONENT = 0x1F;
-    int GTGT_NEXT_COMPONENT = 0x61;
+    int LTLT_NEXT_COMPONENT = 0x1F; // LT_NEXT_COMPONENT - 1
+    int GTGT_NEXT_COMPONENT = 0x61; // GT_NEXT_COMPONENT + 1
 
     // Special value for components that should be excluded from the normal min/max span. (static rows)
     int EXCLUDED = 0x18;
 
     /**
-     * Reinterprets a byte buffer as a byte-comparable source that has 0s escaped and finishes in an escape.
+     * Encodes byte-accessible data as a byte-comparable source that has 0s escaped and finishes in an escaped
+     * state.
      * This provides a weakly-prefix-free byte-comparable version of the content to use in sequences.
-     * (See ByteSource.BufferReinterpreter/Multi for explanation.)
+     * (See {@link AbstractEscaper} for a detailed explanation.)
      */
     static <V> ByteSource of(ValueAccessor<V> accessor, V data, Version version)
     {
-        return new AccessorReinterpreter<>(accessor, data, version);
+        return new AccessorEscaper<>(accessor, data, version);
     }
 
     /**
-     * Reinterprets a byte buffer as a byte-comparable source that has 0s escaped and finishes in an escape.
+     * Encodes a byte buffer as a byte-comparable source that has 0s escaped and finishes in an escape.
      * This provides a weakly-prefix-free byte-comparable version of the content to use in sequences.
-     * (See ByteSource.BufferReinterpreter/Multi for explanation.)
+     * (See ByteSource.BufferEscaper/Multi for explanation.)
      */
     static ByteSource of(ByteBuffer buf, Version version)
     {
-        return new BufferReinterpreter(buf, version);
+        return new BufferEscaper(buf, version);
     }
 
     /**
-     * Reinterprets a byte array as a byte-comparable source that has 0s escaped and finishes in an escape.
+     * Encodes a byte array as a byte-comparable source that has 0s escaped and finishes in an escape.
      * This provides a prefix-free byte-comparable version of the content to use in sequences.
-     * (See ByteSource.BufferReinterpreter/Multi for explanation.)
+     * (See ByteSource.BufferEscaper/Multi for explanation.)
      */
     static ByteSource of(byte[] buf, Version version)
     {
-        return new ReinterpreterArray(buf, version);
+        return new ArrayEscaper(buf, version);
     }
 
     /**
-     * Reinterprets a memory range as a byte-comparable source that has 0s escaped and finishes in an escape.
+     * Encodes a memory range as a byte-comparable source that has 0s escaped and finishes in an escape.
      * This provides a weakly-prefix-free byte-comparable version of the content to use in sequences.
-     * (See ByteSource.BufferReinterpreter/Multi for explanation.)
+     * (See ByteSource.BufferEscaper/Multi for explanation.)
      */
-    static ByteSource of(long address, int length, ByteComparable.Version version)
+    static ByteSource ofMemory(long address, int length, ByteComparable.Version version)
     {
-        return new MemoryReinterpreter(address, length, version);
+        return new MemoryEscaper(address, length, version);
     }
 
     /**
      * Combines a chain of sources, turning their weak-prefix-free byte-comparable representation into the combination's
      * prefix-free byte-comparable representation, with the included terminator character.
-     * For correctness, the terminator must be within MIN-MAX_SEPARATOR and different from NEXT_COMPONENT+/-1.
+     * For correctness, the terminator must be within MIN-MAX_SEPARATOR and outside the range reserved for
+     * NEXT_COMPONENT markers.
      * Typically TERMINATOR, or LT/GT_NEXT_COMPONENT if used for partially specified bounds.
      */
     static ByteSource withTerminator(int terminator, ByteSource... srcs)
     {
+        assert terminator >= MIN_SEPARATOR && terminator <= MAX_SEPARATOR;
+        assert terminator < MIN_NEXT_COMPONENT || terminator > MAX_NEXT_COMPONENT;
         return new Multi(srcs, terminator);
+    }
+
+    /**
+     * As above, but permits any separator. The legacy format wasn't using weak prefix freedom and has some
+     * non-reversible transformations.
+     */
+    static ByteSource withTerminatorLegacy(int terminator, ByteSource... srcs)
+    {
+        return new Multi(srcs, terminator);
+    }
+
+    static ByteSource withTerminatorMaybeLegacy(Version version, int legacyTerminator, ByteSource... srcs)
+    {
+        return version == Version.LEGACY ? withTerminatorLegacy(legacyTerminator, srcs)
+                                         : withTerminator(TERMINATOR, srcs);
     }
 
     static ByteSource of(String s, Version version)
     {
-        return new ReinterpreterArray(s.getBytes(StandardCharsets.UTF_8), version);
+        return new ArrayEscaper(s.getBytes(StandardCharsets.UTF_8), version);
     }
 
     static ByteSource of(long value)
@@ -208,6 +239,16 @@ public interface ByteSource
     }
 
     /**
+     * Produce a source for a signed integer, stored using variable length encoding.
+     * The representation uses between 1 and 9 bytes, is prefix-free and compares
+     * correctly.
+     */
+    static ByteSource variableLengthInteger(long value)
+    {
+        return new VariableLengthInteger(value);
+    }
+
+    /**
      * Returns a separator for two byte sources, i.e. something that is definitely > prevMax, and <= currMin, assuming
      * prevMax < currMin.
      * This returns the shortest prefix of currMin that is greater than prevMax.
@@ -260,6 +301,26 @@ public interface ByteSource
         };
     }
 
+    public static ByteSource append(ByteSource src, int lastByte)
+    {
+        return new ByteSource()
+        {
+            boolean done = false;
+
+            @Override
+            public int next()
+            {
+                if (done)
+                    return END_OF_STREAM;
+                int n = src.next();
+                if (n != END_OF_STREAM)
+                    return n;
+
+                done = true;
+                return lastByte;
+            }
+        };
+    }
 
     /**
      * Variable-length encoding. Escapes 0s as ESCAPE + zero or more ESCAPED_0_CONT + ESCAPED_0_DONE.
@@ -282,13 +343,13 @@ public interface ByteSource
      * prefix-free. Additionally, any such prefix sequence will compare smaller than the value to which it is a prefix,
      * because any permitted separator byte will be smaller than the byte following the prefix.
      */
-    abstract static class AbstractReinterpreter implements ByteSource
+    abstract static class AbstractEscaper implements ByteSource
     {
         private final Version version;
         private int bufpos;
         private boolean escaped;
 
-        AbstractReinterpreter(int position, Version version)
+        AbstractEscaper(int position, Version version)
         {
             this.bufpos = position;
             this.version = version;
@@ -336,12 +397,12 @@ public interface ByteSource
         protected abstract int limit();
     }
 
-    static class AccessorReinterpreter<V> extends AbstractReinterpreter
+    static class AccessorEscaper<V> extends AbstractEscaper
     {
         private final V data;
         private final ValueAccessor<V> accessor;
 
-        private AccessorReinterpreter(ValueAccessor<V> accessor, V data, Version version)
+        private AccessorEscaper(ValueAccessor<V> accessor, V data, Version version)
         {
             super(0, version);
             this.accessor = accessor;
@@ -359,11 +420,11 @@ public interface ByteSource
         }
     }
 
-    static class BufferReinterpreter extends AbstractReinterpreter
+    static class BufferEscaper extends AbstractEscaper
     {
         private final ByteBuffer buf;
 
-        private BufferReinterpreter(ByteBuffer buf, Version version)
+        private BufferEscaper(ByteBuffer buf, Version version)
         {
             super(buf.position(), version);
             this.buf = buf;
@@ -380,11 +441,11 @@ public interface ByteSource
         }
     }
 
-    static class ReinterpreterArray extends AbstractReinterpreter
+    static class ArrayEscaper extends AbstractEscaper
     {
         private final byte[] buf;
 
-        private ReinterpreterArray(byte[] buf, Version version)
+        private ArrayEscaper(byte[] buf, Version version)
         {
             super(0, version);
             this.buf = buf;
@@ -403,12 +464,12 @@ public interface ByteSource
         }
     }
 
-    static class MemoryReinterpreter extends AbstractReinterpreter
+    static class MemoryEscaper extends AbstractEscaper
     {
         private final long address;
         private final int length;
 
-        MemoryReinterpreter(long address, int length, ByteComparable.Version version)
+        MemoryEscaper(long address, int length, ByteComparable.Version version)
         {
             super(0, version);
             this.address = address;
@@ -456,10 +517,119 @@ public interface ByteSource
         }
     }
 
+    /**
+     * Variable-length encoding for unsigned integers.
+     * The encoding is similar to UTF-8 encoding.
+     * Numbers between 0 and 127 are encoded in one byte, using 0 in the most significant bit.
+     * Larger values have 1s in as many of the most significant bits as the number of additional bytes
+     * in the representation, followed by a 0. This ensures that longer numbers compare larger than shorter
+     * ones. Since we never use a longer representation than necessary, this implies numbers compare correctly.
+     * As the number of bytes is specified in the bits of the first, no value is a prefix of another.
+     */
+    static class VariableLengthUnsignedInteger implements ByteSource
+    {
+        private final long value;
+        private int pos = -1;
+
+        public VariableLengthUnsignedInteger(long value)
+        {
+            this.value = value;
+        }
+
+        @Override
+        public int next()
+        {
+            if (pos == -1)
+            {
+                int bitsMinusOne = 63 - (Long.numberOfLeadingZeros(value | 1)); // 0 to 63 (the | 1 is to make sure 0 maps to 0 (1 bit))
+                int bytesMinusOne = bitsMinusOne / 7;
+                int mask = -256 >> bytesMinusOne;   // sequence of bytesMinusOne 1s in the most-significant bits
+                pos = bytesMinusOne * 8;
+                return (int) ((value >>> pos) | mask) & 0xFF;
+            }
+            pos -= 8;
+            if (pos < 0)
+                return END_OF_STREAM;
+            return (int) (value >>> pos) & 0xFF;
+        }
+    }
+
+    /**
+     * Variable-length encoding for signed integers.
+     * The encoding is based on the unsigned encoding above, where the first bit stored is the inverted sign,
+     * followed by as many matching bits as there are additional bytes in the encoding, followed by the two's
+     * complement of the number.
+     * Because of the inverted sign bit, negative numbers compare smaller than positives, and because the length
+     * bits match the sign, longer positive numbers compare greater and longer negative ones compare smaller.
+     *
+     * Examples:
+     *      0              encodes as           80
+     *      1              encodes as           81
+     *     -1              encodes as           7F
+     *     63              encodes as           BF
+     *     64              encodes as           C040
+     *    -64              encodes as           40
+     *    -65              encodes as           3FBF
+     *   2^20-1            encodes as           EFFFFF
+     *   2^20              encodes as           F0100000
+     *  -2^20              encodes as           100000
+     *   2^64-1            encodes as           FFFFFFFFFFFFFFFFFF
+     *  -2^64              encodes as           000000000000000000
+     *
+     * As the number of bytes is specified in bits 2-9, no value is a prefix of another.
+     */
+    static class VariableLengthInteger implements ByteSource
+    {
+        private final long value;
+        private int pos;
+
+        public VariableLengthInteger(long value)
+        {
+            long negativeMask = value >> 63;    // -1 for negative, 0 for positive
+            value ^= negativeMask;
+
+            int bits = 64 - Long.numberOfLeadingZeros(value | 1); // 1 to 63 (can't be 64 because we flip negative numbers)
+            int bytes = bits / 7 + 1;   // 0-6 bits 1 byte 7-13 2 bytes etc to 56-63 9 bytes
+            if (bytes >= 9)
+            {
+                value |= 0x8000000000000000L;   // 8th bit, which doesn't fit the first byte
+                pos = negativeMask < 0 ? 256 : -1; // out of 0-64 range integer such that & 0xFF is 0x00 for negative and 0xFF for positive
+            }
+            else
+            {
+                long mask = (-0x100 >> bytes) & 0xFF; // one in sign bit and as many more as there are extra bytes
+                pos = bytes * 8;
+                value = value | (mask << (pos - 8));
+            }
+
+            value ^= negativeMask;
+            this.value = value;
+        }
+
+        @Override
+        public int next()
+        {
+            if (pos <= 0 || pos > 64)
+            {
+                if (pos == 0)
+                    return END_OF_STREAM;
+                else
+                {
+                    // 8-byte value, returning first byte
+                    int result = pos & 0xFF; // 0x00 for negative numbers, 0xFF for positive
+                    pos = 64;
+                    return result;
+                }
+            }
+            pos -= 8;
+            return (int) (value >>> pos) & 0xFF;
+        }
+    }
+
     static class Number implements ByteSource
     {
-        final long value;
-        int pos;
+        private final long value;
+        private int pos;
 
         public Number(long value, int length)
         {
@@ -467,6 +637,7 @@ public interface ByteSource
             this.pos = length;
         }
 
+        @Override
         public int next()
         {
             if (pos == 0)

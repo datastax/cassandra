@@ -33,7 +33,7 @@ import static org.junit.Assert.assertEquals;
 
 public class ByteSourceDuplicationTest extends ByteSourceTestBase
 {
-    public static final ByteComparable.Version VERSION = ByteComparable.Version.OSS41;
+    public static final ByteComparable.Version VERSION = ByteComparable.Version.OSS50;
     private static final int TRIES = 25;
     private static final double TARGET_DUPES_PER_TRY = 7;
     Random rand = new Random(1);

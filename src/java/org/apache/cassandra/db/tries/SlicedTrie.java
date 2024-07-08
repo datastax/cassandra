@@ -61,33 +61,13 @@ public class SlicedTrie<T> extends Trie<T>
         this.includeRight = includeRight;
     }
 
-    static ByteSource add0(ByteSource src)
-    {
-        return new ByteSource()
-        {
-            boolean done = false;
-
-            @Override
-            public int next()
-            {
-                if (done)
-                    return END_OF_STREAM;
-                int next = src.next();
-                if (next != END_OF_STREAM)
-                    return next;
-                done = true;
-                return 0;
-            }
-        };
-    }
-
     static ByteSource openAndMaybeAdd0(ByteComparable key, boolean shouldAdd0)
     {
         if (key == null)
             return null;
         ByteSource src = key.asComparableBytes(Trie.BYTE_COMPARABLE_VERSION);
         if (shouldAdd0)
-            return add0(src);
+            return ByteSource.append(src, 0);
         else
             return src;
     }

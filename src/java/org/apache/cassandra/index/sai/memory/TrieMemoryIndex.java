@@ -252,7 +252,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return indexContext.isLiteral() ? version -> append(ByteSource.of(input, version), ByteSource.TERMINATOR)
+        return indexContext.isLiteral() ? version -> ByteSource.append(ByteSource.of(input, version), ByteSource.TERMINATOR)
                                         : version -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), version);
     }
 
@@ -260,27 +260,6 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         return indexContext.isLiteral() ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
                                         : term;
-    }
-
-    private ByteSource append(ByteSource src, int lastByte)
-    {
-        return new ByteSource()
-        {
-            boolean done = false;
-
-            @Override
-            public int next()
-            {
-                if (done)
-                    return END_OF_STREAM;
-                int n = src.next();
-                if (n != END_OF_STREAM)
-                    return n;
-
-                done = true;
-                return lastByte;
-            }
-        };
     }
 
     class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>

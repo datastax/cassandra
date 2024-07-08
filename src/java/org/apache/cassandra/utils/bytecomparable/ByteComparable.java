@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import com.google.common.annotations.VisibleForTesting;
+
 /**
  * Interface indicating a value can be represented/identified by a comparable {@link ByteSource}.
  *
@@ -46,6 +48,7 @@ public interface ByteComparable
     {
         LEGACY,
         OSS41,  // CASSANDRA 4.1 encoding, used in trie-based indices
+        OSS50,  // CASSANDRA 5.0 encoding, used by the trie memtable
     }
 
     ByteComparable EMPTY = (Version version) -> ByteSource.EMPTY;
@@ -74,8 +77,10 @@ public interface ByteComparable
 
     // Simple factories used for testing
 
+    @VisibleForTesting
     static ByteComparable of(String s)
     {
+        // Note: This is not prefix-free
         return v -> ByteSource.of(s, v);
     }
 

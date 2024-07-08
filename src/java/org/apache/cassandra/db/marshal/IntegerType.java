@@ -32,6 +32,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 public final class IntegerType extends NumberType<BigInteger>
 {
@@ -44,6 +45,7 @@ public final class IntegerType extends NumberType<BigInteger>
     private static final int POSITIVE_VARINT_LENGTH_HEADER = 0xFF;
     private static final byte BIG_INTEGER_NEGATIVE_LEADING_ZERO = (byte) 0xFF;
     private static final byte BIG_INTEGER_POSITIVE_LEADING_ZERO = (byte) 0x00;
+    public static final int FULL_FORM_THRESHOLD = 7;
 
     private static <V> int findMostSignificantByte(V value, ValueAccessor<V> accessor)
     {
@@ -143,8 +145,151 @@ public final class IntegerType extends NumberType<BigInteger>
 
     /**
      * Constructs a byte-comparable representation of the number.
+     *
+     * In the current format we represent it:
+     *    directly as varint, if the length is 6 or smaller (the encoding has non-00/FF first byte)
+     *    {@code <signbyte><length as unsigned integer - 7><7 or more bytes>}, otherwise
+     * where {@code <signbyte>} is 00 for negative numbers and FF for positive ones, and the length's bytes are inverted if
+     * the number is negative (so that longer length sorts smaller).
+     *
+     * Because we present the sign separately, we don't need to include 0x00 prefix for positive integers whose first
+     * byte is >= 0x80 or 0xFF prefix for negative integers whose first byte is < 0x80. Note that we do this before
+     * taking the length for the purposes of choosing between varint and full-form encoding.
+     *
+     * The representations are prefix-free, because the choice between varint and full-form encoding is determined by
+     * the first byte where varints are properly ordered between full-form negative and full-form positive, varint
+     * encoding is prefix-free, and full-form representations of different length always have length bytes that differ.
+     *
+     * Examples:
+     *    -1            as 7F
+     *    0             as 80
+     *    1             as 81
+     *    127           as C07F
+     *    255           as C0FF
+     *    2^32-1        as F8FFFFFFFF
+     *    2^32          as F900000000
+     *    2^56-1        as FEFFFFFFFFFFFFFF
+     *    2^56          as FF000100000000000000
+     *
+     * See {@link #asComparableBytesLegacy} for description of the legacy format.
+     */
+    @Override
+    public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
+    {
+        final int limit = accessor.size(data);
+        if (limit == 0)
+            return null;
+
+        // skip any leading sign-only byte(s)
+        int p = 0;
+        final byte signbyte = accessor.getByte(data, p);
+        if (signbyte == BIG_INTEGER_NEGATIVE_LEADING_ZERO || signbyte == BIG_INTEGER_POSITIVE_LEADING_ZERO)
+        {
+            while (p + 1 < limit)
+            {
+                if (accessor.getByte(data, ++p) != signbyte)
+                    break;
+            }
+        }
+
+        if (version == ByteComparable.Version.OSS50)
+            return (limit - p < FULL_FORM_THRESHOLD)
+                   ? encodeAsVarInt(accessor, data, limit)
+                   : asComparableBytesCurrent(accessor, data, p, limit, (signbyte >> 7) & 0xFF);
+        else
+            return asComparableBytesLegacy(accessor, data, p, limit, signbyte);
+    }
+
+    /**
+     * Encode the BigInteger stored in the given buffer as a variable-length signed integer.
+     * The length of the number is given in the limit argument, and must be <= 8.
+     */
+    private <V> ByteSource encodeAsVarInt(ValueAccessor<V> accessor, V data, int limit)
+    {
+        long v;
+        switch (limit)
+        {
+            case 1:
+                v = accessor.getByte(data, 0);
+                break;
+            case 2:
+                v = accessor.getShort(data, 0);
+                break;
+            case 3:
+                v = (accessor.getShort(data, 0) << 8) | (accessor.getByte(data, 2) & 0xFF);
+                break;
+            case 4:
+                v = accessor.getInt(data, 0);
+                break;
+            case 5:
+                v = ((long) accessor.getInt(data, 0) << 8) | (accessor.getByte(data, 4) & 0xFF);
+                break;
+            case 6:
+                v = ((long) accessor.getInt(data, 0) << 16) | (accessor.getShort(data, 4) & 0xFFFF);
+                break;
+            case 7:
+                v = ((long) accessor.getInt(data, 0) << 24) | ((accessor.getShort(data, 4) & 0xFFFF) << 8) | (accessor.getByte(data, 6) & 0xFF);
+                break;
+            case 8:
+                // This is not reachable within the encoding; added for completeness.
+                v = accessor.getLong(data, 0);
+                break;
+            default:
+                throw new AssertionError();
+        }
+        return ByteSource.variableLengthInteger(v);
+    }
+
+    /**
+     * Constructs a full-form byte-comparable representation of the number in the current format.
+     *
+     * This contains:
+     *    {@code <signbyte><length as unsigned integer - 7><7 or more bytes>}, otherwise
+     * where {@code <signbyte>} is 00 for negative numbers and FF for positive ones, and the length's bytes are inverted if
+     * the number is negative (so that longer length sorts smaller).
+     *
+     * Because we present the sign separately, we don't need to include 0x00 prefix for positive integers whose first
+     * byte is >= 0x80 or 0xFF prefix for negative integers whose first byte is < 0x80.
+     *
+     * The representations are prefix-free, because representations of different length always have length bytes that
+     * differ.
+     */
+    private <V> ByteSource asComparableBytesCurrent(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
+    {
+        // start with sign as a byte, then variable-length-encoded length, then bytes (stripped leading sign)
+        return new ByteSource()
+        {
+            int pos = -2;
+            ByteSource lengthEncoding = new VariableLengthUnsignedInteger(limit - startpos - FULL_FORM_THRESHOLD);
+
+            @Override
+            public int next()
+            {
+                if (pos == -2)
+                {
+                    ++pos;
+                    return signbyte ^ 0xFF; // 00 for negative/FF for positive (01-FE for direct varint encoding)
+                }
+                else if (pos == -1)
+                {
+                    int nextByte = lengthEncoding.next();
+                    if (nextByte != END_OF_STREAM)
+                        return nextByte ^ signbyte;
+                    pos = startpos;
+                }
+
+                if (pos == limit)
+                    return END_OF_STREAM;
+
+                return accessor.getByte(data, pos++) & 0xFF;
+            }
+        };
+    }
+
+    /**
+     * Constructs a byte-comparable representation of the number in the legacy format.
      * We represent it as
-     *    <zero or more length_bytes where length = 128> <length_byte> <first_significant_byte> <zero or more bytes>
+     *    {@code <zero or more length_bytes where length = 128> <length_byte> <first_significant_byte> <zero or more bytes>}
      * where a length_byte is:
      *    - 0x80 + (length - 1) for positive numbers (so that longer length sorts bigger)
      *    - 0x7F - (length - 1) for negative numbers (so that longer length sorts smaller)
@@ -162,31 +307,12 @@ public final class IntegerType extends NumberType<BigInteger>
      *    1             as 8001
      *    127           as 807F
      *    255           as 80FF
-     *    2^32-1        as 837FFFFFFF
-     *    2^32          as 8380000000
-     *    2^33          as 840100000000
+     *    2^31-1        as 837FFFFFFF
+     *    2^31          as 8380000000
+     *    2^32          as 840100000000
      */
-    @Override
-    public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
+    private <V> ByteSource asComparableBytesLegacy(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
     {
-        int p = 0;
-        final int limit = accessor.size(data);
-        if (p == limit)
-            return null;
-
-        // skip any leading sign-only byte(s)
-        final byte signbyte = accessor.getByte(data, p);
-        if (signbyte == BIG_INTEGER_NEGATIVE_LEADING_ZERO || signbyte == BIG_INTEGER_POSITIVE_LEADING_ZERO)
-        {
-            while (p + 1 < limit)
-            {
-                if (accessor.getByte(data, ++p) != signbyte)
-                    break;
-            }
-        }
-
-        final int startpos = p;
-
         return new ByteSource()
         {
             int pos = startpos;
@@ -227,6 +353,21 @@ public final class IntegerType extends NumberType<BigInteger>
         if (comparableBytes == null)
             return accessor.empty();
 
+        switch (version)
+        {
+            case OSS41:
+                return fromComparableBytes41(accessor, comparableBytes);
+            case OSS50:
+                return fromComparableBytes50(accessor, comparableBytes);
+            case LEGACY:
+                throw new AssertionError("Legacy byte-comparable format is not revertible.");
+            default:
+                throw new AssertionError();
+        }
+    }
+
+    private <V> V fromComparableBytes41(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes)
+    {
         int valueBytes;
         byte signedZero;
         // Consume the first byte to determine whether the encoded number is positive and
@@ -252,18 +393,81 @@ public final class IntegerType extends NumberType<BigInteger>
             }
             signedZero = -1;
         }
+        return extractBytes(accessor, comparableBytes, signedZero, valueBytes);
+    }
 
+    public <V> V fromComparableBytes50(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes)
+    {
+        // Consume the first byte to determine whether the encoded number is positive and
+        // start iterating through the length header bytes and collecting the number of value bytes.
+        int sign = comparableBytes.peek() ^ 0xFF;   // FF if negative, 00 if positive
+        if (sign != 0xFF && sign != 0x00)
+            return extractVarIntBytes(accessor, ByteSourceInverse.getVariableLengthInteger(comparableBytes));
+
+        // consume the sign byte
+        comparableBytes.next();
+
+        // Read the length (inverted if the number is negative)
+        int valueBytes = Math.toIntExact(ByteSourceInverse.getVariableLengthUnsignedIntegerXoring(comparableBytes, sign) + FULL_FORM_THRESHOLD);
+        // Get the bytes.
+        return extractBytes(accessor, comparableBytes, sign, valueBytes);
+    }
+
+    private <V> V extractVarIntBytes(ValueAccessor<V> accessor, long value)
+    {
+        int length = (64 - Long.numberOfLeadingZeros(value ^ (value >> 63)) + 8) / 8;   // number of bytes needed: 7 bits -> one byte, 8 bits -> 2 bytes
+        V buf = accessor.allocate(length);
+        switch (length)
+        {
+            case 1:
+                accessor.putByte(buf, 0, (byte) value);
+                break;
+            case 2:
+                accessor.putShort(buf, 0, (short) value);
+                break;
+            case 3:
+                accessor.putShort(buf, 0, (short) (value >> 8));
+                accessor.putByte(buf, 2, (byte) value);
+                break;
+            case 4:
+                accessor.putInt(buf, 0, (int) value);
+                break;
+            case 5:
+                accessor.putInt(buf, 0, (int) (value >> 8));
+                accessor.putByte(buf, 4, (byte) value);
+                break;
+            case 6:
+                accessor.putInt(buf, 0, (int) (value >> 16));
+                accessor.putShort(buf, 4, (short) value);
+                break;
+            case 7:
+                accessor.putInt(buf, 0, (int) (value >> 24));
+                accessor.putShort(buf, 4, (short) (value >> 8));
+                accessor.putByte(buf, 6, (byte) value);
+                break;
+            case 8:
+                // This is not reachable within the encoding; added for completeness.
+                accessor.putLong(buf, 0, value);
+                break;
+            default:
+                throw new AssertionError();
+        }
+        return buf;
+    }
+
+    private <V> V extractBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, int sign, int valueBytes)
+    {
         int writtenBytes = 0;
         V buf;
         // Add "leading zero" if needed (i.e. in case the leading byte of a positive number corresponds to a negative
         // value, or in case the leading byte of a negative number corresponds to a non-negative value).
         // Size the array containing all the value bytes accordingly.
-        curr = comparableBytes.next();
-        if ((curr & 0x80) != (signedZero & 0x80))
+        int curr = comparableBytes.next();
+        if ((curr & 0x80) != (sign & 0x80))
         {
             ++valueBytes;
             buf = accessor.allocate(valueBytes);
-            accessor.putByte(buf, writtenBytes++, signedZero);
+            accessor.putByte(buf, writtenBytes++, (byte) sign);
         }
         else
             buf = accessor.allocate(valueBytes);

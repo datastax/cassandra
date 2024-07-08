@@ -215,7 +215,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             offset += CollectionSerializer.sizeOfValue(v, accessor, protocolVersion);
             srcs[i * 2 + 1] = valuesComparator.asComparableBytes(accessor, v, version);
         }
-        return ByteSource.withTerminator(version == Version.LEGACY ? 0x00 : ByteSource.TERMINATOR, srcs);
+        return ByteSource.withTerminatorMaybeLegacy(version, 0x00, srcs);
     }
 
     static <V> V fromComparableBytesMap(ValueAccessor<V> accessor,

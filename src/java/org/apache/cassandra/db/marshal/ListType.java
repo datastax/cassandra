@@ -194,7 +194,7 @@ public class ListType<T> extends CollectionType<List<T>>
             offset += CollectionSerializer.sizeOfValue(v, accessor, ProtocolVersion.V3);
             srcs[i] = elementsComparator.asComparableBytes(accessor, v, version);
         }
-        return ByteSource.withTerminator(version == Version.LEGACY ? 0x00 : ByteSource.TERMINATOR, srcs);
+        return ByteSource.withTerminatorMaybeLegacy(version, 0x00, srcs);
     }
 
     static <V> V fromComparableBytesListOrSet(ValueAccessor<V> accessor,
