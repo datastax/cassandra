@@ -196,22 +196,12 @@ public class V1SearchableIndex implements SearchableIndex
         {
             if (segment.intersects(keyRange))
             {
-                var segmentLimit = getSegmentLimit(limit, totalRows, segment);
+                var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                 iterators.add(segment.orderBy(expression, keyRange, context, segmentLimit));
             }
         }
 
         return iterators;
-    }
-
-    private static int getSegmentLimit(int limit, long totalRows, Segment segment)
-    {
-        // We expect the number of top results found in each segment to be proportional to its number of rows
-        // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
-        long segmentRows = 1 + segment.metadata.maxSSTableRowId - segment.metadata.minSSTableRowId;
-        return V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
-                           ? max(1, (int) (limit * ((double) segmentRows / totalRows)))
-                           : limit;
     }
 
     @Override
@@ -220,7 +210,7 @@ public class V1SearchableIndex implements SearchableIndex
         List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>(segments.size());
         for (Segment segment : segments)
         {
-            int segmentLimit = getSegmentLimit(limit, totalRows, segment);
+            var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
             results.add(segment.orderResultsBy(context, keys, exp, segmentLimit));
         }
 

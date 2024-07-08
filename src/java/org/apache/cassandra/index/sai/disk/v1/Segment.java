@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -43,6 +44,8 @@ import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
+
+import static java.lang.Math.max;
 
 /**
  * Each segment represents an on-disk index structure (kdtree/terms/postings) flushed by memory limit or token boundaries,
@@ -214,5 +217,19 @@ public class Segment implements Closeable, SegmentOrdering
         IndexSearcher searcher = getIndexSearcher();
         assert searcher instanceof V2VectorIndexSearcher : searcher;
         return ((V2VectorIndexSearcher) searcher).estimateNodesVisited(limit, candidates);
+    }
+
+    /**
+     * Returns a modified LIMIT (top k) to use with the ANN index that is proportional
+     * to the number of rows in this segment, relative to the total rows in the sstable.
+     */
+    public int proportionalAnnLimit(int limit, long totalRows)
+    {
+        // We expect the number of top results found in each segment to be proportional to its number of rows
+        // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
+        long segmentRows = 1 + metadata.maxSSTableRowId - metadata.minSSTableRowId;
+        return V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
+               ? max(1, (int) (limit * ((double) segmentRows / totalRows)))
+               : limit;
     }
 }

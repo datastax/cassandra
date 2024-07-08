@@ -569,18 +569,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return results;
     }
 
-    /**
-     * Computes the ANN search limit to be used for searching in the sstable index.
-     * @param limit the desired number of TopK rows
-     * @param totalRows total number of rows in all sstables
-     */
-    private int sstableLimit(SSTableReader sstable, int limit, long totalRows)
-    {
-        return V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
-               ? max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)))
-               : limit;
-    }
-
     public IndexFeatureSet indexFeatureSet()
     {
         return indexFeatureSet;
@@ -874,20 +862,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             annNodesCount += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
         }
 
-        long totalRowCount = 0;
+        long totalRows = 0;
         for (SSTableIndex index : queryView.getIndexes())
-            totalRowCount += index.getSSTable().getTotalRows();
+            totalRows += index.getSSTable().getTotalRows();
 
         for (SSTableIndex index : queryView.getIndexes())
         {
-            SSTableReader sstable = index.getSSTable();
-            int sstableLimit = sstableLimit(index.getSSTable(), limit, totalRowCount);
             for (Segment segment : index.getSegments())
             {
                 if (!segment.intersects(mergeRange))
                     continue;
-                int segmentLimit = Math.max(1, (int) (sstableLimit * (double) segment.metadata.numRows / sstable.getTotalRows()));
-                int segmentCandidates = Math.max(1, (int) (candidates * (double) segment.metadata.numRows / totalRowCount));
+                int segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
+                int segmentCandidates = Math.max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
                 annNodesCount += segment.estimateAnnNodesVisited(segmentLimit, segmentCandidates);
             }
         }
