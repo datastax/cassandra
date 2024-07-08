@@ -281,6 +281,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         if (Tracing.isTracing())
         {
+            Tracing.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
             List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
             List<Plan.IndexScan> selectedIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
             Tracing.trace("Selecting {} {} of {} out of {} indexes",
