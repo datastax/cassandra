@@ -65,6 +65,9 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
+import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
@@ -89,7 +92,7 @@ import org.apache.cassandra.utils.concurrent.Ref;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE;
 
-public class QueryController implements Plan.Executor
+public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
@@ -107,7 +110,6 @@ public class QueryController implements Plan.Executor
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
-    private final int limit;
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
     private final IndexFeatureSet indexFeatureSet;
@@ -150,7 +152,6 @@ public class QueryController implements Plan.Executor
         this.cfs = cfs;
         this.command = command;
         this.queryContext = queryContext;
-        this.limit = command.limits().count();
         this.tableQueryMetrics = tableQueryMetrics;
         this.indexFeatureSet = indexFeatureSet;
         this.ranges = dataRanges(command);
@@ -164,7 +165,7 @@ public class QueryController implements Plan.Executor
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
-        this.planFactory = new Plan.Factory(tableMetrics);
+        this.planFactory = new Plan.Factory(tableMetrics, this);
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -260,7 +261,7 @@ public class QueryController implements Plan.Executor
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
         Plan.RowsIteration rowsIteration = planFactory.fetch(keysIterationPlan);
         rowsIteration = planFactory.recheckFilter(command.rowFilter(), rowsIteration);
-        rowsIteration = planFactory.limit(rowsIteration, limit);
+        rowsIteration = planFactory.limit(rowsIteration, command.limits().rows());
 
         Plan optimizedPlan;
         optimizedPlan = QUERY_OPT_LEVEL > 0
@@ -280,6 +281,7 @@ public class QueryController implements Plan.Executor
 
         if (Tracing.isTracing())
         {
+            Tracing.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
             List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
             List<Plan.IndexScan> selectedIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
             Tracing.trace("Selecting {} {} of {} out of {} indexes",
@@ -426,20 +428,18 @@ public class QueryController implements Plan.Executor
 
     // This is an ANN only query
     @Override
-    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression)
+    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression, int softLimit)
     {
         assert expression.operator() == Operator.ANN;
-        Expression planExpression = new Expression(getContext(expression))
-                             .add(Operator.ANN, expression.getIndexValue().duplicate());
+        var planExpression = getAnnPlanExpression(expression);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        var memtableResults = getContext(expression).orderMemtable(queryContext, planExpression, mergeRange, limit);
+        var memtableResults = planExpression.context.orderMemtable(queryContext, planExpression, mergeRange, softLimit);
 
-        QueryViewBuilder.QueryView queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
-
+        var queryView = getQueryView(planExpression);
         try
         {
-            var sstableResults = orderSstables(queryView, Collections.emptyList());
+            var sstableResults = orderSstables(queryView, Collections.emptyList(), softLimit);
             sstableResults.addAll(memtableResults);
             return new MergeScoredPrimaryKeyIterator(sstableResults, queryView.referencedIndexes);
         }
@@ -453,7 +453,8 @@ public class QueryController implements Plan.Executor
     }
 
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
-    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RangeIterator source, RowFilter.Expression expression)
+    @Override
+    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RangeIterator source, RowFilter.Expression expression, int softLimit)
     {
         List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
         List<SSTableIndex> indexesToRelease = new ArrayList<>();
@@ -463,7 +464,10 @@ public class QueryController implements Plan.Executor
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
             // that might not be needed until a deeper search into the ordering index, which happens after
             // we exit this block.
-            iter = new OrderingFilterRangeIterator<>(source, ORDER_CHUNK_SIZE, queryContext, list -> this.getTopKRows(list, expression));
+            iter = new OrderingFilterRangeIterator<>(source,
+                                                     ORDER_CHUNK_SIZE,
+                                                     queryContext,
+                                                     list -> this.getTopKRows(list, expression, softLimit));
             while (iter.hasNext())
             {
                 var next = iter.next();
@@ -481,24 +485,22 @@ public class QueryController implements Plan.Executor
         }
     }
 
-    private IteratorsAndIndexes getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
+    private IteratorsAndIndexes getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
 
         // Filter out PKs now. Each PK is passed to every segment of the ANN index, so filtering shadowed keys
         // eagerly can save some work when going from PK to row id for on disk segments.
         // Since the result is shared with multiple streams, we use an unmodifiable list.
-        var planExpression = new Expression(this.getContext(expression));
-        planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
+        var planExpression = getAnnPlanExpression(expression);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        var memtableResults = this.getContext(expression)
-                                  .orderResultsBy(queryContext, sourceKeys, planExpression, limit);
-        var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
+        var memtableResults = planExpression.context.orderResultsBy(queryContext, sourceKeys, planExpression, softLimit);
 
+        var queryView = getQueryView(planExpression);
         try
         {
-            var sstableScoredPrimaryKeyIterators = orderSstables(queryView, sourceKeys);
+            var sstableScoredPrimaryKeyIterators = orderSstables(queryView, sourceKeys, softLimit);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             if (sstableScoredPrimaryKeyIterators.isEmpty())
             {
@@ -520,13 +522,25 @@ public class QueryController implements Plan.Executor
 
     }
 
+    private QueryViewBuilder.QueryView getQueryView(Expression planExpression)
+    {
+        return new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
+    }
+
+    private Expression getAnnPlanExpression(RowFilter.Expression expression)
+    {
+        var planExpression = new Expression(this.getContext(expression));
+        planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
+        return planExpression;
+    }
+
     /**
      * Create the list of iterators over {@link ScoredPrimaryKey} from the given {@link QueryViewBuilder.QueryView}.
      * @param queryView The view to use to create the iterators.
      * @param sourceKeys The source keys to use to create the iterators. Use an empty list to search all keys.
      * @return The list of iterators over {@link ScoredPrimaryKey}.
      */
-    private List<CloseableIterator<ScoredPrimaryKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys)
+    private List<CloseableIterator<ScoredPrimaryKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys, int softLimit)
     {
         List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>();
         long totalRows = queryView.view.keySet().stream().mapToLong(sstable -> sstable.getTotalRows()).sum();
@@ -537,8 +551,8 @@ public class QueryController implements Plan.Executor
             {
                 assert expressions.size() == 1 : "only one index is expected in ANN expression, found " + expressions.size() + " in " + expressions;
                 annIndexExpression = expressions.get(0);
-                var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, limit, totalRows)
-                                                     : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, limit, totalRows);
+                var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, softLimit, totalRows)
+                                                     : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, softLimit, totalRows);
                 results.addAll(iterators);
             }
             catch (Throwable ex)
@@ -835,5 +849,38 @@ public class QueryController implements Plan.Executor
             this.iterators = iterators;
             this.referencedIndexes = indexes;
         }
+    }
+
+    @Override
+    public int estimateAnnNodesVisited(RowFilter.Expression ordering, int limit, long candidates)
+    {
+        IndexContext context = getContext(ordering);
+        Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
+        View queryView = context.getView();
+
+        int annNodesCount = 0;
+        for (MemtableIndex index : memtables)
+        {
+            // TODO: maybe limit and candidates should be scaled proportionally by the size of the memtable?
+            int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
+            annNodesCount += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
+        }
+
+        long totalRows = 0;
+        for (SSTableIndex index : queryView.getIndexes())
+            totalRows += index.getSSTable().getTotalRows();
+
+        for (SSTableIndex index : queryView.getIndexes())
+        {
+            for (Segment segment : index.getSegments())
+            {
+                if (!segment.intersects(mergeRange))
+                    continue;
+                int segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
+                int segmentCandidates = Math.max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
+                annNodesCount += segment.estimateAnnNodesVisited(segmentLimit, segmentCandidates);
+            }
+        }
+        return annNodesCount;
     }
 }
