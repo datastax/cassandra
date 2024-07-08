@@ -1267,9 +1267,20 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 default:
                     break;
             }
-            return cql
-                 ? String.format("%s %s %s", column.name.toCQLString(), operator, type.toCQLString(value) )
-                 : String.format("%s %s %s", column.name.toString(), operator, type.getString(value));
+            if (cql)
+            {
+                var cqlValueString = type.toCQLString(value);
+                if (cqlValueString.length() > 9)
+                    cqlValueString = cqlValueString.substring(0, 6) + "...";
+                return String.format("%s %s %s", column.name.toCQLString(), operator, cqlValueString);
+            }
+            else
+            {
+                var valueString = type.getString(value);
+                if (valueString.length() > 9)
+                    valueString = valueString.substring(0, 6) + "...";
+                return String.format("%s %s %s", column.name.toString(), operator, valueString);
+            }
         }
 
         @Override
