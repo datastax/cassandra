@@ -414,9 +414,20 @@ abstract public class Plan
 
     protected interface Cost
     {
+        /**
+         * Initialization cost: cannot be reduced later.
+         */
         double initCost();
+
+        /**
+         * Cost to iterate over all the expected keys or rows.  May be reduced by LIMIT.
+         */
         double iterCost();
-        double fullCost();
+
+        default double fullCost()
+        {
+            return initCost() + iterCost();
+        }
     }
 
     protected static final class KeysIterationCost implements Cost
@@ -442,12 +453,6 @@ abstract public class Plan
         public double iterCost()
         {
             return iterCost;
-        }
-
-        @Override
-        public double fullCost()
-        {
-            return initCost + iterCost;
         }
 
         public double costPerKey()
@@ -502,12 +507,6 @@ abstract public class Plan
         public double iterCost()
         {
             return iterCost;
-        }
-
-        @Override
-        public double fullCost()
-        {
-            return initCost + iterCost;
         }
 
         public double costPerRow()
@@ -1194,7 +1193,7 @@ abstract public class Plan
                               + source.expectedKeys() * CostCoefficients.ANN_INPUT_KEY_COST;
             return new KeysIterationCost(expectedKeys,
                                          initCost,
-                                          expectedKeys * CostCoefficients.ANN_SCORED_KEY_COST);
+                                         expectedKeys * CostCoefficients.ANN_SCORED_KEY_COST);
         }
 
         private KeysIterationCost estimateGlobalSortCost()
