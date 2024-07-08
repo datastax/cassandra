@@ -131,7 +131,9 @@ abstract public class Plan
      */
     final Access access;
 
-
+    /**
+     * Lazily caches the estimated fraction of the table data that the result of this plan is expected to match.
+     */
     private double selectivity = -1;
 
 
@@ -800,7 +802,6 @@ abstract public class Plan
             return Objects.equals(this.access, access)
                    ? this
                    : new LiteralIndexScan(factory, id, predicate, matchingKeysCount, this.access);
-
         }
     }
 
@@ -1159,7 +1160,6 @@ abstract public class Plan
             return Objects.equals(access, this.access)
                    ? this
                    : new AnnScan(factory, id, ordering, access);
-
         }
 
         @Override
@@ -1243,7 +1243,6 @@ abstract public class Plan
         @Override
         protected RowsIterationCost estimateCost()
         {
-
             double rowFetchCost = CostCoefficients.ROW_COST
                                   + CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow
                                   + CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow;
@@ -1261,7 +1260,6 @@ abstract public class Plan
             return Objects.equals(access, this.access)
                 ? this
                 : new Fetch(factory, id, source.orig, access);
-
         }
     }
 
@@ -1636,8 +1634,9 @@ abstract public class Plan
         /**
          * Returns the expected number of ANN index nodes that must be visited to get the list of candidates for top K.
          *
-         * @param ordering allows to identify the proper index
-         * @param limit    number of expected
+         * @param ordering   allows to identify the proper index
+         * @param limit      number of rows to fetch
+         * @param candidates number of candidate rows that satisfy the expression predicates
          */
         int estimateAnnNodesVisited(RowFilter.Expression ordering, int limit, long candidates);
     }

@@ -202,12 +202,17 @@ public class Segment implements Closeable, SegmentOrdering
         return String.format("Segment{metadata=%s}", metadata);
     }
 
+    /**
+     * Estimate how many nodes the index will visit to find the top `limit` results
+     * given the number of candidates that match other predicates and taking into
+     * account the size of the index itself.  (The smaller
+     * the number of candidates, the more nodes we expect to visit just to find
+     * results that are in that set.)
+     */
     public int estimateAnnNodesVisited(int limit, int candidates)
     {
         IndexSearcher searcher = getIndexSearcher();
-        if (!(searcher instanceof V2VectorIndexSearcher))
-            throw new UnsupportedOperationException("Not a vector index segment");
-
+        assert searcher instanceof V2VectorIndexSearcher : searcher;
         return ((V2VectorIndexSearcher) searcher).estimateNodesVisited(limit, candidates);
     }
 }
