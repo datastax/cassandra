@@ -52,6 +52,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.store.IndexInput;
@@ -496,5 +497,10 @@ public class IndexDescriptor
     private void registerPerIndexComponent(IndexComponent indexComponent, String index)
     {
         perIndexComponents.computeIfAbsent(index, k -> Sets.newHashSet()).add(indexComponent);
+    }
+
+    public ByteComparable.Version getEncodingVersion(IndexComponent indexComponent)
+    {
+        return version.byteComparableVersionFor(indexComponent, descriptor.version);
     }
 }
