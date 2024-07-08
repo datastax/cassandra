@@ -1151,7 +1151,7 @@ abstract public class Plan
             // occurs that we collected enough rows. keysCount() gives us the
             // average expected number of rows that will be needed but
             // many queries will need fewer than that.
-            return executor.getTopKRows(ordering, keysCount() / 10);
+            return executor.getTopKRows(ordering, max(1, keysCount() / 10));
         }
 
         @Override
