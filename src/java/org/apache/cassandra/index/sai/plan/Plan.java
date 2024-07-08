@@ -825,8 +825,22 @@ abstract public class Plan
             this.subplansSupplier = new LazyTransform<>(subplans, this::propagateAccess);
         }
 
-        private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
+        /**
+         * Adjusts the counts for each subplan to account for the other subplans.
+         * As explained in `estimateSelectivity`, the union of (for instance) two subplans
+         * that each select 50% of the keys is 75%, not 100%.  Thus, we need to reduce the counts
+         * to remove estimated overlapping keys.
+         */
+        private List<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
+            if (selectivity() == 0.0)
+            {
+                // all subplan selectivity should also be 0
+                for (var subplan: subplans)
+                    assert subplan.selectivity() == 0.0;
+                return subplans;
+            }
+
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
             for (KeysIteration subplan : subplans)
             {
@@ -937,9 +951,16 @@ abstract public class Plan
             this.subplansSupplier = new LazyTransform<>(subplans, this::propagateAccess);
         }
 
+        /**
+         * In an intersection operation, the goal is to find the common elements between the results
+         * of multiple subplans.  This requires taking into account not only the selectivity but also
+         * the match probabilities between subplans.
+         * <p>
+         * VSTODO explain what's going on in more detail.
+         */
         private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
-            double loops = selectivity() != 0 ? subplans.get(0).selectivity() / selectivity() : 1.0;
+            double loops = selectivity() == 0 ? 1.0 : subplans.get(0).selectivity() / selectivity();
 
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
             newSubplans.add(subplans.get(0).withAccess(access.scaleDistance(loops).convolute(loops, 1.0)));
@@ -949,7 +970,7 @@ abstract public class Plan
             {
                 KeysIteration subplan = subplans.get(i);
                 double cumulativeSelectivity = subplans.get(0).selectivity() * matchProbability;
-                if (cumulativeSelectivity > 0.0)
+                if (selectivity() > 0.0)
                 {
                     double skipDistance = subplan.selectivity() / cumulativeSelectivity;
                     Access subAccess = access.scaleDistance(subplan.selectivity() / selectivity())
@@ -1283,9 +1304,15 @@ abstract public class Plan
             this.targetSelectivity = targetSelectivity;
         }
 
+        /**
+         * Scale the access pattern of the source to reflect that we will only need
+         * to pull rows from it until the Filter's selectivity is reached.
+         */
         private RowsIteration propagateAccess(RowsIteration source)
         {
-            Access scaledAccess = access.scaleCount(targetSelectivity > 0 ? source.selectivity() / targetSelectivity : 1.0);
+            Access scaledAccess = targetSelectivity == 0.0
+                                  ? Access.EMPTY
+                                  : access.scaleCount(source.selectivity() / targetSelectivity);
             return source.withAccess(scaledAccess);
         }
 
@@ -1794,9 +1821,7 @@ abstract public class Plan
         /** Multiplies all counts by a constant without changing the distribution */
         Access scaleCount(double factor)
         {
-            assert !Double.isNaN(factor) : "Count multiplier must not be NaN";
-            if (Double.isInfinite(factor))
-                return EMPTY;
+            assert Double.isFinite(factor) : "Count multiplier must not be finite; got " + factor;
 
             double[] counts = Arrays.copyOf(this.counts, this.counts.length);
             double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length);
@@ -1811,9 +1836,7 @@ abstract public class Plan
          */
         Access scaleDistance(double factor)
         {
-            assert !Double.isNaN(factor) : "Distance multiplier must not be NaN";
-            if (Double.isInfinite(factor))
-                return EMPTY;
+            assert Double.isFinite(factor) : "Distance multiplier must not be finite; got " + factor;
 
             double[] counts = Arrays.copyOf(this.counts, this.counts.length);
             double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length);
