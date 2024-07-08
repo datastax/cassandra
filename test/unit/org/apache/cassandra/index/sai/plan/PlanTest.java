@@ -25,12 +25,14 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.utils.LongIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -39,6 +41,7 @@ import org.mockito.Mockito;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SCORED_KEY_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ROW_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_KEY_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_OPEN_COST;
 import static org.junit.Assert.*;
 
 public class PlanTest
@@ -61,8 +64,13 @@ public class PlanTest
     private final Plan.TableMetrics table1M = new Plan.TableMetrics(1_000_000, 7, 128, 3);
     private final Plan.TableMetrics table10M = new Plan.TableMetrics(10_000_000, 7, 128, 8);
     
-    private final Plan.Factory factory = new Plan.Factory(table1M);
+    private final Plan.Factory factory = new Plan.Factory(table1M, new CostEstimator(table1M));
 
+
+    static {
+        // For consistent display of plan trees
+        Locale.setDefault(Locale.ENGLISH);
+    }
 
     private static Expression saiPred(String column, Expression.Op operation)
     {
@@ -131,7 +139,7 @@ public class PlanTest
         Plan.KeysIteration plan = factory.intersection(Lists.newArrayList(a1, a2));
         assertEquals(0.0, plan.selectivity(), 0.0001);
         assertEquals(0.0, plan.expectedKeys(), 0.0001);
-        assertTrue(plan.fullCost() <= SAI_KEY_COST * 2);
+        assertTrue(plan.fullCost() <= 2 * factory.tableMetrics.sstables * SAI_OPEN_COST + SAI_KEY_COST * 2);
     }
 
     @Test
@@ -181,7 +189,7 @@ public class PlanTest
         Plan.KeysIteration i1 = factory.intersection(Lists.newArrayList(s1, nested));
         Plan.KeysIteration i2 = factory.intersection(Lists.newArrayList(s1, s2, s3));
         assertEquals(i1.initCost(), i2.initCost(), 0.01);
-        assertTrue(i1.fullCost() > i2.fullCost());
+        assertEquals(i1.fullCost(), i2.fullCost(), 0.01);
     }
 
     @Test
@@ -202,6 +210,7 @@ public class PlanTest
         Plan.KeysIteration li = factory.intersection(Lists.newArrayList(l1, l2));
 
         assertEquals(li.expectedKeys(), ni.expectedKeys(), 0.01);
+
         assertTrue(li.fullCost() < ni.fullCost());
     }
 
@@ -311,8 +320,7 @@ public class PlanTest
     {
         Plan.KeysIteration i = factory.annScan(ordering);
         assertEquals(factory.tableMetrics.rows, i.expectedKeys(), 0.01);
-        assertEquals(0.0, i.initCost(), 0.01);
-        assertEquals(factory.tableMetrics.rows * ANN_SCORED_KEY_COST, i.fullCost(), 0.01);
+        assertEquals(i.initCost() + factory.tableMetrics.rows * ANN_SCORED_KEY_COST, i.fullCost(), 0.01);
     }
 
     @Test
@@ -329,11 +337,15 @@ public class PlanTest
         Plan.RowsIteration filter = factory.recheckFilter(rowFilter, fetch);
         Plan.RowsIteration limit = factory.limit(filter, 3);
 
-        assertEquals(List.of(s2, s1, s3), limit.nodesOfType(Plan.NumericIndexScan.class));
-        assertEquals(List.of(union), limit.nodesOfType(Plan.Union.class));
-        assertEquals(List.of(fetch), limit.nodesOfType(Plan.Fetch.class));
-        assertEquals(List.of(filter), limit.nodesOfType(Plan.Filter.class));
+        assertEquals(List.of(s2.id, s1.id, s3.id), ids(filter.nodesOfType(Plan.NumericIndexScan.class)));
+        assertEquals(List.of(union.id), ids(filter.nodesOfType(Plan.Union.class)));
+        assertEquals(List.of(fetch.id), ids(filter.nodesOfType(Plan.Fetch.class)));
+        assertEquals(List.of(filter.id), ids(filter.nodesOfType(Plan.Filter.class)));
+
+        // Nodes under limit may be different instances because of limit push-down:
         assertEquals(List.of(limit), limit.nodesOfType(Plan.Limit.class));
+        assertEquals(1, limit.nodesOfType(Plan.Filter.class).size());
+        assertEquals(1, limit.nodesOfType(Plan.Union.class).size());
     }
 
 
@@ -349,11 +361,11 @@ public class PlanTest
         assertNotSame(plan1, plan2);
         assertEquals(plan1.id, plan2.id);  // although the result plan is different object, the nodes must retain their ids
         assertTrue(plan2 instanceof Plan.Intersection);
-        assertEquals(Lists.newArrayList(s1, s3), plan2.subplans());
-        assertNotSame(plan1.cost(), plan2.cost());
+        assertEquals(Lists.newArrayList(s1.id, s3.id), ids(plan2.subplans()));
+        assertNotEquals(plan1.cost(), plan2.cost());
 
         Plan plan3 = plan2.remove(s1.id);
-        assertEquals(s3, plan3);
+        assertEquals(s3.id, plan3.id);
 
         Plan plan4 = plan3.remove(s3.id);
         assertTrue(plan4 instanceof Plan.Everything);
@@ -395,17 +407,17 @@ public class PlanTest
         Plan plan3 = plan.limitIntersectedClauses(3);
         Plan.Intersection intersection3 = plan3.firstNodeOfType(Plan.Intersection.class);
         assertNotNull(intersection3);
-        assertEquals(List.of(s3, s4, s1), intersection3.subplans());
+        assertEquals(List.of(s3.id, s4.id, s1.id), ids(intersection3.subplans()));
 
         Plan plan2 = plan.limitIntersectedClauses(2);
         Plan.Intersection intersection2 = plan2.firstNodeOfType(Plan.Intersection.class);
         assertNotNull(intersection2);
-        assertEquals(List.of(s3, s4), intersection2.subplans());
+        assertEquals(List.of(s3.id, s4.id), ids(intersection2.subplans()));
 
         Plan plan1 = plan.limitIntersectedClauses(1);
         Plan.Fetch fetch = plan1.firstNodeOfType(Plan.Fetch.class);
         assertNotNull(fetch);
-        assertSame(s3, fetch.subplans().get(0));
+        assertSame(s3.id, fetch.subplans().get(0).id);
     }
 
     @Test
@@ -430,13 +442,13 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering)
+            public Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering)
+            public Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
@@ -467,7 +479,6 @@ public class PlanTest
     @Test
     public void prettyPrint()
     {
-        Locale.setDefault(Locale.ENGLISH);
         Plan.KeysIteration s1 = factory.numericIndexScan(saiPred1, (long) (0.5 * factory.tableMetrics.rows));
         Plan.KeysIteration s2 = factory.numericIndexScan(saiPred2, (long) (0.002 * factory.tableMetrics.rows));
         Plan.KeysIteration s3 = factory.literalIndexScan(saiPred3, (long) (0.001 * factory.tableMetrics.rows));
@@ -479,15 +490,15 @@ public class PlanTest
 
         String prettyStr = limit.toStringRecursive();
 
-        assertEquals("Limit (sel: 0.000003000, rows: 3.0, cost/row: 213.4, cost: 61099.3..61739.7)\n" +
-                     " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 0.001999000, rows: 1999.0, cost/row: 213.4, cost: 61099.3..487765.9)\n" +
-                     "     └─ Fetch (sel: 0.001999000, rows: 1999.0, cost/row: 213.4, cost: 61099.3..487765.9)\n" +
-                     "         └─ AnnSort (sel: 0.001999000, keys: 1999.0, cost/key: 10.0, cost: 61099.3..81089.3)\n" +
-                     "             └─ Union (sel: 0.001999000, keys: 1999.0, cost/key: 25.6, cost: 3.0..51104.3)\n" +
-                     "                 ├─ Intersection (sel: 0.001000000, keys: 1000.0, cost/key: 50.1, cost: 2.0..50103.3)\n" +
-                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, keys: 2000.0, cost/key: 1.0, cost: 1.0..2001.0)\n" +
-                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, keys: 500000.0, cost/key: 1.0, cost: 1.0..500001.0)\n" +
-                     "                 └─ LiteralIndexScan of pred3_idx using RANGE(pred3) (sel: 0.001000000, keys: 1000.0, cost/key: 1.0, cost: 1.0..1001.0)\n", prettyStr);
+        assertEquals("Limit 3 (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
+                     " └─ Filter pred1 < X AND pred2 < X AND pred3 < X (sel: 1.000000000) (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
+                     "     └─ Fetch (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
+                     "         └─ AnnSort (keys: 3.0, cost/key: 10.0, cost: 40118.3..40148.3)\n" +
+                     "             └─ Union (keys: 1999.0, cost/key: 17.0, cost: 90.0..34091.3)\n" +
+                     "                 ├─ Intersection (keys: 1000.0, cost/key: 33.0, cost: 60.0..33061.3)\n" +
+                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 1.0, cost: 30.0..2030.0)\n" +
+                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 15.5, cost: 30.0..31031.3)\n" +
+                     "                 └─ LiteralIndexScan of pred3_idx using RANGE(pred3) (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 1.0, cost: 30.0..1030.0)\n", prettyStr);
     }
 
     @Test
@@ -504,8 +515,8 @@ public class PlanTest
         Plan.RowsIteration origPlan = factory.fetch(intersect);
 
         Plan optimizedPlan = origPlan.optimize();
-        assertEquals(List.of(s2, s3, s4, s1), intersect.subplans()); // subplans must be sorted by selectivity
-        assertEquals(List.of(s2), optimizedPlan.subplans()); // look ma, no intersection under the fetch node
+        assertEquals(List.of(s2.id, s3.id, s4.id, s1.id), ids(intersect.subplans())); // subplans must be sorted by selectivity
+        assertEquals(List.of(s2.id), ids(optimizedPlan.subplans())); // look ma, no intersection under the fetch node
     }
 
     @Test
@@ -515,7 +526,7 @@ public class PlanTest
         Plan.KeysIteration a2 = factory.numericIndexScan(saiPred2, (long)(0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration plan = factory.intersection(Lists.newArrayList(a1, a2));
         Plan optimized = plan.optimize();
-        assertSame(optimized, a1);
+        assertEquals(optimized.id, a1.id);
     }
 
     @Test
@@ -577,12 +588,28 @@ public class PlanTest
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
 
         Plan optimizedPlan = origPlan.optimize();
+
         assertTrue(optimizedPlan.contains(p -> p instanceof Plan.AnnScan));
-        assertEquals(0.0, optimizedPlan.cost().initCost(), 0.0);
 
         // The optimized plan should finish before the original plan even gets the first row out ;)
         assertTrue(optimizedPlan.cost().fullCost() < origPlan.cost().initCost());
     }
+
+    @Test
+    public void notReplaceAnnSortWithAnnScan()
+    {
+        // Test for CNDB-9898
+        Plan.KeysIteration indexScan = factory.numericIndexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));
+        Plan.KeysIteration sort = factory.annSort(indexScan, ordering);
+        Plan.RowsIteration fetch = factory.fetch(sort);
+        Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter1, fetch);
+        Plan.RowsIteration origPlan = factory.limit(postFilter, 1);
+
+        Plan optimizedPlan = origPlan.optimize();
+        assertFalse(optimizedPlan.contains(p -> p instanceof Plan.AnnScan));
+        assertTrue(optimizedPlan.contains(p -> p instanceof Plan.AnnSort));
+    }
+
 
     @Test
     public void replaceIntersectionAndAnnSortWithAnnScan()
@@ -598,7 +625,6 @@ public class PlanTest
 
         Plan optimizedPlan = origPlan.optimize();
         assertTrue(optimizedPlan.contains(p -> p instanceof Plan.AnnScan));
-        assertEquals(0.0, optimizedPlan.cost().initCost(), 0.0);
 
         // The optimized plan should finish before the original plan even gets the first row out ;)
         assertTrue(optimizedPlan.cost().fullCost() < origPlan.cost().initCost());
@@ -638,7 +664,7 @@ public class PlanTest
 
         Plan.Intersection optimizedIntersection = optimizedPlan.firstNodeOfType(Plan.Intersection.class);
         assertNotNull(optimizedIntersection);
-        assertEquals(List.of(indexScan1, indexScan2), optimizedIntersection.subplans());
+        assertEquals(List.of(indexScan1.id, indexScan2.id), ids(optimizedIntersection.subplans()));
     }
 
     @Test
@@ -656,7 +682,7 @@ public class PlanTest
         Plan optimizedPlan = origPlan.optimize();
         Plan.Intersection optimizedIntersection = optimizedPlan.firstNodeOfType(Plan.Intersection.class);
         assertNotNull(optimizedIntersection);
-        assertEquals(List.of(indexScan1, indexScan2, indexScan3), optimizedIntersection.subplans());
+        assertEquals(List.of(indexScan1.id, indexScan2.id, indexScan3.id), ids(optimizedIntersection.subplans()));
     }
 
     @Test
@@ -736,7 +762,7 @@ public class PlanTest
         testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.001, 1.0), List.of(2));
 
 
-        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.0001, 0.0001), List.of(3));
+        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.0001, 0.0001), List.of(2, 3));
         testIntersectionsUnderLimit(table10M, List.of(0.001, 0.001, 0.001), List.of(3));
         testIntersectionsUnderLimit(table10M, List.of(0.002, 0.002, 0.002), List.of(3));
         testIntersectionsUnderLimit(table10M, List.of(0.005, 0.005, 0.005), List.of(3));
@@ -745,7 +771,7 @@ public class PlanTest
 
     private void testIntersectionsUnderLimit(Plan.TableMetrics metrics, List<Double> selectivities, List<Integer> expectedIndexScanCount)
     {
-        Plan.Factory factory = new Plan.Factory(metrics);
+        Plan.Factory factory = new Plan.Factory(metrics, new CostEstimator(metrics));
         List<Plan.KeysIteration> indexScans = new ArrayList<>(selectivities.size());
         RowFilter.Builder rowFilterBuilder = RowFilter.builder(true);
         RowFilter.Expression[] predicates = new RowFilter.Expression[] { pred1, pred2, pred3, pred4 };
@@ -835,16 +861,16 @@ public class PlanTest
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.002, 1.0), List.of(2));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.001, 1.0), List.of(2));
 
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(3));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(2, 3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(2, 3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.001, 0.001), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.002, 0.002, 0.002), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.005, 0.005, 0.005), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.008, 0.008, 0.008), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.01), List.of(3));
 
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(3));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(3));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(2, 3));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(2, 3));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.001, 0.001), List.of(3));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.002, 0.002, 0.002), List.of(3));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.005, 0.005, 0.005), List.of(3));
@@ -872,7 +898,7 @@ public class PlanTest
                                                List<Double> selectivities,
                                                List<Integer> expectedIndexScanCount)
     {
-        Plan.Factory factory = new Plan.Factory(metrics);
+        Plan.Factory factory = new Plan.Factory(metrics, new CostEstimator(metrics));
         List<Plan.KeysIteration> indexScans = new ArrayList<>(selectivities.size());
         RowFilter.Builder rowFilterBuilder = RowFilter.builder(true);
         for (int i = 0; i < selectivities.size(); i++)
@@ -895,5 +921,81 @@ public class PlanTest
         assertTrue("original:\n" + origPlan.toStringRecursive() + "optimized:\n" + optimizedPlan.toStringRecursive(),
                      expectedIndexScanCount.contains(resultIndexScans.size()));
     }
-    
+
+    @Test
+    public void testExternalCostEstimator()
+    {
+        Plan.CostEstimator est1 = Mockito.mock(Plan.CostEstimator.class);
+        Mockito.when(est1.estimateAnnNodesVisited(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(1);
+        Plan.CostEstimator est2 = Mockito.mock(Plan.CostEstimator.class);
+        Mockito.when(est2.estimateAnnNodesVisited(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(1000);
+
+        Plan.Factory factory1 = new Plan.Factory(table1M, est1);
+        Plan scan1 = factory1.annScan(ordering);
+
+        Plan.Factory factory2 = new Plan.Factory(table1M, est2);
+        Plan scan2 = factory2.annScan(ordering);
+
+        assertTrue(scan2.initCost() > scan1.initCost());
+        assertTrue(scan2.fullCost() > scan1.fullCost());
+    }
+
+    @Test
+    public void testAccessConvolution()
+    {
+        Plan.Access access = Plan.Access.sequential(100);
+        Plan.Access conv = access.scaleDistance(10.0)
+                                 .convolute(10, 1.0)
+                                 .scaleDistance(5.0)
+                                 .convolute(3, 1.0);
+        assertEquals(access.totalDistance * 50.0, conv.totalDistance, 0.001);
+        assertEquals(3000.0, conv.totalCount, 0.1);
+    }
+
+    @Test
+    public void testLazyAccessPropagation()
+    {
+        Plan.KeysIteration indexScan1 = Mockito.mock(Plan.KeysIteration.class);
+        Mockito.when(indexScan1.withAccess(Mockito.any())).thenReturn(indexScan1);
+        Mockito.when(indexScan1.estimateCost()).thenReturn(new Plan.KeysIterationCost(20,0.0, 0.5));
+        Mockito.when(indexScan1.estimateSelectivity()).thenReturn(0.001);
+        Mockito.when(indexScan1.description()).thenReturn("");
+
+        Plan.KeysIteration indexScan2 = factory.numericIndexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
+        Plan.KeysIteration indexScan3 = factory.numericIndexScan(saiPred3, (long) (0.5 * factory.tableMetrics.rows));
+        Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2, indexScan3));
+        Plan.RowsIteration fetch = factory.fetch(intersection);
+        Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
+        Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
+        origPlan.cost();
+
+        Mockito.verify(indexScan1, Mockito.times(1)).withAccess(Mockito.any());
+        Mockito.verify(indexScan1, Mockito.times(1)).estimateCost();
+    }
+
+    private List<Integer> ids(List<? extends Plan> subplans)
+    {
+        return subplans.stream().map(p -> p.id).collect(Collectors.toList());
+    }
+
+    static class CostEstimator implements Plan.CostEstimator
+    {
+        final Plan.TableMetrics metrics;
+
+        CostEstimator(Plan.TableMetrics metrics)
+        {
+            this.metrics = metrics;
+        }
+
+
+        @Override
+        public int estimateAnnNodesVisited(RowFilter.Expression ordering, int limit, long candidates)
+        {
+            return metrics.sstables * VectorMemtableIndex.expectedNodesVisited(
+            limit / metrics.sstables,
+            (int) candidates / metrics.sstables,
+            500000);  // taken from a sample database with 10M 16-dimensional vectors
+        }
+    }
+
 }
