@@ -18,7 +18,7 @@ from datetime import datetime
 import time
 
 from cassandra.query import QueryTrace, TraceUnavailable
-from cqlshlib.displaying import MAGENTA
+from cqlshlib.displaying import colorme, MAGENTA
 
 
 def print_trace_session(shell, session, session_id, partial_session=False):
@@ -35,6 +35,14 @@ def print_trace_session(shell, session, session_id, partial_session=False):
         print_trace(shell, trace)
 
 
+def format_trace(activity):
+    """
+    Format a trace activity, without the control-character mangling we use for other strings.
+    (Trace activity can contain newlines.)
+    """
+    return colorme(activity, None, 'text')
+
+
 def print_trace(shell, trace):
     """
     Print an already populated cassandra.query.QueryTrace instance.
@@ -46,7 +54,7 @@ def print_trace(shell, trace):
     names = ['activity', 'timestamp', 'source', 'source_elapsed', 'client']
 
     formatted_names = list(map(shell.myformat_colname, names))
-    formatted_values = [list(map(shell.myformat_value, row)) for row in rows]
+    formatted_values = [[format_trace(row[0])] + list(map(shell.myformat_value, row[1:])) for row in rows]
 
     shell.writeresult('')
     shell.writeresult('Tracing session: ', color=MAGENTA, newline=False)
