@@ -65,7 +65,7 @@ public class LongType extends NumberType<Long>
     {
         if (accessor.isEmpty(data))
             return null;
-        if (version == ByteComparable.Version.LEGACY)
+        if (version != ByteComparable.Version.OSS50)
             return ByteSource.signedFixedLengthNumber(accessor, data);
         else
             return ByteSource.variableLengthInteger(accessor.getLong(data, 0));
@@ -76,7 +76,7 @@ public class LongType extends NumberType<Long>
     {
         if (comparableBytes == null)
             return accessor.empty();
-        if (version == ByteComparable.Version.LEGACY)
+        if (version != ByteComparable.Version.OSS50)
             return ByteSourceInverse.getSignedFixedLength(accessor, comparableBytes, 8);
         else
             return accessor.valueOf(ByteSourceInverse.getVariableLengthInteger(comparableBytes));
