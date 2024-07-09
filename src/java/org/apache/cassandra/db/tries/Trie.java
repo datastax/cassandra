@@ -408,8 +408,37 @@ public abstract class Trie<T>
         return walker.complete();
     }
 
+
     /**
-     * Process the trie using the given Walker.
+     * Process the trie using the given ValueConsumer, skipping all branches below the top content-bearing node.
+     */
+    public Void forEachValueSkippingBranches(ValueConsumer<T> consumer)
+    {
+        return processSkippingBranches(consumer, cursor(Direction.FORWARD));
+    }
+
+    /**
+     * Call the given consumer on all (path, content) pairs with non-null content in the trie in order, skipping all
+     * branches below the top content-bearing node.
+     */
+    public void forEachEntrySkippingBranches(BiConsumer<ByteComparable, T> consumer)
+    {
+        forEachEntrySkippingBranches(Direction.FORWARD, consumer);
+    }
+
+    /**
+     * Call the given consumer on all (path, content) pairs with non-null content in the trie in order, skipping all
+     * branches below the top content-bearing node.
+     */
+    public void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable, T> consumer)
+    {
+        processSkippingBranches(new TrieEntriesWalker.WithConsumer<T>(consumer), direction);
+        // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
+        // implemented with default methods alone.
+    }
+
+    /**
+     * Process the trie using the given Walker, skipping all branches below the top content-bearing node.
      */
     public <R> R processSkippingBranches(Walker<T, R> walker, Direction direction)
     {

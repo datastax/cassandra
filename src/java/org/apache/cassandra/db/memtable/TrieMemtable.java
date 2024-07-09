@@ -339,7 +339,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     {
         long min = Long.MAX_VALUE;
         for (MemtableShard shard : shards)
-            min =  Long.min(min, shard.minTimestamp());
+            min =  EncodingStats.mergeMinTimestamp(min, shard.stats);
         return min != EncodingStats.NO_STATS.minTimestamp ? min : NO_MIN_TIMESTAMP;
     }
 
@@ -347,7 +347,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     {
         int min = Integer.MAX_VALUE;
         for (MemtableShard shard : shards)
-            min =  Integer.min(min, shard.minLocalDeletionTime());
+            min =  EncodingStats.mergeMinLocalDeletionTime(min, shard.stats);
         return min;
     }
 
