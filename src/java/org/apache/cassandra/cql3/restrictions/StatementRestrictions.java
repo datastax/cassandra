@@ -670,7 +670,7 @@ public class StatementRestrictions
                                 throw invalidRequest(StatementRestrictions.ANN_REQUIRES_INDEX_MESSAGE);
                     }
 
-                    if (!allowFiltering)
+                    if (!allowFiltering  && requiresAllowFilteringIfNotSpecified(table))
                         throwRequiresAllowFilteringError(table, columnRestrictions);
                 }
                 filterRestrictionsBuilder.add(nonPrimaryKeyRestrictions);
