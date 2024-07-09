@@ -180,7 +180,7 @@ cqlsh_help_cmd_syntax_rules = r'''
 '''
 
 cqlsh_tracing_cmd_syntax_rules = r'''
-<tracingCommand> ::= "TRACING" ( switch=( "ON" | "OFF" ) )?
+<tracingCommand> ::= "TRACING" ( switch=( "ON" | "OFF" | "FULL" | "COMPACT" ) )?
                    ;
 '''
 
