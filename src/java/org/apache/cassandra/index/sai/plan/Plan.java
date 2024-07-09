@@ -149,6 +149,12 @@ abstract public class Plan
         return a < 1e-9;
     }
 
+    /** dividing by extremely tiny numbers can cause overflow so clamp the minimum to 1e-9 */
+    protected static double boundedSelectivity(double selectivity) {
+        assert 0 <= selectivity && selectivity <= 1.0;
+        return Math.max(1e-9, selectivity);
+    }
+
     /**
      * Returns a new list containing subplans of this node.
      * The list can be later freely modified by the caller and does not affect the original plan.
@@ -976,19 +982,11 @@ abstract public class Plan
             {
                 KeysIteration subplan = subplans.get(i);
                 double cumulativeSelectivity = subplans.get(0).selectivity() * matchProbability;
-                if (isEffectivelyZero(selectivity()))
-                {
-                    newSubplans.add(subplan.withAccess(Access.EMPTY));
-                }
-                else
-                {
-                    assert !isEffectivelyZero(cumulativeSelectivity);
-                    double skipDistance = subplan.selectivity() / cumulativeSelectivity;
-                    Access subAccess = access.scaleDistance(subplan.selectivity() / selectivity())
-                                             .convolute(loops * matchProbability, skipDistance)
-                                             .forceSkip();
-                    newSubplans.add(subplan.withAccess(subAccess));
-                }
+                double skipDistance = subplan.selectivity() / boundedSelectivity(cumulativeSelectivity);
+                Access subAccess = access.scaleDistance(subplan.selectivity() / boundedSelectivity(selectivity()))
+                                         .convolute(loops * matchProbability, skipDistance)
+                                         .forceSkip();
+                newSubplans.add(subplan.withAccess(subAccess));
                 matchProbability *= subplan.selectivity();
             }
             return newSubplans;
@@ -1312,14 +1310,12 @@ abstract public class Plan
         }
 
         /**
-         * Scale the access pattern of the source to reflect that we will only need
-         * to pull rows from it until the Filter's selectivity is reached.
+         * Scale the access pattern of the source to reflect that we will need
+         * to keep pulling rows from it until the Filter is satisfied.
          */
         private RowsIteration propagateAccess(RowsIteration source)
         {
-            Access scaledAccess = KeysIteration.isEffectivelyZero(targetSelectivity)
-                                  ? Access.EMPTY
-                                  : access.scaleCount(source.selectivity() / targetSelectivity);
+            Access scaledAccess = access.scaleCount(source.selectivity() / boundedSelectivity(targetSelectivity));
             return source.withAccess(scaledAccess);
         }
 
