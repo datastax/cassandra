@@ -462,7 +462,7 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testEdgeNgramFilterWithOR()
+    public void testEdgeNgramFilterWithOR() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -482,43 +482,14 @@ public class LuceneAnalyzerTest extends SAITester
         execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
         execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
 
-        flush();
-
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL0133AU'").size());
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : 'WFS2684AU'").size());
-        assertEquals(0, execute("SELECT val FROM %s WHERE val : ''").size());
-        assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val : 'WFS2684AU'").size());
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : '' OR val : 'WFS2684AU'").size());
-        assertEquals(0, execute("SELECT val FROM %s WHERE val : '' AND val : 'WFS2684AU'").size());
-    }
-
-    @Test
-    public void testEdgeNgramFilterWithOrAndNoFlush()
-    {
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
-                    "'index_analyzer': '{\n" +
-                    "\t\"tokenizer\":{\"name\":\"standard\", \"args\":{}}," +
-                    "\t\"filters\":[{\"name\":\"lowercase\", \"args\":{}}, " +
-                    "{\"name\":\"edgengram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"30\"}}],\n" +
-                    "\t\"charFilters\":[]" +
-                    "}'};");
-
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
-        execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");
-        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 Mercer High Growth Managed')");
-        execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
-        execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
-
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL0133AU'").size());
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : 'WFS2684AU'").size());
-        assertEquals(0, execute("SELECT val FROM %s WHERE val : ''").size());
-        assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val : 'WFS2684AU'").size());
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : '' OR val : 'WFS2684AU'").size());
-        assertEquals(0, execute("SELECT val FROM %s WHERE val : '' AND val : 'WFS2684AU'").size());
+        beforeAndAfterFlush(() -> {
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL0133AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : 'WFS2684AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val : ''").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val : 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : '' OR val : 'WFS2684AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val : '' AND val : 'WFS2684AU'").size());
+        });
     }
 
     @Test
