@@ -394,6 +394,20 @@ public final class ByteSourceInverse
     }
 
     /**
+     * Reads the bytes of the given source into the given byte array and returns the number of bytes read. Doesn't do
+     * any transformation on the bytes, just reads them until it reads an {@code ByteSource.END_OF_STREAM} byte. If the
+     * target byte array does not have enough space to fit the whole source, a {@code RuntimeException} is thrown. See
+     * also {@link ByteSource#nextBytes(byte[])}.
+     */
+    public static int readBytesMustFit(ByteSource byteSource, byte[] dest)
+    {
+        int read = byteSource.nextBytes(dest);
+        if (read == dest.length && byteSource.next() != ByteSource.END_OF_STREAM)
+            throw new RuntimeException(String.format("Number of bytes available exceeds the buffer size of %d.", dest.length));
+        return read;
+    }
+
+    /**
      * Converts the given {@link ByteSource} to a UTF-8 {@link String}.
      *
      * @param byteSource The source we're interested in.

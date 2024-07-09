@@ -230,7 +230,7 @@ public class TypeUtil
         else if (type instanceof DecimalType)
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, DECIMAL_APPROXIMATION_BYTES);
         else
-            ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
+            ByteSourceInverse.readBytesMustFit(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
     }
 
     /**
