@@ -30,16 +30,15 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
-import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -548,18 +547,6 @@ abstract public class Plan
         protected abstract KeysIterationCost estimateCost();
 
         /**
-         * Estimates the cost of advancing the key set iterator to a different key.
-         * This has to be a function, because the skipping cost may depend on the amount of data
-         * and the distance of the skip.
-         *
-         * @param distance distance of the skip expressed as the fraction of the whole key set;
-         *                 the distance of 1.0 means jumping to the end of the key stream,
-         *                 the distance of 1.0 / expectedKeys() means jumping to the next key.
-         * @return estimated cost
-         */
-        protected abstract double estimateCostPerSkip(double distance);
-
-        /**
          * Executes the operation represented by this node.
          * The node itself isn't supposed for doing the actual work, but rather serves as a director which
          * delegates the work to the query controller through the passed Executor.
@@ -568,7 +555,7 @@ abstract public class Plan
          * @param softLimit the number of keys likely to be requested from the returned iterator;
          *                  this is a hint only - it does not change the result set, but may change performance
          */
-        protected abstract Iterator<?> execute(Executor executor, int softLimit);
+        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit);
 
         protected abstract KeysIteration withAccess(Access patterns);
 
@@ -783,7 +770,7 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<?> execute(Executor executor, int softLimit)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
             return executor.getKeysFromIndex(predicate);
         }
@@ -1143,10 +1130,10 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<?> execute(Executor executor, int softLimit)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
             // soft limit for fetching the keys from source is MAX_VALUE because we need to know
-            // all keys to pick the top K.
+            // all keys from which to pick the top K.
             RangeIterator sourceIterator = (RangeIterator) source.execute(executor, Integer.MAX_VALUE);
             return executor.getTopKRows(sourceIterator, ordering, softLimit);
         }
@@ -1380,7 +1367,6 @@ abstract public class Plan
         {
             return String.format("%s (sel: %.9f)", filter, selectivity() / source.get().selectivity());
         }
-
     }
 
     /**
@@ -1390,9 +1376,9 @@ abstract public class Plan
     static class Limit extends RowsIteration
     {
         private final LazyTransform<RowsIteration> source;
-        private final long limit;
+        final int limit;
 
-        private Limit(Factory factory, int id, RowsIteration source, long limit, Access access)
+        private Limit(Factory factory, int id, RowsIteration source, int limit, Access access)
         {
             super(factory, id, access);
             this.limit = limit;
@@ -1669,9 +1655,9 @@ abstract public class Plan
      */
     public interface Executor
     {
-        Iterator<?> getKeysFromIndex(Expression predicate);
-        Iterator<?> getTopKRows(RowFilter.Expression ordering, int softLimit);
-        Iterator<?> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit);
+        Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
+        Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering, int softLimit);
+        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit);
     }
 
     /**

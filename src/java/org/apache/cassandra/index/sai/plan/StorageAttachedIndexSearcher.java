@@ -121,7 +121,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
         FilterTree filterTree = analyzeFilter();
-        Iterator<?> keysIterator = controller.buildIterator();
+        Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator();
 
         if (command.isTopK())
         {

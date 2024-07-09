@@ -52,6 +52,7 @@ import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -66,7 +67,6 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
@@ -262,7 +262,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
         Plan.RowsIteration rowsIteration = planFactory.fetch(keysIterationPlan);
         rowsIteration = planFactory.recheckFilter(command.rowFilter(), rowsIteration);
-        rowsIteration = planFactory.limit(rowsIteration, command.limits().count());
+        rowsIteration = planFactory.limit(rowsIteration, command.limits().rows());
 
         Plan optimizedPlan;
         optimizedPlan = QUERY_OPT_LEVEL > 0
@@ -319,7 +319,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return keysIterationPlan;
     }
 
-    public Iterator<?> buildIterator()
+    public Iterator<? extends PrimaryKey> buildIterator()
     {
         try
         {
@@ -327,7 +327,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             Plan.KeysIteration keysIteration = plan.firstNodeOfType(Plan.KeysIteration.class);
             assert keysIteration != null : "No index scan found";
 
-            // We need to estimate how much keys we'll be fetching for better performance.
+            // We need to estimate how many keys we'll be fetching for better performance.
             // Some indexes may make a good use of knowing the number of requested keys in advance,
             // because incremental re-requesting for more keys may be more expensive than getting them
             // all at once.
@@ -338,8 +338,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             // from the index, so we need to reflect that in the limit.
             Plan.Filter filter = plan.firstNodeOfType(Plan.Filter.class);
             int softLimit = (filter != null)
-                ? SoftLimitUtil.softLimit(hardLimit, 0.9, filter.relativeSelectivity())
-                : hardLimit;
+                          ? SoftLimitUtil.softLimit(hardLimit, 0.9, filter.selectivity())
+                          : hardLimit;
 
             return keysIteration.execute(this, softLimit);
         }
@@ -598,7 +598,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      *  2. The table associated with the query is not using clustering keys
      *  3. The clustering index filter for the command wants the row.
      *
-     *  Item 3 is important in paged queries where the {@link org.apache.cassandra.db.filter.ClusteringIndexSliceFilter} for
+     *  Item 3 is important in paged queries where the {@link ClusteringIndexSliceFilter} for
      *  subsequent paged queries may not select rows that are returned by the index
      *  search because that is initially partition based.
      *
@@ -890,7 +890,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 if (!segment.intersects(mergeRange))
                     continue;
                 int segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
-                int segmentCandidates = Math.max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
+                int segmentCandidates = max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
                 annNodesCount += segment.estimateAnnNodesVisited(segmentLimit, segmentCandidates);
             }
         }
