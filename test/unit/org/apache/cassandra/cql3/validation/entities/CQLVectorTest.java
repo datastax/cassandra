@@ -456,6 +456,13 @@ public class CQLVectorTest extends CQLTester
     }
 
     @Test
+    public void explicitlyFrozen() throws Throwable
+    {
+        // explicitly frozen
+        execute(format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector<text, 2>>)", KEYSPACE));
+    }
+
+    @Test
     public void invalidSyntax() throws Throwable
     {
         assertInvalidThrowMessage("mismatched input '>' expecting ','",
@@ -471,10 +478,6 @@ public class CQLVectorTest extends CQLTester
                                   InvalidRequestException.class,
                                   format("CREATE TABLE %s.t (k int PRIMARY KEY, v vector)", KEYSPACE));
 
-        // explicitly frozen, which is not supported
-        assertInvalidThrowMessage("frozen<> is only allowed on collections, tuples, and user-defined types",
-                                  SyntaxException.class,
-                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector<text, 2>>)", KEYSPACE));
         assertInvalidThrowMessage("mismatched input '>' expecting ','",
                                   SyntaxException.class,
                                   format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector<text>>)", KEYSPACE));
