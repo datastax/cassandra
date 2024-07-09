@@ -143,6 +143,13 @@ abstract public class Plan
         this.factory = factory;
         this.access = access;
     }
+
+    /** selectivity comparisons to 0 will probably cause bugs, use this instead */
+    protected static boolean isEffectivelyZero(double a) {
+        assert a >= 0;
+        return a < 1e-9;
+    }
+
     /**
      * Returns a new list containing subplans of this node.
      * The list can be later freely modified by the caller and does not affect the original plan.
@@ -833,11 +840,11 @@ abstract public class Plan
          */
         private List<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
-            if (selectivity() == 0.0)
+            if (isEffectivelyZero(selectivity()))
             {
-                // all subplan selectivity should also be 0
+                // all subplan selectivity should also be ~0
                 for (var subplan: subplans)
-                    assert subplan.selectivity() == 0.0;
+                    assert isEffectivelyZero(subplan.selectivity());
                 return subplans;
             }
 
@@ -960,7 +967,7 @@ abstract public class Plan
          */
         private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
-            double loops = selectivity() == 0 ? 1.0 : subplans.get(0).selectivity() / selectivity();
+            double loops = isEffectivelyZero(selectivity()) ? 1.0 : subplans.get(0).selectivity() / selectivity();
 
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
             newSubplans.add(subplans.get(0).withAccess(access.scaleDistance(loops).convolute(loops, 1.0)));
@@ -970,17 +977,18 @@ abstract public class Plan
             {
                 KeysIteration subplan = subplans.get(i);
                 double cumulativeSelectivity = subplans.get(0).selectivity() * matchProbability;
-                if (selectivity() > 0.0)
+                if (isEffectivelyZero(selectivity()))
                 {
+                    newSubplans.add(subplan.withAccess(Access.EMPTY));
+                }
+                else
+                {
+                    assert !isEffectivelyZero(cumulativeSelectivity);
                     double skipDistance = subplan.selectivity() / cumulativeSelectivity;
                     Access subAccess = access.scaleDistance(subplan.selectivity() / selectivity())
                                              .convolute(loops * matchProbability, skipDistance)
                                              .forceSkip();
                     newSubplans.add(subplan.withAccess(subAccess));
-                }
-                else
-                {
-                    newSubplans.add(subplan.withAccess(Access.EMPTY));
                 }
                 matchProbability *= subplan.selectivity();
             }
@@ -1310,7 +1318,7 @@ abstract public class Plan
          */
         private RowsIteration propagateAccess(RowsIteration source)
         {
-            Access scaledAccess = targetSelectivity == 0.0
+            Access scaledAccess = KeysIteration.isEffectivelyZero(targetSelectivity)
                                   ? Access.EMPTY
                                   : access.scaleCount(source.selectivity() / targetSelectivity);
             return source.withAccess(scaledAccess);
