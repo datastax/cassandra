@@ -454,7 +454,7 @@ public class PlanTest
             }
         };
 
-        RangeIterator iterator = (RangeIterator) plan.execute(executor);
+        RangeIterator iterator = (RangeIterator) plan.execute(executor, Integer.MAX_VALUE);
         assertEquals(LongIterator.convert(1L, 2L, 100L), LongIterator.convert(iterator));
     }
 
