@@ -91,12 +91,16 @@ public class CQLVectorTest extends CQLTester.InMemory
     }
 
     @Test
-    public void selectNonPk()
+    public void selectNonPk() throws Throwable
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<int, 2>)");
 
         execute("INSERT INTO %s (pk, value) VALUES (0, [1, 2])");
         assertRows(execute("SELECT * FROM %s WHERE value=[1, 2] ALLOW FILTERING"), row(0, list(1, 2)));
+
+        assertInvalidThrowMessage("Cannot execute this query as it might involve data filtering and thus may have unpredictable performance. If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING",
+                                  InvalidRequestException.class,
+                                  "SELECT * FROM %s WHERE value=[1, 2]");
     }
 
     @Test
