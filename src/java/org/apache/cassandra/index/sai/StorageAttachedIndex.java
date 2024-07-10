@@ -321,7 +321,9 @@ public class StorageAttachedIndex implements Index
 
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
         AbstractAnalyzer.fromOptions(type, options); // will throw if invalid
-        IndexWriterConfig config = IndexWriterConfig.fromOptions(null, type, options);
+        if (AbstractAnalyzer.hasQueryAnalyzer(options))
+            AbstractAnalyzer.fromOptionsQueryAnalyzer(type, options); // will throw if invalid
+        var config = IndexWriterConfig.fromOptions(null, type, options);
 
         // If we are indexing map entries we need to validate the sub-types
         if (TypeUtil.isComposite(type))
