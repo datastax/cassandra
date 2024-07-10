@@ -671,8 +671,15 @@ public class LuceneAnalyzerTest extends SAITester
         .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
 
+        var invalidCharfilters = "{\"tokenizer\" : {\"name\" : \"keyword\"},\"charfilters\" : [{\"name\" : \"htmlstrip\"}]}";
+
         // Invalid config name, charfilters should be charFilters
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\"tokenizer\" : {\"name\" : \"keyword\"},\"charfilters\" : [{\"name\" : \"htmlstrip\"}]}'}"))
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'" + invalidCharfilters + "'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Invalid field name 'charfilters' in analyzer config. Valid fields are: [tokenizer, filters, charFilters]");
+
+        // Invalid config name on query_analyzer, charfilters should be charFilters
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'standard', 'query_analyzer':'" + invalidCharfilters + "'}"))
         .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Invalid field name 'charfilters' in analyzer config. Valid fields are: [tokenizer, filters, charFilters]");
 
