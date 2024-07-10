@@ -115,9 +115,6 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
     public static final Predicate<Object> IS_PARTITION_BOUNDARY = TrieMemtable::isPartitionBoundary;
 
-    /** The byte-ordering conversion version to use for memtables. */
-    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
-
     // Set to true when the memtable requests a switch (e.g. for trie size limit being reached) to ensure only one
     // thread calls cfs.switchMemtableIfCurrent.
     private AtomicBoolean switchRequested = new AtomicBoolean(false);
@@ -445,7 +442,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
     private static DecoratedKey getPartitionKeyFromPath(TableMetadata metadata, ByteComparable path)
     {
-        return BufferDecoratedKey.fromByteComparable(path, BYTE_COMPARABLE_VERSION, metadata.partitioner);
+        return BufferDecoratedKey.fromByteComparable(path, Trie.BYTE_COMPARABLE_VERSION, metadata.partitioner);
     }
 
     /**

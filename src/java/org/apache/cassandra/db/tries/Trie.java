@@ -316,7 +316,7 @@ public abstract class Trie<T>
     }
 
     // Version of the byte comparable conversion to use for all operations
-    static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS50;
+    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS50;
 
     /**
      * Adapter interface providing the methods a {@link Walker} to a {@link Consumer}, so that the latter can be used
