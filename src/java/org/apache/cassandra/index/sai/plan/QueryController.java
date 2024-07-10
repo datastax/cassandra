@@ -336,9 +336,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
             // If there is filtering in the plan, we may need to fetch more keys
             // from the index, so we need to reflect that in the limit.
+            // (In general, it costs more to over-fetch than under-fetch, because resume is cheap, so we don't
+            // need to use a high confidenceLevel.)
             Plan.Filter filter = plan.firstNodeOfType(Plan.Filter.class);
             int softLimit = (filter != null)
-                          ? SoftLimitUtil.softLimit(hardLimit, 0.9, filter.selectivity())
+                          ? SoftLimitUtil.softLimit(hardLimit, 0.5, filter.selectivity())
                           : hardLimit;
 
             return keysIteration.execute(this, softLimit);
