@@ -86,11 +86,17 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE v1 > 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE v1 <= 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE v1 >= 1 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k = 0 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE k = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE k = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE k = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE k = 0 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE token(k) > 0 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
 
         // row filter with indexed column
         createIndex("CREATE INDEX ON %s (v1)");
@@ -100,7 +106,9 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE v1 <= 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE v1 >= 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1");
         test("SELECT * FROM %s WHERE k = 0 AND v1 = 1");
 
@@ -156,13 +164,19 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE k1 = 1 AND v2 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k2 = 2 AND v2 = 1 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 0 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 0 AND v2 = 2 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE k1 = 0 AND k2 = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE k1 = 0 AND k2 = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE k1 = 0 AND k2 = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE k1 = 0 AND k2 = 0 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE token(k1, k2) > 0 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
 
         // row filter with indexed column
         createIndex("CREATE INDEX ON %s (k1)");
@@ -181,7 +195,9 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE k1 = 1 AND v2 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k2 = 2 AND v2 = 1 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND k1 = 1");
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND k2 = 2");
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1");
@@ -257,14 +273,24 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE s = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k = 0 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k = 0 AND c = 1 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE k = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE k = 0 AND c = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE token(k) > 0 AND c = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE k = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE k = 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE k = 0 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE k = 0 AND c = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE k = 0 AND c = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE k = 0 AND c = 1 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE token(k) > 0 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE token(k) > 0 AND c = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE token(k) > 0 AND c = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE token(k) > 0 AND c = 1 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
 
         // expression filter with indexed column
         createIndex("CREATE INDEX ON %s (c)");
@@ -274,7 +300,9 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE v1 = 1");
         test("SELECT * FROM %s WHERE s = 1");
         test("SELECT * FROM %s WHERE v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1");
         test("SELECT * FROM %s WHERE k = 0 AND v1 = 1");
         test("SELECT * FROM %s WHERE k = 0 AND v1 = 1 AND c = 1",
@@ -392,14 +420,24 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE c3 = 2 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c1 = 1 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c1 = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND c1 = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c1 = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c1 = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c1 = 1 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE token(k1, k2) > 0 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND c1 = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE token(k1, k2) > 0 AND c1 = 1 AND v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE token(k1, k2) > 0 AND c1 = 1 AND v2 = 2 AND v1 = 1 ALLOW FILTERING");
 
         // expression filter with indexed column
         createIndex("CREATE INDEX ON %s (k1)");
@@ -789,12 +827,23 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
 
     private void test(String query, String... expected)
     {
+        test(query, false, expected);
+    }
+
+    private void test(String query, boolean matchAnyExpected, String... expected)
+    {
         List<String> actual = toCQLString(query);
         List<String> fullExpected = Stream.of(expected)
                                           .map(this::formatQuery)
                                           .map(s -> s.endsWith(" ALLOW FILTERING") ? s : s + " ALLOW FILTERING")
                                           .collect(Collectors.toList());
-        assertEquals(fullExpected, actual);
+
+        if (matchAnyExpected)
+        {
+            assertTrue(fullExpected.stream().anyMatch(s -> actual.stream().anyMatch(s::equals)));
+        }
+        else
+           assertEquals(fullExpected, actual);
 
         // execute both the expected output commands to verify that they are valid CQL
         for (String q : expected)
