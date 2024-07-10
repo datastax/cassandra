@@ -58,6 +58,7 @@ import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.marshal.DateRangeType;
 import org.apache.cassandra.db.marshal.DateType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.DoubleType;
@@ -71,10 +72,13 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.LegacyTimeUUIDType;
 import org.apache.cassandra.db.marshal.LexicalUUIDType;
+import org.apache.cassandra.db.marshal.LineStringType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
+import org.apache.cassandra.db.marshal.PointType;
+import org.apache.cassandra.db.marshal.PolygonType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.ShortType;
@@ -111,6 +115,13 @@ public final class AbstractTypeGenerators
                                                                                                 .put(DynamicCompositeType.FixedValueComparator.class, "Hack type used for special ordering case, not a real/valid type")
                                                                                                 .put(FrozenType.class, "Fake class only used during parsing... the parsing creates this and the real type under it, then this gets swapped for the real type")
                                                                                                 .build();
+
+    private static final Set<Class<? extends AbstractType>> DSE_CUSTOM_TYPES = ImmutableSet.<Class<? extends AbstractType>>builder()
+                                                                                      .add(DateRangeType.class)
+                                                                                      .add(LineStringType.class)
+                                                                                      .add(PolygonType.class)
+                                                                                      .add(PointType.class)
+                                                                                      .build();
 
     /**
      * Java does a char by char compare, but Cassandra does a byte ordered compare.  This mostly overlaps but some cases
@@ -197,6 +208,7 @@ public final class AbstractTypeGenerators
         Set<Class<? extends AbstractType>> types = PRIMITIVE_TYPE_DATA_GENS.keySet().stream().map(a -> a.getClass()).collect(Collectors.toSet());
         types.addAll(NON_PRIMITIVE_TYPES);
         types.addAll(UNSUPPORTED.keySet());
+        types.addAll(DSE_CUSTOM_TYPES);
         return types;
     }
 
