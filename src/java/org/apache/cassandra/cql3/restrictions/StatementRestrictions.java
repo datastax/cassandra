@@ -656,19 +656,24 @@ public class StatementRestrictions
                     Optional<ColumnMetadata> vectorColumn = nonPrimaryKeyRestrictions.getColumnDefs().stream().filter(c -> c.type.isVector()).findFirst();
                     if (vectorColumn.isPresent())
                     {
-                        ColumnMetadata vc = vectorColumn.get();
-                        boolean hasIndex = indexRegistry.listIndexes().stream().anyMatch(i -> i.dependsOn(vc));
-                        boolean isBoundedANN = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isBoundedAnn);
+                        var vc = vectorColumn.get();
+                        var hasIndex = indexRegistry.listIndexes().stream().anyMatch(i -> i.dependsOn(vc));
+                        var isBoundedANN = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isBoundedAnn);
+                        var isANN = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isAnn);
                         if (hasIndex)
+                        {
                             if (isBoundedANN)
                                 throw invalidRequest(StatementRestrictions.VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE);
-                            else
+                            else if (isANN)
                                 throw invalidRequest(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE, vc);
+                        }
                         else
+                        {
                             if (isBoundedANN)
                                 throw invalidRequest(StatementRestrictions.GEO_DISTANCE_REQUIRES_INDEX_MESSAGE);
-                            else
+                            else if (isANN)
                                 throw invalidRequest(StatementRestrictions.ANN_REQUIRES_INDEX_MESSAGE);
+                        }
                     }
 
                     if (!allowFiltering  && requiresAllowFilteringIfNotSpecified(table))
