@@ -252,13 +252,13 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return indexContext.isLiteral() ? version -> ByteSource.append(ByteSource.of(input, version), ByteSource.TERMINATOR)
-                                        : version -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), version);
+        return indexContext.isLiteral() ? version -> ByteSource.append(ByteSource.of(input, ByteComparable.Version.OSS41), ByteSource.TERMINATOR)
+                                        : version -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), ByteComparable.Version.OSS41);
     }
 
     private ByteComparable decode(ByteComparable term)
     {
-        return indexContext.isLiteral() ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
+        return indexContext.isLiteral() ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(ByteComparable.Version.OSS41)))
                                         : term;
     }
 
