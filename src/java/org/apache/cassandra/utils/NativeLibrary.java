@@ -191,7 +191,7 @@ public class NativeLibrary implements INativeLibrary
             else if (osType != MAC)
             {
                 // OS X allows mlockall to be called, but always returns an error
-                logger.warn("Unknown mlockall error", e);
+                logger.error("Unknown mlockall error", e);
             }
         }
     }
@@ -208,7 +208,7 @@ public class NativeLibrary implements INativeLibrary
         }
         catch (IOException e)
         {
-            logger.warn("Could not skip cache", e);
+            logger.error("Could not open file to skip cache", e);
         }
     }
 
@@ -295,7 +295,7 @@ public class NativeLibrary implements INativeLibrary
         }
         catch (NativeError e)
         {
-            logger.warn("fcntl({}, {}, {}) failed, error {}", fd, command, flags, e.getMessage());
+            logger.error("fcntl({}, {}, {}) failed, error {}", fd, command, flags, e.getMessage());
         }
         return -1;
     }
@@ -319,7 +319,7 @@ public class NativeLibrary implements INativeLibrary
         }
         catch (NativeError e)
         {
-            logger.warn("open({}, O_RDONLY) failed, error {}", path, e.getMessage());
+            logger.error("open({}, O_RDONLY) failed, error {}", path, e.getMessage());
         }
         return -1;
     }
@@ -367,7 +367,7 @@ public class NativeLibrary implements INativeLibrary
         }
         catch (IllegalArgumentException|IllegalAccessException e)
         {
-            logger.warn("Unable to read fd field from FileChannel");
+            logger.error("Unable to read fd field from FileChannel");
         }
         return -1;
     }
@@ -394,7 +394,7 @@ public class NativeLibrary implements INativeLibrary
         }
         catch (IllegalArgumentException|IllegalAccessException e)
         {
-            logger.warn("Unable to read fd field from FileChannel");
+            logger.error("Unable to read fd field from FileChannel");
         }
         return -1;
     }
@@ -414,7 +414,7 @@ public class NativeLibrary implements INativeLibrary
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            logger.warn("Unable to read fd field from FileDescriptor");
+            logger.error("Unable to read fd field from FileDescriptor");
         }
 
         return -1;
@@ -432,7 +432,7 @@ public class NativeLibrary implements INativeLibrary
         }
         catch (NativeError e)
         {
-            logger.info("Failed to get PID from JNA", e);
+            logger.error("Failed to get PID from JNA", e);
         }
 
         return -1;
