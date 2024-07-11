@@ -461,7 +461,9 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE c1 = 1 AND c2 = 2 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE c1 = 1 AND c2 = 2 AND c3 = 3 ALLOW FILTERING",
              "SELECT * FROM %s WHERE (c1, c2, c3) = (1, 2, 3) ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING", true,
+             "SELECT * FROM %s WHERE v1 = 1 AND v2 = 2 ALLOW FILTERING",
+             "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1");
         test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1",
              "SELECT * FROM %s WHERE token(k1, k2) >= token(1, 2) AND token(k1, k2) <= token(1, 2) AND v1 = 1");
