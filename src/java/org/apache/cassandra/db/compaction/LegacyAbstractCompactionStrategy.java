@@ -256,6 +256,13 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
         return super.getMaximalTasks(gcBefore, splitOutput);
     }
 
+    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType)
+    {
+        removeDeadSSTables();
+        return super.getMaximalTasks(gcBefore, splitOutput, operationType);
+    }
+
+
     /**
      * Select a table for tombstone-removing compaction from the given set. Returns null if no table is suitable.
      */
