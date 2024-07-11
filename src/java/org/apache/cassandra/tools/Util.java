@@ -37,6 +37,7 @@ import com.google.common.collect.Lists;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -357,6 +358,8 @@ public final class Util
             builder.indexes(indexes);
             builder.kind(TableMetadata.Kind.INDEX);
         }
+        boolean isCounter = header.getRegularColumns().values().stream().anyMatch(AbstractType::isCounter) || header.getStaticColumns().values().stream().anyMatch(AbstractType::isCounter);
+        builder.isCounter(isCounter);
         return builder.build();
     }
 }

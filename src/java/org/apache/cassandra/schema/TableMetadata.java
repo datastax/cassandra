@@ -483,22 +483,7 @@ public class TableMetadata implements SchemaElement
 
         params.validate();
 
-        if (partitionKeyColumns.stream().anyMatch(c -> c.type.isCounter()))
-            except("PRIMARY KEY columns cannot contain counters");
-
-        // Mixing counter with non counter columns is not supported (#2614)
-        if (isCounter())
-        {
-            for (ColumnMetadata column : regularAndStaticColumns)
-                if (!(column.type.isCounter()) && !isSuperColumnMapColumnName(column.name))
-                    except("Cannot have a non counter column (\"%s\") in a counter table", column.name);
-        }
-        else
-        {
-            for (ColumnMetadata column : regularAndStaticColumns)
-                if (column.type.isCounter())
-                    except("Cannot have a counter column (\"%s\") in a non counter table", column.name);
-        }
+        columns().forEach(c -> c.validate(isCounter()));
 
         // All tables should have a partition key
         if (partitionKeyColumns.isEmpty())
@@ -523,9 +508,9 @@ public class TableMetadata implements SchemaElement
      *   table with counters to rename that weirdly name map to something more meaningful (it's not possible today
      *   as after renaming the validation in {@link #validate} would trigger).
      */
-    private static boolean isSuperColumnMapColumnName(ColumnIdentifier columnName)
+    public static boolean isSuperColumnMapColumnName(ByteBuffer columnName)
     {
-        return !columnName.bytes.hasRemaining();
+        return !columnName.hasRemaining();
     }
 
     /**
