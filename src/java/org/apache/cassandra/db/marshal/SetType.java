@@ -126,21 +126,6 @@ public class SetType<T> extends CollectionType<Set<T>>
         return serializer;
     }
 
-    @Override
-    public String toString(boolean ignoreFreezing)
-    {
-        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
-
-        StringBuilder sb = new StringBuilder();
-        if (includeFrozenType)
-            sb.append(FrozenType.class.getName()).append("(");
-        sb.append(getClass().getName());
-        sb.append(TypeParser.stringifyTypeParameters(subTypes, ignoreFreezing || !isMultiCell));
-        if (includeFrozenType)
-            sb.append(")");
-        return sb.toString();
-    }
-
     public List<ByteBuffer> serializedValues(Iterator<Cell<?>> cells)
     {
         List<ByteBuffer> bbs = new ArrayList<>();
