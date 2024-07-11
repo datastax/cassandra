@@ -339,15 +339,9 @@ public final class VectorType<T> extends AbstractType<List<T>>
     }
 
     @Override
-    public String toString()
-    {
-        return toString(false);
-    }
-
-    @Override
     public String toString(boolean ignoreFreezing)
     {
-        return getClass().getName() + TypeParser.stringifyVectorParameters(elementType, ignoreFreezing, dimension);
+        return String.format("%s(%s,%d)", getClass().getName(), elementType, dimension);
     }
 
     private void check(List<?> values)

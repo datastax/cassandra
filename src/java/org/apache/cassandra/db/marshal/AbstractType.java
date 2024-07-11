@@ -548,7 +548,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public String toString(boolean ignoreFreezing)
     {
-        return this.toString();
+        return getClass().getName();
     }
 
     /**
@@ -863,9 +863,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      * For CQL purposes the short name is fine.
      */
     @Override
-    public String toString()
+    public final String toString()
     {
-        return getClass().getName();
+        return toString(false);
     }
 
     public void checkComparable()

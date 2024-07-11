@@ -201,12 +201,6 @@ public abstract class CollectionType<T> extends MultiCellCapableType<T>
         return new CQL3Type.Collection(this);
     }
 
-    @Override
-    public String toString()
-    {
-        return this.toString(false);
-    }
-
     static <VL, VR> int compareListOrSet(AbstractType<?> elementsComparator, VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
     {
         // Note that this is only used if the collection is frozen
@@ -321,4 +315,20 @@ public abstract class CollectionType<T> extends MultiCellCapableType<T>
     }
 
     public abstract void forEach(ByteBuffer input, Consumer<ByteBuffer> action);
+
+    @Override
+    public String toString(boolean ignoreFreezing)
+    {
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+
+        StringBuilder sb = new StringBuilder();
+        if (includeFrozenType)
+            sb.append(FrozenType.class.getName()).append('(');
+        sb.append(getClass().getName());
+        sb.append(TypeParser.stringifyTypeParameters(subTypes, ignoreFreezing || !isMultiCell));
+        if (includeFrozenType)
+            sb.append(')');
+        return sb.toString();
+    }
+
 }
