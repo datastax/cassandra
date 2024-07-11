@@ -455,9 +455,11 @@ public class CompositeType extends AbstractCompositeType
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFreezing)
     {
-        return getClass().getName() + TypeParser.stringifyTypeParameters(subTypes);
+        // Subtypes will always be frozen (since CompositeType always is), but we don't include it in the string
+        // representation (so that we ignore our parameter).
+        return getClass().getName() + TypeParser.stringifyTypeParameters(subTypes, true);
     }
 
     @SafeVarargs

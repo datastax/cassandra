@@ -492,9 +492,26 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFreezing)
     {
-        return getClass().getName() + TypeParser.stringifyTypeParameters(subTypes, true);
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+
+        StringBuilder sb = new StringBuilder();
+        if (includeFrozenType)
+            sb.append(FrozenType.class.getName()).append('(');
+        sb.append(getClass().getName());
+        // FrozenType applies to anything nested (it wouldn't make sense otherwise) and so we only put once at the
+        // highest level. So we can ignore freezing in the subtypes if either we're already within a frozen type
+        // (we're a sub-type ourselves and frozenType has been included at the outer level), or we're frozen.
+        sb.append(stringifyTypeParameters(ignoreFreezing || !isMultiCell()));
+        if (includeFrozenType)
+            sb.append(')');
+        return sb.toString();
+    }
+
+    protected String stringifyTypeParameters(boolean ignoreFreezing)
+    {
+        return TypeParser.stringifyTypeParameters(subTypes, ignoreFreezing);
     }
 
     @Override
