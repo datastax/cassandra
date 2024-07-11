@@ -45,9 +45,11 @@ import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.cql3.statements.schema.AlterTableStatement;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -769,6 +771,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return subTypes().stream().anyMatch(AbstractType::referencesDuration);
     }
 
+    public final boolean referencesCounter()
+    {
+        return isCounter() || subTypes().stream().anyMatch(AbstractType::referencesCounter);
+    }
+
     /**
      * Tests whether a CQL value having this type can be assigned to the provided receiver.
      */
@@ -790,6 +797,84 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
             return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
 
         return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+    }
+
+    /**
+     * Validates whether this type is valid as a column type for a column of the provided kind.
+     * <p>
+     * A number of limits must be respected by column types (possibly depending on the type of columns). For
+     * instance, primary key columns must always be frozen, cannot use counters, etc. And for regular columns, amongst
+     * other things, we currently only support non-frozen types at top-level, so any type with a non-frozen subtype
+     * is invalid (note that it's valid to <b>create</b> a type with non-frozen subtypes, with a {@code CREATE TYPE}
+     * for instance, but they cannot be used as column types without being frozen).
+     *
+     * @param columnName         the name of the column whose type is checked.
+     * @param isPrimaryKeyColumn whether {@code columnName} is a primary key column or not.
+     * @param isCounterTable     whether the table the {@code columnName} is part of is a counter table.
+     * @throws InvalidColumnTypeException if this type is not a valid column type for {@code columnName}.
+     */
+    public void validateForColumn(ByteBuffer columnName,
+                                  boolean isPrimaryKeyColumn,
+                                  boolean isCounterTable)
+    {
+        if (isPrimaryKeyColumn)
+        {
+            if (referencesCounter())
+                throw columnException(columnName, "counters are not supported within PRIMARY KEY columns");
+        }
+        else
+        {
+            // Mixing counter with non counter columns is not supported (#2614)
+            if (isCounterTable)
+            {
+                // Everything within a counter table must be a counter, and we don't allow nesting (collections of
+                // counters), except for legacy backward-compatibility, in the super-column map used to support old
+                // super columns.
+                if (!isCounter() && !TableMetadata.isSuperColumnMapColumnName(columnName))
+                {
+                    // We don't allow counter inside collections, but to be fair, at least for map, it's a bit of an
+                    // arbitrary limitation (it works internally, we don't expose it mostly because counters have
+                    // their limitations, and we want to restrict how user can use them to hopefully make user think
+                    // twice about their usage). In any case, a slightly more user-friendly message is probably nice.
+                    if (referencesCounter())
+                        throw columnException(columnName, "counters are not allowed within %s", category());
+
+                    throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
+                }
+            }
+            else
+            {
+                if (isCounter())
+                    throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
+
+                // For nested counters, we prefer complaining about the nested-ness rather than this not being a counter
+                // table, because the table won't be marked as a counter one even if it has only nested counters, and so
+                // that's overall a more intuitive message.
+                if (referencesCounter())
+                    throw columnException(columnName, "counters are not allowed within %s", category());
+            }
+        }
+
+    }
+
+    private InvalidColumnTypeException columnException(ByteBuffer columnName,
+                                                       String reason,
+                                                       Object... args)
+    {
+        String msg = args.length == 0 ? reason : String.format(reason, args);
+        return new InvalidColumnTypeException(columnName, this, msg);
+    }
+
+    private String category()
+    {
+        if (isCollection())
+            return "collections";
+        else if (isTuple())
+            return "tuples";
+        else if (isUDT())
+            return "user types";
+        else
+            return "types";
     }
 
     /**
@@ -986,4 +1071,5 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return Streams.zip(subTypes.stream().limit(previous.subTypes.size()), previous.subTypes.stream(), predicate::test)
                       .allMatch(Predicate.isEqual(true));
     }
+
 }
