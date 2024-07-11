@@ -197,9 +197,9 @@ public class ReversedType<T> extends AbstractType<T>
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFreezing)
     {
-        return getClass().getName() + "(" + baseType + ")";
+        return getClass().getName() + '(' + baseType + ')';
     }
 
     private static final class ReversedPeekableByteSource extends ByteSource.Peekable
