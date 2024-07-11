@@ -211,15 +211,7 @@ public interface MemoryAllocationStrategy
             this.opOrder = opOrder;
             justReleased = new IndexList(null);
             awaitingBarrierTail = free = new IndexList(null);
-            try
-            {
-                allocator.allocate(free.indexes);
-                free.count = free.indexes.length;
-            }
-            catch (TrieSpaceExhaustedException e)
-            {
-                throw new AssertionError(e);    // unexpected, initial size can't trigger this
-            }
+            free.count = 0;
         }
 
         @Override

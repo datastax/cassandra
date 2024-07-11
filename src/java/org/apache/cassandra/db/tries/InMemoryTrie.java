@@ -1610,16 +1610,26 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     /** Returns the off heap size of the memtable trie itself, not counting any space taken by referenced content. */
     public long sizeOffHeap()
     {
-        return bufferType == BufferType.ON_HEAP ? 0 : allocatedPos;
+        return bufferType == BufferType.ON_HEAP ? 0 : usedBufferSpace();
     }
 
     /** Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content. */
     public long sizeOnHeap()
     {
-        return contentCount * MemoryLayoutSpecification.SPEC.getReferenceSize() +
+        return usedObjectSpace() +
                REFERENCE_ARRAY_ON_HEAP_SIZE * getChunkIdx(contentCount, CONTENTS_START_SHIFT, CONTENTS_START_SIZE) +
-               (bufferType == BufferType.ON_HEAP ? allocatedPos + EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP) +
+               (bufferType == BufferType.ON_HEAP ? usedBufferSpace() + EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP) +
                REFERENCE_ARRAY_ON_HEAP_SIZE * getChunkIdx(allocatedPos, BUF_START_SHIFT, BUF_START_SIZE);
+    }
+
+    private long usedBufferSpace()
+    {
+        return allocatedPos - blockAllocator.indexCountInPipeline() * BLOCK_SIZE;
+    }
+
+    private long usedObjectSpace()
+    {
+        return (contentCount - objectAllocator.indexCountInPipeline()) * MemoryLayoutSpecification.SPEC.getReferenceSize();
     }
 
     @VisibleForTesting
