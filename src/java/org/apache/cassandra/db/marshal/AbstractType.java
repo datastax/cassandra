@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -319,17 +318,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public ArgumentDeserializer getArgumentDeserializer()
     {
         return new DefaultArgumentDeserializer(this);
-    }
-
-    /* convenience method */
-    public String getString(Collection<ByteBuffer> names)
-    {
-        StringBuilder builder = new StringBuilder();
-        for (ByteBuffer name : names)
-        {
-            builder.append(getString(name)).append(",");
-        }
-        return builder.toString();
     }
 
     public boolean isCounter()
