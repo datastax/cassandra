@@ -188,7 +188,12 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     @Override
     public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType)
     {
-        return getMaximalTasks(gcBefore, splitOutput);
+        CompactionTasks maximalTasks = getMaximalTasks(gcBefore, splitOutput);
+        for (AbstractCompactionTask task: maximalTasks)
+        {
+            task.setCompactionType(operationType);
+        }
+        return maximalTasks;
     }
 
     /**
