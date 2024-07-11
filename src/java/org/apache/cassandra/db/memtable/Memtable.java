@@ -20,6 +20,7 @@ package org.apache.cassandra.db.memtable;
 
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ListenableFuture;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -285,6 +286,19 @@ public interface Memtable extends Comparable<Memtable>
         memtable.addMemoryUsageTo(usage);
         return usage;
     }
+
+    /**
+     * Returns the amount of on-heap memory that has been allocated for this memtable but is not yet used.
+     * This is not counted in the memory usage to have a better flushing decision behaviour -- we do not want to flush
+     * immediately after allocating a new buffer but when we have actually used the space provided.
+     * The method is provided for testing the memory usage tracking of memtables.
+     */
+    @VisibleForTesting
+    default long unusedReservedOnHeapMemory()
+    {
+        return 0;
+    }
+
 
     class MemoryUsage
     {

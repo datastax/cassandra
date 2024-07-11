@@ -594,7 +594,6 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
         EncodingStats stats;
 
-        @Unmetered  // total pool size should not be included in memtable's deep size
         private final MemtableAllocator allocator;
 
         @Unmetered
@@ -700,11 +699,6 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             return partitionCount;
         }
 
-        long minTimestamp()
-        {
-            return minTimestamp;
-        }
-
         long liveDataSize()
         {
             return liveDataSize;
@@ -713,11 +707,6 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         long currentOperations()
         {
             return currentOperations;
-        }
-
-        int minLocalDeletionTime()
-        {
-            return stats.minLocalDeletionTime;
         }
 
         private DecoratedKey firstPartitionKey(Direction direction)
@@ -836,12 +825,16 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         }
     }
 
-    @VisibleForTesting
+    @Override
     public long unusedReservedOnHeapMemory()
     {
         long size = 0;
         for (MemtableShard shard : shards)
+        {
             size += shard.data.unusedReservedOnHeapMemory();
+            size += shard.allocator.unusedReservedOnHeapMemory();
+        }
+        size += this.allocator.unusedReservedOnHeapMemory();
         return size;
     }
 

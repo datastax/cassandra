@@ -169,7 +169,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
                               cfs.getTracker().getView().getCurrentMemtable());
 
             Memtable.MemoryUsage usage = Memtable.getMemoryUsage(memtable);
-            long calculatedHeap = usage.ownsOnHeap;
+            long reportedHeap = usage.ownsOnHeap;
             System.out.println(String.format("Memtable in %s mode: %d ops, %s serialized bytes, %s",
                                              DatabaseDescriptor.getMemtableAllocationType(),
                                              memtable.getOperations(),
@@ -188,14 +188,12 @@ public abstract class MemtableSizeTestBase extends CQLTester
 
             long actualHeap = deepSizeAfter - deepSizeBefore;
             long maxDifference = MAX_DIFFERENCE_PERCENT * actualHeap / 100;
-            if (memtable instanceof TrieMemtable)
-                calculatedHeap += ((TrieMemtable) memtable).unusedReservedOnHeapMemory();
+            long unusedReserved = memtable.unusedReservedOnHeapMemory();
+            System.out.println("Unused reserved " + FBUtilities.prettyPrintMemory(unusedReserved));
+            reportedHeap += unusedReserved;
 
             switch (DatabaseDescriptor.getMemtableAllocationType())
             {
-                case heap_buffers:
-                    maxDifference += SLAB_OVERHEAD;
-                    break;
                 case unslabbed_heap_buffers:
                     // add a hardcoded slack factor
                     maxDifference += actualHeap * UNSLABBED_EXTRA_PERCENT / 100;
@@ -203,10 +201,10 @@ public abstract class MemtableSizeTestBase extends CQLTester
             }
             String message = String.format("Actual heap usage is %s, got %s, %s difference.\n",
                                            FBUtilities.prettyPrintMemory(actualHeap),
-                                           FBUtilities.prettyPrintMemory(calculatedHeap),
-                                           FBUtilities.prettyPrintMemory(actualHeap - calculatedHeap));
+                                           FBUtilities.prettyPrintMemory(reportedHeap),
+                                           FBUtilities.prettyPrintMemory(actualHeap - reportedHeap));
             System.out.println(message);
-            Assert.assertTrue(message, Math.abs(calculatedHeap - actualHeap) <= maxDifference);
+            Assert.assertTrue(message, Math.abs(reportedHeap - actualHeap) <= maxDifference);
         }
         finally
         {
