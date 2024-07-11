@@ -26,7 +26,6 @@ import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.IntegerType;
-import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -129,7 +128,16 @@ public class LengthPartitioner implements IPartitioner
         @Override
         public Token fromComparableBytes(ByteSource.Peekable comparableBytes, ByteComparable.Version version)
         {
-            return new BigIntegerToken(ByteSourceInverse.getSignedLong(comparableBytes));
+            switch (version)
+            {
+                case LEGACY:
+                case OSS41:
+                    return new BigIntegerToken(ByteSourceInverse.getSignedLong(comparableBytes));
+                case OSS50:
+                    return new BigIntegerToken(ByteSourceInverse.getVariableLengthInteger(comparableBytes));
+                default:
+                    throw new AssertionError();
+            }
         }
 
         public String toString(Token token)
@@ -231,8 +239,16 @@ public class LengthPartitioner implements IPartitioner
 
         public ByteSource asComparableBytes(ByteComparable.Version version)
         {
-            ByteBuffer tokenBuffer = LongType.instance.decompose(token);
-            return LongType.instance.asComparableBytes(tokenBuffer, version);
+            switch (version)
+            {
+                case LEGACY:
+                case OSS41:
+                    return ByteSource.of(token);
+                case OSS50:
+                    return ByteSource.variableLengthInteger(token);
+                default:
+                    throw new AssertionError();
+            }
         }
 
         @Override
