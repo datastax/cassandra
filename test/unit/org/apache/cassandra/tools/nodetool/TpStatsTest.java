@@ -155,7 +155,7 @@ public class TpStatsTest extends CQLTester
             tool.assertOnCleanExit();
             String yaml = tool.getStdout();
             assertThat(isYAMLString(yaml)).isTrue();
-            assertThat(yaml).containsPattern("WaitLatencies:\\s*[A-Z|_]+:\\s+-\\s");
+            assertThat(yaml).containsPattern("WaitLatencies:\\s*[A-Z0-9|_]+:\\s+-\\s");
         });
     }
 
