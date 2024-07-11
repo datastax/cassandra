@@ -243,7 +243,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     @Override
     public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType)
     {
-        return strategy.getMaximalTasks(gcBefore, splitOutput);
+        return strategy.getMaximalTasks(gcBefore, splitOutput, operationType);
     }
 
     @Override
