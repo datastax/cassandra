@@ -197,7 +197,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
         return new TriePartitionUpdate(iterator.metadata(),
                                        iterator.partitionKey(),
-                                       iterator.metadata().regularAndStaticColumns(),
+                                       iterator.columns(),
                                        collectStats(trie),
                                        trie,
                                        false);
