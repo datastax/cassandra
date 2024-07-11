@@ -42,6 +42,7 @@ import org.mockito.Mockito;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_MONOTONIC_APPROX;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_MONOTONIC_PRECISE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 import static org.apache.cassandra.net.Message.serializer;
 import static org.apache.cassandra.utils.CassandraGenerators.MESSAGE_GEN;
 import static org.apache.cassandra.utils.FailingConsumer.orFail;
@@ -56,6 +57,7 @@ public class MessageSerializationPropertyTest implements Serializable
         // message serialization uses the MonotonicClock class for precise and approx timestamps, so mock it out
         CLOCK_MONOTONIC_PRECISE.setString(FixedMonotonicClock.class.getName());
         CLOCK_MONOTONIC_APPROX.setString(FixedMonotonicClock.class.getName());
+        VECTOR_FLOAT_ONLY.setBoolean(false);
 
         DatabaseDescriptor.daemonInitialization();
     }
