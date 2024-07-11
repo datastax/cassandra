@@ -365,7 +365,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         for (Iterator<Row> it = rowsIncludingStatic(); it.hasNext();)
         {
             Row row = it.next();
-            size += row.dataSize() + row.clustering().dataSize();
+            size += row.dataSize();
         }
 
         return Ints.saturatedCast(size + deletionInfo().dataSize());
