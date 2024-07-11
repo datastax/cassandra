@@ -158,11 +158,12 @@ public class PartitionerDefinedOrder extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFreezing)
     {
         if (partitionKeyType != null && !DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
         {
-            return String.format("%s(%s:%s)", getClass().getName(), partitioner.getClass().getName(), partitionKeyType);
+            // TODO Partition key is always frozen, though - should we pass ignoreFreezing to partitionKeyType.toString()? The default toString assumed ignoreFreezing=false so leaving that way for now
+            return String.format("%s(%s:%s)", getClass().getName(), partitioner.getClass().getName(), partitionKeyType.toString(false));
         }
         // if Cassandra's major version is before 5, use the old behaviour
         return String.format("%s(%s)", getClass().getName(), partitioner.getClass().getName());

@@ -651,8 +651,9 @@ public class DynamicCompositeType extends AbstractCompositeType
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFreezing)
     {
+        // DCT is always frozen, but implicitly so (FrozenType is never used), so we ignore our parameter
         return getClass().getName() + TypeParser.stringifyAliasesParameters(aliases);
     }
 
