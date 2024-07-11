@@ -505,7 +505,7 @@ public class CassandraDaemon
             {
                 List<File> tableDirectories = new ArrayList<>();
                 keyspaceDirectory.forEach(f -> {
-                    if (f.isDirectory() && !SystemKeyspace.TABLES_SPLIT_ACROSS_MULTIPLE_DISKS.contains(f.name()))
+                    if (f.isDirectory() && SystemKeyspace.TABLES_SPLIT_ACROSS_MULTIPLE_DISKS.stream().noneMatch(t -> f.name().startsWith(t + '-')))
                         tableDirectories.add(f);
                 });
 
