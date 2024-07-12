@@ -267,4 +267,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         sstableRowId++;
     }
 
+    public boolean isAborted()
+    {
+        return aborted;
+    }
 }
