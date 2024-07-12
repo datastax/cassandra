@@ -48,7 +48,6 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
@@ -192,6 +191,11 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     long bytesRead = keys.getBytesRead();
                     bytesProcessed += bytesRead - previousBytesRead;
                     previousBytesRead = bytesRead;
+
+                    // Fail fast if index build has been aborted. Index writer won't throw when it's aborted. Because
+                    // it's used during compaction and we don't want to fail compaction on index error.
+                    if (indexWriter.isAborted())
+                        throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
@@ -288,13 +292,16 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             components.forWrite().forceDeleteAllComponents();
     }
 
-    private void completeSSTable(SSTableFlushObserver indexWriter,
+    private void completeSSTable(StorageAttachedIndexWriter indexWriter,
                                  SSTableReader sstable,
                                  Set<StorageAttachedIndex> indexes,
                                  CountDownLatch latch,
                                  Set<Component> replacedComponents) throws InterruptedException
     {
         indexWriter.complete();
+
+        if (indexWriter.isAborted())
+            throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
 
         if (latch != null)
         {
