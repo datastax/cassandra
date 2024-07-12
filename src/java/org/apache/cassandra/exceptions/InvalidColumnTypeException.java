@@ -40,7 +40,7 @@ public class InvalidColumnTypeException extends ConfigurationException
                               String reason)
     {
         return String.format("Invalid type %s for column %s: %s",
-                             invalidType.asCQL3Type().toString(),
+                             invalidType.asCQL3Type().toSchemaString(),
                              ColumnIdentifier.toCQLString(name),
                              reason);
     }

@@ -575,7 +575,7 @@ public final class SchemaKeyspace
         mutation.update(Types)
                 .row(type.getNameAsString())
                 .add("field_names", type.fieldNames().stream().map(FieldIdentifier::toString).collect(toList()))
-                .add("field_types", type.fieldTypes().stream().map(AbstractType::asCQL3Type).map(CQL3Type::toString).collect(toList()));
+                .add("field_types", type.fieldTypes().stream().map(AbstractType::asCQL3Type).map(CQL3Type::toSchemaString).collect(toList()));
     }
 
     private static void addDropTypeToSchemaMutation(UserType type, Mutation.SimpleBuilder builder)
@@ -774,7 +774,7 @@ public final class SchemaKeyspace
                .add("kind", column.kind.toString().toLowerCase())
                .add("position", column.position())
                .add("clustering_order", column.clusteringOrder().toString().toLowerCase())
-               .add("type", type.asCQL3Type().toString());
+               .add("type", type.asCQL3Type().toSchemaString());
 
         ColumnMask mask = column.getMask();
         if (SchemaConstants.isReplicatedSystemKeyspace(table.keyspace))
@@ -806,7 +806,7 @@ public final class SchemaKeyspace
                 for (int i = 0; i < numArgs; i++)
                 {
                     AbstractType<?> argType = partialTypes.get(i);
-                    types.add(argType.asCQL3Type().toString());
+                    types.add(argType.asCQL3Type().toSchemaString());
 
                     ByteBuffer argValue = partialValues.get(i);
                     boolean isNull = argValue == null;
@@ -834,7 +834,7 @@ public final class SchemaKeyspace
         builder.update(DroppedColumns)
                .row(table.name, column.column.name.toString())
                .add("dropped_time", new Date(TimeUnit.MICROSECONDS.toMillis(column.droppedTime)))
-               .add("type", column.column.type.asCQL3Type().toString())
+               .add("type", column.column.type.asCQL3Type().toSchemaString())
                .add("kind", column.column.kind.toString().toLowerCase());
     }
 
@@ -933,7 +933,7 @@ public final class SchemaKeyspace
                .row(function.name().name, function.argumentsList())
                .add("body", function.body())
                .add("language", function.language())
-               .add("return_type", function.returnType().asCQL3Type().toString())
+               .add("return_type", function.returnType().asCQL3Type().toSchemaString())
                .add("called_on_null_input", function.isCalledOnNullInput())
                .add("argument_names", function.argNames().stream().map((c) -> bbToString(c.bytes)).collect(toList()));
     }
@@ -959,9 +959,9 @@ public final class SchemaKeyspace
     {
         builder.update(Aggregates)
                .row(aggregate.name().name, aggregate.argumentsList())
-               .add("return_type", aggregate.returnType().asCQL3Type().toString())
+               .add("return_type", aggregate.returnType().asCQL3Type().toSchemaString())
                .add("state_func", aggregate.stateFunction().name().name)
-               .add("state_type", aggregate.stateType().asCQL3Type().toString())
+               .add("state_type", aggregate.stateType().asCQL3Type().toSchemaString())
                .add("final_func", aggregate.finalFunction() != null ? aggregate.finalFunction().name().name : null)
                .add("initcond", aggregate.initialCondition() != null
                                 // must use the frozen state type here, as 'null' for unfrozen collections may mean 'empty'
