@@ -102,6 +102,46 @@ public interface CQL3Type
     String toCQLLiteral(ByteBuffer bytes);
 
     /**
+     * Generates the string representation of this type, with options regarding the addition of frozen.
+     * <p>
+     * This exists only to provide proper {@code toString} and {@link #toSchemaString} implementations and would
+     * be protected if this was an abstract class rather than an interface (but we cannot change it to an abstract
+     * class easily since {@link Native} is an enum).
+     *
+     * @param alreadyFrozen whether the type is within an already frozen type. If {@code true}, and unless
+     * {@code forceFrozen} is also {@code true} and this type is a complex frozen type itself, the returned
+     * representation will omit the 'frozen<>' prefix. Otherwise, the 'frozen<>' prefix will be included if this type
+     * is (complex and) frozen.
+     * @param forceFrozen force the repetition of 'frozen<>' prefixes before complex frozen types, even if the
+     * context is already frozen. See {@link #toSchemaString} as to why we need this.
+     * @return the type string representation (with or without a 'frozen<>' based on {@code alreadyFrozen} and
+     * {@code forceFrozen}).
+     */
+    String toString(boolean alreadyFrozen, boolean forceFrozen);
+
+    /**
+     * Generate the string representation of this type, like {@code toString}, but where the 'frozen<>' is
+     * repeated for every frozen complex types, even if it is already present as at higher level (and is such
+     * unnecessary). In other words, this will generate {@code frozen<list<frozen<set<int>>>>} when
+     * {@code toString} only generates {@code frozen<list<set<int>>>}.
+     * <p>
+     * This generally shouldn't be used since it is a less readable, wasteful representation, but we use it for
+     * column types in the schema for the following historical reason: before DB-3084, the default {@code toString}
+     * representation was behaving like this method, and drivers have indirectly "relied" on it in the sense that while
+     * types on the drivers side have a {@code isFrozen()} method, it only returns {@code true} if the type has an
+     * explicit "frozen<>" prefix just before it. Meaning that reading {@code frozen<list<set<int>>>} in the schema,
+     * the driver (at least the java one) will return that the list is frozen, but not the set.
+     * <p>
+     * So to avoid risks in breaking external consumers, we preserve the verbose, if wasteful, representation in the
+     * schema. We may remove this when we've coordinated fixing the drivers side to always set their {@code isFrozen} to
+     * {@code true} for subtypes of frozen types, no matter what the representation says.
+     */
+    default String toSchemaString()
+    {
+        return toString(false, true);
+    }
+
+    /**
      * Generates a binary value for the CQL literal of this type
      */
     default ByteBuffer fromCQLLiteral(String literal)
@@ -167,9 +207,15 @@ public interface CQL3Type
         }
 
         @Override
-        public String toString()
+        public String toString(boolean alreadyFrozen, boolean forceFrozen)
         {
             return super.toString().toLowerCase();
+        }
+
+        @Override
+        public String toString()
+        {
+            return toString(false, false);
         }
     }
 
@@ -216,9 +262,15 @@ public interface CQL3Type
         }
 
         @Override
-        public String toString()
+        public String toString(boolean alreadyFrozen, boolean forceFrozen)
         {
             return "'" + type + '\'';
+        }
+
+        @Override
+        public String toString()
+        {
+            return toString(false, false);
         }
     }
 
@@ -324,32 +376,40 @@ public interface CQL3Type
         }
 
         @Override
-        public String toString()
+        public String toString(boolean alreadyFrozen, boolean forceFrozen)
         {
-            boolean isFrozen = !this.type.isMultiCell();
-            StringBuilder sb = new StringBuilder(isFrozen ? "frozen<" : "");
+            boolean addFrozen = !this.type.isMultiCell() && (!alreadyFrozen || forceFrozen);
+            alreadyFrozen = !this.type.isMultiCell() || alreadyFrozen;
+            StringBuilder sb = new StringBuilder(addFrozen ? "frozen<" : "");
             switch (type.kind)
             {
                 case LIST:
                     AbstractType<?> listType = ((ListType<?>) type).getElementsType();
-                    sb.append("list<").append(listType.asCQL3Type());
+                    sb.append("list<").append(listType.asCQL3Type().toString(alreadyFrozen, forceFrozen));
                     break;
                 case SET:
                     AbstractType<?> setType = ((SetType<?>) type).getElementsType();
-                    sb.append("set<").append(setType.asCQL3Type());
+                    sb.append("set<").append(setType.asCQL3Type().toString(alreadyFrozen, forceFrozen));
                     break;
                 case MAP:
                     AbstractType<?> keysType = ((MapType<?, ?>) type).getKeysType();
                     AbstractType<?> valuesType = ((MapType<?, ?>) type).getValuesType();
-                    sb.append("map<").append(keysType.asCQL3Type()).append(", ").append(valuesType.asCQL3Type());
+                    sb.append("map<").append(keysType.asCQL3Type().toString(alreadyFrozen, forceFrozen))
+                      .append(", ").append(valuesType.asCQL3Type().toString(alreadyFrozen, forceFrozen));
                     break;
                 default:
                     throw new AssertionError();
             }
             sb.append('>');
-            if (isFrozen)
+            if (addFrozen)
                 sb.append('>');
             return sb.toString();
+        }
+
+        @Override
+        public String toString()
+        {
+            return toString(false, false);
         }
     }
 
@@ -441,12 +501,18 @@ public interface CQL3Type
         }
 
         @Override
-        public String toString()
+        public String toString(boolean alreadyFrozen, boolean forceFrozen)
         {
-            if (type.isMultiCell())
+            if (type.isMultiCell() || (alreadyFrozen && !forceFrozen))
                 return ColumnIdentifier.maybeQuote(name);
             else
                 return "frozen<" + ColumnIdentifier.maybeQuote(name) + '>';
+        }
+
+        @Override
+        public String toString()
+        {
+            return toString(false, false);
         }
     }
 
@@ -528,28 +594,35 @@ public interface CQL3Type
         }
 
         @Override
-        public String toString()
+        public String toString(boolean alreadyFrozen, boolean forceFrozen)
         {
-            return toString(true);
-        }
+            // As tuples are frozen by default, we don't output the frozen<> prefix even when frozen, unless forceFrozen
+            // is explicitly provided. Note that in practice, the type should never be non-frozen unless forceFrozen
+            // is called: if that were to happen, either:
+            //  1. we'd have built a non-frozen tuple for something other than a dropped column
+            //  2. or we'd be calling toString() for a dropped column type, rather that toSchemaString()
+            // Both of which being bugs.
 
-        public String toString(boolean withFrozen)
-        {
-            StringBuilder sb = new StringBuilder();
-            if (withFrozen)
-                sb.append("frozen<");
+            boolean addFrozen = !type.isMultiCell() && forceFrozen;
+            alreadyFrozen = !type.isMultiCell() || alreadyFrozen;
+            StringBuilder sb = new StringBuilder(addFrozen ? "frozen<" : "");
             sb.append("tuple<");
             for (int i = 0; i < type.size(); i++)
             {
                 if (i > 0)
                     sb.append(", ");
-                sb.append(type.type(i).asCQL3Type());
+                sb.append(type.type(i).asCQL3Type().toString(alreadyFrozen, forceFrozen));
             }
             sb.append('>');
-            if (withFrozen)
+            if (addFrozen)
                 sb.append('>');
-
             return sb.toString();
+        }
+
+        @Override
+        public String toString()
+        {
+            return toString(false, false);
         }
     }
 
@@ -614,11 +687,17 @@ public interface CQL3Type
         }
 
         @Override
-        public String toString()
+        public String toString(boolean alreadyFrozen, boolean forceFrozen)
         {
             StringBuilder sb = new StringBuilder();
             sb.append("vector<").append(type.elementType.asCQL3Type()).append(", ").append(type.dimension).append('>');
             return sb.toString();
+        }
+
+        @Override
+        public String toString()
+        {
+            return toString(false, false);
         }
     }
 
