@@ -28,6 +28,8 @@ import java.util.function.Supplier;
 import org.apache.cassandra.index.Index;
 import org.apache.lucene.util.PriorityQueue;
 
+import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
+
 /**
  * Builds a list of query result rows applying the specified order, limit and offset.
  */
@@ -87,7 +89,9 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
     {
-        return WithHybridSort.create(limit, offset, comparator);
+        return limit == NO_LIMIT
+               ? WithListSort.create(limit, offset, comparator)
+               : WithHybridSort.create(limit, offset, comparator);
     }
 
     /**
@@ -100,7 +104,9 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
     {
-        return WithHybridSort.create(limit, offset, scorer);
+        return limit == NO_LIMIT
+               ? WithListSort.create(limit, offset, scorer)
+               : WithHybridSort.create(limit, offset, scorer);
     }
 
     /**
@@ -258,6 +264,7 @@ public abstract class SortedRowsBuilder
                              Comparator<T> comparator)
         {
             super(limit, offset);
+            assert limit != NO_LIMIT : "Queries without a limit should use WithListSort instead.";
             this.decorator = decorator;
             heapCapacity = limit + offset;
             heap = new PriorityQueue<>(limit + offset)
