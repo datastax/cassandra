@@ -141,17 +141,17 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     public static <T> InMemoryTrie<T> shortLived()
     {
-        return new InMemoryTrie<T>(BufferType.ON_HEAP, ExpectedLifetime.SHORT, null);
+        return new InMemoryTrie<>(BufferType.ON_HEAP, ExpectedLifetime.SHORT, null);
     }
 
     public static <T> InMemoryTrie<T> longLived(OpOrder opOrder)
     {
-        return new InMemoryTrie<T>(BufferType.OFF_HEAP, ExpectedLifetime.LONG, opOrder);
+        return new InMemoryTrie<>(BufferType.OFF_HEAP, ExpectedLifetime.LONG, opOrder);
     }
 
     public static <T> InMemoryTrie<T> longLived(BufferType bufferType, OpOrder opOrder)
     {
-        return new InMemoryTrie<T>(bufferType, ExpectedLifetime.LONG, opOrder);
+        return new InMemoryTrie<>(bufferType, ExpectedLifetime.LONG, opOrder);
     }
 
 

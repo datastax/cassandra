@@ -84,7 +84,6 @@ public class InMemoryTrieThreadedTest
     @Test
     public void testThreaded() throws InterruptedException
     {
-        Random rand = new Random(1);
         OpOrder readOrder = new OpOrder();
         ByteComparable[] src = generateKeys(rand, COUNT + OTHERS);
         InMemoryTrie<String> trie = InMemoryTrie.longLived(readOrder);

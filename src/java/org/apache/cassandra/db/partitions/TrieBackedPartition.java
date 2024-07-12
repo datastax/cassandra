@@ -85,8 +85,6 @@ import org.apache.cassandra.utils.memory.EnsureOnHeap;
  */
 public class TrieBackedPartition implements Partition
 {
-    private final static Logger logger = LoggerFactory.getLogger(TrieBackedPartition.class);
-
     /**
      * If keys is below this length, we will use a recursive procedure for inserting data in the memtable trie.
      */
@@ -98,7 +96,7 @@ public class TrieBackedPartition implements Partition
      *
      * The methods toRow and copyToOnHeapRow combine this with a clustering for the represented Row.
      */
-    static public class RowData
+    public static class RowData
     {
         final Object[] columnsBTree;
         final LivenessInfo livenessInfo;
@@ -111,7 +109,7 @@ public class TrieBackedPartition implements Partition
             this.deletion = deletion;
         }
 
-        Row toRow(Clustering clustering)
+        Row toRow(Clustering<?> clustering)
         {
             return BTreeRow.create(clustering,
                                    livenessInfo,
@@ -148,7 +146,7 @@ public class TrieBackedPartition implements Partition
         }
     }
 
-    static private final long EMPTY_ROWDATA_SIZE = ObjectSizes.measure(new RowData(null, null, null));
+    private static final long EMPTY_ROWDATA_SIZE = ObjectSizes.measure(new RowData(null, null, null));
 
     protected final Trie<Object> trie;
     protected final DecoratedKey partitionKey;
@@ -519,24 +517,7 @@ public class TrieBackedPartition implements Partition
     @Override
     public String toString()
     {
-        StringBuilder sb = new StringBuilder();
-
-        sb.append(String.format("[%s] key=%s partition_deletion=%s columns=%s",
-                                metadata(),
-                                metadata().partitionKeyType.getString(partitionKey().getKey()),
-                                partitionLevelDeletion(),
-                                columns()));
-
-        if (staticRow() != Rows.EMPTY_STATIC_ROW)
-            sb.append("\n    ").append(staticRow().toString(metadata(), true));
-
-        try (UnfilteredRowIterator iter = unfilteredIterator())
-        {
-            while (iter.hasNext())
-                sb.append("\n    ").append(iter.next().toString(metadata(), true));
-        }
-
-        return sb.toString();
+        return Partition.toString(this);
     }
 
     class SlicesIterator extends AbstractUnfilteredRowIterator

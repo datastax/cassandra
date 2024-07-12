@@ -354,24 +354,7 @@ public abstract class AbstractBTreePartition implements Partition
     @Override
     public String toString()
     {
-        StringBuilder sb = new StringBuilder();
-
-        sb.append(String.format("[%s] key=%s partition_deletion=%s columns=%s",
-                                metadata(),
-                                metadata().partitionKeyType.getString(partitionKey().getKey()),
-                                partitionLevelDeletion(),
-                                columns()));
-
-        if (staticRow() != Rows.EMPTY_STATIC_ROW)
-            sb.append("\n    ").append(staticRow().toString(metadata(), true));
-
-        try (UnfilteredRowIterator iter = unfilteredIterator())
-        {
-            while (iter.hasNext())
-                sb.append("\n    ").append(iter.next().toString(metadata(), true));
-        }
-
-        return sb.toString();
+        return Partition.toString(this);
     }
 
     public int rowCount()

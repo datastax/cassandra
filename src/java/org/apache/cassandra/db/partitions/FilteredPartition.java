@@ -43,6 +43,7 @@ public class FilteredPartition extends ImmutableBTreePartition
         return new FilteredPartition(iterator);
     }
 
+    @Override
     public RowIterator rowIterator()
     {
         final Iterator<Row> iter = super.rowIterator();

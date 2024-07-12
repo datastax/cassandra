@@ -21,7 +21,6 @@ package org.apache.cassandra.db.memtable;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.metrics.TableMetrics;

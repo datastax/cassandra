@@ -147,7 +147,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     public static TriePartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row)
     {
-        EncodingStats stats = EncodingStats.NO_STATS;   // As in trunk TODO: shouldn't this be EncodingStats.Collector.forRow(row)?
+        EncodingStats stats = EncodingStats.NO_STATS;  // As BTreePartitionUpdate does TODO: shouldn't this be EncodingStats.Collector.forRow(row)?
         InMemoryTrie<Object> trie = newTrie(DeletionInfo.LIVE);
 
         RegularAndStaticColumns columns;
@@ -220,6 +220,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         return fromIterator(UnfilteredRowIterators.withOnlyQueriedData(iterator, filter));
     }
 
+    @Override
     protected boolean canHaveShadowedData()
     {
         return canHaveShadowedData;

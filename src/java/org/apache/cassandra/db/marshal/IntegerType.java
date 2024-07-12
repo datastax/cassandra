@@ -171,7 +171,7 @@ public final class IntegerType extends NumberType<BigInteger>
      *    2^56-1        as FEFFFFFFFFFFFFFF
      *    2^56          as FF000100000000000000
      *
-     * See {@link #asComparableBytesLegacy} for description of the legacy format.
+     * See {@link #asComparableBytes41} for description of the legacy format.
      */
     @Override
     public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
@@ -195,9 +195,9 @@ public final class IntegerType extends NumberType<BigInteger>
         if (version == ByteComparable.Version.OSS50)
             return (limit - p < FULL_FORM_THRESHOLD)
                    ? encodeAsVarInt(accessor, data, limit)
-                   : asComparableBytesCurrent(accessor, data, p, limit, (signbyte >> 7) & 0xFF);
+                   : asComparableBytes50(accessor, data, p, limit, (signbyte >> 7) & 0xFF);
         else
-            return asComparableBytesLegacy(accessor, data, p, limit, signbyte);
+            return asComparableBytes41(accessor, data, p, limit, signbyte);
     }
 
     /**
@@ -254,13 +254,14 @@ public final class IntegerType extends NumberType<BigInteger>
      * The representations are prefix-free, because representations of different length always have length bytes that
      * differ.
      */
-    private <V> ByteSource asComparableBytesCurrent(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
+    private <V> ByteSource asComparableBytes50(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
     {
+        assert startpos >= 0 && startpos + FULL_FORM_THRESHOLD <= limit;
         // start with sign as a byte, then variable-length-encoded length, then bytes (stripped leading sign)
         return new ByteSource()
         {
             int pos = -2;
-            ByteSource lengthEncoding = new VariableLengthUnsignedInteger(limit - startpos - FULL_FORM_THRESHOLD);
+            ByteSource lengthEncoding = new VariableLengthUnsignedInteger(limit - (startpos + FULL_FORM_THRESHOLD));
 
             @Override
             public int next()
@@ -311,7 +312,7 @@ public final class IntegerType extends NumberType<BigInteger>
      *    2^31          as 8380000000
      *    2^32          as 840100000000
      */
-    private <V> ByteSource asComparableBytesLegacy(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
+    private <V> ByteSource asComparableBytes41(ValueAccessor<V> accessor, V data, int startpos, int limit, int signbyte)
     {
         return new ByteSource()
         {

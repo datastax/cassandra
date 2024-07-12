@@ -97,11 +97,10 @@ public class EncodingStats implements IMeasurableMemory
      */
     public EncodingStats mergeWith(EncodingStats that)
     {
-        long minTimestamp = mergeMinTimestamp(this.minTimestamp, that);
-        int minDelTime = mergeMinLocalDeletionTime(this.minLocalDeletionTime, that);
-        int minTTL = mergeMinTTL(this.minTTL, that);
 
-        return new EncodingStats(minTimestamp, minDelTime, minTTL);
+        return new EncodingStats(mergeMinTimestamp(this.minTimestamp, that),
+                                 mergeMinLocalDeletionTime(this.minLocalDeletionTime, that),
+                                 mergeMinTTL(this.minTTL, that));
     }
 
     public static long mergeMinTimestamp(long minTimestamp, EncodingStats stats)

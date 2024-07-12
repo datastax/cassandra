@@ -75,6 +75,8 @@ public interface Partition
         return this::rowIterator;
     }
 
+    Row staticRow();
+
     /**
      * Returns the last non-static row in the partition.
      */
@@ -104,4 +106,26 @@ public interface Partition
      * selected by the provided clusterings.
      */
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter columns, NavigableSet<Clustering<?>> clusteringsInQueryOrder, boolean reversed);
+
+    static String toString(Partition p)
+    {
+        StringBuilder sb = new StringBuilder();
+
+        sb.append(String.format("[%s] key=%s partition_deletion=%s columns=%s",
+                                p.metadata(),
+                                p.metadata().partitionKeyType.getString(p.partitionKey().getKey()),
+                                p.partitionLevelDeletion(),
+                                p.columns()));
+
+        if (p.staticRow() != Rows.EMPTY_STATIC_ROW)
+            sb.append("\n    ").append(p.staticRow().toString(p.metadata(), true));
+
+        try (UnfilteredRowIterator iter = p.unfilteredIterator())
+        {
+            while (iter.hasNext())
+                sb.append("\n    ").append(iter.next().toString(p.metadata(), true));
+        }
+
+        return sb.toString();
+    }
 }

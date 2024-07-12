@@ -35,7 +35,7 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
     private T next;
     private boolean gotNext;
 
-    public TrieTailsIterator(Trie<T> trie, Direction direction, Predicate<T> predicate)
+    protected TrieTailsIterator(Trie<T> trie, Direction direction, Predicate<T> predicate)
     {
         this.cursor = trie.cursor(direction);
         this.predicate = predicate;

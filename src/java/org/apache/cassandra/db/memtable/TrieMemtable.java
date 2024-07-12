@@ -390,7 +390,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
     static boolean isPartitionBoundary(Object content)
     {
-        return content != null && content instanceof PartitionData;
+        return content instanceof PartitionData;
     }
 
     public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
@@ -414,7 +414,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
     private static ByteComparable toComparableBound(PartitionPosition position, boolean before)
     {
-        return (position.isMinimum() || position == null) ? null : position.asComparableBound(before);
+        return position.isMinimum() ? null : position.asComparableBound(before);
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -453,6 +453,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
      */
     public static class PartitionData extends MutableDeletionInfo
     {
+        @Unmetered
         public final MemtableShard owner;
 
         public static final long HEAP_SIZE = ObjectSizes.measure(new PartitionData(DeletionInfo.LIVE, null));
@@ -482,11 +483,13 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             return owner.stats;
         }
 
+        @Override
         public String toString()
         {
             return "partition " + super.toString();
         }
 
+        @Override
         public long unsharedHeapSize()
         {
             return super.unsharedHeapSize() + HEAP_SIZE - MutableDeletionInfo.EMPTY_SIZE;

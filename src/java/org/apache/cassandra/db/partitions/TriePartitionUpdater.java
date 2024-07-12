@@ -37,43 +37,35 @@ import static org.apache.cassandra.db.partitions.TrieBackedPartition.RowData;
 /**
  *  The function we provide to the trie utilities to perform any partition and row inserts and updates
  */
-public final class TriePartitionUpdater implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>, ColumnData.PostReconciliationFunction
+public final class TriePartitionUpdater
+extends BasePartitionUpdater
+implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
 {
-    private final Cloner cloner;
     private final UpdateTransaction indexer;
     private final TableMetadata metadata;
     private final TrieMemtable.MemtableShard owner;
-    public long dataSize;
-    public long heapSize;
     public int partitionsAdded = 0;
     public int rowsAdded = 0;
-    public long colUpdateTimeDelta = Long.MAX_VALUE;
 
     public TriePartitionUpdater(Cloner cloner,
                                 UpdateTransaction indexer,
                                 TableMetadata metadata,
                                 TrieMemtable.MemtableShard owner)
     {
+        super(cloner);
         this.indexer = indexer;
         this.metadata = metadata;
-        this.cloner = cloner;
         this.owner = owner;
     }
 
-    public Object apply(Object existing, Object update, InMemoryTrie.KeyProducer keyState)
+    public Object apply(Object existing, Object update, InMemoryTrie.KeyProducer<Object> keyState)
     {
         if (update instanceof RowData)
-        {
-            RowData rowData = (RowData) update;
-            return applyRow((RowData) existing, rowData, keyState);
-        }
+            return applyRow((RowData) existing, (RowData) update, keyState);
         else if (update instanceof DeletionInfo)
-        {
             return applyDeletion((TrieMemtable.PartitionData) existing, (DeletionInfo) update);
-        }
-        {
+        else
             throw new AssertionError("Unexpected update type: " + update.getClass());
-        }
     }
 
     /**
@@ -84,7 +76,7 @@ public final class TriePartitionUpdater implements InMemoryTrie.UpsertTransforme
      * @param keyState Used to obtain the path through which this node was reached.
      * @return the insert row, or the merged row, copied using our allocator
      */
-    public RowData applyRow(RowData existing, RowData insert, InMemoryTrie.KeyProducer keyState)
+    public RowData applyRow(RowData existing, RowData insert, InMemoryTrie.KeyProducer<Object> keyState)
     {
         if (existing == null)
         {
@@ -165,41 +157,5 @@ public final class TriePartitionUpdater implements InMemoryTrie.UpsertTransforme
         TrieMemtable.PartitionData merged = new TrieMemtable.PartitionData(existing, update);
         this.heapSize += merged.unsharedHeapSize() - existing.unsharedHeapSize();
         return merged;
-    }
-
-    public Cell<?> merge(Cell<?> previous, Cell<?> insert)
-    {
-        if (insert == previous)
-            return insert;
-
-        long timeDelta = Math.abs(insert.timestamp() - previous.timestamp());
-        if (timeDelta < colUpdateTimeDelta)
-            colUpdateTimeDelta = timeDelta;
-        if (cloner != null)
-            insert = cloner.clone(insert);
-        dataSize += insert.dataSize() - previous.dataSize();
-        heapSize += insert.unsharedHeapSizeExcludingData() - previous.unsharedHeapSizeExcludingData();
-        return insert;
-    }
-
-    public ColumnData insert(ColumnData insert)
-    {
-        if (cloner != null)
-            insert = insert.clone(cloner);
-        dataSize += insert.dataSize();
-        heapSize += insert.unsharedHeapSizeExcludingData();
-        return insert;
-    }
-
-    @Override
-    public void delete(ColumnData existing)
-    {
-        dataSize -= existing.dataSize();
-        heapSize -= existing.unsharedHeapSizeExcludingData();
-    }
-
-    public void onAllocatedOnHeap(long heapSize)
-    {
-        this.heapSize += heapSize;
     }
 }

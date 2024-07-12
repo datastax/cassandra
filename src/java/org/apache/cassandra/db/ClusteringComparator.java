@@ -293,6 +293,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
                 {
                     if (current != null)
                     {
+                        // Process bytes of the current component.
                         int b = current.next();
                         if (b > END_OF_STREAM)
                             return b;
@@ -300,14 +301,18 @@ public class ClusteringComparator implements Comparator<Clusterable>
                     }
 
                     int sz = src.size();
-                    if (srcnum == sz)
+                    if (srcnum == sz) // already produced the Kind byte, we are done
                         return END_OF_STREAM;
 
                     ++srcnum;
                     if (srcnum == sz)
                         return src.kind().asByteComparableValue(version);
+                    else
+                        return advanceToComponent(src.get(srcnum));
+                }
 
-                    final V nextComponent = src.get(srcnum);
+                private int advanceToComponent(V nextComponent)
+                {
                     // We can have a null as the clustering component (this is a relic of COMPACT STORAGE, but also
                     // can appear in indexed partitions with no rows but static content),
                     if (nextComponent == null)
@@ -317,7 +322,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
                         else
                         {
                             // legacy version did not permit nulls in clustering keys and treated these as null values
-                            return subtype(srcnum).isReversed() ? NEXT_COMPONENT_NULL_REVERSED : NEXT_COMPONENT_NULL;
+                            return nextComponentNull(subtype(srcnum).isReversed());
                         }
                     }
 
@@ -325,11 +330,16 @@ public class ClusteringComparator implements Comparator<Clusterable>
                     // and also null values for some types (e.g. int, varint but not text) that are encoded as empty
                     // buffers.
                     if (current == null)
-                        return subtype(srcnum).isReversed() ? NEXT_COMPONENT_NULL_REVERSED : NEXT_COMPONENT_NULL;
+                        return nextComponentNull(subtype(srcnum).isReversed());
 
                     return NEXT_COMPONENT;
                 }
             };
+        }
+
+        private int nextComponentNull(boolean isReversed)
+        {
+            return isReversed ? NEXT_COMPONENT_NULL_REVERSED : NEXT_COMPONENT_NULL;
         }
 
         public String toString()
