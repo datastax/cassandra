@@ -75,6 +75,8 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
 
 public class CompactionGraph implements Closeable, Accountable
@@ -121,10 +123,10 @@ public class CompactionGraph implements Closeable, Accountable
         // and start another to avoid crashing CM.  But we'd rather not do this because the whole goal of
         // CompactionGraph is to write one segment only.
         var dd = perIndexComponents.descriptor();
-        var rowsPerKey = Keyspace.open(dd.ksname).getColumnFamilyStore(dd.cfname).getMeanRowsPerPartition();
+        var rowsPerKey = max(1, Keyspace.open(dd.ksname).getColumnFamilyStore(dd.cfname).getMeanRowsPerPartition());
         long estimatedRows = (long) (1.1 * keyCount * rowsPerKey); // 10% fudge factor
         int maxRowsInGraph = Integer.MAX_VALUE - 100_000; // leave room for a few more async additions until we flush
-        postingsEntriesAllocated = estimatedRows > maxRowsInGraph ? maxRowsInGraph : (int) estimatedRows;
+        postingsEntriesAllocated = max(1000, (int) min(estimatedRows, maxRowsInGraph));
 
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
