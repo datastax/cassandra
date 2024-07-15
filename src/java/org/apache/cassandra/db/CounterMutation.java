@@ -20,7 +20,12 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -36,6 +41,8 @@ import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
+import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.rows.*;
@@ -101,8 +108,46 @@ public class CounterMutation implements IMutation
 
     private static final Striped<Lock> LOCKS = Striped.lock(NUM_COUNTER_LOCKS.getInt());
 
+    private static final Map<Object, AtomicInteger> LOCK_CONTENTION = new HashMap<>();
+    private static final Map<Object, Integer> LOCK_ID = new HashMap<>();
+    private static final Map<Object, AtomicInteger> LOCK_USES = new HashMap<>();
+    private static final Map<Object, AtomicInteger> WAIT_DURATION = new HashMap<>();
+    private static final Map<Object, AtomicInteger> MAX_WAIT_THREADS = new HashMap<>();
+    private static final Map<Object, AtomicInteger> WAIT_THREADS = new HashMap<>();
+    private static final ScheduledExecutorService CONTENTION_DUMPER = new DebuggableScheduledThreadPoolExecutor("CounterMutationLockContentionDumper");
+    private static final AtomicLong TOTAL_NUM_LOCKS = new AtomicLong();
+    private static final AtomicLong PREV_TOTAL_NUM_LOCKS = new AtomicLong();
+
     private final Mutation mutation;
     private final ConsistencyLevel consistency;
+
+    static
+    {
+        for (int i = 0; i < NUM_COUNTER_LOCKS.getInt(); i++)
+        {
+            LOCK_CONTENTION.put(LOCKS.getAt(i), new AtomicInteger());
+            LOCK_USES.put(LOCKS.getAt(i), new AtomicInteger());
+            WAIT_DURATION.put(LOCKS.getAt(i), new AtomicInteger());
+            MAX_WAIT_THREADS.put(LOCKS.getAt(i), new AtomicInteger());
+            WAIT_THREADS.put(LOCKS.getAt(i), new AtomicInteger());
+            LOCK_ID.put(LOCKS.getAt(i), i);
+        }
+        CONTENTION_DUMPER.scheduleWithFixedDelay(() -> {
+            if (TOTAL_NUM_LOCKS.get() != PREV_TOTAL_NUM_LOCKS.get())
+            {
+                PREV_TOTAL_NUM_LOCKS.set(TOTAL_NUM_LOCKS.get());
+                int numEntries = 200;
+                Set<Map.Entry<Object, AtomicInteger>> contention = Collections.unmodifiableSet(LOCK_CONTENTION.entrySet());
+                Set<Map.Entry<Object, AtomicInteger>> waitDuration = Collections.unmodifiableSet(WAIT_DURATION.entrySet());
+                logger.debug("DUPA total number of lock taken: {} in {} stripes; avg {}", TOTAL_NUM_LOCKS.get(), NUM_COUNTER_LOCKS.getInt(), TOTAL_NUM_LOCKS.get() / NUM_COUNTER_LOCKS.getInt());
+                logger.debug("DUPA Most common locks:");
+                contention.stream().sorted(Comparator.comparingInt(entry -> -entry.getValue().get())).limit(numEntries).forEach(e -> logger.debug("DUPA {}: {}/{} times (max threads: {})", LOCK_ID.get(e.getKey()), e.getValue(), LOCK_USES.get(e.getKey()).get(), MAX_WAIT_THREADS.get(e.getKey()).get()));
+                logger.debug("DUPA Longest locks:");
+                waitDuration.stream().sorted(Comparator.comparingInt(entry -> -entry.getValue().get())).limit(numEntries).forEach(e -> logger.debug("DUPA {}: {} ms", LOCK_ID.get(e.getKey()), e.getValue()));
+            }
+        }, 1, 1, MINUTES);
+    }
+
 
     public CounterMutation(Mutation mutation, ConsistencyLevel consistency)
     {
@@ -247,16 +292,30 @@ public class CounterMutation implements IMutation
         {
             for (Lock lock : sortedLocks)
             {
-                long timeout = getTimeout(NANOSECONDS) - (System.nanoTime() - startTime);
+                long lockStart = System.nanoTime();
+                long timeout = getTimeout(NANOSECONDS) - (lockStart - startTime);
+                LOCK_USES.get(lock).incrementAndGet();
                 try
                 {
-                    if (!lock.tryLock(timeout, NANOSECONDS))
-                        handleLockTimeoutAndThrow(replicationStrategy);
+                    if (!lock.tryLock())
+                    {
+                        LOCK_CONTENTION.get(lock).incrementAndGet();
+                        int numWaiting = WAIT_THREADS.get(lock).incrementAndGet();
+                        MAX_WAIT_THREADS.get(lock).updateAndGet(current -> Math.max(current, numWaiting));
+                        if (!lock.tryLock(timeout, NANOSECONDS))
+                            handleLockTimeoutAndThrow(replicationStrategy);
+                        WAIT_DURATION.get(lock).addAndGet((int) TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lockStart));
+                        TOTAL_NUM_LOCKS.incrementAndGet();
+                    }
                     locks.add(lock);
                 }
                 catch (InterruptedException e)
                 {
                     handleLockTimeoutAndThrow(replicationStrategy);
+                }
+                finally
+                {
+                    WAIT_THREADS.get(lock).decrementAndGet();
                 }
             }
         }

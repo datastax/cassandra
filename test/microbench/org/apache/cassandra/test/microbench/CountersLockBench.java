@@ -62,6 +62,7 @@ public class CountersLockBench
     {
         // locks should be created like CounterMutation::LOCKS
         locks = Striped.lock(numStripes);
+//        locks = Striped.custom(numStripes);
     }
 
     @Benchmark
