@@ -43,6 +43,7 @@ public class BTreePartitionUpdater extends BasePartitionUpdater implements Updat
     final MemtableAllocator allocator;
     final OpOrder.Group writeOp;
     final UpdateTransaction indexer;
+    public int partitionsAdded = 0;
 
     public BTreePartitionUpdater(MemtableAllocator allocator, Cloner cloner, OpOrder.Group writeOp, UpdateTransaction indexer)
     {
@@ -89,6 +90,28 @@ public class BTreePartitionUpdater extends BasePartitionUpdater implements Updat
         DeletionInfo newInfo = existing.mutableCopy().add(update.clone(HeapCloner.instance));
         onAllocatedOnHeap(newInfo.unsharedHeapSize() - existing.unsharedHeapSize());
         return newInfo;
+    }
+
+    public BTreePartitionData mergePartitions(BTreePartitionData current, final BTreePartitionUpdate update)
+    {
+        if (current == null)
+        {
+            current = BTreePartitionData.EMPTY;
+            this.onAllocatedOnHeap(BTreePartitionData.UNSHARED_HEAP_SIZE);
+            ++partitionsAdded;
+        }
+
+        try
+        {
+            indexer.start();
+
+            return makeMergedPartition(current, update);
+        }
+        finally
+        {
+            indexer.commit();
+            reportAllocatedMemory();
+        }
     }
 
     protected BTreePartitionData makeMergedPartition(BTreePartitionData current, BTreePartitionUpdate update)

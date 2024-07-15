@@ -67,6 +67,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
     public static List<Object> parameters()
     {
         return ImmutableList.of("SkipListMemtable",
+                                "TrieMemtableStage1",
                                 "TrieMemtable");
     }
 
