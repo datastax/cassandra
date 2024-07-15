@@ -35,7 +35,7 @@ public class DefaultMemtableFactory implements Memtable.Factory
     @Override
     public Memtable create(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadaRef, Memtable.Owner owner)
     {
-        return TrieMemtableStage1.FACTORY.create(commitLogLowerBound, metadaRef, owner);
+        return TrieMemtable.FACTORY.create(commitLogLowerBound, metadaRef, owner);
     }
 
     @Override
@@ -68,9 +68,9 @@ public class DefaultMemtableFactory implements Memtable.Factory
         return TrieMemtable.FACTORY.createMemtableMetrics(metadataRef);
     }
 
-//    @Override
-//    public PartitionUpdate.Factory partitionUpdateFactory()
-//    {
-//        return TriePartitionUpdate.FACTORY;
-//    }
+    @Override
+    public PartitionUpdate.Factory partitionUpdateFactory()
+    {
+        return TriePartitionUpdate.FACTORY;
+    }
 }
