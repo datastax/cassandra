@@ -321,7 +321,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         if (openResult)
             openResult();
         txnProxy().commit();
-        observers.forEach(SSTableFlushObserver::complete);
+        observers.forEach(obs -> obs.complete(this));
         return finished();
     }
 
@@ -341,8 +341,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         finally
         {
             // need to generate all index files before commit, so they will be included in txn log
-            observers.forEach(SSTableFlushObserver::complete);
-        }
+            observers.forEach(obs -> obs.complete(this));
+         }
     }
 
     public final Throwable commit(Throwable accumulate)

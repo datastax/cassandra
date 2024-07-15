@@ -48,6 +48,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionT
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
@@ -88,6 +89,12 @@ public class SSTableIndexWriter implements PerIndexWriter
     public IndexContext indexContext()
     {
         return indexContext;
+    }
+
+    @Override
+    public IndexComponents.ForWrite writtenComponents()
+    {
+        return perIndexComponents;
     }
 
     @Override

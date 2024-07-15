@@ -25,11 +25,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Stopwatch;
+import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -39,6 +41,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -56,6 +59,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     private final PerSSTableWriter perSSTableWriter;
     private final Stopwatch stopwatch = Stopwatch.createUnstarted();
     private final RowMapping rowMapping;
+    private final OperationType opType;
 
     private DecoratedKey currentKey;
     private boolean tokenOffsetWriterCompleted = false;
@@ -86,7 +90,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         // format version, because that is what `IndexContext.keyFactory` always uses (see ctor)
         this.primaryKeyFactory = onDiskFormat.newPrimaryKeyFactory(tableMetadata.comparator);
         this.indices = indices;
-        this.rowMapping = RowMapping.create(lifecycleNewTracker.opType());
+        this.opType = lifecycleNewTracker.opType();
+        this.rowMapping = RowMapping.create(opType);
         this.perIndexWriters = indices.stream().map(i -> onDiskFormat.newPerIndexWriter(i,
                                                                                         indexDescriptor,
                                                                                         lifecycleNewTracker,
@@ -173,7 +178,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     }
 
     @Override
-    public void complete()
+    public void complete(SSTable sstable)
     {
         if (aborted) return;
 
@@ -200,6 +205,41 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             for (PerIndexWriter perIndexWriter : perIndexWriters)
             {
                 perIndexWriter.complete(stopwatch);
+
+                // The handling of components when we flush/compact is a tad backward: instead of registering the
+                // components as we write them, all the components are collected beforehand in `SSTableWriter#create`,
+                // which means this is a superset of possible components, but if any components are not written for
+                // those reason, this needs to be fixed afterward. One case for SAI component for instance is empty
+                // indexes: if a particular sstable has nothing indexed for a particular index, then only the completion
+                // marker for that index is kept on disk but no other components, so we need to remove the components
+                // that were "optimistically" added (and more generally, future index implementation may have some
+                // components that are only optionally present based on specific conditions).
+                // Note 1: for index build/rebuild on existing sstable, `SSTableWriter#create` is not used, and instead
+                //   we do only register components written (see `StorageAttachedIndexBuilder#completeSSTable`).
+                // Note 2: as hinted above, an alternative here would be to change the whole handling of components,
+                //   registering components only as they are effectively written. This is a larger refactor, with some
+                //   subtleties involved, so it is left as potential future work.
+                logger.warn("Completing {} with operation {}", sstable, opType);
+                if (opType == OperationType.FLUSH || opType == OperationType.COMPACTION)
+                {
+                    var writtenComponents = perIndexWriter.writtenComponents().allAsCustomComponents();
+                    var registeredComponents = IndexDescriptor.perIndexComponentsForNewlyFlushedSSTable(perIndexWriter.indexContext());
+                    var toRemove = Sets.difference(registeredComponents, writtenComponents);
+                    if (!toRemove.isEmpty())
+                    {
+                        if (logger.isTraceEnabled())
+                        {
+                            logger.trace(indexDescriptor.logMessage("Removing optimistically added but not writen components from TOC of SSTable {} for index {}"),
+                                         indexDescriptor.descriptor,
+                                         perIndexWriter.indexContext().getIndexName());
+                        }
+
+                        // During flush, this happens as we finalize the sstable and before its size is tracked, so not
+                        // passing a tracker is correct and intended (there is nothing to update in the tracker).
+                        sstable.unregisterComponents(toRemove, null);
+                    }
+                }
+
             }
             elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
             logger.trace(indexDescriptor.logMessage("Completed per-index writes for SSTable {}. Duration: {} ms. Total elapsed time: {} ms."),
