@@ -106,7 +106,7 @@ public class CounterMutation implements IMutation
     private static final String LOCK_TIMEOUT_MESSAGE = "Failed to acquire locks for counter mutation on keyspace {} for longer than {} millis, giving up";
     private static final String LOCK_TIMEOUT_TRACE = "Failed to acquire locks for counter mutation for longer than {} millis, giving up";
 
-    private static final Striped<Lock> LOCKS = Striped.lock(NUM_COUNTER_LOCKS.getInt());
+    private static final Striped<Lock> LOCKS;
 
     private static final Map<Object, AtomicInteger> LOCK_CONTENTION = new HashMap<>();
     private static final Map<Object, Integer> LOCK_ID = new HashMap<>();
@@ -121,9 +121,12 @@ public class CounterMutation implements IMutation
     private final Mutation mutation;
     private final ConsistencyLevel consistency;
 
+    private static final Boolean REVERSE_UNLOCK = Boolean.getBoolean("cassandra.test.reverse_unlock");
+
     static
     {
-        for (int i = 0; i < NUM_COUNTER_LOCKS.getInt(); i++)
+        LOCKS = Striped.lock(NUM_COUNTER_LOCKS.getInt());
+        for (int i = 0; i < LOCKS.size(); i++)
         {
             LOCK_CONTENTION.put(LOCKS.getAt(i), new AtomicInteger());
             LOCK_USES.put(LOCKS.getAt(i), new AtomicInteger());
@@ -218,7 +221,7 @@ public class CounterMutation implements IMutation
         Mutation.PartitionUpdateCollector resultBuilder = new Mutation.PartitionUpdateCollector(getKeyspaceName(), key());
         Keyspace keyspace = Keyspace.open(getKeyspaceName());
 
-        List<Lock> locks = new ArrayList<>();
+        ArrayList<Lock> locks = new ArrayList<>();
         Tracing.trace("Acquiring counter locks");
 
         long clock = FBUtilities.timestampMicros();
@@ -236,8 +239,17 @@ public class CounterMutation implements IMutation
         }
         finally
         {
-            for (Lock lock : locks)
-                lock.unlock();
+            if (REVERSE_UNLOCK)
+            {
+                // iterate over all locks in reverse order and unlock them
+                for (int i = locks.size() - 1; i >= 0; i--)
+                    locks.get(i).unlock();
+            }
+            else
+            {
+                for (Lock lock : locks)
+                    lock.unlock();
+            }
         }
     }
 
