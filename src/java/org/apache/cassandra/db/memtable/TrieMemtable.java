@@ -435,6 +435,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return TrieBackedPartition.create(key,
                                           holder.columns(),
                                           holder.stats(),
+                                          holder.rowCount(),
                                           trie,
                                           metadata,
                                           ensureOnHeap);
@@ -456,6 +457,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         @Unmetered
         public final MemtableShard owner;
 
+        public int rowCount;
+
         public static final long HEAP_SIZE = ObjectSizes.measure(new PartitionData(DeletionInfo.LIVE, null));
 
         public PartitionData(DeletionInfo deletion,
@@ -463,6 +466,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         {
             super(deletion.getPartitionDeletion(), deletion.copyRanges(HeapCloner.instance));
             this.owner = owner;
+            this.rowCount = 0;
         }
 
         public PartitionData(PartitionData existing,
@@ -470,6 +474,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         {
             // Start with the update content, to properly copy it
             this(update, existing.owner);
+            rowCount = existing.rowCount;
             add(existing);
         }
 
@@ -481,6 +486,11 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         public EncodingStats stats()
         {
             return owner.stats;
+        }
+
+        public int rowCount()
+        {
+            return rowCount;
         }
 
         @Override
@@ -752,6 +762,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             return TrieBackedPartition.create(key,
                                               pd.columns(),
                                               pd.stats(),
+                                              pd.rowCount(),
                                               tailTrie,
                                               metadata,
                                               ensureOnHeap);

@@ -44,9 +44,9 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
 {
     private final UpdateTransaction indexer;
     private final TableMetadata metadata;
+    private TrieMemtable.PartitionData currentPartition;
     private final TrieMemtable.MemtableShard owner;
     public int partitionsAdded = 0;
-    public int rowsAdded = 0;
 
     public TriePartitionUpdater(Cloner cloner,
                                 UpdateTransaction indexer,
@@ -104,7 +104,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
 
             this.dataSize += data.dataSize();
             this.heapSize += data.unsharedHeapSizeExcludingData();
-            ++this.rowsAdded;
+            ++currentPartition.rowCount;  // null pointer here means a problem in applyDeletion
             return data;
         }
         else
@@ -155,16 +155,16 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
             TrieMemtable.PartitionData newRef = new TrieMemtable.PartitionData(update, owner);
             this.heapSize += newRef.unsharedHeapSize();
             ++this.partitionsAdded;
-            return newRef;
+            return currentPartition = newRef;
         }
 
         assert owner == existing.owner;
         if (update.isLive() || !update.mayModify(existing))
-            return existing;
+            return currentPartition = existing;
 
         // Note: Always on-heap, regardless of cloner
         TrieMemtable.PartitionData merged = new TrieMemtable.PartitionData(existing, update);
         this.heapSize += merged.unsharedHeapSize() - existing.unsharedHeapSize();
-        return merged;
+        return currentPartition = merged;
     }
 }

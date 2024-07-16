@@ -39,7 +39,6 @@ import org.apache.cassandra.db.MutableDeletionInfo;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.ComplexColumnData;
@@ -72,21 +71,11 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                 DecoratedKey key,
                                 RegularAndStaticColumns columns,
                                 EncodingStats stats,
+                                int rowCount,
                                 Trie<Object> trie,
                                 boolean canHaveShadowedData)
     {
-        super(key, columns, stats, trie, metadata, canHaveShadowedData);
-    }
-
-    protected TriePartitionUpdate(TableMetadata metadata,
-                                  DecoratedKey key)
-    {
-        this(metadata,
-             key,
-             RegularAndStaticColumns.NONE,
-             EncodingStats.NO_STATS,
-             newTrie(MutableDeletionInfo.live()),
-             false);
+        super(key, columns, stats, rowCount, trie, metadata, canHaveShadowedData);
     }
 
     private static InMemoryTrie<Object> newTrie(DeletionInfo deletion)
@@ -113,7 +102,13 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     public static TriePartitionUpdate emptyUpdate(TableMetadata metadata, DecoratedKey key)
     {
-        return new TriePartitionUpdate(metadata, key);
+        return new TriePartitionUpdate(metadata,
+                                       key,
+                                       RegularAndStaticColumns.NONE,
+                                       EncodingStats.NO_STATS,
+                                       0,
+                                       newTrie(MutableDeletionInfo.live()),
+                                       false);
     }
 
     /**
@@ -132,6 +127,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        key,
                                        RegularAndStaticColumns.NONE,
                                        new EncodingStats(timestamp, nowInSec, LivenessInfo.NO_TTL),
+                                       0,
                                        newTrie(new MutableDeletionInfo(timestamp, nowInSec)),
                                        false);
     }
@@ -166,7 +162,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             throw new AssertionError(e);
         }
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, trie, false);
+        return new TriePartitionUpdate(metadata, key, columns, stats, row.isStatic() ? 0 : 1, trie, false);
     }
 
     /**
@@ -194,13 +190,14 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @SuppressWarnings("resource")
     public static TriePartitionUpdate fromIterator(UnfilteredRowIterator iterator)
     {
-        InMemoryTrie<Object> trie = build(iterator);
+        ContentBuilder builder = build(iterator);
 
         return new TriePartitionUpdate(iterator.metadata(),
                                        iterator.partitionKey(),
                                        iterator.columns(),
-                                       collectStats(trie),
-                                       trie,
+                                       iterator.stats(),
+                                       builder.rowCount(),
+                                       builder.trie(),
                                        false);
     }
 
@@ -335,7 +332,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
-        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, t, canHaveShadowedData);
+        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCount, t, canHaveShadowedData);
     }
 
     /**
@@ -493,6 +490,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         private final InMemoryTrie<Object> trie = InMemoryTrie.shortLived();
         private final EncodingStats.Collector statsCollector = new EncodingStats.Collector();
         private final boolean useRecursive;
+        private int rowCount;
 
         public Builder(TableMetadata metadata,
                        DecoratedKey key,
@@ -514,6 +512,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             this.canHaveShadowedData = canHaveShadowedData;
             this.deletionInfo = deletionInfo.mutableCopy();
             useRecursive = useRecursive(metadata.comparator);
+            rowCount = 0;
             add(staticRow);
         }
 
@@ -559,6 +558,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 throw new AssertionError(e);
             }
             Rows.collectStats(row, statsCollector);
+            if (!row.isStatic())
+                ++rowCount;
         }
 
         public void addPartitionDeletion(DeletionTime deletionTime)
@@ -596,6 +597,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                                              partitionKey(),
                                                              columns,
                                                              statsCollector.get(),
+                                                             rowCount,
                                                              trie,
                                                              canHaveShadowedData);
 
