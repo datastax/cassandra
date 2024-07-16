@@ -44,6 +44,7 @@ import org.apache.cassandra.index.sasi.utils.TypeUtil;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -138,7 +139,7 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     }
 
     @Override
-    public void complete()
+    public void complete(SSTable sstable)
     {
         if (isComplete)
             return;
