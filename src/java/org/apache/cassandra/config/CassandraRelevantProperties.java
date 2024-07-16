@@ -457,6 +457,7 @@ public enum CassandraRelevantProperties
 
     LWT_LOCKS_PER_THREAD("cassandra.lwt_locks_per_thread", "1024"),
     COUNTER_LOCK_NUM_STRIPES("cassandra.counter_lock.num_stripes", "1024"),
+    COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
 
     CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
     /**

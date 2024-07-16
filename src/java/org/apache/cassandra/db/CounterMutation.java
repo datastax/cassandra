@@ -18,14 +18,17 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
+import com.google.common.base.Supplier;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
@@ -56,6 +59,7 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static java.util.concurrent.TimeUnit.*;
+import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_FAIR_LOCK;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_NUM_STRIPES;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
@@ -99,10 +103,36 @@ public class CounterMutation implements IMutation
     private static final String LOCK_TIMEOUT_MESSAGE = "Failed to acquire locks for counter mutation on keyspace {} for longer than {} millis, giving up";
     private static final String LOCK_TIMEOUT_TRACE = "Failed to acquire locks for counter mutation for longer than {} millis, giving up";
 
-    private static final Striped<Lock> LOCKS = Striped.lock(COUNTER_LOCK_NUM_STRIPES.getInt());
+    private static final Striped<Lock> LOCKS;
 
     private final Mutation mutation;
     private final ConsistencyLevel consistency;
+
+    static
+    {
+        if (COUNTER_LOCK_FAIR_LOCK.getBoolean())
+        {
+            try
+            {
+                Class<?> stripedClass = Striped.class;
+
+                // Get the custom method Striped.custom
+                Method customMethod = stripedClass.getDeclaredMethod("custom", int.class, Supplier.class);
+                customMethod.setAccessible(true);
+
+                Supplier<Lock> lockSupplier = () -> new ReentrantLock(true);
+                LOCKS = (Striped<Lock>) customMethod.invoke(null, COUNTER_LOCK_NUM_STRIPES.getInt(), lockSupplier);
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+        else
+        {
+            LOCKS = Striped.lock(COUNTER_LOCK_NUM_STRIPES.getInt());
+        }
+    }
 
     public CounterMutation(Mutation mutation, ConsistencyLevel consistency)
     {
