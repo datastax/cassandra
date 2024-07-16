@@ -23,6 +23,7 @@ import com.google.common.base.Stopwatch;
 
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
@@ -30,6 +31,11 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
  */
 public interface PerIndexWriter
 {
+    /**
+     * The index components written on disk by this disk.
+     */
+    IndexComponents.ForWrite writtenComponents();
+
     /**
      * Adds a row to this index.
      */
