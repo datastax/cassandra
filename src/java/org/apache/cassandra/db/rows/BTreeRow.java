@@ -588,9 +588,7 @@ public class BTreeRow extends AbstractRow
         Object[] existingBtree = existing.btree;
         Object[] updateBtree = update.btree;
 
-        LivenessInfo existingInfo = existing.primaryKeyLivenessInfo();
-        LivenessInfo updateInfo = update.primaryKeyLivenessInfo();
-        LivenessInfo livenessInfo = existingInfo.supersedes(updateInfo) ? existingInfo : updateInfo;
+        LivenessInfo livenessInfo = LivenessInfo.merge(update.primaryKeyLivenessInfo(), existing.primaryKeyLivenessInfo());
 
         Row.Deletion rowDeletion = existing.deletion().supersedes(update.deletion()) ? existing.deletion() : update.deletion();
 
@@ -600,11 +598,19 @@ public class BTreeRow extends AbstractRow
             rowDeletion = Row.Deletion.LIVE;
 
         DeletionTime deletion = rowDeletion.time();
+        Object[] tree = mergeRowBTrees(reconcileF, existingBtree, updateBtree, deletion, existing.deletion().time());
+        return new BTreeRow(existing.clustering, livenessInfo, rowDeletion, tree, minDeletionTime(tree, livenessInfo, deletion));
+    }
+
+    public static Object[] mergeRowBTrees(ColumnData.PostReconciliationFunction reconcileF,
+                                          Object[] existingBtree, Object[] updateBtree,
+                                          DeletionTime deletion, DeletionTime existingDeletion)
+    {
         try (ColumnData.Reconciler reconciler = ColumnData.reconciler(reconcileF, deletion))
         {
-            if (!rowDeletion.isLive())
+            if (!deletion.isLive())
             {
-                if (rowDeletion == existing.deletion())
+                if (deletion == existingDeletion)
                 {
                     updateBtree = BTree.transformAndFilter(updateBtree, reconciler::retain);
                 }
@@ -613,8 +619,7 @@ public class BTreeRow extends AbstractRow
                     existingBtree = BTree.transformAndFilter(existingBtree, reconciler::retain);
                 }
             }
-            Object[] tree = BTree.update(existingBtree, updateBtree, ColumnData.comparator, reconciler);
-            return new BTreeRow(existing.clustering, livenessInfo, rowDeletion, tree, minDeletionTime(tree, livenessInfo, deletion));
+            return BTree.update(existingBtree, updateBtree, ColumnData.comparator, reconciler);
         }
     }
 
