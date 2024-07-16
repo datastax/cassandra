@@ -302,7 +302,7 @@ public class SSTableFlushObserverTest
         }
 
         @Override
-        public void complete()
+        public void complete(SSTable ssTable)
         {
             isComplete = true;
         }
