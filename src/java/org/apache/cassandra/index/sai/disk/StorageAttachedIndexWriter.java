@@ -219,7 +219,6 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                 // Note 2: as hinted above, an alternative here would be to change the whole handling of components,
                 //   registering components only as they are effectively written. This is a larger refactor, with some
                 //   subtleties involved, so it is left as potential future work.
-                logger.warn("Completing {} with operation {}", sstable, opType);
                 if (opType == OperationType.FLUSH || opType == OperationType.COMPACTION)
                 {
                     var writtenComponents = perIndexWriter.writtenComponents().allAsCustomComponents();
