@@ -31,6 +31,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
@@ -38,6 +39,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
 import org.awaitility.Awaitility;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -110,6 +112,10 @@ public class HintServiceBytemanTest
         assertEquals(StorageService.instance.getLocalHostUUID(), info.hostId);
         assertEquals(1, info.totalFiles);
         assertEquals(info.oldestTimestamp, info.newestTimestamp); // there is 1 descriptor with only 1 timestamp
+
+        // Set the endpoint version for the HintsDispatchExecutor to be able to dispatch the hints
+        InetAddressAndPort knownEndpointAddress = FBUtilities.getBroadcastAddressAndPort();
+        MessagingService.instance().versions.set(knownEndpointAddress, MessagingService.current_version);
 
         spy.interceptMessageOut(20000).get();
         assertEquals(Collections.emptyList(), HintsService.instance.getPendingHints());
