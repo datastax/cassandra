@@ -65,7 +65,7 @@ public interface SSTableFlushObserver
     /**
      * Called when all data is written to the file and it's ready to be finished up.
      */
-    void complete();
+    void complete(SSTable ssTable);
 
     /**
      * Called when current sstable writer is switched during sharded compaction to free any in-memory resources associated
