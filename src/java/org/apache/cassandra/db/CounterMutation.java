@@ -173,7 +173,7 @@ public class CounterMutation implements IMutation
         Mutation.PartitionUpdateCollector resultBuilder = new Mutation.PartitionUpdateCollector(getKeyspaceName(), key());
         Keyspace keyspace = Keyspace.open(getKeyspaceName());
 
-        List<Lock> locks = new ArrayList<>();
+        ArrayList<Lock> locks = new ArrayList<>();
         Tracing.trace("Acquiring counter locks");
 
         long clock = FBUtilities.timestampMicros();
@@ -191,8 +191,9 @@ public class CounterMutation implements IMutation
         }
         finally
         {
-            for (Lock lock : locks)
-                lock.unlock();
+            // iterate over all locks in reverse order and unlock them
+            for (int i = locks.size() - 1; i >= 0; i--)
+                locks.get(i).unlock();
         }
     }
 
