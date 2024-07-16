@@ -265,7 +265,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         if (openResult)
             openResult();
         txnProxy.commit();
-        observers.forEach(SSTableFlushObserver::complete);
+        observers.forEach(obs -> obs.complete(this));
         return finished();
     }
 
@@ -289,7 +289,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
     {
         try
         {
-            observers.forEach(SSTableFlushObserver::complete);
+            observers.forEach(obs -> obs.complete(this));
         }
         catch (Throwable t)
         {
