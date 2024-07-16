@@ -262,17 +262,6 @@ public interface IndexComponents
         IndexComponent.ForWrite addOrGet(IndexComponentType component);
 
         /**
-         * Adds to this writer all the components that the version of this writer defines.
-         *
-         * @return this writer (for chaining purposes).
-         */
-        default ForWrite addAllComponentsForVersion()
-        {
-            expectedComponentsForVersion().forEach(this::addOrGet);
-            return this;
-        }
-
-        /**
          * Delete the files of all the components in this writer (and remove them so that the group will be empty
          * afterward).
          */

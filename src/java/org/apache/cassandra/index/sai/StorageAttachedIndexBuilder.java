@@ -298,7 +298,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                                  CountDownLatch latch,
                                  Set<Component> replacedComponents) throws InterruptedException
     {
-        indexWriter.complete();
+        indexWriter.complete(sstable);
 
         if (indexWriter.isAborted())
             throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
