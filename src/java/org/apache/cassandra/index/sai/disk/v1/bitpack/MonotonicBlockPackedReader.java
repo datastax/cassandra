@@ -24,7 +24,6 @@ import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
@@ -59,9 +58,8 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
         blockBitsPerValue = new byte[numBlocks];
         this.file = file;
 
-        try (final RandomAccessReader reader = this.file.createReader())
+        try (final IndexInputReader in = IndexInputReader.create(this.file.createReader()))
         {
-            final IndexInputReader in = IndexInputReader.create(reader);
             SAICodecUtils.validate(in);
 
             in.seek(meta.blockMetaOffset);
