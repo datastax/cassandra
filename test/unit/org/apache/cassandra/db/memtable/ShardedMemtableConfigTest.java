@@ -50,7 +50,7 @@ public class ShardedMemtableConfigTest extends CQLTester
     public void testDefaultShardCountSetByJMX() throws MalformedObjectNameException, ReflectionException, AttributeNotFoundException, InstanceNotFoundException, MBeanException, IOException, InvalidAttributeValueException, InterruptedException
     {
         // check the default, but also make sure the class is initialized if the default memtable is not sharded
-        assertEquals(FBUtilities.getAvailableProcessors(), AbstractShardedMemtable.getDefaultShardCount());
+        assertEquals(4 * FBUtilities.getAvailableProcessors(), AbstractShardedMemtable.getDefaultShardCount());
         jmxConnection.setAttribute(new ObjectName(SHARDED_MEMTABLE_CONFIG_OBJECT_NAME), new Attribute("DefaultShardCount", "7"));
         assertEquals(7, AbstractShardedMemtable.getDefaultShardCount());
         assertEquals("7", jmxConnection.getAttribute(new ObjectName(SHARDED_MEMTABLE_CONFIG_OBJECT_NAME), "DefaultShardCount"));
