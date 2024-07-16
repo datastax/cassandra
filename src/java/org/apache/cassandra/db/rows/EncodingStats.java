@@ -283,6 +283,13 @@ public class EncodingStats implements IMeasurableMemory
                 Rows.collectStats(rows.next(), collector);
             return collector.get();
         }
+
+        public static EncodingStats forRow(Row row)
+        {
+            Collector collector = new Collector();
+            Rows.collectStats(row, collector);
+            return collector.get();
+        }
     }
 
     public static class Serializer

@@ -144,7 +144,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     public static TriePartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row)
     {
-        EncodingStats stats = EncodingStats.NO_STATS;  // As BTreePartitionUpdate does TODO: shouldn't this be EncodingStats.Collector.forRow(row)?
+        EncodingStats stats = EncodingStats.Collector.forRow(row);
         InMemoryTrie<Object> trie = newTrie(DeletionInfo.LIVE);
 
         RegularAndStaticColumns columns;
@@ -264,15 +264,15 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     public PartitionUpdate merge(List<? extends PartitionUpdate> updates)
     {
-        // TODO: Use tries to do these merges, and test their correctness.
         assert !updates.isEmpty();
         final int size = updates.size();
 
         if (size == 1)
             return Iterables.getOnlyElement(updates);
 
+        // This could be more efficient but its performance is not critical (only used by triggers).
         List<UnfilteredRowIterator> asIterators = Lists.transform(updates, Partition::unfilteredIterator);
-        return fromIterator(UnfilteredRowIterators.merge(asIterators), ColumnFilter.all(updates.get(0).metadata()));
+        return fromIterator(UnfilteredRowIterators.merge(asIterators));
     }
 
     /**
