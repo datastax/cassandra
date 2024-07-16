@@ -141,6 +141,13 @@ public class IndexDescriptor
         return new IndexComponentsImpl(context, Version.latest(), -1);
     }
 
+    /**
+     * The set of components _expected_ to be written for a newly flushed sstable given the provided set of indices.
+     * This includes both per-sstable and per-index components.
+     * <p>
+     * Please note that the final sstable may not contain all of these components, as some may be empty or not written
+     * due to the specific of the flush, but this should be a superset of the components written.
+     */
     public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices)
     {
         Version version = Version.latest();
@@ -149,12 +156,25 @@ public class IndexDescriptor
             components.add(customComponentFor(version, component, null, 0));
 
         for (StorageAttachedIndex index : indices)
-        {
-            IndexContext context = index.getIndexContext();
-            for (IndexComponentType component : version.onDiskFormat().perIndexComponentTypes(context))
-                components.add(customComponentFor(version, component, context, 0));
-        }
+            addPerIndexComponentsForNewlyFlushedSSTable(components, version, index.getIndexContext());
         return components;
+    }
+
+    /**
+     * The set of per-index components _expected_ to be written for a newly flushed sstable for the provided index.
+     * <p>
+     * This is a subset of {@link #componentsForNewlyFlushedSSTable(Collection)} and has the same caveats.
+     */
+    public static Set<Component> perIndexComponentsForNewlyFlushedSSTable(IndexContext context)
+    {
+        return addPerIndexComponentsForNewlyFlushedSSTable(new HashSet<>(), Version.latest(), context);
+    }
+
+    private static Set<Component> addPerIndexComponentsForNewlyFlushedSSTable(Set<Component> addTo, Version version, IndexContext context)
+    {
+        for (IndexComponentType component : version.onDiskFormat().perIndexComponentTypes(context))
+            addTo.add(customComponentFor(version, component, context, 0));
+        return addTo;
     }
 
     private static Component customComponentFor(Version version, IndexComponentType componentType, @Nullable IndexContext context, int generation)
