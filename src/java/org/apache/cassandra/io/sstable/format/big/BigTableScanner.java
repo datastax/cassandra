@@ -81,8 +81,19 @@ public class BigTableScanner extends SSTableScanner<BigTableReader, RowIndexEntr
                             SSTableReadsListener listener)
     {
         super(sstable, columns, dataRange, rangeIterator, listener);
-        this.ifile = sstable.openIndexReader();
-        this.rowIndexEntrySerializer = new RowIndexEntry.Serializer(sstable.descriptor.version, sstable.header, sstable.owner().map(SSTable.Owner::getMetrics).orElse(null));
+
+        RandomAccessReader ifile = null;
+        try
+        {
+            ifile = sstable.openIndexReader();
+            this.rowIndexEntrySerializer = new RowIndexEntry.Serializer(sstable.descriptor.version, sstable.header, sstable.owner().map(SSTable.Owner::getMetrics).orElse(null));
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(ifile);
+            throw t;
+        }
+        this.ifile = ifile;
     }
 
     private void seekToCurrentRangeStart()
