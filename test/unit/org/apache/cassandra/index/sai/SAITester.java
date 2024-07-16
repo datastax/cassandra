@@ -101,6 +101,7 @@ import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class SAITester extends CQLTester
 {
@@ -650,6 +651,32 @@ public class SAITester extends CQLTester
                   .filter(File::isFile)
                   .filter(file -> Version.tryParseFileName(file.name()).isPresent())
                   .collect(Collectors.toSet());
+    }
+
+    /**
+     * Checks that the set of all SAI index files in the TOC for all sstables (of the {@link #currentTable()}) are
+     * exactly the provided files.
+     *
+     * @param files expected SAI index files (typically the result of {@link #indexFiles()} above). Should not contain
+     *              non-SAI sstable files (or the test will fail).
+     */
+    protected void assertIndexFilesInToc(Set<File> files) throws IOException
+    {
+        Set<String> found = files.stream().map(File::name).collect(Collectors.toSet());
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        for (SSTableReader sstable : cfs.getLiveSSTables())
+        {
+            for (Component component : TOCComponent.loadTOC(sstable.descriptor, false))
+            {
+                if (component.type != SSTableFormat.Components.Types.CUSTOM || !component.name.startsWith(Version.SAI_DESCRIPTOR))
+                    continue;
+
+                String tocFile = sstable.descriptor.fileFor(component).name();
+                if (!found.remove(tocFile))
+                    fail(String.format("TOC of %s contains unexpected SAI index file %s (all expected: %s)", sstable, tocFile, files));
+            }
+        }
+        assertTrue("The following files could not be found in the sstable TOC files: " + found, found.isEmpty());
     }
 
     protected ObjectName bufferSpaceObjectName(String name) throws MalformedObjectNameException
