@@ -22,8 +22,6 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.memtable.TrieMemtable;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.tries.InMemoryTrie;
