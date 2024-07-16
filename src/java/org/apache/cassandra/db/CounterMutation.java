@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -27,10 +28,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
+import com.google.common.base.Supplier;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
@@ -122,10 +125,33 @@ public class CounterMutation implements IMutation
     private final ConsistencyLevel consistency;
 
     private static final Boolean REVERSE_UNLOCK = Boolean.getBoolean("cassandra.test.reverse_unlock");
+    private static final Boolean FAIR_LOCK = Boolean.getBoolean("cassandra.test.fair_lock");
 
     static
     {
-        LOCKS = Striped.lock(NUM_COUNTER_LOCKS.getInt());
+        if (Boolean.getBoolean("cassandra.test.fair_counter_lock"))
+        {
+            try
+            {
+                Class<?> stripedClass = Striped.class;
+
+                // Get the custom method Striped.custom
+                Method customMethod = stripedClass.getDeclaredMethod("custom", int.class, Supplier.class);
+                customMethod.setAccessible(true);
+
+                Supplier<Lock> lockSupplier = () -> new ReentrantLock(true);
+                LOCKS = (Striped<Lock>) customMethod.invoke(null, NUM_COUNTER_LOCKS.getInt(), lockSupplier);
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+        else
+        {
+            LOCKS = Striped.lock(NUM_COUNTER_LOCKS.getInt());
+        }
+
         for (int i = 0; i < LOCKS.size(); i++)
         {
             LOCK_CONTENTION.put(LOCKS.getAt(i), new AtomicInteger());
