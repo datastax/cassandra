@@ -52,6 +52,7 @@ import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -313,15 +314,13 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                     LivenessInfo newInfo = update.livenessInfo.isEmpty()
                                            ? update.livenessInfo
                                            : update.livenessInfo.withUpdatedTimestamp(newTimestamp);
-                    // If the deletion is shadowable and the row has a timestamp, we'll force the deletion timestamp to be less
-                    // than the row one, so we should get rid of said deletion.
-                    Row.Deletion newDeletion = update.deletion.isLive() || (update.deletion.isShadowable() && !update.livenessInfo.isEmpty())
-                                               ? Row.Deletion.LIVE
-                                               : new Row.Deletion(new DeletionTime(newTimestamp - 1, update.deletion.time().localDeletionTime()),
-                                                                  update.deletion.isShadowable());
+                    DeletionTime newDeletion = update.deletion.isLive()
+                                               ? DeletionTime.LIVE
+                                               : new DeletionTime(newTimestamp - 1, update.deletion.localDeletionTime());
 
-                    Row updated = toRow(update, Clustering.EMPTY).updateAllTimestamp(newTimestamp);
-                    return new RowData(((BTreeRow)updated).getBTree(), newInfo, newDeletion);
+                    return new RowData(BTree.transformAndFilter(update.columnsBTree,
+                                                                (ColumnData cd) -> cd.updateAllTimestamp(newTimestamp)),
+                                       newInfo, newDeletion);
                 }
 
                 public DeletionInfo applyDeletion(DeletionInfo update)

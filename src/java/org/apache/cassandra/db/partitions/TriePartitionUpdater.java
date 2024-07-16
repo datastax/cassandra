@@ -73,21 +73,16 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
                                 RowData update,
                                 ColumnData.PostReconciliationFunction reconcileF)
     {
-        Object[] existingBtree = existing.columnsBTree;
-        Object[] updateBtree = update.columnsBTree;
 
         LivenessInfo livenessInfo = LivenessInfo.merge(update.livenessInfo, existing.livenessInfo);
-
-        Row.Deletion rowDeletion = existing.deletion.supersedes(update.deletion) ? existing.deletion : update.deletion;
-
-        if (rowDeletion.deletes(livenessInfo))
+        DeletionTime deletion = DeletionTime.merge(update.deletion, existing.deletion);
+        if (deletion.deletes(livenessInfo))
             livenessInfo = LivenessInfo.EMPTY;
-        else if (rowDeletion.isShadowedBy(livenessInfo))
-            rowDeletion = Row.Deletion.LIVE;
 
-        DeletionTime deletion = rowDeletion.time();
-        Object[] tree = BTreeRow.mergeRowBTrees(reconcileF, existingBtree, updateBtree, deletion, existing.deletion.time());
-        return new RowData(tree, livenessInfo, rowDeletion);
+        Object[] tree = BTreeRow.mergeRowBTrees(reconcileF,
+                                                existing.columnsBTree, update.columnsBTree,
+                                                deletion, existing.deletion);
+        return new RowData(tree, livenessInfo, deletion);
     }
 
     /**
