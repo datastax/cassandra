@@ -19,10 +19,10 @@
 package org.apache.cassandra.index.sai.disk.v2.hnsw;
 
 import java.io.IOException;
-
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
@@ -37,9 +37,10 @@ public class OnDiskVectors implements RandomAccessVectorValues<float[]>, AutoClo
 
     public OnDiskVectors(FileHandle fh, long segmentOffset)
     {
+        RandomAccessReader reader = null;
         try
         {
-            this.reader = fh.createReader();
+            reader = fh.createReader();
             reader.seek(segmentOffset);
             this.segmentOffset = segmentOffset;
 
@@ -49,8 +50,11 @@ public class OnDiskVectors implements RandomAccessVectorValues<float[]>, AutoClo
         }
         catch (Exception e)
         {
+            if (reader != null)
+                FileUtils.closeQuietly(reader);
             throw new RuntimeException("Error initializing OnDiskVectors at segment offset" + segmentOffset, e);
         }
+        this.reader = reader;
     }
 
     @Override

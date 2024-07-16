@@ -281,25 +281,26 @@ public class CompactionGraph implements Closeable, Accountable
             writer.writeHeader();
             long postingsOffset = postingsOutput.getFilePointer();
             var es = ExecutorFactory.Global.executorFactory().sequential("CompactionGraphPostingsWriter");
-            var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createFileHandle();
-            var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset);
-            var postingsFuture = es.submit(() -> {
-                try (var view = index.getView())
-                {
-                    return new VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
-                           .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
-                }
-            });
+            long postingsLength;
+            try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createFileHandle();
+                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
+            {
+                var postingsFuture = es.submit(() -> {
+                    try (var view = index.getView())
+                    {
+                        return new VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
+                               .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
+                    }
+                });
 
-            // complete internal graph clean up
-            builder.cleanup();
+                // complete internal graph clean up
+                builder.cleanup();
 
-            // wait for postings to finish writing and clean up related resources
-            long postingsEnd = postingsFuture.get();
-            long postingsLength = postingsEnd - postingsOffset;
-            es.shutdown();
-            index.close();
-            indexHandle.close();
+                // wait for postings to finish writing and clean up related resources
+                long postingsEnd = postingsFuture.get();
+                postingsLength = postingsEnd - postingsOffset;
+                es.shutdown();
+            }
 
             // write the graph edge lists and optionally fused adc features
             var start = nanoTime();
