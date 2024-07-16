@@ -42,6 +42,7 @@ import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -78,12 +79,22 @@ implements ISSTableScanner
     {
         assert sstable != null;
 
-        this.dfile = sstable.openDataReader();
-        this.sstable = sstable;
-        this.columns = columns;
-        this.dataRange = dataRange;
-        this.rangeIterator = rangeIterator;
-        this.listener = listener;
+        RandomAccessReader dfile = null;
+        try
+        {
+            dfile = sstable.openDataReader();
+            this.sstable = sstable;
+            this.columns = columns;
+            this.dataRange = dataRange;
+            this.rangeIterator = rangeIterator;
+            this.listener = listener;
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(dfile);
+            throw t;
+        }
+        this.dfile = dfile;
     }
 
     protected static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, Collection<Range<Token>> tokenRanges)

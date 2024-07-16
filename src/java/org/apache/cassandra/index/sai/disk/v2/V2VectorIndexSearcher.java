@@ -68,6 +68,7 @@ import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.ScoredRowIdPrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.LinearFit;
 import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
@@ -269,7 +270,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     protected CloseableIterator<ScoredPrimaryKey> toScoreOrderedIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, QueryContext queryContext) throws IOException
     {
         if (scoredRowIdIterator == null || !scoredRowIdIterator.hasNext())
+        {
+            FileUtils.closeQuietly(scoredRowIdIterator);
             return CloseableIterator.emptyIterator();
+        }
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
                                                                         metadata.maxKey,

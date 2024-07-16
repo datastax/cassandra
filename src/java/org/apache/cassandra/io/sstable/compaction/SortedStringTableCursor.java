@@ -87,14 +87,22 @@ public class SortedStringTableCursor implements SSTableCursor
 
     public SortedStringTableCursor(SSTableReader sstable, RandomAccessReader dataFile)
     {
-        this.dataFile = dataFile;
-        this.header = sstable.header;
-        this.helper = new DeserializationHelper(sstable.metadata(), sstable.descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL);
-        this.sstable = sstable;
-        this.activeRangeDeletion = DeletionTime.LIVE;
-        this.regularColumns = toArray(header.columns(false));
-        this.staticColumns = toArray(header.columns(true));
-        this.columnsReusableArray = new ColumnMetadata[Math.max(regularColumns.length, staticColumns.length)];
+        try
+        {
+            this.dataFile = dataFile;
+            this.header = sstable.header;
+            this.helper = new DeserializationHelper(sstable.metadata(), sstable.descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL);
+            this.sstable = sstable;
+            this.activeRangeDeletion = DeletionTime.LIVE;
+            this.regularColumns = toArray(header.columns(false));
+            this.staticColumns = toArray(header.columns(true));
+            this.columnsReusableArray = new ColumnMetadata[Math.max(regularColumns.length, staticColumns.length)];
+        }
+        catch (Throwable t)
+        {
+            dataFile.close();
+            throw t;
+        }
     }
 
     private static ColumnMetadata[] toArray(Columns columns)
