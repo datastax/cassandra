@@ -80,6 +80,12 @@ public class MemtableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public IndexComponents.ForWrite writtenComponents()
+    {
+        return perIndexComponents;
+    }
+
+    @Override
     public void addRow(PrimaryKey key, Row row, long sstableRowId)
     {
         // Memtable indexes are flushed directly to disk with the aid of a mapping between primary

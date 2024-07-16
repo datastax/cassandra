@@ -93,6 +93,12 @@ public class SSTableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public IndexComponents.ForWrite writtenComponents()
+    {
+        return perIndexComponents;
+    }
+
+    @Override
     public void addRow(PrimaryKey key, Row row, long sstableRowId) throws IOException
     {
         if (maybeAbort())

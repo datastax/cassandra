@@ -65,7 +65,7 @@ public interface SSTableFlushObserver
     /**
      * Called when all data is written to the file and it's ready to be finished up.
      */
-    void complete();
+    void complete(SSTable ssTable);
 
     /**
      * Clean up resources on error. There should be no side effects if called multiple times.
