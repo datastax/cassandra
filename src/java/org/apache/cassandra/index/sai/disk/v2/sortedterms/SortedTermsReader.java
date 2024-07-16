@@ -148,12 +148,21 @@ public class SortedTermsReader
 
         Cursor(FileHandle termsData, LongArray.Factory blockOffsetsFactory) throws IOException
         {
-            this.termsData = IndexInputReader.create(termsData);
-            SAICodecUtils.validate(this.termsData);
-            this.termsDataFp = this.termsData.getFilePointer();
-            this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
-            this.currentTerm = new BytesRef(Math.max(meta.maxTermLength, 0));  // maxTermLength can be negative if meta.count == 0
-            this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(null), meta.trieFP, ByteComparable.Version.OSS50);
+            try
+            {
+                this.termsData = IndexInputReader.create(termsData);
+                SAICodecUtils.validate(this.termsData);
+                this.termsDataFp = this.termsData.getFilePointer();
+                this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
+                this.currentTerm = new BytesRef(Math.max(meta.maxTermLength, 0));  // maxTermLength can be negative if meta.count == 0
+                this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(null), meta.trieFP, ByteComparable.Version.OSS50);
+            }
+            catch (Throwable t)
+            {
+                if (termsData != null)
+                    termsData.close();
+                throw t;
+            }
         }
 
         /**
