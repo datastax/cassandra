@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.service;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.io.IOError;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -33,11 +35,11 @@ import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Scanner;
 import java.util.Set;
@@ -143,6 +145,7 @@ import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.IFailureDetector;
+import org.apache.cassandra.gms.TokenSerializer;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.index.IndexStatusManager;
@@ -177,10 +180,9 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.AsyncOneResponse;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.RepairCoordinator;
 import org.apache.cassandra.repair.SharedContext;
-import org.apache.cassandra.nodes.NodeInfo;
-import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -211,6 +213,7 @@ import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.transport.ClientResourceLimits;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -702,65 +705,73 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (state == null)
             throw new RuntimeException(String.format("Cannot replace_address %s because it doesn't exist in gossip", replaceAddress));
 
-        validateEndpointSnitch(epStates.keySet());
+        validateEndpointSnitch(epStates.values().iterator());
         return replaceNodeAndOwnTokens(replaceAddress, epStates, state);
     }
 
     @VisibleForTesting
     UUID replaceNodeAndOwnTokens(InetAddressAndPort replaceAddress, Map<InetAddressAndPort, EndpointState> epStates, EndpointState state)
     {
-        Collection<Token> tokens = state.getTokens(getTokenMetadata().partitioner);
-        if (tokens == null)
-            throw new RuntimeException(String.format("Could not find tokens for %s to replace", replaceAddress));
-
-        bootstrapTokens = validateReplacementBootstrapTokens(getTokenMetadata(), replaceAddress, tokens);
-
-        if (state.isEmptyWithoutStatus() && REPLACEMENT_ALLOW_EMPTY.getBoolean())
+        try
         {
-            logger.warn("Gossip state not present for replacing node {}. Adding temporary entry to continue.", replaceAddress);
+            VersionedValue tokensVersionedValue = state.getApplicationState(ApplicationState.TOKENS);
+            if (tokensVersionedValue == null)
+                throw new RuntimeException(String.format("Could not find tokens for %s to replace", replaceAddress));
 
-            // When replacing a node, we take ownership of all its tokens.
-            // If that node is currently down and not present in the gossip info
-            // of any other live peers, then we will not be able to take ownership
-            // of its tokens during bootstrap as they have no way of being propagated
-            // to this node's TokenMetadata. TM is loaded at startup (in which case
-            // it will be/ empty for a new replacement node) and only updated with
-            // tokens for an endpoint during normal state propagation (which will not
-            // occur if no peers have gossip state for it).
-            // However, the presence of host id and tokens in the system tables implies
-            // that the node managed to complete bootstrap at some point in the past.
-            // Peers may include this information loaded directly from system tables
-            // in a GossipDigestAck *only if* the GossipDigestSyn was sent as part of a
-            // shadow round (otherwise, a GossipDigestAck contains only state about peers
-            // learned via gossip).
-            // It is safe to do this here as since we completed a shadow round we know
-            // that :
-            // * replaceAddress successfully bootstrapped at some point and owned these
-            //   tokens
-            // * we know that no other node currently owns these tokens
-            // * we are going to completely take over replaceAddress's ownership of
-            //   these tokens.
-            getTokenMetadata().updateNormalTokens(bootstrapTokens, replaceAddress);
-            UUID hostId = Gossiper.instance.getHostId(replaceAddress, epStates);
-            if (hostId != null)
-                getTokenMetadata().updateHostId(hostId, replaceAddress);
+            Collection<Token> tokens = TokenSerializer.deserialize(getTokenMetadata().partitioner, new DataInputStream(new ByteArrayInputStream(tokensVersionedValue.toBytes())));
+            bootstrapTokens = validateReplacementBootstrapTokens(getTokenMetadata(), replaceAddress, tokens);
 
-            // If we were only able to learn about the node being replaced through the
-            // shadow gossip round (i.e. there is no state in gossip across the cluster
-            // about it, perhaps because the entire cluster has been bounced since it went
-            // down), then we're safe to proceed with the replacement. In this case, there
-            // will be no local endpoint state as we discard the results of the shadow
-            // round after preparing replacement info. We inject a minimal EndpointState
-            // to keep IFailureDetector::isAlive and Gossiper::compareEndpointStartup from
-            // failing later in the replacement, as they both expect the replaced node to
-            // be fully present in gossip.
-            // Otherwise, if the replaced node is present in gossip, we need check that
-            // it is not in fact live.
-            // We choose to not include the EndpointState provided during the shadow round
-            // as its possible to include more state than is desired, so by creating a
-            // new empty endpoint without that information we can control what is in our
-            // local gossip state
-            Gossiper.instance.initializeUnreachableNodeUnsafe(replaceAddress);
+            if (state.isEmptyWithoutStatus() && REPLACEMENT_ALLOW_EMPTY.getBoolean())
+            {
+                logger.warn("Gossip state not present for replacing node {}. Adding temporary entry to continue.", replaceAddress);
+
+                // When replacing a node, we take ownership of all its tokens.
+                // If that node is currently down and not present in the gossip info
+                // of any other live peers, then we will not be able to take ownership
+                // of its tokens during bootstrap as they have no way of being propagated
+                // to this node's TokenMetadata. TM is loaded at startup (in which case
+                // it will be/ empty for a new replacement node) and only updated with
+                // tokens for an endpoint during normal state propagation (which will not
+                // occur if no peers have gossip state for it).
+                // However, the presence of host id and tokens in the system tables implies
+                // that the node managed to complete bootstrap at some point in the past.
+                // Peers may include this information loaded directly from system tables
+                // in a GossipDigestAck *only if* the GossipDigestSyn was sent as part of a
+                // shadow round (otherwise, a GossipDigestAck contains only state about peers
+                // learned via gossip).
+                // It is safe to do this here as since we completed a shadow round we know
+                // that :
+                // * replaceAddress successfully bootstrapped at some point and owned these
+                //   tokens
+                // * we know that no other node currently owns these tokens
+                // * we are going to completely take over replaceAddress's ownership of
+                //   these tokens.
+                getTokenMetadata().updateNormalTokens(bootstrapTokens, replaceAddress);
+                UUID hostId = Gossiper.instance.getHostId(replaceAddress, epStates);
+                if (hostId != null)
+                    getTokenMetadata().updateHostId(hostId, replaceAddress);
+
+                // If we were only able to learn about the node being replaced through the
+                // shadow gossip round (i.e. there is no state in gossip across the cluster
+                // about it, perhaps because the entire cluster has been bounced since it went
+                // down), then we're safe to proceed with the replacement. In this case, there
+                // will be no local endpoint state as we discard the results of the shadow
+                // round after preparing replacement info. We inject a minimal EndpointState
+                // to keep IFailureDetector::isAlive and Gossiper::compareEndpointStartup from
+                // failing later in the replacement, as they both expect the replaced node to
+                // be fully present in gossip.
+                // Otherwise, if the replaced node is present in gossip, we need check that
+                // it is not in fact live.
+                // We choose to not include the EndpointState provided during the shadow round
+                // as its possible to include more state than is desired, so by creating a
+                // new empty endpoint without that information we can control what is in our
+                // local gossip state
+                Gossiper.instance.initializeUnreachableNodeUnsafe(replaceAddress);
+            }
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
         }
 
         UUID localHostId = SystemKeyspace.getOrInitializeLocalHostId();
@@ -828,7 +839,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                      FBUtilities.getBroadcastAddressAndPort(), REPLACE_ADDRESS.getKey()));
         }
 
-        validateEndpointSnitch(epStates.keySet());
+        validateEndpointSnitch(epStates.values().iterator());
 
         if (shouldBootstrap() && useStrictConsistency && !allowSimultaneousMoves())
         {
@@ -853,16 +864,20 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    private static void validateEndpointSnitch(Collection<InetAddressAndPort> endpoints)
+    private static void validateEndpointSnitch(Iterator<EndpointState> endpointStates)
     {
         Set<String> datacenters = new HashSet<>();
         Set<String> racks = new HashSet<>();
-        endpoints.stream().map(Nodes::localOrPeerInfo).filter(Objects::nonNull).forEach(nodeInfo -> {
-            if (nodeInfo.getDataCenter() != null)
-                datacenters.add(nodeInfo.getDataCenter());
-            if (nodeInfo.getRack() != null)
-                racks.add(nodeInfo.getRack());
-        });
+        while (endpointStates.hasNext())
+        {
+            EndpointState state = endpointStates.next();
+            VersionedValue val = state.getApplicationState(ApplicationState.DC);
+            if (val != null)
+                datacenters.add(val.value);
+            val = state.getApplicationState(ApplicationState.RACK);
+            if (val != null)
+                racks.add(val.value);
+        }
 
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         if (!snitch.validate(datacenters, racks))
@@ -2329,8 +2344,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             try
             {
-                InetAddressAndPort address = InetAddressAndPort.getByName(Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.NATIVE_ADDRESS_AND_PORT).value);
-                return address;
+                return InetAddressAndPort.getByName(Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.NATIVE_ADDRESS_AND_PORT).value);
             }
             catch (UnknownHostException e)
             {
@@ -2339,29 +2353,28 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
         {
-            final String ipAddress;
-            // If RPC_ADDRESS present in gossip for this endpoint use it.  This is expected for 3.x nodes.
-            if (Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS) != null)
-            {
-                ipAddress = Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS).value;
-            }
-            else
-            {
-                // otherwise just use the IP of the endpoint itself.
-                ipAddress = endpoint.getHostAddress(false);
-            }
+             final String ipAddress;
+             // If RPC_ADDRESS present in gossip for this endpoint use it.  This is expected for 3.x nodes.
+             if (Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS) != null)
+             {
+                 ipAddress = Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS).value;
+             }
+             else
+             {
+                 // otherwise just use the IP of the endpoint itself.
+                 ipAddress = endpoint.getHostAddress(false);
+             }
 
-            // include the configured native_transport_port.
-            try
-            {
-                InetAddressAndPort address = InetAddressAndPort.getByNameOverrideDefaults(ipAddress, DatabaseDescriptor.getNativeTransportPort());
-                return address;
-            }
-            catch (UnknownHostException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
+             // include the configured native_transport_port.
+             try
+             {
+                 return InetAddressAndPort.getByNameOverrideDefaults(ipAddress, DatabaseDescriptor.getNativeTransportPort());
+             }
+             catch (UnknownHostException e)
+             {
+                 throw new RuntimeException(e);
+             }
+         }
     }
 
     /**
@@ -2661,6 +2674,57 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return new EndpointsByRange(rangeToEndpointMap);
     }
 
+    private boolean updateLocalOrPeer(InetAddressAndPort endpoint, ApplicationState state, VersionedValue value, boolean blockingUpdate, boolean forceUpdate)
+    {
+        switch (state)
+        {
+            case RELEASE_VERSION:
+                Nodes.updateLocalOrPeer(endpoint, info -> info.setReleaseVersion(new CassandraVersion(value.value)), blockingUpdate, forceUpdate);
+                break;
+            case DC:
+                updateTopology(endpoint);
+                Nodes.updateLocalOrPeer(endpoint, info -> info.setDataCenter(value.value), blockingUpdate, forceUpdate);
+                break;
+            case RACK:
+                updateTopology(endpoint);
+                Nodes.updateLocalOrPeer(endpoint, info -> info.setRack(value.value), blockingUpdate, forceUpdate);
+                break;
+            case RPC_ADDRESS:
+                try
+                {
+                    InetAddress address = InetAddress.getByName(value.value);
+                    Nodes.updateLocalOrPeer(endpoint, info -> info.setNativeTransportAddressOnly(address, DatabaseDescriptor.getNativeTransportPort()), blockingUpdate, forceUpdate);
+                }
+                catch (UnknownHostException e)
+                {
+                    throw new RuntimeException(e);
+                }
+                break;
+            case NATIVE_ADDRESS_AND_PORT:
+                try
+                {
+                    InetAddressAndPort address = InetAddressAndPort.getByName(value.value);
+                    Nodes.updateLocalOrPeer(endpoint, info -> info.setNativeTransportAddressAndPort(address), blockingUpdate, forceUpdate);
+                    SystemKeyspace.updatePeerNativeAddress(endpoint, address);
+                }
+                catch (UnknownHostException e)
+                {
+                    throw new RuntimeException(e);
+                }
+                break;
+            case SCHEMA:
+                Nodes.updateLocalOrPeer(endpoint, info -> info.setSchemaVersion(UUID.fromString(value.value)), blockingUpdate, forceUpdate);
+                break;
+            case HOST_ID:
+                Nodes.updateLocalOrPeer(endpoint, info -> info.setHostId(UUID.fromString(value.value)), blockingUpdate, forceUpdate);
+                break;
+            default:
+                return false;
+        }
+
+        return true;
+    }
+
     public void beforeChange(InetAddressAndPort endpoint, EndpointState currentState, ApplicationState newStateKey, VersionedValue newValue)
     {
         // no-op
@@ -2738,12 +2802,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
         {
-            if (state == ApplicationState.INDEX_STATUS)
-            {
-                updateIndexStatus(endpoint, value);
-                return;
-            }
-
             EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
             if (epState == null || Gossiper.instance.isDeadState(epState))
             {
@@ -2753,12 +2811,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             if (getTokenMetadata().isMember(endpoint))
             {
+                updateLocalOrPeer(endpoint, state, value, false, false);
                 switch (state)
                 {
-                    case DC:
-                    case RACK:
-                        updateTopology(endpoint);
-                        break;
                     case RPC_READY:
                         notifyRpcChange(endpoint, epState.isRpcReady());
                         break;
@@ -2811,6 +2866,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public void updateTopology()
     {
         getTokenMetadata().updateTopology();
+    }
+
+    private void updatePeerInfo(InetAddressAndPort endpoint)
+    {
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        for (Map.Entry<ApplicationState, VersionedValue> entry : epState.states())
+        {
+            updateLocalOrPeer(endpoint, entry.getKey(), entry.getValue(), false, false);
+            switch (entry.getKey())
+            {
+                case INDEX_STATUS:
+                    // Need to set the peer index status in SIM here
+                    // to ensure the status is correct before the node
+                    // fully joins the ring
+                    updateIndexStatus(endpoint, entry.getValue());
+                    break;
+            }
+        }
     }
 
     private void notifyRpcChange(InetAddressAndPort endpoint, boolean ready)
@@ -2889,11 +2962,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Collection<Token> getTokensFor(InetAddressAndPort endpoint)
     {
-        NodeInfo<?> info = Nodes.localOrPeerInfo(endpoint);
-        if (info == null)
-            return Collections.emptyList();
+        try
+        {
+            EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+            if (state == null)
+                return Collections.emptyList();
 
-        return info.getTokens();
+            VersionedValue versionedValue = state.getApplicationState(ApplicationState.TOKENS);
+            if (versionedValue == null)
+                return Collections.emptyList();
+
+            return TokenSerializer.deserialize(getTokenMetadata().partitioner, new DataInputStream(new ByteArrayInputStream(versionedValue.toBytes())));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -2928,7 +3012,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         getTokenMetadata().addBootstrapTokens(tokens, endpoint);
         PendingRangeCalculatorService.instance.update();
 
-        getTokenMetadata().updateHostId(Objects.requireNonNull(Nodes.localOrPeerInfo(endpoint)).getHostId(), endpoint);
+        getTokenMetadata().updateHostId(Gossiper.instance.getHostId(endpoint), endpoint);
     }
 
     private void handleStateBootreplacing(InetAddressAndPort newNode, String[] pieces)
@@ -2964,7 +3048,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         getTokenMetadata().addReplaceTokens(tokens, newNode, oldNode);
         PendingRangeCalculatorService.instance.update();
 
-        getTokenMetadata().updateHostId(Objects.requireNonNull(Nodes.localOrPeerInfo(newNode)).getHostId(), newNode);
+        getTokenMetadata().updateHostId(Gossiper.instance.getHostId(newNode), newNode);
     }
 
     private void ensureUpToDateTokenMetadata(String status, InetAddressAndPort endpoint)
@@ -3058,7 +3142,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             return isReplacingSameAddress() &&
                     Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress()) != null
-                    && Objects.equals(hostId, Nodes.localOrPeerInfoOpt(DatabaseDescriptor.getReplaceAddress()).map(NodeInfo::getHostId).orElse(null));
+                    && hostId.equals(Gossiper.instance.getHostId(DatabaseDescriptor.getReplaceAddress()));
         }
         catch (RuntimeException ex)
         {
@@ -3124,8 +3208,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.warn("Node {} is currently being replaced by node {}.", endpoint, replacementNode.get());
         }
 
+        updatePeerInfo(endpoint);
         // Order Matters, TM.updateHostID() should be called before TM.updateNormalToken(), (see CASSANDRA-4300).
-        UUID hostId = Objects.requireNonNull(Nodes.localOrPeerInfo(endpoint)).getHostId();
+        UUID hostId = Gossiper.instance.getHostId(endpoint);
         InetAddressAndPort existing = getTokenMetadata().getEndpointForHostId(hostId);
         if (replacing && isReplacingSameHostAddressAndHostId(hostId))
         {
@@ -3326,7 +3411,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private void removeEndpoint(InetAddressAndPort endpoint)
     {
         Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.removeEndpoint(endpoint));
-        Nodes.peers().remove(endpoint, true, false);
+        SystemKeyspace.removeEndpoint(endpoint);
     }
 
     protected void addExpireTimeIfFound(InetAddressAndPort endpoint, long expireTime)

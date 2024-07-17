@@ -18,8 +18,8 @@
 
 package org.apache.cassandra.locator;
 
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,9 +27,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.nodes.NodeInfo;
-import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -89,8 +88,8 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
             return myDC;
 
-        String dc = Nodes.localOrPeerInfoOpt(endpoint).map(NodeInfo::getDataCenter).orElse(null);
-        if (dc == null)
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        if (epState == null || epState.getApplicationState(ApplicationState.DC) == null)
         {
             if (psnitch == null)
             {
@@ -103,7 +102,7 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
             else
                 return psnitch.getDatacenter(endpoint);
         }
-        return dc;
+        return epState.getApplicationState(ApplicationState.DC).value;
     }
 
     /**
@@ -117,8 +116,8 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
             return myRack;
 
-        String rack = Nodes.localOrPeerInfoOpt(endpoint).map(NodeInfo::getRack).orElse(null);
-        if (rack == null)
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        if (epState == null || epState.getApplicationState(ApplicationState.RACK) == null)
         {
             if (psnitch == null)
             {
@@ -131,7 +130,7 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
             else
                 return psnitch.getRack(endpoint);
         }
-        return rack;
+        return epState.getApplicationState(ApplicationState.RACK).value;
     }
 
     public void gossiperStarting()

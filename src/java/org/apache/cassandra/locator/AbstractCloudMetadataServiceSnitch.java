@@ -20,12 +20,13 @@ package org.apache.cassandra.locator;
 
 import java.util.Map;
 
-import org.apache.cassandra.nodes.Nodes;
-import org.apache.cassandra.nodes.NodeInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
@@ -72,8 +73,8 @@ abstract class AbstractCloudMetadataServiceSnitch extends AbstractNetworkTopolog
     {
         if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
             return getLocalRack();
-        String rack = Nodes.localOrPeerInfoOpt(endpoint).map(NodeInfo::getRack).orElse(null);
-        if (rack == null)
+        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        if (state == null || state.getApplicationState(ApplicationState.RACK) == null)
         {
             if (savedEndpoints == null)
                 savedEndpoints = SystemKeyspace.loadDcRackInfo();
@@ -81,7 +82,7 @@ abstract class AbstractCloudMetadataServiceSnitch extends AbstractNetworkTopolog
                 return savedEndpoints.get(endpoint).get("rack");
             return DEFAULT_RACK;
         }
-        return rack;
+        return state.getApplicationState(ApplicationState.RACK).value;
     }
 
     @Override
@@ -89,8 +90,8 @@ abstract class AbstractCloudMetadataServiceSnitch extends AbstractNetworkTopolog
     {
         if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
             return getLocalDatacenter();
-        String dc = Nodes.localOrPeerInfoOpt(endpoint).map(NodeInfo::getDataCenter).orElse(null);
-        if (dc == null)
+        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        if (state == null || state.getApplicationState(ApplicationState.DC) == null)
         {
             if (savedEndpoints == null)
                 savedEndpoints = SystemKeyspace.loadDcRackInfo();
@@ -98,6 +99,6 @@ abstract class AbstractCloudMetadataServiceSnitch extends AbstractNetworkTopolog
                 return savedEndpoints.get(endpoint).get("data_center");
             return DEFAULT_DC;
         }
-        return dc;
+        return state.getApplicationState(ApplicationState.DC).value;
     }
 }

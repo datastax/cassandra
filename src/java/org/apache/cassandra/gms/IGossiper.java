@@ -37,9 +37,6 @@ public interface IGossiper
     default CassandraVersion getReleaseVersion(InetAddressAndPort ep)
     {
         EndpointState state = getEndpointStateForEndpoint(ep);
-        VersionedValue applicationState = state != null ? state.getApplicationState(ApplicationState.RELEASE_VERSION) : null;
-        return applicationState != null
-                ? new CassandraVersion(applicationState.value)
-                : null;
+        return state != null ? state.getReleaseVersion() : null;
     }
 }
