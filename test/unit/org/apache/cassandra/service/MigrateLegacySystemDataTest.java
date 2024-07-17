@@ -29,6 +29,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -66,7 +67,7 @@ public class MigrateLegacySystemDataTest
 
             // verify table directories are migrated in new system dir
             newTableDirectories = getSystemTableDirectories(newSystemDataDirectory);
-            Assert.assertEquals(legacyTableDirectories.size(), newTableDirectories.size());
+            Assert.assertEquals(legacyTableDirectories.size(), newTableDirectories.size() + SystemKeyspace.TABLES_SPLIT_ACROSS_MULTIPLE_DISKS.size());
         }
         finally
         {
