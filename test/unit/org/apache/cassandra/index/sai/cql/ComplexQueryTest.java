@@ -292,4 +292,51 @@ public class ComplexQueryTest extends SAITester
         assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a NOT IN (2, 3)"), row(1), row(4));
         assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a NOT IN (2, 3) AND b NOT IN (7, 8)"), row(1));
     }
+
+    @Test
+    public void complexQueryWithIndexedAndNotIndexed()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, x int, y int, z int)");
+        execute("INSERT INTO %s(k, x, y, z) values (0, 0, 0, 0)");
+        execute("INSERT INTO %s(k, x, y, z) values (1, 0, 1, 0)");
+        execute("INSERT INTO %s(k, x, y, z) values (2, 0, 2, 1)");
+        execute("INSERT INTO %s(k, x, y, z) values (3, 0, 3, 1)");
+
+        // verify queries without any index
+        assertComplexQueryWithIndexedAndNotIndexed();
+
+        // verify queries with only some columns indexed
+        createIndex("CREATE CUSTOM INDEX ON %s(x) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        assertComplexQueryWithIndexedAndNotIndexed();
+
+        // verify queries with all columns indexed
+        createIndex("CREATE CUSTOM INDEX ON %s(y) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        assertComplexQueryWithIndexedAndNotIndexed();
+    }
+
+    private void assertComplexQueryWithIndexedAndNotIndexed()
+    {
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=0 ALLOW FILTERING"),
+                                row(0), row(1), row(2), row(3));
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE y IN (1, 2) ALLOW FILTERING"),
+                                row(1), row(2));
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=0 AND y IN (1, 2) ALLOW FILTERING"),
+                                row(1), row(2));
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=0 AND (y=1 OR y=2) ALLOW FILTERING"),
+                                row(1), row(2));
+
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=1 ALLOW FILTERING"));
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=1 AND y IN (1, 2) ALLOW FILTERING"));
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=1 AND (y=1 OR y=2) ALLOW FILTERING"));
+
+        // TODO: enable these tests after fixing the issue with skipping the indexes if they are useless for the query
+//        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=0 OR y=0 ALLOW FILTERING"),
+//                                row(0), row(1), row(2), row(3));
+//        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=1 OR y=0 ALLOW FILTERING"),
+//                                row(0));
+//        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE x=0 OR (y=0 AND z=0) ALLOW FILTERING"),
+//                                row(0), row(1), row(2), row(3));
+    }
 }
