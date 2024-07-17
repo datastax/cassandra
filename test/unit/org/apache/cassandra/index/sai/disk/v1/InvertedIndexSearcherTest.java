@@ -57,6 +57,9 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 {
     public static final int LIMIT = Integer.MAX_VALUE;
 
+    // Use a shared index context to prevent creating too many metrics unnecessarily
+    private final IndexContext indexContext = SAITester.createIndexContext("meh", UTF8Type.instance);
+
     @ParametersFactory()
     public static Collection<Object[]> data()
     {
@@ -95,7 +98,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         {
             for (int t = 0; t < numTerms; ++t)
             {
-                try (RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
+                try (RangeIterator results = searcher.search(new Expression(indexContext)
                         .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
@@ -110,7 +113,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     assertFalse(results.hasNext());
                 }
 
-                try (RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
+                try (RangeIterator results = searcher.search(new Expression(indexContext)
                         .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
@@ -132,13 +135,13 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
             // try searching for terms that weren't indexed
             final String tooLongTerm = randomSimpleString(10, 12);
-            RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
-                                                                .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false, LIMIT);
+            RangeIterator results = searcher.search(new Expression(indexContext)
+                                                    .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false, LIMIT);
             assertFalse(results.hasNext());
 
             final String tooShortTerm = randomSimpleString(1, 2);
-            results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
-                                                      .add(Operator.EQ, UTF8Type.instance.decompose(tooShortTerm)), null, new QueryContext(), false, LIMIT);
+            results = searcher.search(new Expression(indexContext)
+                                      .add(Operator.EQ, UTF8Type.instance.decompose(tooShortTerm)), null, new QueryContext(), false, LIMIT);
             assertFalse(results.hasNext());
         }
     }
@@ -151,7 +154,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
-            searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
+            searcher.search(new Expression(indexContext)
                             .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false, LIMIT);
 
             fail("Expect IllegalArgumentException thrown, but didn't");
@@ -193,9 +196,9 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
             when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
             final IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext,
-                                                                                          SAITester.createIndexContext(index, UTF8Type.instance),
-                                                                                          indexFiles,
-                                                                                          segmentMetadata);
+                                                                                            indexContext,
+                                                                                            indexFiles,
+                                                                                            segmentMetadata);
             assertThat(searcher, is(instanceOf(InvertedIndexSearcher.class)));
             return searcher;
         }
