@@ -32,11 +32,31 @@ public class InstrumentingCache<K, V>
 
     private CacheMetrics metrics;
 
+    /**
+     * cache capacity cached for performance reasons
+     * </p>
+     * The need to cache this value arises from the fact that map.capacity() is an expensive operation for
+     * Caffeine caches, which use the cache eviction policy to determine the capacity, which, in turn,
+     * may take eviction lock and do cache maintenance before returning the actual value.
+     * </p>
+     * Cassandra frequently uses cache capacity to determine if a cache is enabled.
+     * See e.g:
+     * {@link org.apache.cassandra.db.ColumnFamilyStore#putCachedCounter},
+     * {@link org.apache.cassandra.db.ColumnFamilyStore#getCachedCounter},
+     * </p>
+     * In more stressful scenarios with many counter cache puts and gets asking the underlying cache to provide the
+     * capacity instead of using the cached value leads to a significant performance degradation.
+     * </p>
+     * No thread-safety guarantees are provided. The value may be a bit stale, and this is good enough.
+     */
+    private long cacheCapacity;
+
     public InstrumentingCache(CacheService.CacheType type, ICache<K, V> map)
     {
         this.map = map;
         this.type = type;
         this.metrics = CacheMetrics.create(type, map);
+        this.cacheCapacity = map.capacity();
     }
 
     public void put(K key, V value)
@@ -76,12 +96,13 @@ public class InstrumentingCache<K, V>
 
     public long getCapacity()
     {
-        return map.capacity();
+        return cacheCapacity;
     }
 
     public void setCapacity(long capacity)
     {
         map.setCapacity(capacity);
+        cacheCapacity = map.capacity();
     }
 
     public int size()
