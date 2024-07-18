@@ -91,7 +91,8 @@ public class Tracker
 {
     private static final Logger logger = LoggerFactory.getLogger(Tracker.class);
 
-    private final Collection<INotificationConsumer> subscribers = new CopyOnWriteArrayList<>();
+    private final List<INotificationConsumer> subscribers = new CopyOnWriteArrayList<>();
+    private final List<INotificationConsumer> lateSubscribers = new CopyOnWriteArrayList<>();
 
     public final ColumnFamilyStore cfstore;
     public final TableMetadataRef metadata;
@@ -551,19 +552,7 @@ public class Tracker
 
     public Throwable notifySSTablesChanged(Collection<SSTableReader> removed, Collection<SSTableReader> added, OperationType operationType, Optional<UUID> operationId, Throwable accumulate)
     {
-        INotification notification = new SSTableListChangedNotification(added, removed, operationType, operationId);
-        for (INotificationConsumer subscriber : subscribers)
-        {
-            try
-            {
-                subscriber.handleNotification(notification, this);
-            }
-            catch (Throwable t)
-            {
-                accumulate = merge(accumulate, t);
-            }
-        }
-        return accumulate;
+        return notify(new SSTableListChangedNotification(added, removed, operationType, operationId), accumulate);
     }
 
     Throwable notifyAdded(Iterable<SSTableReader> added, OperationType operationType, Optional<UUID> operationId, boolean isInitialSSTables, Memtable memtable, Throwable accumulate)
@@ -574,35 +563,12 @@ public class Tracker
         else
             notification = new InitialSSTableAddedNotification(added);
 
-        for (INotificationConsumer subscriber : subscribers)
-        {
-            try
-            {
-                subscriber.handleNotification(notification, this);
-            }
-            catch (Throwable t)
-            {
-                accumulate = merge(accumulate, t);
-            }
-        }
-        return accumulate;
+        return notify(notification, accumulate);
     }
 
     Throwable notifyAdding(Iterable<SSTableReader> added, @Nullable Memtable memtable, Throwable accumulate, OperationType type, Optional<UUID> operationId)
     {
-        INotification notification = new SSTableAddingNotification(added, memtable, type, operationId);
-        for (INotificationConsumer subscriber : subscribers)
-        {
-            try
-            {
-                subscriber.handleNotification(notification, this);
-            }
-            catch (Throwable t)
-            {
-                accumulate = merge(accumulate, t);
-            }
-        }
-        return accumulate;
+        return notify(new SSTableAddingNotification(added, memtable, type, operationId), accumulate);
     }
 
     public void notifyAdding(Iterable<SSTableReader> added, OperationType operationType)
@@ -618,23 +584,17 @@ public class Tracker
 
     public void notifySSTableRepairedStatusChanged(Collection<SSTableReader> repairStatusesChanged)
     {
-        INotification notification = new SSTableRepairStatusChanged(repairStatusesChanged);
-        for (INotificationConsumer subscriber : subscribers)
-            subscriber.handleNotification(notification, this);
+        notify(new SSTableRepairStatusChanged(repairStatusesChanged));
     }
 
     public void notifyDeleting(SSTableReader deleting)
     {
-        INotification notification = new SSTableDeletingNotification(deleting);
-        for (INotificationConsumer subscriber : subscribers)
-            subscriber.handleNotification(notification, this);
+        notify(new SSTableDeletingNotification(deleting));
     }
 
     public void notifyTruncated(CommitLogPosition replayAfter, long truncatedAt)
     {
-        INotification notification = new TruncationNotification(replayAfter, truncatedAt);
-        for (INotificationConsumer subscriber : subscribers)
-            subscriber.handleNotification(notification, this);
+        notify(new TruncationNotification(replayAfter, truncatedAt));
     }
 
     public void notifyRenewed(Memtable renewed)
@@ -654,8 +614,29 @@ public class Tracker
 
     private void notify(INotification notification)
     {
+        maybeFail(notify(notification, null));
+    }
+
+    private Throwable notify(INotification notification, @Nullable Throwable accumulate)
+    {
         for (INotificationConsumer subscriber : subscribers)
+            accumulate = notifyOne(subscriber, notification, accumulate);
+        for (INotificationConsumer subscriber : lateSubscribers)
+            accumulate = notifyOne(subscriber, notification, accumulate);
+        return accumulate;
+    }
+
+    private Throwable notifyOne(INotificationConsumer subscriber, INotification notification, @Nullable Throwable accumulate)
+    {
+        try
+        {
             subscriber.handleNotification(notification, this);
+            return accumulate;
+        }
+        catch (Throwable t)
+        {
+            return merge(accumulate, t);
+        }
     }
 
     public boolean isDummy()
@@ -670,15 +651,34 @@ public class Tracker
             logger.trace("{} subscribed to the data tracker.", consumer);
     }
 
+    /**
+     * Subscribes the provided consumer for data tracker notifications, similarly to {@link #subscribe}, but the
+     * consumer subscribed by this method are guaranteed to be notificed _after_ all the consumers subscribed with
+     * {@link #subscribe}.
+     * <p>
+     * The consumers registered by this method are notified in order of subscription (with not particular guarantee
+     * in case of concurrent calls), but again, they all execute after those of {@link #subscribe}.
+     * <p>
+     * This method is mainly targeted for non-Cassandra internal subscribers that want to register for notifications
+     * but need to make sure they are notified only after all the Cassandra internal subscribers have executed.
+     */
+    public void subscribeLateConsumer(INotificationConsumer consumer)
+    {
+        lateSubscribers.add(consumer);
+        if (logger.isTraceEnabled())
+            logger.trace("{} subscribed to the data tracker (as a 'late' consumer).", consumer);
+    }
+
     @VisibleForTesting
     public boolean contains(INotificationConsumer consumer)
     {
-        return subscribers.contains(consumer);
+        return subscribers.contains(consumer) || lateSubscribers.contains(consumer);
     }
 
     public void unsubscribe(INotificationConsumer consumer)
     {
         subscribers.remove(consumer);
+        lateSubscribers.remove(consumer);
     }
 
     private static Set<SSTableReader> emptySet()
