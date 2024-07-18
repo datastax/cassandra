@@ -75,23 +75,13 @@ public class LongType extends NumberType<Long>
     @Override
     public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
     {
-        if (accessor.isEmpty(data))
-            return null;
-        if (version == ByteComparable.Version.LEGACY)
-            return ByteSource.signedFixedLengthNumber(accessor, data);
-        else
-            return ByteSource.variableLengthInteger(accessor.getLong(data, 0));
+        return ByteSource.optionalSignedFixedLengthNumber(accessor, data);
     }
 
     @Override
     public <V> V fromComparableBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, ByteComparable.Version version)
     {
-        if (comparableBytes == null)
-            return accessor.empty();
-        if (version == ByteComparable.Version.LEGACY)
-            return ByteSourceInverse.getSignedFixedLength(accessor, comparableBytes, 8);
-        else
-            return accessor.valueOf(ByteSourceInverse.getVariableLengthInteger(comparableBytes));
+        return ByteSourceInverse.getOptionalSignedFixedLength(accessor, comparableBytes, 8);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException
