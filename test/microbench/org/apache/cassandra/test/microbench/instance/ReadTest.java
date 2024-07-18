@@ -203,7 +203,9 @@ public abstract class ReadTest extends CQLTester
         executorService.awaitTermination(15, TimeUnit.SECONDS);
 
         // do a flush to print sizes
+        long flushStart = System.currentTimeMillis();
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
+        System.err.format("Flushed in %.3f s.\n", (System.currentTimeMillis() - flushStart) / 1000.0);
 
         CommitLog.instance.shutdownBlocking();
         CQLTester.tearDownClass();

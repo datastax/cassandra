@@ -84,6 +84,11 @@ public class WriteTest extends CQLTester
     @Param({"32"})
     int threadCount;
 
+    @Param({"1", "1000"})
+    int rowsPerPartition = 1;
+
+    int partitions;
+
     ExecutorService executorService;
 
     @Setup(Level.Trial)
@@ -91,6 +96,7 @@ public class WriteTest extends CQLTester
     {
         rand = new Random(1);
         executorService = Executors.newFixedThreadPool(threadCount);
+        partitions = Math.max(1, count / rowsPerPartition);
         DatabaseDescriptor.setAutoSnapshot(false);
         CQLTester.setUpClass();
         logger.info("setupClass done.");
@@ -109,8 +115,9 @@ public class WriteTest extends CQLTester
             executeNet(getDefaultVersion(), "use " + keyspace + ";");
         }
         writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
-        logger.info("Prepared, batch " + BATCH + " threads " + threadCount + " flush " + flush);
-        logger.info("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() +
+        System.err.println(String.format("Prepared, batch %s threads %s flush %s", BATCH, threadCount, flush));
+        System.err.println(String.format("%s writes in %s partitions x %s rows", count, partitions, rowsPerPartition));
+        System.err.println("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() +
                            " index " + DatabaseDescriptor.getIndexAccessMode());
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
@@ -146,7 +153,7 @@ public class WriteTest extends CQLTester
 
     public Object[] writeArguments(long i)
     {
-        return new Object[] { i, i, i };
+        return new Object[] { i % partitions, i, i };
     }
 
     public void performWrite(long ofs, int count) throws Throwable
