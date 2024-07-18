@@ -880,7 +880,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             storageHandler.unload();
 
-            if (status.isInvalidAndShouldDropData())
+            // wait for sstable GlobalTidy to complete
+            if (!status.isValid())
             {
                 LifecycleTransaction.waitForDeletions(); // just in case an index had a reference on the sstable
             }
