@@ -311,6 +311,10 @@
 
         <!-- below was added in Cassandra only; check for what and whether we need it here
             add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED-->
+
+        <!-- below 2 were added to support jamm and fix BatchCommitLogTest -->
+        <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
     </resources>
     <pathconvert property="_jvm22_args_concat" refid="_jvm22_arg_items" pathsep=" "/>
     <condition property="java-jvmargs" value="${_jvm22_args_concat}">
