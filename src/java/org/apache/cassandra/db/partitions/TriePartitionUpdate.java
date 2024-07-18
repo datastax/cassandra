@@ -67,15 +67,19 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
     public static final Factory FACTORY = new TrieFactory();
 
+    final int dataSize;
+
     private TriePartitionUpdate(TableMetadata metadata,
                                 DecoratedKey key,
                                 RegularAndStaticColumns columns,
                                 EncodingStats stats,
                                 int rowCount,
+                                int dataSize,
                                 Trie<Object> trie,
                                 boolean canHaveShadowedData)
     {
         super(key, columns, stats, rowCount, trie, metadata, canHaveShadowedData);
+        this.dataSize = dataSize;
     }
 
     private static InMemoryTrie<Object> newTrie(DeletionInfo deletion)
@@ -107,6 +111,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        RegularAndStaticColumns.NONE,
                                        EncodingStats.NO_STATS,
                                        0,
+                                       MutableDeletionInfo.live().dataSize(),
                                        newTrie(MutableDeletionInfo.live()),
                                        false);
     }
@@ -123,12 +128,14 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     public static TriePartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, int nowInSec)
     {
+        MutableDeletionInfo deletion = new MutableDeletionInfo(timestamp, nowInSec);
         return new TriePartitionUpdate(metadata,
                                        key,
                                        RegularAndStaticColumns.NONE,
                                        new EncodingStats(timestamp, nowInSec, LivenessInfo.NO_TTL),
                                        0,
-                                       newTrie(new MutableDeletionInfo(timestamp, nowInSec)),
+                                       deletion.dataSize(),
+                                       newTrie(deletion),
                                        false);
     }
 
@@ -162,7 +169,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             throw new AssertionError(e);
         }
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, row.isStatic() ? 0 : 1, trie, false);
+        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.dataSize(), trie, false);
     }
 
     /**
@@ -190,13 +197,14 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @SuppressWarnings("resource")
     public static TriePartitionUpdate fromIterator(UnfilteredRowIterator iterator)
     {
-        ContentBuilder builder = build(iterator);
+        ContentBuilder builder = build(iterator, true);
 
         return new TriePartitionUpdate(iterator.metadata(),
                                        iterator.partitionKey(),
                                        iterator.columns(),
                                        iterator.stats(),
                                        builder.rowCount(),
+                                       builder.dataSize(),
                                        builder.trie(),
                                        false);
     }
@@ -332,7 +340,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
-        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCount, t, canHaveShadowedData);
+        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCount, dataSize, t, canHaveShadowedData);
     }
 
     /**
@@ -358,31 +366,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     public int dataSize()
     {
-        long size = 0;
-        for (Iterator<Row> it = rowsIncludingStatic(); it.hasNext();)
-        {
-            Row row = it.next();
-            size += row.dataSize();
-        }
-
-        return Ints.saturatedCast(size + deletionInfo().dataSize());
-    }
-
-    /**
-     * The size of the data contained in this update.
-     *
-     * @return the size of the data contained in this update.
-     */
-    public long unsharedHeapSizeExcludingData()
-    {
-        long size = 0;
-        for (Iterator<Row> it = rowsIncludingStatic(); it.hasNext();)
-        {
-            Row row = it.next();
-            size += row.unsharedHeapSizeExcludingData() + row.clustering().unsharedHeapSize();
-        }
-
-        return size + deletionInfo().unsharedHeapSize();
+        return dataSize;
     }
 
     /**
@@ -431,21 +415,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         return maxTimestamp;
     }
 
-    private static EncodingStats collectStats(InMemoryTrie<Object> trie)
-    {
-        EncodingStats.Collector statsCollector = new EncodingStats.Collector();
-
-        for (Object o : trie.values())
-        {
-            if (o instanceof DeletionInfo)
-                ((DeletionInfo) o).collectStats(statsCollector);
-            else
-                Rows.collectStats(((RowData) o).toRow(Clustering.EMPTY), statsCollector);
-        }
-
-        return statsCollector.get();
-    }
-
     /**
      * For an update on a counter table, returns a list containing a {@code CounterMark} for
      * every counter contained in the update.
@@ -491,6 +460,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         private final EncodingStats.Collector statsCollector = new EncodingStats.Collector();
         private final boolean useRecursive;
         private int rowCount;
+        private long dataSize;
 
         public Builder(TableMetadata metadata,
                        DecoratedKey key,
@@ -513,6 +483,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             this.deletionInfo = deletionInfo.mutableCopy();
             useRecursive = useRecursive(metadata.comparator);
             rowCount = 0;
+            dataSize = 0;
             add(staticRow);
         }
 
@@ -558,8 +529,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 throw new AssertionError(e);
             }
             Rows.collectStats(row, statsCollector);
-            if (!row.isStatic())
-                ++rowCount;
         }
 
         public void addPartitionDeletion(DeletionTime deletionTime)
@@ -598,6 +567,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                                              columns,
                                                              statsCollector.get(),
                                                              rowCount,
+                                                             Ints.saturatedCast(dataSize + deletionInfo.dataSize()),
                                                              trie,
                                                              canHaveShadowedData);
 
@@ -607,7 +577,17 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         RowData merge(Object existing, Row update)
         {
             if (existing != null)
-                update = Rows.merge(((RowData) existing).toRow(update.clustering()), update);
+            {
+                // this is not expected to happen much, so going through toRow and the existing size is okay
+                RowData rowData = (RowData) existing;
+                update = Rows.merge(rowData.toRow(update.clustering()), update);
+                dataSize += update.dataSize() - rowData.dataSize();
+            }
+            else
+            {
+                ++rowCount;
+                dataSize += update.dataSize();
+            }
 
             return rowToData(update);
         }

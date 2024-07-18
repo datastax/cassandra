@@ -93,13 +93,6 @@ public interface PartitionUpdate extends Partition
      */
     int dataSize();
 
-    /**
-     * The size of the data contained in this update.
-     *
-     * @return the size of the data contained in this update.
-     */
-    long unsharedHeapSizeExcludingData();
-
     @Override
     RegularAndStaticColumns columns();
 

@@ -179,7 +179,7 @@ public class TrieBackedPartition implements Partition
 
     public static TrieBackedPartition create(UnfilteredRowIterator iterator)
     {
-        ContentBuilder builder = build(iterator);
+        ContentBuilder builder = build(iterator, false);
         return new TrieBackedPartition(iterator.partitionKey(),
                                        iterator.columns(),
                                        iterator.stats(),
@@ -189,11 +189,11 @@ public class TrieBackedPartition implements Partition
                                        false);
     }
 
-    protected static ContentBuilder build(UnfilteredRowIterator iterator)
+    protected static ContentBuilder build(UnfilteredRowIterator iterator, boolean collectDataSize)
     {
         try
         {
-            ContentBuilder builder = new ContentBuilder(iterator.metadata(), iterator.partitionLevelDeletion(), iterator.isReverseOrder());
+            ContentBuilder builder = new ContentBuilder(iterator.metadata(), iterator.partitionLevelDeletion(), iterator.isReverseOrder(), collectDataSize);
 
             builder.addStatic(iterator.staticRow());
 
@@ -625,10 +625,12 @@ public class TrieBackedPartition implements Partition
         private final InMemoryTrie<Object> trie;
 
         private final boolean useRecursive;
+        private final boolean collectDataSize;
 
         private int rowCount;
+        private long dataSize;
 
-        public ContentBuilder(TableMetadata metadata, DeletionTime partitionLevelDeletion, boolean isReverseOrder)
+        public ContentBuilder(TableMetadata metadata, DeletionTime partitionLevelDeletion, boolean isReverseOrder, boolean collectDataSize)
         {
             this.metadata = metadata;
             this.comparator = metadata.comparator;
@@ -639,20 +641,23 @@ public class TrieBackedPartition implements Partition
             this.trie = InMemoryTrie.shortLived();
 
             this.useRecursive = useRecursive(comparator);
+            this.collectDataSize = collectDataSize;
 
             rowCount = 0;
+            dataSize = 0;
         }
 
         public ContentBuilder addStatic(Row staticRow) throws TrieSpaceExhaustedException
         {
-            putStaticInTrie(comparator, trie, staticRow);
-            return this;
+            return addRow(staticRow);
         }
 
         public ContentBuilder addRow(Row row) throws TrieSpaceExhaustedException
         {
             putInTrie(comparator, useRecursive, trie, row);
             ++rowCount;
+            if (collectDataSize)
+                dataSize += row.dataSize();
             return this;
         }
 
@@ -672,7 +677,10 @@ public class TrieBackedPartition implements Partition
 
         public ContentBuilder complete() throws TrieSpaceExhaustedException
         {
-            trie.putRecursive(ByteComparable.EMPTY, deletionBuilder.build(), NO_CONFLICT_RESOLVER);
+            MutableDeletionInfo deletionInfo = deletionBuilder.build();
+            trie.putRecursive(ByteComparable.EMPTY, deletionInfo, NO_CONFLICT_RESOLVER);    // will throw if called more than once
+            if (collectDataSize)
+                dataSize += deletionInfo.dataSize();
             return this;
         }
 
@@ -684,6 +692,12 @@ public class TrieBackedPartition implements Partition
         public int rowCount()
         {
             return rowCount;
+        }
+
+        public int dataSize()
+        {
+            assert collectDataSize;
+            return Ints.saturatedCast(dataSize);
         }
     }
 }

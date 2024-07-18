@@ -296,17 +296,6 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
                 + holder.staticRow.dataSize() + holder.deletionInfo.dataSize());
     }
 
-    /**
-     * The size of the data contained in this update.
-     *
-     * @return the size of the data contained in this update.
-     */
-    public long unsharedHeapSizeExcludingData()
-    {
-        return BTree.<Row>accumulate(holder.tree, (row, value) -> row.unsharedHeapSizeExcludingData() + value, 0L)
-                + holder.staticRow.unsharedHeapSizeExcludingData() + holder.deletionInfo.unsharedHeapSize();
-    }
-
     public TableMetadata metadata()
     {
         return metadata;
