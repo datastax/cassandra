@@ -129,6 +129,14 @@ public interface StorageProvider
     void invalidateFileSystemCache(File file);
 
     /**
+     * Remove the give sstable from any local cache, for example the OS page cache, or at least it tries to.
+     *
+     * @param descriptor the descriptor for the sstable that is no longer required in the file system caches
+     * @param tidied whether ReaderTidier has been run, aka. deleting sstable files.
+     */
+    void invalidateFileSystemCache(Descriptor descriptor, boolean tidied);
+
+    /**
      * Creates a new {@link FileHandle.Builder} for the given sstable component.
      * <p>
      * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
@@ -220,6 +228,13 @@ public interface StorageProvider
         public void invalidateFileSystemCache(File file)
         {
             INativeLibrary.instance.trySkipCache(file, 0, 0);
+        }
+
+        @Override
+        public void invalidateFileSystemCache(Descriptor desc, boolean tidied)
+        {
+            for (Component c : desc.discoverComponents())
+                StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(c));
         }
 
         protected Config.DiskAccessMode accessMode(Component component)
