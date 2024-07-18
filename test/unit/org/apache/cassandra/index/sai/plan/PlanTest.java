@@ -76,7 +76,7 @@ public class PlanTest
     private static RowFilter.Expression filerPred(String column, Operator operation)
     {
         RowFilter.Expression pred = Mockito.mock(RowFilter.Expression.class);
-        Mockito.when(pred.toString()).thenReturn(column + ' ' + operation + " X");
+        Mockito.when(pred.toString(false)).thenReturn(column + ' ' + operation + " X");
         Mockito.when(pred.operator()).thenReturn(operation);
         return pred;
     }
