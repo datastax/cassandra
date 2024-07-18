@@ -1014,4 +1014,45 @@ public class UFTest extends CQLTester
               .hasMessageContaining("Function name '%s' is invalid", funcName);
         }
     }
+
+    @Test
+    public void testRejectInvalidLanguageOnCreation()
+    {
+        for (String funcName : Arrays.asList("my/fancy/func", "my_other[fancy]func"))
+        {
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE javascript\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
+
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE JAVASCRIPT\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
+
+            // test with weird made up word for language
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE JAVASCRI\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
+        }
+    }
 }
