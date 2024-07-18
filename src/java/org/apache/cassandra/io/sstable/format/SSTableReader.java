@@ -1728,8 +1728,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                     obsoletion.commit();
 
                 // don't ideally want to dropPageCache for the file until all instances have been released
-                for (Component c : desc.discoverComponents())
-                    StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(c));
+                StorageProvider.instance.invalidateFileSystemCache(desc, obsoletion != null);
             }
             finally
             {
