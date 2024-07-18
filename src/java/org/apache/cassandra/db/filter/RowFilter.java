@@ -986,7 +986,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             return toString(true);
         }
 
-        protected abstract String toString(boolean cql);
+        public abstract String toString(boolean cql);
 
         public static class Serializer
         {
@@ -1244,7 +1244,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        protected String toString(boolean cql)
+        public String toString(boolean cql)
         {
             AbstractType<?> type = column.type;
             switch (operator)
@@ -1378,7 +1378,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        protected String toString(boolean cql)
+        public String toString(boolean cql)
         {
             MapType<?, ?> mt = (MapType<?, ?>) column.type;
             AbstractType<?> nt = mt.nameComparator();
@@ -1560,7 +1560,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        protected String toString(boolean cql)
+        public String toString(boolean cql)
         {
             return String.format("GEO_DISTANCE(%s, %s) %s %s", cql ? column.name.toCQLString() : column.name.toString(),
                                  column.type.getString(value),
@@ -1638,7 +1638,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        protected String toString(boolean cql)
+        public String toString(boolean cql)
         {
             return String.format("expr(%s, %s)",
                                  cql ? ColumnIdentifier.maybeQuote(targetIndex.name) : targetIndex.name,
