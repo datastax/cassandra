@@ -100,6 +100,9 @@ public class CacheService implements CacheServiceMBean
     public final AutoSavingCache<RowCacheKey, IRowCacheEntry> rowCache;
     public final AutoSavingCache<CounterCacheKey, ClockAndCount> counterCache;
 
+    // screw thread safety; best effort view is good enough
+    public long counterCacheCapacity;
+
     private CacheService()
     {
         MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
@@ -107,6 +110,7 @@ public class CacheService implements CacheServiceMBean
         keyCache = initKeyCache();
         rowCache = initRowCache();
         counterCache = initCounterCache();
+        counterCacheCapacity = counterCache.getCapacity();
     }
 
     /**
@@ -349,6 +353,7 @@ public class CacheService implements CacheServiceMBean
             throw new RuntimeException("capacity should not be negative.");
 
         counterCache.setCapacity(capacity * 1024 * 1024);
+        counterCacheCapacity = counterCache.getCapacity();
     }
 
     public void saveCaches() throws ExecutionException, InterruptedException
