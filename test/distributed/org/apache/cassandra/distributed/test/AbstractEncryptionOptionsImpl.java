@@ -48,8 +48,6 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.concurrent.FutureListener;
 import org.apache.cassandra.config.EncryptionOptions;
-import org.apache.cassandra.distributed.Cluster;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.security.ISslContextFactory;
 import org.apache.cassandra.security.SSLFactory;
 
@@ -333,29 +331,6 @@ public class AbstractEncryptionOptionsImpl extends TestBaseImpl
                               lastThrowable().getMessage().contains("Received fatal alert: handshake_failure") ||
                               lastThrowable().getMessage().contains("Received fatal alert: protocol_version") ||
                               lastThrowable.getCause() instanceof  SSLHandshakeException);
-        }
-    }
-
-    /* Provde the cluster cannot start with the configured options */
-    void assertCannotStartDueToConfigurationException(Cluster cluster)
-    {
-        Throwable tr = null;
-        try
-        {
-            cluster.startup();
-        }
-        catch (Throwable maybeConfigException)
-        {
-            tr = maybeConfigException;
-        }
-
-        if (tr == null)
-        {
-            Assert.fail("Expected a ConfigurationException");
-        }
-        else
-        {
-            Assert.assertEquals(ConfigurationException.class.getName(), tr.getClass().getName());
         }
     }
 }
