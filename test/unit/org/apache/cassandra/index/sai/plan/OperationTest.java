@@ -646,7 +646,7 @@ public class OperationTest extends IndexingSchemaLoader
         }
 
         @Override
-        protected String toString(boolean cql)
+        public String toString(boolean cql)
         {
             return String.format("%s %s %s",
                     cql ? column.name.toCQLString() : column.name.toString(),
