@@ -273,15 +273,6 @@ public class TrieBackedPartition implements Partition
     }
 
     /**
-     * Put the given static row in the trie. Does nothing if the row is empty.
-     */
-    protected static void putStaticInTrie(ClusteringComparator comparator, InMemoryTrie<Object> trie, Row staticRow) throws TrieSpaceExhaustedException
-    {
-        if (!staticRow.isEmpty())
-            trie.putRecursive(comparator.asByteComparable(Clustering.STATIC_CLUSTERING), rowToData(staticRow), NO_CONFLICT_RESOLVER);
-    }
-
-    /**
      * Check if we can use recursive operations when putting a value in tries.
      * True if all types in the clustering keys are fixed length, and total size is small enough.
      */
@@ -649,7 +640,10 @@ public class TrieBackedPartition implements Partition
 
         public ContentBuilder addStatic(Row staticRow) throws TrieSpaceExhaustedException
         {
-            return addRow(staticRow);
+            if (!staticRow.isEmpty())
+                return addRow(staticRow);
+            else
+                return this;
         }
 
         public ContentBuilder addRow(Row row) throws TrieSpaceExhaustedException
