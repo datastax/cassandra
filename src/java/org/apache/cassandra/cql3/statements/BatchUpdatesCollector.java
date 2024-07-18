@@ -61,7 +61,7 @@ final class BatchUpdatesCollector implements UpdatesCollector
      *
      * MutationBuilder holds a PartitionUpdate.Builder
      */
-    private final Map<String, Map<Integer, IMutationBuilder>> mutationBuilders = Maps.newHashMapWithExpectedSize(1);
+    private final Map<String, Map<ByteBuffer, IMutationBuilder>> mutationBuilders = Maps.newHashMapWithExpectedSize(1);
 
 
     BatchUpdatesCollector(Map<TableId, RegularAndStaticColumns> updatedColumns, Map<TableId, HashMultiset<ByteBuffer>> perPartitionKeyCounts)
@@ -80,9 +80,9 @@ final class BatchUpdatesCollector implements UpdatesCollector
      * @param consistency the consistency level
      * @return the <code>PartitionUpdate.Builder</code> for the specified column family and key
      */
-    public PartitionUpdate.Builder getPartitionUpdateBuilder(TableMetadata metadata, DecoratedKey dk, Clustering<?> clustering, ConsistencyLevel consistency)
+    public PartitionUpdate.Builder getPartitionUpdateBuilder(TableMetadata metadata, DecoratedKey dk, ConsistencyLevel consistency)
     {
-        IMutationBuilder mut = getMutationBuilder(metadata, dk, clustering, consistency);
+        IMutationBuilder mut = getMutationBuilder(metadata, dk, consistency);
         PartitionUpdate.Builder upd = mut.get(metadata.id);
         if (upd == null)
         {
@@ -94,14 +94,14 @@ final class BatchUpdatesCollector implements UpdatesCollector
         return upd;
     }
 
-    private IMutationBuilder getMutationBuilder(TableMetadata metadata, DecoratedKey dk, Clustering<?> clustering, ConsistencyLevel consistency)
+    private IMutationBuilder getMutationBuilder(TableMetadata metadata, DecoratedKey dk, ConsistencyLevel consistency)
     {
-        Map<Integer, IMutationBuilder> ksMap = keyspaceMap(metadata.keyspace);
-        IMutationBuilder mutationBuilder = ksMap.get(dk.getKey().hashCode() ^ clustering.hashCode());
+        Map<ByteBuffer, IMutationBuilder> ksMap = keyspaceMap(metadata.keyspace);
+        IMutationBuilder mutationBuilder = ksMap.get(dk.getKey());
         if (mutationBuilder == null)
         {
             mutationBuilder = makeMutationBuilder(metadata, dk, consistency);
-            ksMap.put(dk.getKey().hashCode() ^ clustering.hashCode(), mutationBuilder);
+            ksMap.put(dk.getKey(), mutationBuilder);
         }
         return mutationBuilder;
     }
@@ -126,7 +126,7 @@ final class BatchUpdatesCollector implements UpdatesCollector
     public List<IMutation> toMutations()
     {
         List<IMutation> ms = new ArrayList<>();
-        for (Map<Integer, IMutationBuilder> ksMap : mutationBuilders.values())
+        for (Map<ByteBuffer, IMutationBuilder> ksMap : mutationBuilders.values())
         {
             for (IMutationBuilder builder : ksMap.values())
             {
@@ -144,9 +144,9 @@ final class BatchUpdatesCollector implements UpdatesCollector
      * @param ksName the keyspace name
      * @return the key-mutation mappings for the specified keyspace.
      */
-    private Map<Integer, IMutationBuilder> keyspaceMap(String ksName)
+    private Map<ByteBuffer, IMutationBuilder> keyspaceMap(String ksName)
     {
-        Map<Integer, IMutationBuilder> ksMap = mutationBuilders.get(ksName);
+        Map<ByteBuffer, IMutationBuilder> ksMap = mutationBuilders.get(ksName);
         if (ksMap == null)
         {
             ksMap = Maps.newHashMapWithExpectedSize(1);

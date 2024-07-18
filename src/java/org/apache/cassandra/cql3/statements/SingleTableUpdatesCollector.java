@@ -59,7 +59,7 @@ final class SingleTableUpdatesCollector implements UpdatesCollector
     /**
      * the partition update builders per key
      */
-    private final Map<Integer, PartitionUpdate.Builder> puBuilders;
+    private final Map<ByteBuffer, PartitionUpdate.Builder> puBuilders;
 
     /**
      * if it is a counter table, we will set this
@@ -74,15 +74,15 @@ final class SingleTableUpdatesCollector implements UpdatesCollector
         this.puBuilders = Maps.newHashMapWithExpectedSize(perPartitionKeyCounts.size());
     }
 
-    public PartitionUpdate.Builder getPartitionUpdateBuilder(TableMetadata metadata, DecoratedKey dk, Clustering<?> clustering, ConsistencyLevel consistency)
+    public PartitionUpdate.Builder getPartitionUpdateBuilder(TableMetadata metadata, DecoratedKey dk, ConsistencyLevel consistency)
     {
         if (metadata.isCounter())
             counterConsistencyLevel = consistency;
-        PartitionUpdate.Builder builder = puBuilders.get(dk.getKey().hashCode() ^ clustering.hashCode());
+        PartitionUpdate.Builder builder = puBuilders.get(dk.getKey());
         if (builder == null)
         {
             builder = new PartitionUpdate.Builder(metadata, dk, updatedColumns, perPartitionKeyCounts.count(dk.getKey()));
-            puBuilders.put(dk.getKey().hashCode() ^ clustering.hashCode(), builder);
+            puBuilders.put(dk.getKey(), builder);
         }
         return builder;
     }

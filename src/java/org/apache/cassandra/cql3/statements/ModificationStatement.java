@@ -751,7 +751,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                 Validation.validateKey(metadata(), key);
                 DecoratedKey dk = metadata().partitioner.decorateKey(key);
 
-                PartitionUpdate.Builder updateBuilder = collector.getPartitionUpdateBuilder(metadata(), dk, Clustering.EMPTY, options.getConsistency());
+                PartitionUpdate.Builder updateBuilder = collector.getPartitionUpdateBuilder(metadata(), dk, options.getConsistency());
 
                 for (Slice slice : slices)
                     addUpdateForKey(updateBuilder, slice, params);
@@ -772,11 +772,10 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                 Validation.validateKey(metadata(), key);
                 DecoratedKey dk = metadata().partitioner.decorateKey(key);
 
-                //PartitionUpdate.Builder updateBuilder = collector.getPartitionUpdateBuilder(metadata(), dk, options.getConsistency());
+                PartitionUpdate.Builder updateBuilder = collector.getPartitionUpdateBuilder(metadata(), dk, options.getConsistency());
 
                 if (!restrictions.hasClusteringColumnsRestrictions())
                 {
-                    PartitionUpdate.Builder updateBuilder = collector.getPartitionUpdateBuilder(metadata(), dk, Clustering.EMPTY, options.getConsistency());
                     addUpdateForKey(updateBuilder, Clustering.EMPTY, params);
                 }
                 else
@@ -784,7 +783,6 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                     for (Clustering<?> clustering : clusterings)
                     {
                         clustering.validate();
-                        PartitionUpdate.Builder updateBuilder = collector.getPartitionUpdateBuilder(metadata(), dk, clustering, options.getConsistency());
                         addUpdateForKey(updateBuilder, clustering, params);
                     }
                 }
