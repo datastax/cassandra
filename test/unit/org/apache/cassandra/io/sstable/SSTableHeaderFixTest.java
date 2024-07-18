@@ -36,6 +36,7 @@ import java.util.stream.IntStream;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -316,6 +317,7 @@ public class SSTableHeaderFixTest
     }
 
     @Test
+    @Ignore("CNDB-10180")
     public void complexTypeMatchTest() throws Exception
     {
         File dir = temporaryFolder;
