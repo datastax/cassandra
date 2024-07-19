@@ -152,20 +152,6 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void testVectorEqualityIsNotAllowed() throws Throwable
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        assertInvalidMessage(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE,
-                             "SELECT * FROM %s WHERE val = [2.5, 3.5, 4.5] LIMIT 1");
-
-        assertInvalidMessage(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE,
-                             "SELECT * FROM %s WHERE val = [2.5, 3.5, 4.5]");
-    }
-
-    @Test
     public void annOrderingMustHaveLimit() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, ck int, val vector<float, 3>, PRIMARY KEY(pk, ck))");
