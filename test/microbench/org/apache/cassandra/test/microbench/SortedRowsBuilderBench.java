@@ -48,10 +48,10 @@ public class SortedRowsBuilderBench extends CQLTester
     private static final Comparator<List<ByteBuffer>> COMPARATOR = (o1, o2) -> Int32Type.instance.compare(o1.get(0), o2.get(0));
     private static final Random RANDOM = new Random();
 
-    @Param({ "1", "2", "3", "4", "6", "8", "16" })
+    @Param({ "1", "2", "3", "4", "5", "6", "8", "16", "32" })
     public int nodes;
 
-    @Param({ "100", "10000" })
+    @Param({ "10", "100", "1000", "10000" })
     public int limit;
 
     @Param({ "0", "0.1", "0.5", "1" })
@@ -81,15 +81,39 @@ public class SortedRowsBuilderBench extends CQLTester
     }
 
     @Benchmark
-    public Object comparator()
+    public Object comparatorWithList()
     {
-        return test(SortedRowsBuilder.create(limit, offset, COMPARATOR));
+        return test(SortedRowsBuilder.WithListSort.create(limit, offset, COMPARATOR));
     }
 
     @Benchmark
-    public Object scorer()
+    public Object comparatorWithHeap()
     {
-        return test(SortedRowsBuilder.create(limit, offset, SCORER));
+        return test(SortedRowsBuilder.WithHeapSort.create(limit, offset, COMPARATOR));
+    }
+
+    @Benchmark
+    public Object comparatorWithHybrid()
+    {
+        return test(SortedRowsBuilder.WithHybridSort.create(limit, offset, COMPARATOR));
+    }
+
+    @Benchmark
+    public Object scorerWithList()
+    {
+        return test(SortedRowsBuilder.WithListSort.create(limit, offset, SCORER));
+    }
+
+    @Benchmark
+    public Object scorerWithHeap()
+    {
+        return test(SortedRowsBuilder.WithHeapSort.create(limit, offset, SCORER));
+    }
+
+    @Benchmark
+    public Object scorerWithHybrid()
+    {
+        return test(SortedRowsBuilder.WithHybridSort.create(limit, offset, SCORER));
     }
 
     private List<List<ByteBuffer>> test(SortedRowsBuilder builder)
