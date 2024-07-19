@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.plan;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -70,104 +71,108 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     @Nullable
     public static StorageAttachedIndexQueryPlan create(ColumnFamilyStore cfs,
                                                        TableQueryMetrics queryMetrics,
-                                                       Set<StorageAttachedIndex> indexes,
+                                                       Set<StorageAttachedIndex> allIndexes,
                                                        RowFilter rowFilter)
     {
-        ImmutableSet.Builder<Index> selectedIndexesBuilder = ImmutableSet.builder();
+        // collect the indexes that can be used with the provided row filter
+        Set<StorageAttachedIndex> selectedIndexes = new HashSet<>();
+        if (!selectedIndexes(rowFilter.root(), allIndexes, selectedIndexes))
+            return null;
+
+        // collect the features of the selected indexes
         IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator();
+        for (StorageAttachedIndex index : selectedIndexes)
+            accumulator.accumulate(index.getIndexContext().indexFeatureSet());
 
-        for (RowFilter.Expression expression : rowFilter)
-        {
-            // we ignore user-defined expressions here because we don't have a way to translate their #isSatifiedBy
-            // method, they will be included in the filter returned by QueryPlan#postIndexQueryFilter()
-            if (expression.isUserDefined())
-                continue;
-
-            for (StorageAttachedIndex index : indexes)
-            {
-                if (index.supportsExpression(expression.column(), expression.operator()))
-                {
-                    accumulator.accumulate(index.getIndexContext().indexFeatureSet());
-                    selectedIndexesBuilder.add(index);
-                }
-            }
-        }
-
-        ImmutableSet<Index> selectedIndexes = selectedIndexesBuilder.build();
-        if (selectedIndexes.isEmpty())
-            return null;
-
-        // TODO: The list of selected indexes collected above only considers the top level expressions in the filter
-        //  tree. However, the actual query planning in done by the searcher. That query planning will consider all the
-        //  levels of the filter tree. This means that the selected indexes can be a subset of the indexes that will be
-        //  actually used. We should fix this so the list of indexes returned by this query planner is at least a
-        //  superset of the indexes that will be used by the searcher.
-        if (!hasUsableIndexes(rowFilter.root(), indexes))
-            return null;
-
-        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, rowFilter, selectedIndexes, accumulator.complete());
+        return new StorageAttachedIndexQueryPlan(cfs,
+                                                 queryMetrics,
+                                                 rowFilter,
+                                                 ImmutableSet.copyOf(selectedIndexes),
+                                                 accumulator.complete());
     }
 
     /**
-     * Returns whether this filter might benefit from using any of the provided indexes. That happens if at least
-     * one of the indexes can satisfy at least one of the expressions of this filter, and if there isn't an unindexed
-     * expression in an OR that isn't nested in an indexed AND.
+     * Collects the indexes that can be used with the specified filtering tree without doing a full index scan.
      * </p>
-     * For example, {@code x AND y}, can use any index in {@code x}, {@code y}, or both.
+     * The selected indexes are those that can satisfy at least one of the expressions of the filter, and that
+     * aren't part of an OR operation that contains not indexed expressions, unless that OR operation is nested inside
+     * an AND operation that has at least one indexed operation.
      * </p>
-     * However, {@code x OR y}, where only {@code x} is indexed, can't use the index on {@code x} because it would need
-     * to do a full scan all the index entries, and it's more efficient to just scan the base table. However, if both
-     * columns were indexed, the filter could use those indexes.
+     * For example, for {@code x AND y} we can use any index in {@code x}, {@code y}, or both.
      * </p>
-     * As another example, {@code (x OR y) AND z}, where {@code x} and {@code z} are indexed, can use the index on
-     * {@code z}, even though it will ignore the index on {@code x}.
+     * For {@code x OR y} we can't use a single index on {@code x} or {@code y} because we would need to do a full index
+     * scan because of the unidexed expression. However, if both columns were indexed, we could use those two indexes.
      * </p>
-     * In ultimate instance the decission on whether to use an index or not is made by the index implementation, in
-     * {@link Index.Group#queryPlanFor(RowFilter)}.
+     * For {@code (x OR y) AND z}, where {@code x} and {@code z} are indexed, we can use the index on {@code z}, even
+     * though we will ignore the index on {@code x}.
      *
-     * @param element a row filter node
-     * @param indexes the indexes that can be used to satisfy some of the expressions in the filter
-     * @return {@code true} if this filter can any of use the provided indexes, {@code false} otherwise.
+     * @param element a row filter tree node
+     * @param allIndexes all the indexes in the index group
+     * @param selectedIndexes the set of indexes where we'll add those indexes can be used with the specified expression
+     * @return {@code true} if this has collected any indexes, {@code false} otherwise
      */
-    private static boolean hasUsableIndexes(RowFilter.FilterElement element, Set<? extends Index> indexes)
+    private static boolean selectedIndexes(RowFilter.FilterElement element,
+                                           Set<StorageAttachedIndex> allIndexes,
+                                           Set<StorageAttachedIndex> selectedIndexes)
     {
         if (element.isDisjunction()) // OR, all restrictions should have an index
         {
-            boolean result = true;
+            Set<StorageAttachedIndex> orIndexes = new HashSet<>();
             for (RowFilter.Expression expression : element.expressions())
             {
-                result &= supportsExpression(expression, indexes);
+                if (!selectedIndexes(expression, allIndexes, orIndexes))
+                    return false;
             }
             for (RowFilter.FilterElement child : element.children())
             {
-                result &= hasUsableIndexes(child, indexes);
+                if (!selectedIndexes(child, allIndexes, orIndexes))
+                    return false;
             }
-            return result;
+            selectedIndexes.addAll(orIndexes);
+            return !orIndexes.isEmpty();
         }
         else // AND, only one restriction needs to have an index
         {
+            boolean hasIndex = false;
             for (RowFilter.Expression expression : element.expressions())
             {
-                if (supportsExpression(expression, indexes))
-                    return true;
+                hasIndex |= selectedIndexes(expression, allIndexes, selectedIndexes);
             }
             for (RowFilter.FilterElement child : element.children())
             {
-                if (hasUsableIndexes(child, indexes))
-                    return true;
+                hasIndex |= selectedIndexes(child, allIndexes, selectedIndexes);
             }
-            return false;
+            return hasIndex;
         }
     }
 
-    private static boolean supportsExpression(RowFilter.Expression expression, Set<? extends Index> indexes)
+    /**
+     * Collects the indexes that can be used with the specified expression.
+     *
+     * @param expression a row filter expression
+     * @param allIndexes all the indexes in the index group
+     * @param selectedIndexes the set of indexes where we'll add those indexes can be used with the specified expression
+     * @return {@code true} if this has collected any indexes, {@code false} otherwise
+     */
+    private static boolean selectedIndexes(RowFilter.Expression expression,
+                                           Set<StorageAttachedIndex> allIndexes,
+                                           Set<StorageAttachedIndex> selectedIndexes)
     {
-        for (Index index : indexes)
+        // we ignore user-defined expressions here because we don't have a way to translate their #isSatifiedBy
+        // method, they will be included in the filter returned by QueryPlan#postIndexQueryFilter()
+        if (expression.isUserDefined())
+            return false;
+
+        boolean hasIndex = false;
+        for (StorageAttachedIndex index : allIndexes)
         {
             if (index.supportsExpression(expression.column(), expression.operator()))
-                return true;
+            {
+                selectedIndexes.add(index);
+                hasIndex = true;
+            }
         }
-        return false;
+        return hasIndex;
     }
 
     @Override

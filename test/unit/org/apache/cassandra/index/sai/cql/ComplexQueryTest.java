@@ -18,10 +18,12 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.QueryOptions;
@@ -33,6 +35,7 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
@@ -326,68 +329,109 @@ public class ComplexQueryTest extends SAITester
 
     private void assertComplexQueryWithIndexedAndNotIndexed(String... indexedColumns)
     {
-        Set<String> indexNames = Arrays.stream(indexedColumns)
-                                       .map(c -> createIndex("CREATE CUSTOM INDEX ON %s(" + c + ") USING 'StorageAttachedIndex'"))
-                                       .collect(Collectors.toSet());
+        assertComplexQueryWithIndexedAndNotIndexed(Set.of(indexedColumns));
+    }
+
+    private void assertComplexQueryWithIndexedAndNotIndexed(Set<String> indexedColumns)
+    {
+        Set<String> indexNames = new HashSet<>();
+        for (String indexedColumn : indexedColumns)
+        {
+            indexNames.add(createIndex("CREATE CUSTOM INDEX ON %s(" + indexedColumn + ") USING 'StorageAttachedIndex'"));
+        }
         waitForIndexQueryable();
 
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 ALLOW FILTERING",
-                             contains(indexedColumns, "x"),
+                             indexedColumns,
+                             c -> contains(c, "x"),
                              row(0), row(1), row(2), row(3));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (1, 2) ALLOW FILTERING",
-                             contains(indexedColumns, "y"),
-                             row(1), row(2));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND y IN (1, 2) ALLOW FILTERING",
-                             contains(indexedColumns, "x") || contains(indexedColumns, "y"),
-                             row(1), row(2));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND (y=1 OR y=2) ALLOW FILTERING",
-                             contains(indexedColumns, "x") || contains(indexedColumns, "y"),
-                             row(1), row(2));
-
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 ALLOW FILTERING",
-                             contains(indexedColumns, "x"));
+                             indexedColumns,
+                             c -> contains(c, "x"));
+
+        assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (1, 2) ALLOW FILTERING",
+                             indexedColumns,
+                             c -> contains(c, "y"),
+                             row(1), row(2));
+        assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (4, 6) ALLOW FILTERING",
+                             indexedColumns,
+                             c -> contains(c, "y"));
+
+        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND y IN (1, 2) ALLOW FILTERING",
+                             indexedColumns,
+                             c -> contains(c, "x") || contains(c, "y"),
+                             row(1), row(2));
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 AND y IN (1, 2) ALLOW FILTERING",
-                             contains(indexedColumns, "x") || contains(indexedColumns, "y"));
+                             indexedColumns,
+                             c -> contains(c, "x") || contains(c, "y"));
+
+        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND (y=1 OR y=2) ALLOW FILTERING",
+                             indexedColumns,
+                             c -> contains(c, "x") || contains(c, "y"),
+                             row(1), row(2));
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 AND (y=1 OR y=2) ALLOW FILTERING",
-                             contains(indexedColumns, "x") || contains(indexedColumns, "y"));
+                             indexedColumns,
+                             c -> contains(c, "x") || contains(c, "y"));
 
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR y=0 ALLOW FILTERING",
-                             contains(indexedColumns, "x", "y"),
+                             indexedColumns,
+                             c -> contains(c, "x", "y"),
                              row(0), row(1), row(2), row(3));
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR y=0 ALLOW FILTERING",
-                             contains(indexedColumns, "x", "y"),
+                             indexedColumns,
+                             c -> contains(c, "x", "y"),
                              row(0));
 
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR (y=0 AND z=0) ALLOW FILTERING",
-                             contains(indexedColumns, "x", "y") || contains(indexedColumns, "x", "z"),
+                             indexedColumns,
+                             c -> contains(c, "x", "y") || contains(c, "x", "z"),
                              row(0), row(1), row(2), row(3));
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR (y=0 AND z=0) ALLOW FILTERING",
-                             contains(indexedColumns, "x", "y") || contains(indexedColumns, "x", "z"),
+                             indexedColumns,
+                             c -> contains(c, "x", "y") || contains(c, "x", "z"),
                              row(0));
 
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR y=0 OR z=0 ALLOW FILTERING",
-                             contains(indexedColumns, "x", "y", "z"),
+                             indexedColumns,
+                             c -> contains(c, "x", "y", "z"),
                              row(0), row(1), row(2), row(3));
         assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR y=0 OR z=0 ALLOW FILTERING",
-                             contains(indexedColumns, "x", "y", "z"),
+                             indexedColumns,
+                             c -> contains(c, "x", "y", "z"),
                              row(0), row(1));
 
         indexNames.forEach(idx -> dropIndex("DROP INDEX %s." + idx));
     }
 
-    private void assertQueryUsesIndex(String query, boolean shouldUseIndex, Object[]... rows)
+    private void assertQueryUsesIndex(String query,
+                                      Set<String> indexedColumns,
+                                      Predicate<Set<String>> shouldUseIndexes,
+                                      Object[]... expectedRows)
     {
-        assertRowsIgnoringOrder(execute(query), rows);
+        // verify query result
+        assertRowsIgnoringOrder(execute(query), expectedRows);
 
+        // verify whether indexes are used or skipped
         String formattedQuery = formatQuery(query);
         SelectStatement select = (SelectStatement) QueryProcessor.parseStatement(formattedQuery, ClientState.forInternalCalls());
         ReadCommand cmd = (ReadCommand) select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
-        Index.Searcher searcher = cmd.indexSearcher();
-        assertEquals(shouldUseIndex, searcher != null);
+        Index.QueryPlan plan = cmd.indexQueryPlan();
+        assertEquals(shouldUseIndexes.test(indexedColumns), plan != null);
+
+        // if we are using indexes, verify that we are using the expected ones
+        if (plan != null)
+        {
+            Set<String> selectedColumns = plan.getIndexes()
+                                              .stream()
+                                              .map(i -> (StorageAttachedIndex) i)
+                                              .map(i -> i.getIndexContext().getColumnName())
+                                              .collect(Collectors.toSet());
+            Assert.assertTrue(shouldUseIndexes.test(selectedColumns));
+        }
     }
 
-    private static boolean contains(String[] set, String... elements)
+    private static boolean contains(Set<String> set, String... elements)
     {
-        return Set.of(set).containsAll(Set.of(elements));
+        return set.containsAll(Set.of(elements));
     }
 }
