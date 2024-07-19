@@ -35,6 +35,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -109,6 +110,32 @@ public class VectorLocalTest extends VectorTester
                       queryVector, limit);
 
         assertThat(result).hasSize(1);
+    }
+
+    @Test
+    public void vectorEqualityTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+
+        String vs = vectorString(new float[]{1.0f, 2.0f, 3.0f});
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, '1', [2.5, 3.5, 4.5])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, '2', [2.5, 3.5, 4.5])");
+
+        UntypedResultSet result;
+
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "val"),
+                             "SELECT * FROM %s WHERE val = [2.5, 3.5, 4.5] LIMIT 1");
+
+        result = execute("SELECT * FROM %s WHERE val = [2.5, 3.5, 4.5] LIMIT 1 ALLOW FILTERING");
+        assertThat(result).hasSize(1);
+
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "val"),
+                             "SELECT * FROM %s WHERE val = [2.5, 3.5, 4.5]");
+
+        result = execute("SELECT * FROM %s WHERE val = [2.5, 3.5, 4.5] ALLOW FILTERING");
+        assertThat(result).hasSize(2);
     }
 
     @Test
