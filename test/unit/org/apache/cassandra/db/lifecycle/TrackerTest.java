@@ -219,6 +219,62 @@ public class TrackerTest
     }
 
     @Test
+    public void testLateSubscribers()
+    {
+        boolean backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
+        DatabaseDescriptor.setIncrementalBackupsEnabled(false);
+        try
+        {
+            ColumnFamilyStore cfs = MockSchema.newCFS();
+            Tracker tracker = cfs.getTracker();
+
+            OrderTestingMockListener listener1 = new OrderTestingMockListener("l1");
+            OrderTestingMockListener listener2 = new OrderTestingMockListener("l2");
+            OrderTestingMockListener lateListener1 = new OrderTestingMockListener("ll1");
+            OrderTestingMockListener lateListener2 = new OrderTestingMockListener("ll2");
+
+            int initialCount = OrderTestingMockListener.counter.get();
+
+            tracker.subscribeLateConsumer(lateListener1);
+            tracker.subscribe(listener1);
+            tracker.subscribeLateConsumer(lateListener2);
+            tracker.subscribe(listener2);
+
+            List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, 17, cfs));
+            tracker.addSSTables(copyOf(readers), OperationType.UNKNOWN);
+
+            Assert.assertEquals(initialCount, listener1.captured);
+            Assert.assertEquals(initialCount + 1, listener2.captured);
+            Assert.assertEquals(initialCount + 2, lateListener1.captured);
+            Assert.assertEquals(initialCount + 3, lateListener2.captured);
+        }
+        finally
+        {
+            DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
+        }
+    }
+
+    // Mock listener that let us test the order of notifications by capturing and incrementing a common counter.
+    // Please note that this only capture the counter value for the first time a notification is triggered
+    private static final class OrderTestingMockListener implements INotificationConsumer
+    {
+        static final AtomicInteger counter = new AtomicInteger();
+        volatile int captured = -1;
+        private final String name;
+
+        OrderTestingMockListener(String name)
+        {
+            this.name = name;
+        }
+
+        public void handleNotification(INotification notification, Object sender)
+        {
+            if (captured < 0)
+                captured = counter.getAndIncrement();
+        }
+    }
+
+    @Test
     public void testDropSSTables()
     {
         testDropSSTables(false);
