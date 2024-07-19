@@ -400,6 +400,9 @@ public class SelectOffsetTest extends CQLTester
 
     private void testLimitAndOffset(String query, int limit, @Nullable Integer offset, boolean paging, Object[]... rows) throws Throwable
     {
+        // test without a limit (nor offset)
+        assertRows(execute(query + " ALLOW FILTERING"), rows);
+
         // append the specified limit and offset to the unrestricted query
         StringBuilder sb = new StringBuilder(query);
         sb.append(" LIMIT ").append(limit);
