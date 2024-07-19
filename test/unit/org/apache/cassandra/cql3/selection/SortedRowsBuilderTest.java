@@ -63,10 +63,22 @@ public class SortedRowsBuilderTest
                 // with comparator
                 test(rows, SortedRowsBuilder.create(limit, offset, comparator), comparator);
                 test(rows, SortedRowsBuilder.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, reverseComparator), reverseComparator);
 
                 // with index scorer
                 test(rows, SortedRowsBuilder.create(limit, offset, scorer(false)), comparator);
                 test(rows, SortedRowsBuilder.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(true)), reverseComparator);
             }
         }
     }
