@@ -69,6 +69,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.ByteSequence;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -85,7 +86,7 @@ import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
@@ -298,7 +299,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     }
 
     /**
-     * @return an itererator over {@link ScoredPrimaryKey} in the graph's {@link SearchResult} order
+     * @return an itererator over {@link PrimaryKeyWithSortKey} in the graph's {@link SearchResult} order
      */
     public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, VectorFloat<?> queryVector, int limit, float threshold, Bits toAccept)
     {
@@ -620,11 +621,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return RamEstimation.concurrentHashMapRamUsed(postingsByOrdinal.size()) // NBHM is close to CHM
                + 3 * RamEstimation.concurrentHashMapRamUsed(postingsMap.size()) // CSLM is much less efficient than CHM
                + postingsMap.values().stream().mapToLong(VectorPostings::ramBytesUsed).sum();
-    }
-
-    private long exactRamBytesUsed()
-    {
-        return ObjectSizes.measureDeep(this);
     }
 
     public enum InvalidVectorBehavior

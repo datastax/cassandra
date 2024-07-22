@@ -1067,6 +1067,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 case NOT_IN:
                     type = ListType.getInstance(type, false);
                     break;
+                case ORDER_BY_ASC:
+                case ORDER_BY_DESC:
+                    // These don't have a value, so we return here to prevent an error calling type.getString(value)
+                    return String.format("%s %s", column.name, operator);
                 default:
                     break;
             }

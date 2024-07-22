@@ -16,26 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.vector;
+package org.apache.cassandra.index.sai.utils;
 
-public class ScoredRowId
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.io.sstable.SSTableId;
+
+/**
+ * Represents a row id with a score.
+ */
+public class RowIdWithScore extends RowIdWithMeta implements Comparable<RowIdWithScore>
 {
-    final int segmentRowId;
-    final float score;
+    private final float score;
 
-    public ScoredRowId(int segmentRowId, float score)
+    public RowIdWithScore(int segmentRowId, float score)
     {
-        this.segmentRowId = segmentRowId;
+        super(segmentRowId);
         this.score = score;
     }
 
-    public float getScore()
+    @Override
+    public int compareTo(RowIdWithScore o)
     {
-        return score;
+        return Float.compare(score, o.score);
     }
 
-    public int getSegmentRowId()
+    @Override
+    protected PrimaryKeyWithSortKey wrapPrimaryKey(IndexContext indexContext, SSTableId<?> sstableId, PrimaryKey primaryKey)
     {
-        return segmentRowId;
+        return new PrimaryKeyWithScore(indexContext, sstableId, primaryKey, score);
     }
 }

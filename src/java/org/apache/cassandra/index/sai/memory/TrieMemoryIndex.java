@@ -26,12 +26,14 @@ package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,17 +42,25 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -66,6 +76,8 @@ public class TrieMemoryIndex extends MemoryIndex
     private final MemtableTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
 
+    private final Memtable memtable;
+
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
 
@@ -77,11 +89,18 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     };
 
+    @VisibleForTesting
     public TrieMemoryIndex(IndexContext indexContext)
+    {
+        this(indexContext, null);
+    }
+
+    public TrieMemoryIndex(IndexContext indexContext, Memtable memtable)
     {
         super(indexContext);
         this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
         this.primaryKeysReducer = new PrimaryKeysReducer();
+        this.memtable = memtable;
     }
 
     public synchronized void add(DecoratedKey key,
@@ -156,6 +175,22 @@ public class TrieMemoryIndex extends MemoryIndex
                 return Pair.create(decode(entry.getKey()), entry.getValue());
             }
         };
+    }
+
+    @Override
+    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(QueryContext queryContext, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        if (data.isEmpty())
+            return CloseableIterator.emptyIterator();
+        var iter = data.entrySet(orderer.isAscending() ? Direction.FORWARD : Direction.REVERSE).iterator();
+        return new AllTermsIterator(iter);
+    }
+
+    @Override
+    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
+    {
+        // The current implementation is one level higher in the TrieMemtableIndex.
+        throw new UnsupportedOperationException("Not supported");
     }
 
     @Override
@@ -268,7 +303,7 @@ public class TrieMemoryIndex extends MemoryIndex
                                         : term;
     }
 
-    private ByteSource append(ByteSource src, int lastByte)
+    private static ByteSource append(ByteSource src, int lastByte)
     {
         return new ByteSource()
         {
@@ -288,6 +323,7 @@ public class TrieMemoryIndex extends MemoryIndex
             }
         };
     }
+
 
     class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
@@ -361,6 +397,36 @@ public class TrieMemoryIndex extends MemoryIndex
                     maximumKey = maximumKey == null ? key : key.compareTo(maximumKey) > 0 ? key : maximumKey;
                 }
             }
+        }
+    }
+
+    private class AllTermsIterator extends AbstractIterator<PrimaryKeyWithByteComparable>
+    {
+        private final Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator;
+        private Iterator<PrimaryKey> primaryKeysIterator = CloseableIterator.emptyIterator();
+        private ByteComparable byteComparableTerm = null;
+
+        public AllTermsIterator(Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator)
+        {
+            this.iterator = iterator;
+        }
+
+        @Override
+        protected PrimaryKeyWithByteComparable computeNext()
+        {
+            assert memtable != null;
+            if (primaryKeysIterator.hasNext())
+                return new PrimaryKeyWithByteComparable(indexContext, memtable, primaryKeysIterator.next(), byteComparableTerm);
+
+            if (iterator.hasNext())
+            {
+                var entry = iterator.next();
+                primaryKeysIterator = entry.getValue().keys().iterator();
+                // Literal terms are compared differently than the way they are inserted into the trie.
+                byteComparableTerm = decode(entry.getKey());
+                return new PrimaryKeyWithByteComparable(indexContext, memtable, primaryKeysIterator.next(), byteComparableTerm);
+            }
+            return endOfData();
         }
     }
 }

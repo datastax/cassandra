@@ -18,92 +18,147 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.googlecode.concurrenttrees.common.Iterables;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.view.View;
+import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
- * Build a query specific view of the on-disk indexes for a query. This will return a
- * {@link Collection} of {@link Expression} and {@link SSTableIndex}s that represent
- * the on-disk data for a query.
- * <p>
- * The query view will include all the indexed expressions even if they don't have any
- * on-disk data. This in necessary because the query view is used to query in-memory
- * data as well as the attached on-disk indexes.
+ * Build a query specific view of the memtables, sstables, and indexes for a query.
+ * For use with SAI ordered queries to ensure that the view is consistent over the lifetime of the query,
+ * which is particularly important for validation of a cell's source memtable/sstable.
  */
 public class QueryViewBuilder
 {
-    private final Collection<Expression> expressions;
-    private final AbstractBounds<PartitionPosition> range;
+    private static final Logger logger = LoggerFactory.getLogger(QueryViewBuilder.class);
 
-    QueryViewBuilder(Collection<Expression> expressions, AbstractBounds<PartitionPosition> range)
+    private final ColumnFamilyStore cfs;
+    private final Orderer orderer;
+    private final AbstractBounds<PartitionPosition> range;
+    private final QueryContext queryContext;
+
+    QueryViewBuilder(ColumnFamilyStore cfs, Orderer orderer, AbstractBounds<PartitionPosition> range, QueryContext queryContext)
     {
-        this.expressions = expressions;
+        this.cfs = cfs;
+        this.orderer = orderer;
         this.range = range;
+        this.queryContext = queryContext;
     }
 
-    public static class QueryView
+    public static class QueryView implements AutoCloseable
     {
-        public final Map<SSTableReader, List<IndexExpression>> view;
-        public final Set<SSTableIndex> referencedIndexes;
+        final ColumnFamilyStore.RefViewFragment view;
+        final Set<SSTableIndex> referencedIndexes;
+        final Set<MemtableIndex> memtableIndexes;
+        final Orderer orderer;
 
-        public QueryView(Map<SSTableReader, List<IndexExpression>> view, Set<SSTableIndex> referencedIndexes)
+        public QueryView(ColumnFamilyStore.RefViewFragment view,
+                         Set<SSTableIndex> referencedIndexes,
+                         Set<MemtableIndex> memtableIndexes,
+                         Orderer orderer)
         {
             this.view = view;
             this.referencedIndexes = referencedIndexes;
+            this.memtableIndexes = memtableIndexes;
+            this.orderer = orderer;
+        }
+
+        @Override
+        public void close()
+        {
+            view.release();
+            referencedIndexes.forEach(SSTableIndex::release);
         }
     }
 
     /**
-     * Acquire references to all the SSTableIndexes required to query the expressions.
+     * Acquire references to all the memtables, memtable indexes, sstables, and sstable indexes required for the
+     * given expression.
      * <p>
      * Will retry if the active sstables change concurrently.
      */
     protected QueryView build()
     {
-        Set<SSTableIndex> referencedIndexes = new HashSet<>();
-        AtomicBoolean failed = new AtomicBoolean();
+        var referencedIndexes = new HashSet<SSTableIndex>();
+        long failingSince = -1L;
         try
         {
+            outer:
             while (true)
             {
-                referencedIndexes.clear();
-                failed.set(false);
+                // Prevent an infinite loop
+                queryContext.checkpoint();
 
-                Map<SSTableReader, List<IndexExpression>> view = getQueryView(expressions);
-                view.values()
-                .stream()
-                .flatMap(expressions -> expressions.stream().map(e -> e.index))
-                .forEach(index ->
+                // Acquire live memtable index and memtable references first to avoid missing an sstable due to flush.
+                // Copy the memtable indexes to avoid concurrent modification.
+                var memtableIndexes = new HashSet<>(orderer.context.getLiveMemtables().values());
+
+                // TODO live sstables or canonical?
+                var refViewFragment = cfs.selectAndReference(org.apache.cassandra.db.lifecycle.View.selectLive(range));
+                var memtables = Iterables.toSet(refViewFragment.memtables);
+                // Confirm that all the memtables associated with the memtable indexes we already have are still live.
+                // There might be additional memtables that are not associated with the expression because tombstones
+                // are not indexed.
+                for (MemtableIndex memtableIndex : memtableIndexes)
                 {
-                    if (referencedIndexes.contains(index))
-                        return;
-                    if (index.reference())
-                        referencedIndexes.add(index);
-                    else
-                        failed.set(true);
-                });
+                    if (!memtables.contains(memtableIndex.getMemtable()))
+                    {
+                        refViewFragment.release();
+                        continue outer;
+                    }
+                }
 
-                if (failed.get())
-                    referencedIndexes.forEach(SSTableIndex::release);
-                else
-                    return new QueryView(view, referencedIndexes);
+                Set<SSTableIndex> indexes = getIndexesForExpression(orderer);
+                // Attempt to reference each of the indexes, and thn confirm that the sstable associated with the index
+                // is in the refViewFragment. If it isn't in the refViewFragment, we will get incorrect results, so
+                // we release the indexes and refViewFragment and try again.
+                for (SSTableIndex index : indexes)
+                {
+                    var success = index.reference();
+                    if (success)
+                        referencedIndexes.add(index);
+
+                    if (!success || !refViewFragment.sstables.contains(index.getSSTable()))
+                    {
+                        referencedIndexes.forEach(SSTableIndex::release);
+                        referencedIndexes.clear();
+                        refViewFragment.release();
+
+                        // Log about the failures
+                        if (failingSince <= 0)
+                        {
+                            failingSince = System.nanoTime();
+                        }
+                        else if (System.nanoTime() - failingSince > TimeUnit.MILLISECONDS.toNanos(100))
+                        {
+                            failingSince = System.nanoTime();
+                            if (success)
+                                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
+                                                 "Spinning trying to capture index reader for {}, but it was released.", index);
+                            else
+                                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
+                                                 "Spinning trying to capture readers for {}, but : {}, ", refViewFragment.sstables, index.getSSTable());
+                        }
+                        continue outer;
+                    }
+                }
+                return new QueryView(refViewFragment, referencedIndexes, memtableIndexes, orderer);
             }
         }
         finally
@@ -120,44 +175,16 @@ public class QueryViewBuilder
         }
     }
 
-    public static class IndexExpression
-    {
-        public final SSTableIndex index;
-        public final Expression expression;
-
-        public IndexExpression(SSTableIndex index, Expression expression)
-        {
-            this.index = index;
-            this.expression = expression;
-        }
-    }
-
     /**
-     * Group the expressions and corresponding indexes by sstable
+     * Get the index
      */
-    private Map<SSTableReader, List<IndexExpression>> getQueryView(Collection<Expression> expressions)
+    private Set<SSTableIndex> getIndexesForExpression(Orderer orderer)
     {
-        Map<SSTableReader, List<IndexExpression>> queryView = new HashMap<>();
+        if (!orderer.context.isIndexed())
+            throw new IllegalArgumentException("Expression is not indexed");
 
-        for (Expression expression : expressions)
-        {
-            // Non-index column query should only act as FILTER BY for satisfiedBy(Row) method
-            // because otherwise it likely to go through the whole index.
-            if (!expression.context.isIndexed())
-                continue;
-
-            // Finally, we select the sstable index corresponding to this expression and sstable
-            // if it has overlapping keys with the most select sstable index, and
-            // and has a term range that is satisfied by the expression.
-            View view = expression.context.getView();
-            for (var index: view.match(expression))
-            {
-                if (indexInRange(index))
-                    queryView.computeIfAbsent(index.getSSTable(), k -> new ArrayList<>()).add(new IndexExpression(index, expression));
-            }
-        }
-
-        return queryView;
+        // Get all the indexes in the range.
+        return orderer.context.getView().getIndexes().stream().filter(this::indexInRange).collect(Collectors.toSet());
     }
 
     // I've removed the concept of "most selective index" since we don't actually have per-sstable

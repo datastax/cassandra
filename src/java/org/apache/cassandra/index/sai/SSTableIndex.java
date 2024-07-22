@@ -40,10 +40,11 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -193,13 +194,13 @@ public class SSTableIndex
         return searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
-    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
-                                                             AbstractBounds<PartitionPosition> keyRange,
-                                                             QueryContext context,
-                                                             int limit,
-                                                             long totalRows) throws IOException
+    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                            AbstractBounds<PartitionPosition> keyRange,
+                                                                            QueryContext context,
+                                                                            int limit,
+                                                                            long totalRows) throws IOException
     {
-        return searchableIndex.orderBy(expression, keyRange, context, limit, totalRows);
+        return searchableIndex.orderBy(orderer, keyRange, context, limit, totalRows);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)
@@ -287,9 +288,9 @@ public class SSTableIndex
         return Objects.hashCode(sstableContext, indexContext);
     }
 
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit, long totalRows) throws IOException
+    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
     {
-        return searchableIndex.orderResultsBy(context, keys, exp, limit, totalRows);
+        return searchableIndex.orderResultsBy(context, keys, orderer, limit, totalRows);
     }
 
     public String toString()

@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -33,6 +34,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
 import org.apache.cassandra.serializers.TimeSerializer;
@@ -279,6 +282,16 @@ public abstract class DataSet<T> extends CQLTester
             return value.add(BigInteger.ONE);
         }
 
+        // varint are truncated in SAI to 20 byte precision. That means
+        // we cannot guarantee ordering based on the current design, so
+        // they are not supported in the first iteration, but could be
+        // with modification.
+        @Override
+        public QuerySet querySet()
+        {
+            return new QuerySet.NumericQuerySet(this, false);
+        }
+
         public String toString()
         {
             return "varint";
@@ -315,6 +328,16 @@ public abstract class DataSet<T> extends CQLTester
         BigDecimal increment(BigDecimal value)
         {
             return value.add(BigDecimal.ONE);
+        }
+
+        // Decimals are truncated in SAI to 24 byte precision. That means
+        // we cannot guarantee ordering based on the current design, so
+        // they are not supported in the first iteration, but could be
+        // with modification.
+        @Override
+        public QuerySet querySet()
+        {
+            return new QuerySet.NumericQuerySet(this, false);
         }
 
         public String toString()
@@ -476,7 +499,9 @@ public abstract class DataSet<T> extends CQLTester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet(this);
+            var type = UTF8Type.instance;
+            Comparator<Object[]> comparator = Comparator.comparing(objects -> type.decompose((String) objects[2]), type);
+            return new QuerySet.LiteralQuerySet(this, comparator);
         }
 
         public String toString()
@@ -511,7 +536,19 @@ public abstract class DataSet<T> extends CQLTester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet(this);
+            Comparator<Object[]> comp = Comparator.comparing(o -> o[2], this::compareDateInts);
+            return new QuerySet.LiteralQuerySet(this, comp);
+        }
+
+        private int compareDateInts(Object left, Object right)
+        {
+            int leftInt = (int) left;
+            int rightInt = (int) right;
+            // Dates are stored as unsigned ints, so we need to shift before comparing.
+            // Note that when inserting the values above as integers, they are interpreted as
+            // the already shifted values, not as a date, which is why shifting is required.
+            // We add Integer.MIN_VALUE to shift the values back to their original form.
+            return Integer.compare((leftInt + Integer.MIN_VALUE), (rightInt + Integer.MIN_VALUE));
         }
 
         public String toString()
@@ -614,7 +651,9 @@ public abstract class DataSet<T> extends CQLTester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet(this);
+            Comparator<Object[]> comparator = Comparator.comparing(o -> UUIDType.instance.decompose((UUID) o[2]),
+                                                                   UUIDType.instance);
+            return new QuerySet.LiteralQuerySet(this, comparator);
         }
 
         public String toString()
@@ -696,7 +735,7 @@ public abstract class DataSet<T> extends CQLTester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.NumericQuerySet(this);
+            return new QuerySet.NumericQuerySet(this, false);
         }
 
         public String toString()

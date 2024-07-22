@@ -152,19 +152,19 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
         // All of these queries fail with and without filtering
         assertThatThrownBy(() -> execute("select pk from %s WHERE pk > 4 AND geo_distance(v,[5,5]) <= 1000000 ORDER BY v ANN of [5,5] limit 3"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+        .hasMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
         assertThatThrownBy(() -> execute("select pk from %s WHERE pk > 4 AND geo_distance(v,[5,5]) <= 1000000 ORDER BY v ANN of [5,5] limit 3 ALLOW FILTERING"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+        .hasMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
         assertThatThrownBy(() -> execute("select pk from %s WHERE x > 4 AND geo_distance(v,[5,5]) <= 1000000 ORDER BY v ANN of [5,5] limit 3"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+        .hasMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
         assertThatThrownBy(() -> execute("select pk from %s WHERE x > 4 AND geo_distance(v,[5,5]) <= 1000000 ORDER BY v ANN of [5,5] limit 3 ALLOW FILTERING"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+        .hasMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
         assertThatThrownBy(() -> execute("select pk from %s WHERE geo_distance(v,[5,5]) <= 1000000 AND v = [5,5] ORDER BY v ANN of [5,5] limit 3"))
         .isInstanceOf(InvalidRequestException.class)

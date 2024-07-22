@@ -53,6 +53,10 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -71,11 +75,12 @@ import org.apache.cassandra.index.sai.memory.MemtableRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
@@ -241,7 +246,7 @@ public class IndexContext
 
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
     {
-        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this));
+        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
 
         long start = System.nanoTime();
 
@@ -432,21 +437,6 @@ public class IndexContext
         return builder.build();
     }
 
-    public List<CloseableIterator<ScoredPrimaryKey>> orderMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
-    {
-        Collection<MemtableIndex> memtables = liveMemtables.values();
-
-        if (memtables.isEmpty())
-            return List.of();
-
-        var result = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(memtables.size());
-
-        for (MemtableIndex index : memtables)
-            result.add(index.orderBy(context, e, keyRange, limit));
-
-        return result;
-    }
-
     private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
     {
         Collection<Memtable> memtables = liveMemtables.keySet();
@@ -466,16 +456,16 @@ public class IndexContext
     }
 
     // Search all memtables for all PrimaryKeys in list.
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
+    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Orderer orderer, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
             return List.of();
 
-        List<CloseableIterator<ScoredPrimaryKey>> result = new ArrayList<>(memtables.size());
+        List<CloseableIterator<? extends PrimaryKeyWithSortKey>> result = new ArrayList<>(memtables.size());
         for (MemtableIndex index : memtables)
-            result.add(index.orderResultsBy(context, source, e, limit));
+            result.add(index.orderResultsBy(context, source, orderer, limit));
 
         return result;
     }
@@ -616,6 +606,15 @@ public class IndexContext
             return op == Operator.ANN || (op == Operator.BOUNDED_ANN && hasEuclideanSimilarityFunc);
         if (op == Operator.ANN || op == Operator.BOUNDED_ANN)
             return false;
+
+        // Only regular columns can be sorted by SAI (at least for now)
+        if (op == Operator.ORDER_BY_ASC || op == Operator.ORDER_BY_DESC)
+            return !isCollection()
+                   && column.isRegular()
+                   &&  !(column.type instanceof InetAddressType  // Possible, but need to add decoding logic based on
+                                                                 // SAI's TypeUtil.encode method.
+                         || column.type instanceof DecimalType   // Currently truncates to 24 bytes
+                         || column.type instanceof IntegerType); // Currently truncates to 20 bytes
 
         Expression.Op operator = Expression.Op.valueOf(op);
 
