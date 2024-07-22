@@ -51,6 +51,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.schema.CompressionParams.DEFAULT_CHUNK_LENGTH;
 import static org.apache.commons.io.FileUtils.readFileToByteArray;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -283,11 +284,12 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
     {
         File tempFile = new File(Files.createTempDir().toPath(), "reset.txt");
         File offsetsFile = FileUtils.createDeletableTempFile("compressedsequentialwriter.offset", "test");
+        File digestFile = FileUtils.createDeletableTempFile("digest.db", "test");
         final int bufferSize = 48;
         final int writeSize = 64;
         byte[] toWrite = new byte[writeSize];
         try (SequentialWriter writer = new CompressedSequentialWriter(tempFile, offsetsFile,
-                                                                      null, SequentialWriterOption.DEFAULT,
+                                                                      digestFile, SequentialWriterOption.DEFAULT,
                                                                       CompressionParams.lz4(bufferSize),
                                                                       new MetadataCollector(new ClusteringComparator(UTF8Type.instance))))
         {
@@ -313,6 +315,12 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
             // flush off set should not be increase
             assertEquals(flushedOffset, writer.getLastFlushOffset());
             writer.finish();
+
+            // verify digest value is present
+            try (RandomAccessReader digestReader = RandomAccessReader.open(digestFile))
+            {
+                assertThat(Long.parseLong(digestReader.readLine())).isNotNull();
+            }
         }
         catch (IOException e)
         {
