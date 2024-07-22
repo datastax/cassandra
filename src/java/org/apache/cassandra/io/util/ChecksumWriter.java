@@ -28,6 +28,7 @@ import java.util.zip.CRC32;
 import javax.annotation.Nonnull;
 
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 
 public class ChecksumWriter
 {
@@ -90,9 +91,18 @@ public class ChecksumWriter
 
     public void writeFullChecksum(@Nonnull File digestFile)
     {
+        writeFullChecksum(digestFile, fullChecksum.getValue());
+    }
+
+    /**
+     * Write given checksum into the digest file. This is used when {@link CompressedSequentialWriter} is reset and truncated,
+     * and we need to recompute digest for the whole file.
+     */
+    public static void writeFullChecksum(@Nonnull File digestFile, long checksum)
+    {
         try (FileOutputStreamPlus fos = new FileOutputStreamPlus(digestFile))
         {
-            fos.write(String.valueOf(fullChecksum.getValue()).getBytes(StandardCharsets.UTF_8));
+            fos.write(String.valueOf(checksum).getBytes(StandardCharsets.UTF_8));
             fos.flush();
             fos.getChannel().force(true);
         }
