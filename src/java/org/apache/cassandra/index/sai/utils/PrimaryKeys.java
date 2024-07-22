@@ -53,6 +53,11 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
             add(key);
     }
 
+    public long remove(PrimaryKey key)
+    {
+        return keys.remove(key) ? -SET_ENTRY_OVERHEAD : 0;
+    }
+
     public SortedSet<PrimaryKey> keys()
     {
         return keys;

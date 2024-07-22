@@ -49,6 +49,13 @@ public abstract class MemoryIndex
                              LongConsumer onHeapAllocationsTracker,
                              LongConsumer offHeapAllocationsTracker);
 
+    public abstract void update(DecoratedKey key,
+                                Clustering clustering,
+                                ByteBuffer oldValue,
+                                ByteBuffer newValue,
+                                LongConsumer onHeapAllocationsTracker,
+                                LongConsumer offHeapAllocationsTracker);
+
     public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
     public abstract ByteBuffer getMinTerm();

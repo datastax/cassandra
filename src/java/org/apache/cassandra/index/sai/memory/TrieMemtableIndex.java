@@ -160,6 +160,43 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
+    public void update(DecoratedKey key, Clustering clustering, ByteBuffer oldValue, ByteBuffer newValue, Memtable memtable, OpOrder.Group opGroup)
+    {
+        int oldRemaining = oldValue == null ? 0 : oldValue.remaining();
+        int newRemaining = newValue == null ? 0 : newValue.remaining();
+        if (oldRemaining == 0 && newRemaining == 0)
+            return;
+
+        boolean different;
+        if (oldRemaining != newRemaining)
+        {
+            assert oldRemaining == 0 || newRemaining == 0; // one of them is null
+            different = true;
+        }
+        else
+        {
+            different = validator.compare(oldValue, newValue) != 0;
+        }
+
+        if (different)
+        {
+            rangeIndexes[boundaries.getShardForKey(key)].update(key,
+                                                                clustering,
+                                                                oldValue,
+                                                                newValue,
+                                                                allocatedBytes -> {
+                                                                    memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+                                                                    estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                                    },
+                                                                allocatedBytes -> {
+                                                                    memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
+                                                                    estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                                });
+            writeCount.increment();
+        }
+    }
+
+    @Override
     public RangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
