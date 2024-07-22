@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -317,90 +316,67 @@ public class ComplexQueryTest extends SAITester
         execute("INSERT INTO %s(k, x, y, z) values (2, 0, 2, 1)");
         execute("INSERT INTO %s(k, x, y, z) values (3, 0, 3, 1)");
 
-        assertComplexQueryWithIndexedAndNotIndexed();
-        assertComplexQueryWithIndexedAndNotIndexed("x");
-        assertComplexQueryWithIndexedAndNotIndexed("y");
-        assertComplexQueryWithIndexedAndNotIndexed("z");
-        assertComplexQueryWithIndexedAndNotIndexed("x", "y");
-        assertComplexQueryWithIndexedAndNotIndexed("x", "z");
-        assertComplexQueryWithIndexedAndNotIndexed("y", "z");
-        assertComplexQueryWithIndexedAndNotIndexed("x", "y", "z");
-    }
+        new IndexCombinationsTester(this).withIndexOn("x", "y", "z").test(indexedColumns -> {
 
-    private void assertComplexQueryWithIndexedAndNotIndexed(String... indexedColumns)
-    {
-        assertComplexQueryWithIndexedAndNotIndexed(Set.of(indexedColumns));
-    }
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x"),
+                                 row(0), row(1), row(2), row(3));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x"));
 
-    private void assertComplexQueryWithIndexedAndNotIndexed(Set<String> indexedColumns)
-    {
-        Set<String> indexNames = new HashSet<>();
-        for (String indexedColumn : indexedColumns)
-        {
-            indexNames.add(createIndex("CREATE CUSTOM INDEX ON %s(" + indexedColumn + ") USING 'StorageAttachedIndex'"));
-        }
-        waitForIndexQueryable();
+            assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (1, 2) ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "y"),
+                                 row(1), row(2));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (4, 6) ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "y"));
 
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x"),
-                             row(0), row(1), row(2), row(3));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x"));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND y IN (1, 2) ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x") || contains(c, "y"),
+                                 row(1), row(2));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 AND y IN (1, 2) ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x") || contains(c, "y"));
 
-        assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (1, 2) ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "y"),
-                             row(1), row(2));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (4, 6) ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "y"));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND (y=1 OR y=2) ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x") || contains(c, "y"),
+                                 row(1), row(2));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 AND (y=1 OR y=2) ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x") || contains(c, "y"));
 
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND y IN (1, 2) ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x") || contains(c, "y"),
-                             row(1), row(2));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 AND y IN (1, 2) ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x") || contains(c, "y"));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR y=0 ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x", "y"),
+                                 row(0), row(1), row(2), row(3));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR y=0 ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x", "y"),
+                                 row(0));
 
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND (y=1 OR y=2) ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x") || contains(c, "y"),
-                             row(1), row(2));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 AND (y=1 OR y=2) ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x") || contains(c, "y"));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR (y=0 AND z=0) ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x", "y") || contains(c, "x", "z"),
+                                 row(0), row(1), row(2), row(3));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR (y=0 AND z=0) ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x", "y") || contains(c, "x", "z"),
+                                 row(0));
 
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR y=0 ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x", "y"),
-                             row(0), row(1), row(2), row(3));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR y=0 ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x", "y"),
-                             row(0));
-
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR (y=0 AND z=0) ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x", "y") || contains(c, "x", "z"),
-                             row(0), row(1), row(2), row(3));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR (y=0 AND z=0) ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x", "y") || contains(c, "x", "z"),
-                             row(0));
-
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR y=0 OR z=0 ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x", "y", "z"),
-                             row(0), row(1), row(2), row(3));
-        assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR y=0 OR z=0 ALLOW FILTERING",
-                             indexedColumns,
-                             c -> contains(c, "x", "y", "z"),
-                             row(0), row(1));
-
-        indexNames.forEach(idx -> dropIndex("DROP INDEX %s." + idx));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR y=0 OR z=0 ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x", "y", "z"),
+                                 row(0), row(1), row(2), row(3));
+            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR y=0 OR z=0 ALLOW FILTERING",
+                                 indexedColumns,
+                                 c -> contains(c, "x", "y", "z"),
+                                 row(0), row(1));
+        });
     }
 
     private void assertQueryUsesIndex(String query,
