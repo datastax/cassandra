@@ -121,10 +121,7 @@ public class RequestSensors
         {
             sensors.values().forEach(sensor -> {
                 if (sensor.getValue() > 0)
-                {
-                    sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), sensor.getValue());
-                    sensor.reset();
-                }
+                    sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), sensor.getValueAndReset());
             });
         }
         finally

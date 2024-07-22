@@ -71,6 +71,12 @@ public class Sensor
     }
 
     @VisibleForTesting
+    public double getValueAndReset()
+    {
+        return value.getAndSet(0);
+    }
+
+    @VisibleForTesting
     public void reset()
     {
         value.set(0);

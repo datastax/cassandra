@@ -82,7 +82,7 @@ public class RequestSensorBench
     @Setup
     public void generateFixtures()
     {
-        SensorsRegistry.USE_STRIPED_LOCK = false;
+        SensorsRegistry.USE_STRIPED_LOCK = true;
         for (int i = 0; i < NUM_SENSORS; i++)
         {
             Context context = new Context("keyspace" + i, "table" + i, UUID.randomUUID().toString());
