@@ -83,7 +83,7 @@ public class ImmutableOneDimPointValuesTest
             int postingCounter = 0;
 
             @Override
-            public void visit(long docID, byte[] packedValue)
+            public void visit(int docID, byte[] packedValue)
             {
                 final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
                 final ByteComparable expectedTerm = ByteComparable.of(term);

@@ -41,7 +41,8 @@ public class PackedLongsPostingList implements PostingList
     {
         if (iterator.hasNext())
         {
-            // TODO possibly unsafe conversion?
+            // This is assumed to be safe because we only insert segment row ids, which are always integers,
+            // into the packed longs object
             return Math.toIntExact(iterator.next());
         }
         else
@@ -53,7 +54,7 @@ public class PackedLongsPostingList implements PostingList
     @Override
     public int size()
     {
-        // TODO possibly unsafe conversion?
+        // We know that the size of the packed longs object is less than or equal to Integer.MAX_VALUE
         return Math.toIntExact(values.size());
     }
 
