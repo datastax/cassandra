@@ -24,7 +24,7 @@ import java.util.List;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -72,7 +72,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     private void doTestEqQueriesAgainstStringIndex() throws Exception
     {
         final int numTerms = randomIntBetween(64, 512), numPostings = randomIntBetween(256, 1024);
-        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<Pair<ByteComparable, IntArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
@@ -130,7 +130,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     public void testUnsupportedOperator() throws Exception
     {
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
-        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<Pair<ByteComparable, IntArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
@@ -145,7 +145,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         }
     }
 
-    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<Pair<ByteComparable, LongArrayList>> termsEnum) throws IOException
+    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<Pair<ByteComparable, IntArrayList>> termsEnum) throws IOException
     {
         final int size = terms * postings;
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
@@ -183,7 +183,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         }
     }
 
-    private List<Pair<ByteComparable, LongArrayList>> buildTermsEnum(int terms, int postings)
+    private List<Pair<ByteComparable, IntArrayList>> buildTermsEnum(int terms, int postings)
     {
         return InvertedIndexBuilder.buildStringTermsEnum(terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
     }

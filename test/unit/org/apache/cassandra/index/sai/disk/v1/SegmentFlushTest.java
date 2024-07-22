@@ -197,7 +197,7 @@ public class SegmentFlushTest
                                                   segmentMetadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).root,
                                                   termsFooterPointer))
         {
-            TermsIterator iterator = reader.allTerms(0);
+            TermsIterator iterator = reader.allTerms();
             assertEquals(minTerm, iterator.getMinTerm());
             assertEquals(maxTerm, iterator.getMaxTerm());
 

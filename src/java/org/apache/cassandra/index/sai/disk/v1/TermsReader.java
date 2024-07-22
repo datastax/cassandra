@@ -120,10 +120,10 @@ public class TermsReader implements Closeable
         }
     }
 
-    public TermsIterator allTerms(long segmentOffset)
+    public TermsIterator allTerms()
     {
         // blocking, since we use it only for segment merging for now
-        return new TermsScanner(segmentOffset);
+        return new TermsScanner();
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -309,17 +309,15 @@ public class TermsReader implements Closeable
     // currently only used for testing
     private class TermsScanner implements TermsIterator
     {
-        private final long segmentOffset;
         private final TrieTermsDictionaryReader termsDictionaryReader;
         private final ByteBuffer minTerm, maxTerm;
         private Pair<ByteComparable, Long> entry;
 
-        private TermsScanner(long segmentOffset)
+        private TermsScanner()
         {
             this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, termDictionaryFileEncodingVersion);
             this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(ByteComparable.Version.OSS41)));
             this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(ByteComparable.Version.OSS41)));
-            this.segmentOffset = segmentOffset;
         }
 
         @Override
@@ -328,7 +326,7 @@ public class TermsReader implements Closeable
         {
             assert entry != null;
             final IndexInput input = IndexFileUtils.instance.openInput(postingsFile);
-            return new OffsetPostingList(segmentOffset, new ScanningPostingsReader(input, new PostingsReader.BlocksSummary(input, entry.right)));
+            return new ScanningPostingsReader(input, new PostingsReader.BlocksSummary(input, entry.right));
         }
 
         @Override
@@ -364,42 +362,6 @@ public class TermsReader implements Closeable
         public boolean hasNext()
         {
             return termsDictionaryReader.hasNext();
-        }
-    }
-
-    private class OffsetPostingList implements PostingList
-    {
-        private final long offset;
-        private final PostingList wrapped;
-
-        OffsetPostingList(long offset, PostingList postingList)
-        {
-            this.offset = offset;
-            this.wrapped = postingList;
-        }
-
-        @Override
-        public long nextPosting() throws IOException
-        {
-            long next = wrapped.nextPosting();
-            if (next == PostingList.END_OF_STREAM)
-                return next;
-            return next + offset;
-        }
-
-        @Override
-        public long size()
-        {
-            return wrapped.size();
-        }
-
-        @Override
-        public long advance(long targetRowID) throws IOException
-        {
-            long next = wrapped.advance(targetRowID);
-            if (next == PostingList.END_OF_STREAM)
-                return next;
-            return next + offset;
         }
     }
 }

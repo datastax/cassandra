@@ -27,7 +27,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
@@ -125,7 +125,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             }
             else
             {
-                final Iterator<Pair<ByteComparable, LongArrayList>> iterator = rowMapping.merge(memtableIndex);
+                final Iterator<Pair<ByteComparable, IntArrayList>> iterator = rowMapping.merge(memtableIndex);
 
                 try (MemtableTermsIterator terms = new MemtableTermsIterator(memtableIndex.getMinTerm(), memtableIndex.getMaxTerm(), iterator))
                 {
@@ -144,7 +144,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         }
     }
 
-    private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, long maxSegmentRowId) throws IOException
+    private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, int maxSegmentRowId) throws IOException
     {
         long numRows;
         SegmentMetadata.ComponentMetadataMap indexMetas;
@@ -215,7 +215,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         SegmentMetadata.ComponentMetadataMap metadataMap = vectorIndex.writeData(perIndexComponents, deletedOrdinals);
 
         SegmentMetadata metadata = new SegmentMetadata(0,
-                                                       rowMapping.size(),
+                                                       rowMapping.size(), // TODO this isn't the right size metric.
                                                        0,
                                                        rowMapping.maxSegmentRowId,
                                                        pkFactory.createPartitionKeyOnly(minKey),

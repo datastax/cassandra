@@ -37,11 +37,12 @@ public class PackedLongsPostingList implements PostingList
     }
 
     @Override
-    public long nextPosting()
+    public int nextPosting()
     {
         if (iterator.hasNext())
         {
-            return iterator.next();
+            // TODO possibly unsafe conversion?
+            return Math.toIntExact(iterator.next());
         }
         else
         {
@@ -50,13 +51,14 @@ public class PackedLongsPostingList implements PostingList
     }
 
     @Override
-    public long size()
+    public int size()
     {
-        return values.size();
+        // TODO possibly unsafe conversion?
+        return Math.toIntExact(values.size());
     }
 
     @Override
-    public long advance(long targetRowID) throws IOException
+    public int advance(int targetRowID) throws IOException
     {
         throw new UnsupportedOperationException();
     }
