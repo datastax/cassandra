@@ -252,7 +252,7 @@ public class BTreeRow extends AbstractRow
         return BTree.accumulate(btree, accumulator, arg, comparator, from, initialValue);
     }
 
-    private static int minDeletionTime(Object[] btree, LivenessInfo info, DeletionTime rowDeletion)
+    public static int minDeletionTime(Object[] btree, LivenessInfo info, DeletionTime rowDeletion)
     {
         long min = Math.min(minDeletionTime(info), minDeletionTime(rowDeletion));
         return (int) BTree.<ColumnData>accumulate(btree, (cd, l) -> Math.min(l, minDeletionTime(cd)), min);
@@ -629,6 +629,11 @@ public class BTreeRow extends AbstractRow
     public Object[] getBTree()
     {
         return btree;
+    }
+
+    public int getMinLocalDeletionTime()
+    {
+        return minLocalDeletionTime;
     }
 
     private class CellIterator extends AbstractIterator<Cell<?>>

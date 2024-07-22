@@ -19,14 +19,10 @@
 package org.apache.cassandra.db.partitions;
 
 import java.util.Iterator;
-import java.util.Map;
 import java.util.NavigableSet;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Iterables;
 import com.google.common.primitives.Ints;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
@@ -44,7 +40,6 @@ import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
-import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.ColumnData;
@@ -101,12 +96,19 @@ public class TrieBackedPartition implements Partition
         final Object[] columnsBTree;
         final LivenessInfo livenessInfo;
         final DeletionTime deletion;
+        final int minLocalDeletionTime;
 
         RowData(Object[] columnsBTree, LivenessInfo livenessInfo, DeletionTime deletion)
+        {
+            this(columnsBTree, livenessInfo, deletion, BTreeRow.minDeletionTime(columnsBTree, livenessInfo, deletion));
+        }
+
+        RowData(Object[] columnsBTree, LivenessInfo livenessInfo, DeletionTime deletion, int minLocalDeletionTime)
         {
             this.columnsBTree = columnsBTree;
             this.livenessInfo = livenessInfo;
             this.deletion = deletion;
+            this.minLocalDeletionTime = minLocalDeletionTime;
         }
 
         Row toRow(Clustering<?> clustering)
@@ -114,7 +116,8 @@ public class TrieBackedPartition implements Partition
             return BTreeRow.create(clustering,
                                    livenessInfo,
                                    Row.Deletion.regular(deletion),
-                                   columnsBTree);
+                                   columnsBTree,
+                                   minLocalDeletionTime);
         }
 
         public int dataSize()
@@ -142,11 +145,11 @@ public class TrieBackedPartition implements Partition
         public RowData clone(Cloner cloner)
         {
             Object[] tree = BTree.<ColumnData, ColumnData>transform(columnsBTree, c -> c.clone(cloner));
-            return new RowData(tree, livenessInfo, deletion);
+            return new RowData(tree, livenessInfo, deletion, minLocalDeletionTime);
         }
     }
 
-    private static final long EMPTY_ROWDATA_SIZE = ObjectSizes.measure(new RowData(null, null, null));
+    private static final long EMPTY_ROWDATA_SIZE = ObjectSizes.measure(new RowData(null, null, null, 0));
 
     protected final Trie<Object> trie;
     protected final DecoratedKey partitionKey;
@@ -248,7 +251,8 @@ public class TrieBackedPartition implements Partition
 
     static RowData rowToData(Row row)
     {
-        return new RowData(((BTreeRow) row).getBTree(), row.primaryKeyLivenessInfo(), row.deletion().time());
+        BTreeRow brow = (BTreeRow) row;
+        return new RowData(brow.getBTree(), row.primaryKeyLivenessInfo(), row.deletion().time(), brow.getMinLocalDeletionTime());
     }
 
     /**
