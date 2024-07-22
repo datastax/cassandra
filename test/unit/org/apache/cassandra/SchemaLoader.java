@@ -796,7 +796,7 @@ public static TableMetadata.Builder clusteringSASICFMD(String ksName, String cfN
         Schema.instance.transform(SchemaTransformations.addTable(metadata, true));
     }
 
-    private static CompressionParams compressionParams(int chunkLength)
+    public static CompressionParams compressionParams(int chunkLength)
     {
         String algo = TEST_COMPRESSION_ALGO.getString().toLowerCase();
         switch (algo)
