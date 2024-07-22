@@ -285,6 +285,7 @@
         <string>--add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming</string>
         <string>--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
         <string>--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.util.jar=ALL-UNNAMED</string>
 
         <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
