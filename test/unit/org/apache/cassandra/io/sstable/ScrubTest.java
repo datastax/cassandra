@@ -21,6 +21,7 @@ import java.io.IOError;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -35,6 +36,7 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.Sets;
@@ -58,6 +60,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
@@ -76,6 +79,8 @@ import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -85,12 +90,14 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.format.CompressionInfoComponent;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat.Components;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -100,6 +107,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
+import static org.apache.cassandra.SchemaLoader.compressionParams;
 import static org.apache.cassandra.SchemaLoader.counterCFMD;
 import static org.apache.cassandra.SchemaLoader.createKeyspace;
 import static org.apache.cassandra.SchemaLoader.getCompressionParameters;
@@ -121,6 +129,7 @@ public class ScrubTest
     private final static Logger logger = LoggerFactory.getLogger(ScrubTest.class);
 
     public static final String CF = "Standard1";
+    public static final String COMPRESSED_CF = "compressed_table";
     public static final String COUNTER_CF = "Counter1";
     public static final String CF_UUID = "UUIDKeys";
     public static final String CF_INDEX1 = "Indexed1";
@@ -155,6 +164,8 @@ public class ScrubTest
         createKeyspace(ksName,
                        KeyspaceParams.simple(1),
                        standardCFMD(ksName, CF),
+                       // force this table to use compression
+                       standardCFMD(ksName, COMPRESSED_CF).compression(compressionParams(COMPRESSION_CHUNK_LENGTH)),
                        counterCFMD(ksName, COUNTER_CF).compression(getCompressionParameters(COMPRESSION_CHUNK_LENGTH)),
                        standardCFMD(ksName, CF_UUID, 0, UUIDType.instance),
                        SchemaLoader.keysIndexCFMD(ksName, CF_INDEX1, true),
@@ -228,6 +239,56 @@ public class ScrubTest
 
         // check data is still there
         assertOrderedAll(cfs, 0);
+    }
+
+    @Test
+    public void testScrubOneBrokenPartitionInTheMiddleOfCompressedFile() throws ExecutionException, InterruptedException, IOException
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(COMPRESSED_CF);
+
+        // insert data and verify we get it back w/ range query
+        int partitions = 5;
+        int rowsPerPartition = 2000;
+        int total = partitions * rowsPerPartition;
+        fillCF(cfs, partitions, rowsPerPartition);
+        int outputRows = assertRowsOrdered(Util.cmd(cfs).build());
+        assertThat(outputRows).isEqualTo(total);
+
+        Set<SSTableReader> liveSSTables = cfs.getLiveSSTables();
+        assertThat(liveSSTables).hasSize(1);
+
+        try (FileChannel channel = FileChannel.open(liveSSTables.iterator().next().getDataFile().toPath(), StandardOpenOption.WRITE))
+        {
+            // corrupt data in the middle
+            long middle = channel.size() / 2;
+            channel.position(middle);
+
+            byte[] buffer = new byte[50];
+            ThreadLocalRandom.current().nextBytes(buffer);
+            channel.write(ByteBuffer.wrap(buffer));
+        }
+
+        if (ChunkCache.instance != null)
+            ChunkCache.instance.clear();
+        IScrubber.Options options = IScrubber.options()
+                                             .skipCorrupted(true)
+                                             .checkData(true)
+                                             .reinsertOverflowedTTLRows(false)
+                                             .build();
+        CompactionManager.instance.performScrub(cfs, options, 1);
+
+        // check data is still there, some corrupted partitions are discarded
+        outputRows = assertRowsOrdered(Util.cmd(cfs).build());
+        assertThat(outputRows).isGreaterThan(0).isLessThan(total);
+
+        // check digest file do not exist because scruber can't reset the CRC value after resetting file position when corruption is found.
+        SSTableReader outputSSTable = cfs.getLiveSSTables().iterator().next();
+        assertThat(outputSSTable.descriptor.fileFor(SSTableFormat.Components.DIGEST).exists()).isTrue();
+
+        DataIntegrityMetadata.FileDigestValidator validator = outputSSTable.maybeGetDigestValidator();
+        assertNotNull(validator);
+        validator.validate();
     }
 
     @Test
@@ -650,6 +711,33 @@ public class ScrubTest
         assertEquals(expectedSize, size);
     }
 
+    private static int assertRowsOrdered(ReadCommand cmd)
+    {
+        int size = 0;
+        DecoratedKey prev = null;
+        for (Partition partition : Util.getAllUnfiltered(cmd))
+        {
+            DecoratedKey current = partition.partitionKey();
+            assertTrue("key " + current + " does not sort after previous key " + prev, prev == null || prev.compareTo(current) < 0);
+            prev = current;
+
+            ClusteringPrefix<?> prevClustering = null;
+            UnfilteredRowIterator rows = partition.unfilteredIterator();
+            while (rows.hasNext())
+            {
+                Unfiltered unfiltered = rows.next();
+                ClusteringPrefix<?> currentClustering = unfiltered.clustering();
+
+                assertTrue("Clustering " + currentClustering + " does not sort after previous clustering " + prevClustering,
+                           prevClustering == null || cmd.metadata().comparator.compare(prevClustering, currentClustering) < 0);
+
+                prevClustering = currentClustering;
+                size++;
+            }
+        }
+        return size;
+    }
+
     public static void fillCF(ColumnFamilyStore cfs, int partitionsPerSSTable)
     {
         for (int i = 0; i < partitionsPerSSTable; i++)
@@ -660,6 +748,23 @@ public class ScrubTest
                                                   .build();
 
             new Mutation(update).applyUnsafe();
+        }
+
+        Util.flush(cfs);
+    }
+
+    protected static void fillCF(ColumnFamilyStore cfs, int partitionsPerSSTable, int rowsPerPartition)
+    {
+        for (int i = 0; i < partitionsPerSSTable; i++)
+        {
+            for (int r = 0; r < rowsPerPartition; r++)
+            {
+                PartitionUpdate update = UpdateBuilder.create(cfs.metadata(), String.valueOf(i))
+                                                      .newRow(String.valueOf(r)).add("val", "1")
+                                                      .build();
+
+                new Mutation(update).applyUnsafe();
+            }
         }
 
         Util.flush(cfs);
