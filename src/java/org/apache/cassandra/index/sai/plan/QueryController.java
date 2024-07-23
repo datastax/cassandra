@@ -400,6 +400,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         // VSTODO move ANN out of expressions and into its own abstraction? That will help get generic ORDER BY support
         Collection<Expression> exp = expressions.stream().filter(e -> e.operation != Expression.Op.ANN).collect(Collectors.toList());
+
+        // we cannot use indexes with OR if we have a mix of indexed and non-indexed columns (see CNDB-10142)
+        if (op == Operation.OperationType.OR && !exp.stream().allMatch(e -> e.context.isIndexed()))
+        {
+            builder.add(planFactory.everything);
+            return;
+        }
+
         boolean defer = builder.type == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
 
         Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, exp).entrySet();
