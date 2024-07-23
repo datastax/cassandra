@@ -1305,7 +1305,7 @@ public abstract class CQLTester
      * @param query the index creation query
      * @return the name of the created index
      */
-    protected String createIndex(String query)
+    public String createIndex(String query)
     {
         return createIndex(KEYSPACE, query);
     }
@@ -1528,7 +1528,7 @@ public abstract class CQLTester
         QueryProcessor.executeOnceInternal(fullQuery);
     }
 
-    protected void dropIndex(String query) throws Throwable
+    public void dropIndex(String query)
     {
         String fullQuery = String.format(query, KEYSPACE);
         logger.info(fullQuery);
