@@ -310,9 +310,9 @@ public class DatabaseDescriptor
         daemonInitialized = true;
 
         setConfig(config.get());
-        createAllDirectories();
-        applyAll(); // applySnitch requires dataDirectories to be set by createAllDirectories
+        applyAll();
 
+        createAllDirectories();
         applyGuardrails(); // requires created directories
 
         AuthConfig.applyAuth();
@@ -362,11 +362,11 @@ public class DatabaseDescriptor
 
         applyPartitioner();
 
-        createAllDirectories();
-
-        applySnitch(); // requires dataDirectories to be set by createAllDirectories
+        applySnitch();
 
         applyEncryptionContext();
+
+        createAllDirectories();
     }
 
     /**
@@ -534,7 +534,7 @@ public class DatabaseDescriptor
 
         applyAddressConfig();
 
-        applySnitch(); // requires dataDirectories to be set by createAllDirectories
+        applySnitch();
 
         applyTokensConfig();
 
