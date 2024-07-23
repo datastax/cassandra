@@ -38,6 +38,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -46,6 +47,7 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import org.apache.commons.lang3.NotImplementedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,12 +97,10 @@ import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
-import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -143,11 +143,11 @@ public class StorageAttachedIndex implements Index
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
-                                                          .filter(s -> !IndexDescriptor.createFrom(s).isPerIndexBuildComplete(indexContext))
+                                                          .filter(s -> !IndexDescriptor.isIndexBuildCompleteOnDisk(s, indexContext))
                                                           .collect(Collectors.toList());
                                 }
 
-                                group.dropIndexSSTables(ss, sai);
+                                group.prepareIndexSSTablesForRebuild(ss, sai);
 
                                 ss.forEach((sstable) ->
                                            {
@@ -314,12 +314,14 @@ public class StorageAttachedIndex implements Index
             for (ColumnMetadata column : metadata.primaryKeyColumns())
             {
                 if (column.name.equals(target.left.name))
-                    throw new InvalidRequestException("Cannot specify index analyzer on primary key column: " + target.left);
+                    logger.warn("Schema contains an invalid index analyzer on primary key column, allowed for backwards compatibility: " + target.left);
             }
         }
 
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
         AbstractAnalyzer.fromOptions(type, options); // will throw if invalid
+        if (AbstractAnalyzer.hasQueryAnalyzer(options))
+            AbstractAnalyzer.fromOptionsQueryAnalyzer(type, options); // will throw if invalid
         var config = IndexWriterConfig.fromOptions(null, type, options);
 
         // If we are indexing map entries we need to validate the sub-types
@@ -520,9 +522,11 @@ public class StorageAttachedIndex implements Index
             valid = false;
 
             // in case of dropping table, SSTable indexes should already been removed by SSTableListChangedNotification.
-            Set<Component> toRemove = getComponents();
             for (SSTableIndex sstableIndex : indexContext.getView().getIndexes())
-                sstableIndex.getSSTable().unregisterComponents(toRemove, baseCfs.getTracker());
+            {
+                var components = sstableIndex.usedPerIndexComponents();
+                sstableIndex.getSSTable().unregisterComponents(components.allAsCustomComponents(), baseCfs.getTracker());
+            }
 
             indexContext.invalidate(true);
             return null;
@@ -647,7 +651,7 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public void postQuerySort(ResultSet cqlRows, Restriction restriction, int columnIndex, QueryOptions options)
+    public Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
     {
         // For now, only support ANN
         assert restriction instanceof SingleColumnRestriction.AnnRestriction;
@@ -659,22 +663,22 @@ public class StorageAttachedIndex implements Index
 
         var targetVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate()));
 
-        List<List<ByteBuffer>> buffRows = cqlRows.rows;
-        // Decorate-sort-undecorate to optimize sorting of vectors by their similarity scores
-        List<Pair<List<ByteBuffer>, Double>> listPairsVectorsScores = buffRows.stream()
-                                                                              .map(row -> {
-                                                                                  ByteBuffer vectorBuffer = row.get(columnIndex);
-                                                                                  var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate()));
-                                                                                  Double score = (double) similarityFunction.compare(vector, targetVector);
-                                                                                  return Pair.create(row, score);
-                                                                              })
-                                                                              .collect(Collectors.toList());
-        listPairsVectorsScores.sort(Comparator.comparing(pair -> pair.right, Comparator.reverseOrder()));
-        List<List<ByteBuffer>> sortedRows = listPairsVectorsScores.stream()
-                                                                  .map(pair -> pair.left)
-                                                                  .collect(Collectors.toList());
+        return new Scorer()
+        {
+            @Override
+            public float score(List<ByteBuffer> row)
+            {
+                ByteBuffer vectorBuffer = row.get(columnIndex);
+                var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate()));
+                return similarityFunction.compare(vector, targetVector);
+            }
 
-        cqlRows.rows = sortedRows;
+            @Override
+            public boolean reversed()
+            {
+                return true;
+            }
+        };
     }
 
     @Override
@@ -739,8 +743,9 @@ public class StorageAttachedIndex implements Index
             //   1. The current view does not contain the SSTable
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
-            if (!view.containsSSTable(sstable) && !sstable.isMarkedCompacted() &&
-                !IndexDescriptor.createFrom(sstable).isPerIndexBuildComplete(indexContext))
+            if (!view.containsSSTable(sstable)
+                && !sstable.isMarkedCompacted()
+                && !IndexDescriptor.isIndexBuildCompleteOnDisk(sstable, indexContext))
             {
                 nonIndexed.add(sstable);
             }
@@ -810,17 +815,6 @@ public class StorageAttachedIndex implements Index
     public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker)
     {
         throw new UnsupportedOperationException("Storage-attached index flush observers should never be created directly.");
-    }
-
-    @Override
-    public Set<Component> getComponents()
-    {
-        return Version.latest().onDiskFormat()
-                             .perIndexComponents(indexContext)
-                             .stream()
-                             .map(c -> new Component(Component.Type.CUSTOM,
-                                                     Version.latest().fileNameFormatter().format(c, indexContext)))
-                             .collect(Collectors.toSet());
     }
 
     @Override

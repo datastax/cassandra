@@ -29,11 +29,10 @@ import org.slf4j.LoggerFactory;
 
 import org.agrona.collections.IntArrayList;
 import org.agrona.collections.LongArrayList;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdapter;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
@@ -110,9 +109,9 @@ public class PostingsWriter implements Closeable
     private long maxDelta;
     private long totalPostings;
 
-    public PostingsWriter(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
+    public PostingsWriter(IndexComponents.ForWrite components) throws IOException
     {
-        this(indexDescriptor, indexContext, BLOCK_SIZE);
+        this(components, BLOCK_SIZE);
     }
 
     public PostingsWriter(IndexOutput dataOutput) throws IOException
@@ -121,9 +120,9 @@ public class PostingsWriter implements Closeable
     }
 
     @VisibleForTesting
-    PostingsWriter(IndexDescriptor indexDescriptor, IndexContext indexContext, int blockSize) throws IOException
+    PostingsWriter(IndexComponents.ForWrite components, int blockSize) throws IOException
     {
-        this(indexDescriptor.openPerIndexOutput(IndexComponent.POSTING_LISTS, indexContext, true), blockSize);
+        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), blockSize);
     }
 
     private PostingsWriter(IndexOutput dataOutput, int blockSize) throws IOException

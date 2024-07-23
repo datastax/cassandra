@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.io.sstable.compaction;
 
+import java.io.IOException;
+
 import com.google.common.util.concurrent.RateLimiter;
+
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBoundOrBoundary;
 import org.apache.cassandra.db.ClusteringPrefix;
@@ -38,8 +41,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
-
-import java.io.IOException;
 
 /**
  * Cursor over sstable data files.
@@ -86,14 +87,22 @@ public class SortedStringTableCursor implements SSTableCursor
 
     public SortedStringTableCursor(SSTableReader sstable, RandomAccessReader dataFile)
     {
-        this.dataFile = dataFile;
-        this.header = sstable.header;
-        this.helper = new DeserializationHelper(sstable.metadata(), sstable.descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL);
-        this.sstable = sstable;
-        this.activeRangeDeletion = DeletionTime.LIVE;
-        this.regularColumns = toArray(header.columns(false));
-        this.staticColumns = toArray(header.columns(true));
-        this.columnsReusableArray = new ColumnMetadata[Math.max(regularColumns.length, staticColumns.length)];
+        try
+        {
+            this.dataFile = dataFile;
+            this.header = sstable.header;
+            this.helper = new DeserializationHelper(sstable.metadata(), sstable.descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL);
+            this.sstable = sstable;
+            this.activeRangeDeletion = DeletionTime.LIVE;
+            this.regularColumns = toArray(header.columns(false));
+            this.staticColumns = toArray(header.columns(true));
+            this.columnsReusableArray = new ColumnMetadata[Math.max(regularColumns.length, staticColumns.length)];
+        }
+        catch (Throwable t)
+        {
+            dataFile.close();
+            throw t;
+        }
     }
 
     private static ColumnMetadata[] toArray(Columns columns)

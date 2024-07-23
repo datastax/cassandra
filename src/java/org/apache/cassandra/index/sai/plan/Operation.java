@@ -36,6 +36,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
@@ -277,7 +278,7 @@ public class Operation
         {
             OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
             for (RowFilter.Expression expression : expressions)
-                node.add(buildExpression(expression));
+                node.add(buildExpression(expression, isDisjunction));
             for (RowFilter.FilterElement child : children)
                 node.add(buildTree(child));
             return node;
@@ -288,7 +289,7 @@ public class Operation
             return buildTree(filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
         }
 
-        static Node buildExpression(RowFilter.Expression expression)
+        static Node buildExpression(RowFilter.Expression expression, boolean isDisjunction)
         {
             if (expression.operator() == Operator.IN)
             {
@@ -311,6 +312,12 @@ public class Operation
                     return new EmptyNode();
                 return node;
             }
+            else if (expression.operator() == Operator.ANALYZER_MATCHES && isDisjunction)
+            {
+                OperatorNode node = new AndNode();
+                node.add(new ExpressionNode(expression));
+                return node;
+            }
             else
                 return new ExpressionNode(expression);
         }
@@ -326,6 +333,15 @@ public class Operation
         {
             analyze(controller);
             return filterTree();
+        }
+
+        /**
+         * Formats the whole operation tree as a pretty tree.
+         */
+        public final String toStringRecursive()
+        {
+            TreeFormatter<Node> formatter = new TreeFormatter<>(Node::toString, Node::children);
+            return formatter.format(this);
         }
     }
 
@@ -401,6 +417,12 @@ public class Operation
         {
             return controller.planFactory.intersectionBuilder();
         }
+
+        @Override
+        public String toString()
+        {
+            return "AndNode";
+        }
     }
 
     public static class OrNode extends OperatorNode
@@ -415,6 +437,12 @@ public class Operation
         protected Plan.Builder planBuilder(QueryController controller)
         {
             return controller.planFactory.unionBuilder();
+        }
+
+        @Override
+        public String toString()
+        {
+            return "OrNode";
         }
     }
 
@@ -454,6 +482,12 @@ public class Operation
             controller.buildPlanForExpressions(builder, expressionMap.values());
             return builder.build();
         }
+
+        @Override
+        public String toString()
+        {
+            return "ExpressionNode{expression=" + expression + '}';
+        }
     }
 
     public static class EmptyNode extends Node
@@ -482,6 +516,12 @@ public class Operation
         Plan.KeysIteration plan(QueryController controller)
         {
             return controller.planFactory.nothing;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "EmptyNode";
         }
     }
 

@@ -49,6 +49,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -447,16 +448,37 @@ public interface Index
     public RowFilter getPostIndexQueryFilter(RowFilter filter);
 
     /**
-     * Reorder query result before sending to client
+     * Returns a {@link Scorer} to give a similarity/proximity score to CQL result rows, so they can be ordered by the
+     * coordinator before sending them to client.
      *
-     * @param cqlRows     result set from a query
      * @param restriction restriction that requires current index
      * @param columnIndex idx of the indexed column in returned row
      * @param options     query options
+     * @return a scorer to score the rows
      */
-    default void postQuerySort(ResultSet cqlRows, Restriction restriction, int columnIndex, QueryOptions options)
+    default Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
     {
         throw new NotImplementedException();
+    }
+
+    /**
+     * Gives a similarity/proximity score to CQL result rows.
+     */
+    interface Scorer
+    {
+        /**
+         * @param row a CQL result row
+         * @return the similarity/proximity score for the row
+         */
+        float score(List<ByteBuffer> row);
+
+        /**
+         * @return {@code true} if higher scores are considered better, {@code false} otherwise
+         */
+        default boolean reversed()
+        {
+            return false;
+        }
     }
 
     /**
@@ -494,16 +516,6 @@ public interface Index
      * @throws InvalidRequestException
      */
     public void validate(PartitionUpdate update) throws InvalidRequestException;
-
-    /**
-     * Returns the SSTable-attached {@link Component}s created by this index.
-     *
-     * @return the SSTable components created by this index
-     */
-    default Set<Component> getComponents()
-    {
-        return Collections.emptySet();
-    }
 
     /*
      * Update processing
@@ -750,7 +762,7 @@ public interface Index
          *
          * @return the indexes that are members of this group
          */
-        Set<Index> getIndexes();
+        Set<? extends Index> getIndexes();
 
         /**
          * Adds the specified {@link Index} as a member of this group.
@@ -844,11 +856,26 @@ public interface Index
         default void unload() { }
 
         /**
-         * Returns the SSTable-attached {@link Component}s created by this index group.
+         * Returns the set of sstable-attached components that this group will create for a newly flushed sstable.
          *
-         * @return the SSTable components created by this group
+         * Note that the result of this method is only valid for newly flushed/written sstables as the components
+         * returned will assume a version of {@link Version#latest()} and a generation of 0. SSTables for which some
+         * index have been rebuild may have index components that do not match what this method return in particular.
          */
-        Set<Component> getComponents();
+        Set<Component> componentsForNewSSTable();
+
+        /**
+         * Return the set of sstable-attached components belonging to the group that are currently "active" for the
+         * provided sstable.
+         * <p>
+         * The "active" components are the components that are currently in use, meaning that if a given component
+         * of the sstable exists with multiple versions or generation on disk, only the most recent version/generation
+         * is the active one.
+         *
+         * @param sstable the sstable to get components for.
+         * @return the set of the sstable-attached components of the provided sstable for this group.
+         */
+        Set<Component> activeComponents(SSTableReader sstable);
 
         /**
          * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise

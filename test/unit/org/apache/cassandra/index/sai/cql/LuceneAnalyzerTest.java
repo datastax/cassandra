@@ -53,6 +53,7 @@ public class LuceneAnalyzerTest extends SAITester
         flush();
 
         assertEquals(0, execute("SELECT * FROM %s WHERE val : 'query'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'query'").size());
     }
 
     @Test
@@ -203,11 +204,10 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'dog')").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'missing')").size());
 
-        // EQ operator is not supported for analyzed columns unless ALLOW FILTERING is used
-        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val = 'dog'")).isInstanceOf(InvalidRequestException.class);
+        // EQ operator support is reintroduced for analyzed columns, it should work as ':' operator
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'The quick brown fox jumps over the lazy DOG.' ALLOW FILTERING").size());
-        // EQ is a raw equality check, so a token like 'dog' should not return any results
-        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'dog' ALLOW FILTERING").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog' ALLOW FILTERING").size());
     }
 
     @Test
@@ -264,16 +264,15 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
     }
 
-    // Analyzers on clustering columns are not supported yet
     @Test
-    public void testStandardAnalyzerInClusteringColumnFailsAtCreateIndex() throws Throwable
+    public void testStandardAnalyzerInClusteringColumns() throws Throwable
     {
         createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
 
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                                             "WITH OPTIONS = { 'index_analyzer': 'standard' }"
-        )).isInstanceOf(InvalidRequestException.class);
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        waitForIndexQueryable();
 
         assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) WITH OPTIONS = { 'ascii': true }"
         )).isInstanceOf(InvalidRequestException.class);
@@ -463,6 +462,66 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
+    public void testEdgeNgramFilterWithOR() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': '{\n" +
+                    "\t\"tokenizer\":{\"name\":\"standard\", \"args\":{}}," +
+                    "\t\"filters\":[{\"name\":\"lowercase\", \"args\":{}}, " +
+                    "{\"name\":\"edgengram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"30\"}}],\n" +
+                    "\t\"charFilters\":[]" +
+                    "}'};");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
+        execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");
+        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 Mercer High Growth Managed')");
+        execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
+        execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
+
+        beforeAndAfterFlush(() -> {
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL0133AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : 'WFS2684AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val : ''").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val : 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : '' OR val : 'WFS2684AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val : '' AND val : 'WFS2684AU'").size());
+        });
+    }
+
+    @Test
+    public void testNgramFilterWithOR()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': '{\n" +
+                    "\t\"tokenizer\":{\"name\":\"standard\", \"args\":{}}," +
+                    "\t\"filters\":[{\"name\":\"lowercase\", \"args\":{}}, " +
+                    "{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"30\"}}],\n" +
+                    "\t\"charFilters\":[]" +
+                    "}'};");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
+        execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");
+        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 Mercer High Growth Managed')");
+        execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
+        execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
+
+        flush();
+
+        assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL0133AU'").size());
+        assertEquals(1, execute("SELECT val FROM %s WHERE val : 'WFS2684AU'").size());
+        assertEquals(1, execute("SELECT val FROM %s WHERE val : '268'").size());
+        assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val : 'WFS2684AU'").size());
+        assertEquals(2, execute("SELECT val FROM %s WHERE val : '133' OR val : 'WFS2684AU'").size());
+    }
+    @Test
     public void testWhitespace() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
@@ -575,6 +634,18 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
+    public void testLegacyEqQueryOnNormalizedTextColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'ascii': 'true', 'case_sensitive': 'false', 'normalize': 'true'}");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES (1, 'Aaą')");
+
+        beforeAndAfterFlush(() -> assertEquals(1, execute("SELECT * FROM %s WHERE val = 'aaa'").size()));
+    }
+
+    @Test
     public void testAnalyzerThatProducesTooManyBytesIsRejectedAtWriteTime()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
@@ -600,8 +671,15 @@ public class LuceneAnalyzerTest extends SAITester
         .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
 
+        var invalidCharfilters = "{\"tokenizer\" : {\"name\" : \"keyword\"},\"charfilters\" : [{\"name\" : \"htmlstrip\"}]}";
+
         // Invalid config name, charfilters should be charFilters
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\"tokenizer\" : {\"name\" : \"keyword\"},\"charfilters\" : [{\"name\" : \"htmlstrip\"}]}'}"))
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'" + invalidCharfilters + "'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Invalid field name 'charfilters' in analyzer config. Valid fields are: [tokenizer, filters, charFilters]");
+
+        // Invalid config name on query_analyzer, charfilters should be charFilters
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'standard', 'query_analyzer':'" + invalidCharfilters + "'}"))
         .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Invalid field name 'charfilters' in analyzer config. Valid fields are: [tokenizer, filters, charFilters]");
 

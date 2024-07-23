@@ -106,12 +106,6 @@ public class ListType<T> extends CollectionType<List<T>>
         return (ListType<?>) super.withUpdatedUserType(udt);
     }
 
-    @Override
-    public boolean referencesDuration()
-    {
-        return getElementsType().referencesDuration();
-    }
-
     @SuppressWarnings("unchecked")
     public AbstractType<T> getElementsType()
     {

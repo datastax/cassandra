@@ -330,27 +330,4 @@ public class AbstractEncryptionOptionsImpl extends TestBaseImpl
                               lastThrowable.getCause() instanceof  SSLHandshakeException);
         }
     }
-
-    /* Provde the cluster cannot start with the configured options */
-    void assertCannotStartDueToConfigurationException(Cluster cluster)
-    {
-        Throwable tr = null;
-        try
-        {
-            cluster.startup();
-        }
-        catch (Throwable maybeConfigException)
-        {
-            tr = maybeConfigException;
-        }
-
-        if (tr == null)
-        {
-            Assert.fail("Expected a ConfigurationException");
-        }
-        else
-        {
-            Assert.assertEquals(ConfigurationException.class.getName(), tr.getClass().getName());
-        }
-    }
 }

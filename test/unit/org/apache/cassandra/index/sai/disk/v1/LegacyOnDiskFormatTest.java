@@ -20,11 +20,11 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
@@ -40,7 +40,8 @@ import org.apache.cassandra.index.sai.disk.FileUtils;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.QueryEventListeners;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
@@ -58,9 +59,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.index.sai.disk.v1.kdtree.BKDQueries.bkdQueryFrom;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Note: The sstables and SAI indexes used in this test were written with DSE 6.8
@@ -73,6 +72,10 @@ public class LegacyOnDiskFormatTest
     private TableMetadata tableMetadata;
     private IndexDescriptor indexDescriptor;
     private SSTableReader sstable;
+    private PrimaryKey.Factory pkFactory;
+
+    private IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
+    private IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
 
     @BeforeClass
     public static void initialise()
@@ -81,7 +84,6 @@ public class LegacyOnDiskFormatTest
         DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
         StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
     }
-
 
     @Before
     public void setup() throws Throwable
@@ -95,7 +97,8 @@ public class LegacyOnDiskFormatTest
                                      .addRegularColumn("text_value", UTF8Type.instance)
                                      .build();
         sstable = TrieIndexFormat.instance.getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(tableMetadata));
-        indexDescriptor = IndexDescriptor.createFrom(sstable);
+        indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(Set.of(intContext, textContext));
+        pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
     }
 
     @After
@@ -107,19 +110,20 @@ public class LegacyOnDiskFormatTest
     @Test
     public void correctlyIdentifiesPerSSTableFileVersion()
     {
-        assertEquals(Version.AA, indexDescriptor.getVersion());
+        assertEquals(Version.AA, indexDescriptor.perSSTableComponents().version());
     }
 
     @Test
     public void canReadPerSSTableMetadata() throws Throwable
     {
-        final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
+        IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
+        final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.OFFSETS_VALUES, null)));
+        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(components.get(IndexComponentType.OFFSETS_VALUES)));
 
         assertEquals(100, numericValuesMeta.valueCount);
 
-        numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES, null)));
+        numericValuesMeta = new NumericValuesMeta(source.get(components.get(IndexComponentType.TOKEN_VALUES)));
 
         assertEquals(100, numericValuesMeta.valueCount);
     }
@@ -127,10 +131,10 @@ public class LegacyOnDiskFormatTest
     @Test
     public void canReadPerIndexMetadata() throws Throwable
     {
-        final MetadataSource source = MetadataSource.loadColumnMetadata(indexDescriptor, SAITester.createIndexContext("int_index",
-                                                                                                                      Int32Type.instance));
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(intContext);
+        final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, indexDescriptor.primaryKeyFactory);
+        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, pkFactory);
 
         assertEquals(1, metadatas.size());
         assertEquals(100, metadatas.get(0).numRows);
@@ -139,11 +143,12 @@ public class LegacyOnDiskFormatTest
     @Test
     public void canCreateAndUsePrimaryKeyMapWithLegacyFormat() throws Throwable
     {
-        PrimaryKeyMap.Factory primaryKeyMapFactory = indexDescriptor.newPrimaryKeyMapFactory(sstable);
+        var perSSTableComponents = indexDescriptor.perSSTableComponents();
+        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.version().onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
 
         PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
 
-        PrimaryKey expected = indexDescriptor.primaryKeyFactory.createTokenOnly(Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(23)).getToken());
+        PrimaryKey expected = pkFactory.createTokenOnly(Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(23)).getToken());
 
         PrimaryKey primaryKey = primaryKeyMap.primaryKeyFromRowId(0);
 
@@ -153,20 +158,19 @@ public class LegacyOnDiskFormatTest
     @Test
     public void canSearchBDKIndex() throws Throwable
     {
-        IndexContext indexContext = SAITester.createIndexContext("int_index", Int32Type.instance);
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(intContext);
 
-        final MetadataSource source = MetadataSource.loadColumnMetadata(indexDescriptor, SAITester.createIndexContext("int_index",
-                                                                                                                      Int32Type.instance));
+        final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, indexDescriptor.primaryKeyFactory);
+        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, pkFactory);
 
-        BKDReader bkdReader = new BKDReader(indexContext,
-                                            indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext),
-                                            metadatas.get(0).getIndexRoot(IndexComponent.KD_TREE),
-                                            indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext),
-                                            metadatas.get(0).getIndexRoot(IndexComponent.KD_TREE_POSTING_LISTS));
+        BKDReader bkdReader = new BKDReader(intContext,
+                                            components.get(IndexComponentType.KD_TREE).createFileHandle(),
+                                            metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE),
+                                            components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(),
+                                            metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS));
 
-        Expression expression = new Expression(indexContext).add(Operator.LT, Int32Type.instance.decompose(10));
+        Expression expression = new Expression(intContext).add(Operator.LT, Int32Type.instance.decompose(10));
         BKDReader.IntersectVisitor query = bkdQueryFrom(expression, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
         PostingList postingList = bkdReader.intersect(query, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext());
         assertNotNull(postingList);
@@ -175,24 +179,24 @@ public class LegacyOnDiskFormatTest
     @Test
     public void canSearchTermsIndex() throws Throwable
     {
-        IndexContext indexContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(textContext);
 
-        final MetadataSource source = MetadataSource.loadColumnMetadata(indexDescriptor, indexContext);
+        final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        SegmentMetadata metadata = SegmentMetadata.load(source, indexDescriptor.primaryKeyFactory).get(0);
+        SegmentMetadata metadata = SegmentMetadata.load(source, pkFactory).get(0);
 
-        long root = metadata.getIndexRoot(IndexComponent.TERMS_DATA);
-        Map<String,String> map = metadata.componentMetadatas.get(IndexComponent.TERMS_DATA).attributes;
+        long root = metadata.getIndexRoot(IndexComponentType.TERMS_DATA);
+        Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
         long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
-        TermsReader termsReader = new TermsReader(indexDescriptor,
-                                                  indexContext,
-                                                  indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext),
-                                                  indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext),
+        TermsReader termsReader = new TermsReader(textContext,
+                                                  components.get(IndexComponentType.TERMS_DATA).createFileHandle(),
+                                                  components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
+                                                  components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
                                                   root,
                                                   footerPointer);
-        Expression expression = new Expression(indexContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
+        Expression expression = new Expression(textContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
         ByteComparable term = ByteComparable.fixedLength(expression.lower.value.encoded);
 
         PostingList result = termsReader.exactMatch(term, QueryEventListeners.NO_OP_TRIE_LISTENER, new QueryContext());

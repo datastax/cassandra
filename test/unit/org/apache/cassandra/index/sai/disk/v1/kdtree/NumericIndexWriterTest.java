@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -31,7 +30,8 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -87,8 +87,8 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
 
-        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 Integer.BYTES,
                                                                 docCount, docCount,
                                                                 IndexWriterConfig.defaultConfig("test")))
@@ -96,14 +96,14 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
             indexMetas = writer.writeAll(pointValues);
         }
 
-        final FileHandle kdtreeHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
-        final FileHandle kdtreePostingsHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
+        final FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
+        final FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
 
         try (BKDReader reader = new BKDReader(indexContext,
                                               kdtreeHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE).root,
+                                              indexMetas.get(IndexComponentType.KD_TREE).root,
                                               kdtreePostingsHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE_POSTING_LISTS).root
+                                              indexMetas.get(IndexComponentType.KD_TREE_POSTING_LISTS).root
         ))
         {
             final Counter visited = Counter.newCounter();
@@ -139,8 +139,8 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                                                        .fromTermEnum(termEnum, Int32Type.instance);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
-        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 TypeUtil.fixedSizeOf(Int32Type.instance),
                                                                 maxSegmentRowId, maxSegmentRowId,
                                                                 IndexWriterConfig.defaultConfig("test")))
@@ -148,14 +148,14 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
             indexMetas = writer.writeAll(pointValues);
         }
 
-        final FileHandle kdtreeHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
-        final FileHandle kdtreePostingsHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
+        final FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
+        final FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
 
         try (BKDReader reader = new BKDReader(indexContext,
                                               kdtreeHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE).root,
+                                              indexMetas.get(IndexComponentType.KD_TREE).root,
                                               kdtreePostingsHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE_POSTING_LISTS).root
+                                              indexMetas.get(IndexComponentType.KD_TREE_POSTING_LISTS).root
         ))
         {
             final Counter visited = Counter.newCounter();

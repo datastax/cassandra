@@ -176,7 +176,7 @@ public class SecondaryIndexManagerTest extends CQLTester
         // unlink sstable and index context: expect no rows to be read by base and index
         cfs.clearUnsafe();
         IndexMetadata indexMetadata = cfs.metadata().indexes.iterator().next();
-        ((StorageAttachedIndex) cfs.getIndexManager().getIndex(indexMetadata)).getIndexContext().drop(sstables);
+        ((StorageAttachedIndex) cfs.getIndexManager().getIndex(indexMetadata)).getIndexContext().prepareSSTablesForRebuild(sstables);
         assertEmpty(execute("SELECT * FROM %s WHERE a=1"));
         assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
 

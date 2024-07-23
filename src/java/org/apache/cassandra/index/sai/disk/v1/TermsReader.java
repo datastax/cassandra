@@ -32,8 +32,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
@@ -72,11 +71,11 @@ public class TermsReader implements Closeable
     private final FileHandle termDictionaryFile;
     private final FileHandle postingsFile;
     private final long termDictionaryRoot;
-    private final ByteComparable.Version encodingVersion;
+    private final ByteComparable.Version termDictionaryFileEncodingVersion;
 
-    public TermsReader(IndexDescriptor indexDescriptor,
-                       IndexContext indexContext,
+    public TermsReader(IndexContext indexContext,
                        FileHandle termsData,
+                       ByteComparable.Version termsDataEncodingVersion,
                        FileHandle postingLists,
                        long root,
                        long termsFooterPointer) throws IOException
@@ -85,7 +84,7 @@ public class TermsReader implements Closeable
         termDictionaryFile = termsData;
         postingsFile = postingLists;
         termDictionaryRoot = root;
-        this.encodingVersion = indexDescriptor.getEncodingVersion(IndexComponent.TERMS_DATA);
+        this.termDictionaryFileEncodingVersion = termsDataEncodingVersion;
 
         try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile))
         {
@@ -196,7 +195,7 @@ public class TermsReader implements Closeable
 
         public long lookupTermDictionary(ByteComparable term)
         {
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, encodingVersion))
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, termDictionaryFileEncodingVersion))
             {
                 final long offset = reader.exactMatch(term);
 
@@ -244,7 +243,7 @@ public class TermsReader implements Closeable
                                                                                   lower,
                                                                                   upper,
                                                                                   true,
-                                                                                  encodingVersion))
+                                                                                  termDictionaryFileEncodingVersion))
             {
                 if (!reader.hasNext())
                     return PostingList.EMPTY;
@@ -317,7 +316,7 @@ public class TermsReader implements Closeable
 
         private TermsScanner(long segmentOffset)
         {
-            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, encodingVersion);
+            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, termDictionaryFileEncodingVersion);
             this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(ByteComparable.Version.OSS41)));
             this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(ByteComparable.Version.OSS41)));
             this.segmentOffset = segmentOffset;
