@@ -426,9 +426,14 @@ public interface StorageServiceMBean extends NotificationEmitter
      * If tableNames array is empty, all CFs are verified.
      *
      * The entire sstable will be read to ensure each cell validates if extendedVerify is true
+     * @deprecated See CNDB-10054
      */
+    @Deprecated(since = "CC4.0")
     public int verify(boolean extendedVerify, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException;
+    /** @deprecated See CNDB-10054 */
+    @Deprecated(since = "CC4.0")
     public int verify(boolean extendedVerify, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException;
+    public int verify(boolean extendedVerify, boolean validateAllRows, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException;
 
     /**
      * Rewrite all sstables to the latest version.
