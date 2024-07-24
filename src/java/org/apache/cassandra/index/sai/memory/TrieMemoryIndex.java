@@ -64,6 +64,8 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
     private final MemtableTrie<PrimaryKeys> data;
+    private final LongAdder heapAllocations;
+    private final PrimaryKeysAccumulator primaryKeysAccumulator;
     private final PrimaryKeysReducer primaryKeysReducer;
 
     private ByteBuffer minTerm;
@@ -81,7 +83,9 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         super(indexContext);
         this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
-        this.primaryKeysReducer = new PrimaryKeysReducer();
+        this.heapAllocations = new LongAdder();
+        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations);
+        this.primaryKeysReducer = new PrimaryKeysReducer(heapAllocations);
     }
 
     public synchronized void add(DecoratedKey key,
@@ -89,6 +93,32 @@ public class TrieMemoryIndex extends MemoryIndex
                                  ByteBuffer value,
                                  LongConsumer onHeapAllocationsTracker,
                                  LongConsumer offHeapAllocationsTracker)
+    {
+        applyTransformer(key, clustering, value, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+    }
+
+    public synchronized void update(DecoratedKey key,
+                                    Clustering clustering,
+                                    ByteBuffer oldValue,
+                                    ByteBuffer newValue,
+                                    LongConsumer onHeapAllocationsTracker,
+                                    LongConsumer offHeapAllocationsTracker)
+    {
+        // TODO what order is correct here? Doing it this way removes it from the index completely for a time,
+        // but there is a chance that the analyzer will produce dupes and we don't want to lose those.
+        if (oldValue != null && oldValue.hasRemaining())
+            applyTransformer(key, clustering, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysReducer);
+        if (newValue != null && newValue.hasRemaining())
+            applyTransformer(key, clustering, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+
+    }
+
+    private void applyTransformer(DecoratedKey key,
+                                  Clustering clustering,
+                                  ByteBuffer value,
+                                  LongConsumer onHeapAllocationsTracker,
+                                  LongConsumer offHeapAllocationsTracker,
+                                  MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey> transformer)
     {
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
         try
@@ -98,7 +128,7 @@ public class TrieMemoryIndex extends MemoryIndex
             final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
             final long initialSizeOffHeap = data.sizeOffHeap();
-            final long reducerHeapSize = primaryKeysReducer.heapAllocations();
+            final long reducerHeapSize = heapAllocations.longValue();
 
             while (analyzer.hasNext())
             {
@@ -114,11 +144,11 @@ public class TrieMemoryIndex extends MemoryIndex
                 {
                     if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
                     {
-                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
+                        data.putRecursive(encodedTerm, primaryKey, transformer);
                     }
                     else
                     {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
+                        data.apply(Trie.singleton(encodedTerm, primaryKey), transformer);
                     }
                 }
                 catch (MemtableTrie.SpaceExhaustedException e)
@@ -128,7 +158,7 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
-                                            (primaryKeysReducer.heapAllocations() - reducerHeapSize));
+                                            (heapAllocations.longValue() - reducerHeapSize));
             offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
         }
         finally
@@ -289,9 +319,17 @@ public class TrieMemoryIndex extends MemoryIndex
         };
     }
 
-    class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    /**
+     * Accumulator that adds a primary key to the primary keys set.
+     */
+    static class PrimaryKeysAccumulator implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
-        private final LongAdder heapAllocations = new LongAdder();
+        private final LongAdder heapAllocations;
+
+        PrimaryKeysAccumulator(LongAdder heapAllocations)
+        {
+            this.heapAllocations = heapAllocations;
+        }
 
         @Override
         public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
@@ -304,10 +342,33 @@ public class TrieMemoryIndex extends MemoryIndex
             heapAllocations.add(existing.add(neww));
             return existing;
         }
+    }
 
-        long heapAllocations()
+    /**
+     * Reducer that removes a primary key from the primary keys set, if present.
+     */
+    static class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    {
+        private final LongAdder heapAllocations;
+
+        PrimaryKeysReducer(LongAdder heapAllocations)
         {
-            return heapAllocations.longValue();
+            this.heapAllocations = heapAllocations;
+        }
+
+        @Override
+        public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
+        {
+            if (existing == null)
+                return null;
+
+            heapAllocations.add(existing.remove(neww));
+            if (existing.isEmpty())
+            {
+                heapAllocations.add(-existing.unsharedHeapSize());
+                return null;
+            }
+            return existing;
         }
     }
 

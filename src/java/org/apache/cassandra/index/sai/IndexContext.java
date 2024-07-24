@@ -370,12 +370,6 @@ public class IndexContext
 
     public void update(DecoratedKey key, Row oldRow, Row newRow, Memtable memtable, OpOrder.Group opGroup)
     {
-        if (!isVector())
-        {
-            index(key, newRow, memtable, opGroup);
-            return;
-        }
-
         MemtableIndex target = liveMemtables.get(memtable);
         if (target == null)
             return;
