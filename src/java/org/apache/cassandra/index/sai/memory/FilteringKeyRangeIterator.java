@@ -17,30 +17,58 @@
  */
 package org.apache.cassandra.index.sai.memory;
 
+import java.io.IOException;
 import java.util.SortedSet;
+
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.RangeIterator;
 
 /**
- * A {@link KeyRangeIterator} that filters the returned {@PrimaryKey}s based on the provided keyRange
+ * A {@link RangeIterator} that filters the returned {@link PrimaryKey}s based on the provided keyRange
  */
-public class FilteringKeyRangeIterator extends KeyRangeIterator
+public class FilteringKeyRangeIterator extends RangeIterator
 {
     private final AbstractBounds<PartitionPosition> keyRange;
+    private final PeekingIterator<PrimaryKey> source;
 
     public FilteringKeyRangeIterator(SortedSet<PrimaryKey> keys, AbstractBounds<PartitionPosition> keyRange)
     {
-        super(keys);
+        super(keys.first(), keys.last(), keys.size());
         this.keyRange = keyRange;
+        this.source = Iterators.peekingIterator(keys.iterator());
     }
 
+    @Override
     protected PrimaryKey computeNext()
     {
-        PrimaryKey key = computeNextKey();
-        while (key != null && !keyRange.contains(key.partitionKey()))
-            key = computeNextKey();
-        return key == null ? endOfData() : key;
+        while (source.hasNext())
+        {
+            PrimaryKey key = source.next();
+            if (keyRange.contains(key.partitionKey()))
+                return key;
+        }
+        return endOfData();
+    }
+
+    @Override
+    protected void performSkipTo(PrimaryKey nextKey)
+    {
+        while (source.hasNext())
+        {
+            if (source.peek().compareTo(nextKey) >= 0)
+                break;
+            // Consume key
+            source.next();
+        }
+    }
+
+    @Override
+    public void close() throws IOException
+    {
     }
 }
