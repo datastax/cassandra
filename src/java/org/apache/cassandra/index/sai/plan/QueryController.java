@@ -97,7 +97,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
-    public static final int ORDER_CHUNK_SIZE = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
+    public static int ORDER_CHUNK_SIZE = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
 
     /**
      * Controls whether we optimize query plans.
