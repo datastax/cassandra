@@ -24,13 +24,19 @@
 
 package org.apache.cassandra.index.sai.memory;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
+
+import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +58,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.PriorityQueueUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -215,7 +222,10 @@ public class TrieMemoryIndex extends MemoryIndex
             upperInclusive = false;
         }
 
-        Collector cd = new Collector(keyRange);
+        var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
+        var mergingIteratorBuilder = KeyRangeMergingIterator.builder(keyRange, indexContext.keyFactory(), capacity);
+        lastQueueSize.set(mergingIteratorBuilder.size());
+
         Trie<PrimaryKeys> subtrie = data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
         if (expression.validator instanceof CompositeType)
             subtrie.entrySet().forEach(entry -> {
@@ -224,18 +234,14 @@ public class TrieMemoryIndex extends MemoryIndex
                 ByteComparable decoded = decode(entry.getKey());
                 byte[] key = ByteSourceInverse.readBytes(decoded.asComparableBytes(ByteComparable.Version.OSS41));
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
-                    cd.processContent(entry.getValue());
+                    mergingIteratorBuilder.add(entry.getValue());
             });
         else
-            subtrie.values().forEach(cd::processContent);
+            subtrie.values().forEach(mergingIteratorBuilder::add);
 
-        if (cd.mergedKeys.isEmpty())
-        {
-            return RangeIterator.empty();
-        }
-
-        lastQueueSize.set(Math.max(MINIMUM_QUEUE_SIZE, cd.mergedKeys.size()));
-        return new KeyRangeIterator(cd.minimumKey, cd.maximumKey, cd.mergedKeys);
+        return mergingIteratorBuilder.isEmpty()
+               ? RangeIterator.empty()
+               : mergingIteratorBuilder.build();
     }
 
     public ByteBuffer getMinTerm()
@@ -311,56 +317,185 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    class Collector
+    static class KeyRangeMergingIterator extends RangeIterator
     {
-        PrimaryKey minimumKey = null;
-        PrimaryKey maximumKey = null;
-        PriorityQueue<PrimaryKey> mergedKeys = new PriorityQueue<>(lastQueueSize.get());
+        PriorityQueue<Object> keySets;  // class invariant: each object placed in this queue contains at least one key
 
-        AbstractBounds<PartitionPosition> keyRange;
-
-        public Collector(AbstractBounds<PartitionPosition> keyRange)
+        KeyRangeMergingIterator(Collection<Object> keySets,
+                                PrimaryKey minKey,
+                                PrimaryKey maxKey,
+                                long count)
         {
-            this.keyRange = keyRange;
+            super(minKey, maxKey, count);
+
+            // don't change this to Comparator.comparing, because it introduces another indirection layer
+            // and is slower than this lambda
+            this.keySets = PriorityQueueUtil.createQueue(keySets, (a, b) -> peek(a).compareTo(peek(b)));
         }
 
-        public void processContent(PrimaryKeys keys)
+        static Builder builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity)
         {
-            if (keys.isEmpty())
-                return;
+            return new Builder(keyRange, factory, capacity);
+        }
 
-            SortedSet<PrimaryKey> primaryKeys = keys.keys();
-
-            // shortcut to avoid generating iterator
-            if (primaryKeys.size() == 1)
+        @Override
+        protected void performSkipTo(PrimaryKey nextKey)
+        {
+            while (true)
             {
-                PrimaryKey first = primaryKeys.first();
-                if (keyRange.contains(first.partitionKey()))
-                {
-                    mergedKeys.add(first);
+                Object keys = keySets.poll();
+                if (keys == null || nextKey.compareTo(peek(keys)) < 0)
+                    break;
 
-                    minimumKey = minimumKey == null ? first : first.compareTo(minimumKey) < 0 ? first : minimumKey;
-                    maximumKey = maximumKey == null ? first : first.compareTo(maximumKey) > 0 ? first : maximumKey;
+                if (keys instanceof SortedSet)
+                {
+                    var newKeys = ((SortedSet<PrimaryKey>) keys).tailSet(nextKey);
+                    if (!newKeys.isEmpty())
+                        keySets.offer(newKeys);
                 }
-
-                return;
-            }
-
-            // skip entire partition keys if they don't overlap
-            if (!keyRange.right.isMinimum() && primaryKeys.first().partitionKey().compareTo(keyRange.right) > 0
-                || primaryKeys.last().partitionKey().compareTo(keyRange.left) < 0)
-                return;
-
-            for (PrimaryKey key : primaryKeys)
-            {
-                if (keyRange.contains(key.partitionKey()))
+                else if (keys instanceof SortedSetRangeIterator)
                 {
-                    mergedKeys.add(key);
-
-                    minimumKey = minimumKey == null ? key : key.compareTo(minimumKey) < 0 ? key : minimumKey;
-                    maximumKey = maximumKey == null ? key : key.compareTo(maximumKey) > 0 ? key : maximumKey;
+                    var iterator = (SortedSetRangeIterator) keys;
+                    iterator.performSkipTo(nextKey);
+                    if (iterator.hasNext())
+                        keySets.offer(iterator);
                 }
             }
+        }
+
+        @Override
+        protected PrimaryKey computeNext()
+        {
+            Object keys = keySets.poll();
+            if (keys == null)
+                return endOfData();
+
+            PrimaryKey result = peek(keys);
+            assert result != null;
+
+            SortedSetRangeIterator iterator = dropFirst(keys);
+            if (iterator != null)
+                keySets.offer(iterator);
+
+            return result;
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+        }
+
+        /**
+         * The purpose of this method is to avoid unnecessary allocation of iterators for singleton sets.
+         * If the keys object contains a single key, null is returned.
+         * If the keys object contains more than one key, the first key is dropped and the iterator to the
+         * remaining keys is returned.
+         */
+        private static @Nullable SortedSetRangeIterator dropFirst(Object keys)
+        {
+            if (keys instanceof PrimaryKey)
+                return null;
+
+            SortedSetRangeIterator iterator = (keys instanceof SortedSetRangeIterator)
+                ? (SortedSetRangeIterator) keys
+                : new SortedSetRangeIterator((SortedSet<PrimaryKey>) keys);
+
+            assert iterator.hasNext();
+            iterator.next();
+            return iterator.hasNext() ? iterator : null;
+        }
+
+        static PrimaryKey peek(Object keys)
+        {
+            if (keys instanceof PrimaryKey)
+                return (PrimaryKey) keys;
+            if (keys instanceof SortedSet)
+                return (PrimaryKey) ((SortedSet<?>) keys).first();
+            if (keys instanceof SortedSetRangeIterator)
+                return ((SortedSetRangeIterator) keys).peek();
+
+            throw new AssertionError("Unreachable");
+        }
+
+        static class Builder
+        {
+            final List<Object> keySets;
+
+            private final PrimaryKey min;
+            private final PrimaryKey max;
+            private long count;
+
+
+            Builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity)
+            {
+                this.min = factory.createTokenOnly(keyRange.left.getToken());
+                this.max = factory.createTokenOnly(keyRange.right.getToken());
+                this.keySets = new ArrayList<>(capacity);
+            }
+
+            public void add(PrimaryKeys primaryKeys)
+            {
+                if (primaryKeys.isEmpty())
+                    return;
+
+                int size = primaryKeys.size();
+                SortedSet<PrimaryKey> keys = primaryKeys.keys();
+                if (size == 1)
+                    keySets.add(keys.first());
+                else
+                    keySets.add(keys);
+
+                count += size;
+            }
+
+            public int size()
+            {
+                return keySets.size();
+            }
+
+            public boolean isEmpty()
+            {
+                return keySets.isEmpty();
+            }
+
+            public KeyRangeMergingIterator build()
+            {
+                return new KeyRangeMergingIterator(keySets, min, max, count);
+            }
+        }
+
+    }
+
+    static class SortedSetRangeIterator extends RangeIterator
+    {
+        private SortedSet<PrimaryKey> primaryKeySet;
+        private Iterator<PrimaryKey> iterator;
+
+        public SortedSetRangeIterator(SortedSet<PrimaryKey> source)
+        {
+            super(source.first(), source.last(), source.size());
+            this.primaryKeySet = source;
+        }
+
+        @Override
+        protected PrimaryKey computeNext()
+        {
+            // Skip can be called multiple times in a row, so defer iterator creation until needed
+            if (iterator == null)
+                iterator = primaryKeySet.iterator();
+            return iterator.hasNext() ? iterator.next() : endOfData();
+        }
+
+        @Override
+        protected void performSkipTo(PrimaryKey nextKey)
+        {
+            primaryKeySet = primaryKeySet.tailSet(nextKey);
+            iterator = null;
+        }
+
+        @Override
+        public void close() throws IOException
+        {
         }
     }
 }
