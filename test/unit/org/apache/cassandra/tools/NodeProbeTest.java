@@ -19,6 +19,8 @@
 package org.apache.cassandra.tools;
 
 import java.io.IOException;
+import java.io.PrintStream;
+import java.util.concurrent.ExecutionException;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -72,6 +74,37 @@ public class NodeProbeTest extends CQLTester
         // by subsequent validations
         assertToolResult(ToolRunner.invokeNodetool("setconcurrentcompactors", String.valueOf(jobs)));
         assertToolResult(ToolRunner.invokeNodetool("upgradesstables", "-j", String.valueOf(jobs)));
+    }
+
+    @Test
+    public void testVerifyWithoutValidateAllRows() throws IOException, ExecutionException, InterruptedException
+    {
+        ToolResult toolResult = ToolRunner.invokeNodetool("verify", "--force", "--extended-verify");
+        toolResult.assertOnCleanExit();
+        assertThat(toolResult.getStdout()).isEmpty();
+
+        for (String keyspace : probe.getKeyspaces())
+        {
+            PrintStream out = probe.output().out;
+            probe.verify(out, true, false, false, false, false, false, false, keyspace);
+            probe.verify(true, false, false, false, false, false, false, keyspace);
+        }
+    }
+
+    @Test
+    public void testVerifyWithValidateAllRows() throws IOException, ExecutionException, InterruptedException
+    {
+        // new config is recognized
+        ToolResult toolResult = ToolRunner.invokeNodetool("verify", "--force", "--extended-verify", "--validate-all-rows");
+        toolResult.assertOnCleanExit();
+        assertThat(toolResult.getStdout()).isEmpty();
+
+        for (String keyspace : probe.getKeyspaces())
+        {
+            PrintStream out = probe.output().out;
+            probe.verify(out, true, true, false, false, false, false, false, keyspace);
+            probe.verify(true, true, false, false, false, false, false, keyspace);
+        }
     }
 
     private static void assertToolResult(ToolResult toolResult)
