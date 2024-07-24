@@ -33,6 +33,12 @@ public class BtiTableVerifier extends SortedTableVerifier<BtiTableReader> implem
 
     protected void verifyPartition(DecoratedKey key, UnfilteredRowIterator iterator)
     {
+        if (options.validateAllRows)
+        {
+            // validate all rows and cells
+            while (iterator.hasNext())
+                iterator.next();
+        }
         // The trie writers abort if supplied with badly ordered or duplicate row keys. Verification is not necessary.
         // no-op, just open and close partition.
     }
