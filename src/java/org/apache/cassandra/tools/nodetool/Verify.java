@@ -36,8 +36,13 @@ public class Verify extends NodeToolCmd
 
     @Option(title = "extended_verify",
             name = {"-e", "--extended-verify"},
-            description = "Verify each cell data, beyond simply checking sstable checksums")
+            description = "Verify each partition data, beyond simply checking sstable checksums")
     private boolean extendedVerify = false;
+
+    @Option(title = "validate_all_rows",
+    name = {"-v", "--validate-all-rows"},
+    description = "Verify each row and cell data in the partition, beyond checking partition key. Must be enabled with extended verification")
+    private boolean validateAllRows = false;
 
     @Option(title = "check_version",
             name = {"-c", "--check-version"},
@@ -93,7 +98,7 @@ public class Verify extends NodeToolCmd
         {
             try
             {
-                probe.verify(out, extendedVerify, checkVersion, diskFailurePolicy, mutateRepairStatus, checkOwnsTokens, quick, keyspace, tableNames);
+                probe.verify(out, extendedVerify, validateAllRows, checkVersion, diskFailurePolicy, mutateRepairStatus, checkOwnsTokens, quick, keyspace, tableNames);
             } catch (Exception e)
             {
                 throw new RuntimeException("Error occurred during verifying", e);

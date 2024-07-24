@@ -50,6 +50,7 @@ public interface IVerifier extends Closeable
          * if there is no digest present. Setting it along with quick makes no sense.
          */
         public final boolean extendedVerification;
+        public final boolean validateAllRows;
 
         public final boolean checkVersion;
         public final boolean mutateRepairStatus;
@@ -64,6 +65,7 @@ public interface IVerifier extends Closeable
 
         private Options(boolean invokeDiskFailurePolicy,
                         boolean extendedVerification,
+                        boolean validateAllRows,
                         boolean checkVersion,
                         boolean mutateRepairStatus,
                         boolean checkOwnsTokens,
@@ -72,11 +74,15 @@ public interface IVerifier extends Closeable
         {
             this.invokeDiskFailurePolicy = invokeDiskFailurePolicy;
             this.extendedVerification = extendedVerification;
+            this.validateAllRows = validateAllRows;
             this.checkVersion = checkVersion;
             this.mutateRepairStatus = mutateRepairStatus;
             this.checkOwnsTokens = checkOwnsTokens;
             this.quick = quick;
             this.tokenLookup = tokenLookup;
+
+            if (validateAllRows && !extendedVerification)
+                throw new IllegalArgumentException("validateAllRows must be enabled with extended verification");
         }
 
         @Override
@@ -85,6 +91,7 @@ public interface IVerifier extends Closeable
             return "Options{" +
                    "invokeDiskFailurePolicy=" + invokeDiskFailurePolicy +
                    ", extendedVerification=" + extendedVerification +
+                   ", validateAllRows=" + validateAllRows +
                    ", checkVersion=" + checkVersion +
                    ", mutateRepairStatus=" + mutateRepairStatus +
                    ", checkOwnsTokens=" + checkOwnsTokens +
@@ -96,6 +103,7 @@ public interface IVerifier extends Closeable
         {
             private boolean invokeDiskFailurePolicy = false; // invoking disk failure policy can stop the node if we find a corrupt stable
             private boolean extendedVerification = false;
+            private boolean validateAllRows = false; // whether to validate all rows in each partition in extended verification mode
             private boolean checkVersion = false;
             private boolean mutateRepairStatus = false; // mutating repair status can be dangerous
             private boolean checkOwnsTokens = false;
@@ -111,6 +119,12 @@ public interface IVerifier extends Closeable
             public Builder extendedVerification(boolean param)
             {
                 this.extendedVerification = param;
+                return this;
+            }
+
+            public Builder validateAllRows(boolean param)
+            {
+                this.validateAllRows = param;
                 return this;
             }
 
@@ -146,7 +160,7 @@ public interface IVerifier extends Closeable
 
             public Options build()
             {
-                return new Options(invokeDiskFailurePolicy, extendedVerification, checkVersion, mutateRepairStatus, checkOwnsTokens, quick, tokenLookup);
+                return new Options(invokeDiskFailurePolicy, extendedVerification, validateAllRows, checkVersion, mutateRepairStatus, checkOwnsTokens, quick, tokenLookup);
             }
         }
     }

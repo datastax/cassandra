@@ -44,6 +44,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -340,7 +341,9 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
                     if (key == null || dataSize > dataFile.length())
                         markAndThrow(new RuntimeException(String.format("key = %s, dataSize=%d, dataFile.length() = %d", key, dataSize, dataFile.length())));
 
-                    try (UnfilteredRowIterator iterator = SSTableIdentityIterator.create(sstable, dataFile, key))
+                    //mimic the scrub read path
+                    try (UnfilteredRowIterator identity = SSTableIdentityIterator.create(sstable, dataFile, key);
+                         UnfilteredRowIterator iterator = UnfilteredRowIterators.withValidation(identity, dataFile.getFile()))
                     {
                         verifyPartition(key, iterator);
                     }
