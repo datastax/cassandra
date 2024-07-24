@@ -18,10 +18,6 @@
 package org.apache.cassandra.index.sai.memory;
 
 import java.io.IOException;
-import java.util.SortedSet;
-
-import com.google.common.collect.Iterators;
-import com.google.common.collect.PeekingIterator;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -34,13 +30,13 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
 public class FilteringKeyRangeIterator extends RangeIterator
 {
     private final AbstractBounds<PartitionPosition> keyRange;
-    private final PeekingIterator<PrimaryKey> source;
+    private final RangeIterator source;
 
-    public FilteringKeyRangeIterator(SortedSet<PrimaryKey> keys, AbstractBounds<PartitionPosition> keyRange)
+    public FilteringKeyRangeIterator(RangeIterator source, AbstractBounds<PartitionPosition> keyRange)
     {
-        super(keys.first(), keys.last(), keys.size());
+        super(source.getMinimum(), source.getMaximum(), source.getMaxKeys());
         this.keyRange = keyRange;
-        this.source = Iterators.peekingIterator(keys.iterator());
+        this.source = source;
     }
 
     @Override
@@ -58,13 +54,7 @@ public class FilteringKeyRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        while (source.hasNext())
-        {
-            if (source.peek().compareTo(nextKey) >= 0)
-                break;
-            // Consume key
-            source.next();
-        }
+        source.skipTo(nextKey);
     }
 
     @Override
