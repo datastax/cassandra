@@ -503,11 +503,40 @@ class Shell(cmd.Cmd):
 
     def check_build_versions(self):
         baseversion = self.connection_versions['build']
-        extra = baseversion.rfind('-')
-        if extra != -1:
-            baseversion = baseversion[0:extra]
-        if baseversion != build_version:
-            print("WARNING: cqlsh was built against {}, but this server is {}.  All features may not work!".format(build_version, baseversion))
+        buildversion = build_version
+
+        # Remove any pre-release secondary component, e.g. SNAPSHOT, when delimited by either '-' or '.'
+        # ex. 5.0.0-beta2-SNAPSHOT -> 5.0.0-beta2
+        # ex. 5.0.0-beta2.SNAPSHOT -> 5.0.0-beta2
+        # ex. 5.0.0-rc1 -> no change
+        if baseversion.count('-') > 0:
+            if baseversion.count('-') > 1:
+                # When the pre-release component delimiter is a dash, e.g. 5.0.0-beta2-SNAPSHOT
+                extra = baseversion.rfind('-')
+                if extra != -1:
+                    baseversion = baseversion[0:extra]
+            else:
+                # When the pre-release component delimiter is a dot, e.g. 5.0.0-beta2.SNAPSHOT
+                prerelease_start = baseversion.rfind('-')
+                extra = baseversion.rfind('.')
+                if extra > prerelease_start:
+                    baseversion = baseversion[0:extra]
+
+        # CC produces a version string that includes a patch number, e.g. 5.0.0
+        # Remove the patch number if the build version does not include it
+        base_version_parts = baseversion.count('.')
+        build_version_parts = buildversion.count('.')
+        if base_version_parts > 1 and build_version_parts < base_version_parts:
+            base_parts = baseversion.split('-')
+            base_versions = base_parts[0].split('.')
+            if base_versions[-1] == '0':
+                base_versions.pop(-1)
+            baseversion = '.'.join(base_versions)
+            if len(base_parts) > 1:
+                baseversion = baseversion + '-' + base_parts[1]
+
+        if baseversion != buildversion:
+            print("WARNING: cqlsh was built against {}, but this server is {}.  All features may not work!".format(buildversion, baseversion))
 
     @property
     def batch_mode(self):
