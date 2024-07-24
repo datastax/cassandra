@@ -4061,16 +4061,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return verify(extendedVerify, false, false, false, false, false, keyspaceName, tableNames);
     }
 
+    /** @deprecated See CNDB-10054 */
+    @Deprecated(since = "CC4.0")
     public int verify(boolean extendedVerify, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    {
+        return verify(extendedVerify, false, checkVersion, diskFailurePolicy, mutateRepairStatus, checkOwnsTokens, quick, keyspaceName, tableNames);
+    }
+
+    public int verify(boolean extendedVerify, boolean validateAllRows, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
         IVerifier.Options options = IVerifier.options().invokeDiskFailurePolicy(diskFailurePolicy)
                                              .extendedVerification(extendedVerify)
+                                             .validateAllRows(validateAllRows)
                                              .checkVersion(checkVersion)
                                              .mutateRepairStatus(mutateRepairStatus)
                                              .checkOwnsTokens(checkOwnsTokens)
                                              .quick(quick).build();
-        logger.info("Staring {} on {}.{} with options = {}", OperationType.VERIFY, keyspaceName, Arrays.toString(tableNames), options);
+        logger.info("Starting {} on {}.{} with options = {}", OperationType.VERIFY, keyspaceName, Arrays.toString(tableNames), options);
         for (ColumnFamilyStore cfStore : getValidColumnFamilies(false, false, keyspaceName, tableNames))
         {
             CompactionManager.AllSSTableOpStatus oneStatus = cfStore.verify(options);
