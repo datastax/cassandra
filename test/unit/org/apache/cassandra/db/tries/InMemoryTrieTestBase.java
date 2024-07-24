@@ -31,8 +31,9 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Multiset;
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.ObjectSizes;
@@ -40,11 +41,15 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.junit.Assert.assertEquals;
 
-public abstract class MemtableTrieTestBase
+@RunWith(Parameterized.class)
+public abstract class InMemoryTrieTestBase
 {
     // Set this to true (in combination with smaller count) to dump the tries while debugging a problem.
     // Do not commit the code with VERBOSE = true.
     private static final boolean VERBOSE = false;
+
+    // Set to true by some tests that need prefix-free keys.
+    static boolean prefixFree = false;
 
     private static final int COUNT = 100000;
     private static final int KEY_CHOICE = 25;
@@ -53,7 +58,7 @@ public abstract class MemtableTrieTestBase
 
     Random rand = new Random();
 
-    static final ByteComparable.Version VERSION = MemtableTrie.BYTE_COMPARABLE_VERSION;
+    static final ByteComparable.Version VERSION = InMemoryTrie.BYTE_COMPARABLE_VERSION;
 
     public static final Comparator<ByteComparable> FORWARD_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, VERSION);
     public static final Comparator<ByteComparable> REVERSE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(invert(bytes1), invert(bytes2), VERSION);
@@ -80,12 +85,42 @@ public abstract class MemtableTrieTestBase
     public void testSingle()
     {
         ByteComparable e = ByteComparable.of("test");
-        MemtableTrie<String> trie = new MemtableTrie<>(BufferType.OFF_HEAP);
+        InMemoryTrie<String> trie = strategy.create();
         putSimpleResolve(trie, e, "test", (x, y) -> y);
         System.out.println("Trie " + trie.dump());
         assertEquals("test", trie.get(e));
         assertEquals(null, trie.get(ByteComparable.of("teste")));
     }
+
+    public enum ReuseStrategy
+    {
+        SHORT_LIVED
+        {
+            <T> InMemoryTrie<T> create()
+            {
+                return InMemoryTrie.shortLived();
+            }
+        },
+        LONG_LIVED
+        {
+            <T> InMemoryTrie<T> create()
+            {
+                return InMemoryTrie.longLived(null);
+            }
+        };
+
+        abstract <T> InMemoryTrie<T> create();
+    }
+
+    @Parameterized.Parameters(name="{0}")
+    public static Object[] generateData()
+    {
+        return ReuseStrategy.values();
+    }
+
+
+    @Parameterized.Parameter(0)
+    public static ReuseStrategy strategy = ReuseStrategy.LONG_LIVED;
 
     @Test
     public void testSplitMulti()
@@ -108,7 +143,7 @@ public abstract class MemtableTrieTestBase
         "40bdd47ec043641f2b403131323400",
         "40bd00bf5ae8cf9d1d403133323800",
         };
-        MemtableTrie<String> trie = new MemtableTrie<>(BufferType.OFF_HEAP);
+        InMemoryTrie<String> trie = strategy.create();
         for (String test : tests)
         {
             ByteComparable e = ByteComparable.fixedLength(ByteBufferUtil.hexToBytes(test));
@@ -138,7 +173,7 @@ public abstract class MemtableTrieTestBase
     {
         String[] tests = new String[] {"testing", "tests", "trials", "trial", "testing", "trial", "trial"};
         String[] values = new String[] {"testing", "tests", "trials", "trial", "t2", "x2", "y2"};
-        MemtableTrie<String> trie = new MemtableTrie<>(BufferType.OFF_HEAP);
+        InMemoryTrie<String> trie = strategy.create();
         for (int i = 0; i < tests.length; ++i)
         {
             String test = tests[i];
@@ -213,10 +248,24 @@ public abstract class MemtableTrieTestBase
             return ++depth;
         }
 
-        public int skipChildren()
+        public int skipTo(int skipDepth, int skipTransition)
         {
-            --depth;
-            stack = stack.parent;
+            assert skipDepth <= depth + 1 : "skipTo descends more than one level";
+
+            while (skipDepth < depth)
+            {
+                --depth;
+                stack = stack.parent;
+            }
+            int index = skipTransition - 0x30;
+            assert direction.gt(index, stack.curChild) : "Backwards skipTo";
+            if (direction.gt(index, direction.select(stack.children.length - 1, 0)))
+            {
+                --depth;
+                stack = stack.parent;
+                return advance();
+            }
+            stack.curChild = index - direction.increase;
             return advance();
         }
 
@@ -234,6 +283,18 @@ public abstract class MemtableTrieTestBase
         {
             SpecStackEntry parent = stack.parent;
             return parent != null ? parent.curChild + 0x30 : -1;
+        }
+
+        @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        @Override
+        public Trie<ByteBuffer> tailTrie()
+        {
+            throw new UnsupportedOperationException("tailTrie on test cursor");
         }
     }
 
@@ -302,7 +363,7 @@ public abstract class MemtableTrieTestBase
     {
         ByteComparable[] src = generateKeys(rand, COUNT);
         SortedMap<ByteComparable, ByteBuffer> content = new TreeMap<>(FORWARD_COMPARATOR);
-        MemtableTrie<ByteBuffer> trie = makeMemtableTrie(src, content, usePut());
+        InMemoryTrie<ByteBuffer> trie = makeInMemoryTrie(src, content, usePut());
         int keysize = Arrays.stream(src)
                             .mapToInt(src1 -> ByteComparable.length(src1, VERSION))
                             .sum();
@@ -397,7 +458,7 @@ public abstract class MemtableTrieTestBase
     private void testEntries(String[] tests, Function<String, ByteComparable> mapping)
 
     {
-        MemtableTrie<String> trie = new MemtableTrie<>(BufferType.OFF_HEAP);
+        InMemoryTrie<String> trie = strategy.create();
         for (String test : tests)
         {
             ByteComparable e = mapping.apply(test);
@@ -410,20 +471,60 @@ public abstract class MemtableTrieTestBase
             assertEquals(test, trie.get(mapping.apply(test)));
     }
 
-    static MemtableTrie<ByteBuffer> makeMemtableTrie(ByteComparable[] src,
+    static InMemoryTrie<ByteBuffer> makeInMemoryTrie(ByteComparable[] src,
                                                      Map<ByteComparable, ByteBuffer> content,
                                                      boolean usePut)
 
     {
-        MemtableTrie<ByteBuffer> trie = new MemtableTrie<>(BufferType.OFF_HEAP);
-        addToMemtableTrie(src, content, trie, usePut);
+        InMemoryTrie<ByteBuffer> trie = strategy.create();
+        addToInMemoryTrie(src, content, trie, usePut);
         return trie;
     }
 
-    static void addToMemtableTrie(ByteComparable[] src,
+    static void addToInMemoryTrie(ByteComparable[] src,
                                   Map<ByteComparable, ByteBuffer> content,
-                                  MemtableTrie<ByteBuffer> trie,
+                                  InMemoryTrie<? super ByteBuffer> trie,
                                   boolean usePut)
+
+    {
+        for (ByteComparable b : src)
+            addToInMemoryTrie(content, trie, usePut, b);
+    }
+
+    static void addNthToInMemoryTrie(ByteComparable[] src,
+                                     Map<ByteComparable, ByteBuffer> content,
+                                     InMemoryTrie<? super ByteBuffer> trie,
+                                     boolean usePut,
+                                     int divisor,
+                                     int remainder)
+
+    {
+        int i = 0;
+        for (ByteComparable b : src)
+        {
+            if (i++ % divisor != remainder)
+                continue;
+
+            addToInMemoryTrie(content, trie, usePut, b);
+        }
+    }
+
+    private static void addToInMemoryTrie(Map<ByteComparable, ByteBuffer> content, InMemoryTrie<? super ByteBuffer> trie, boolean usePut, ByteComparable b)
+    {
+        // Note: Because we don't ensure order when calling resolve, just use a hash of the key as payload
+        // (so that all sources have the same value).
+        int payload = asString(b).hashCode();
+        ByteBuffer v = ByteBufferUtil.bytes(payload);
+        content.put(b, v);
+        if (VERBOSE)
+            System.out.println("Adding " + asString(b) + ": " + ByteBufferUtil.bytesToHex(v));
+        putSimpleResolve(trie, b, v, (x, y) -> y, usePut);
+        if (VERBOSE)
+            System.out.println(trie.dump(x -> string(x)));
+    }
+
+    static void addToMap(ByteComparable[] src,
+                         Map<ByteComparable, ByteBuffer> content)
 
     {
         for (ByteComparable b : src)
@@ -433,18 +534,24 @@ public abstract class MemtableTrieTestBase
             int payload = asString(b).hashCode();
             ByteBuffer v = ByteBufferUtil.bytes(payload);
             content.put(b, v);
-            if (VERBOSE)
-                System.out.println("Adding " + asString(b) + ": " + ByteBufferUtil.bytesToHex(v));
-            putSimpleResolve(trie, b, v, (x, y) -> y, usePut);
-            if (VERBOSE)
-                System.out.println(trie.dump(ByteBufferUtil::bytesToHex));
         }
     }
 
-    static void checkGet(MemtableTrie<ByteBuffer> trie, Map<ByteComparable, ByteBuffer> items)
+    private static String string(Object x)
+    {
+        return x instanceof ByteBuffer
+               ? ByteBufferUtil.bytesToHex((ByteBuffer) x)
+               : x instanceof ByteComparable
+                 ? ((ByteComparable) x).byteComparableAsString(VERSION)
+                 : x.toString();
+    }
+
+    static void checkGet(Trie<? super ByteBuffer> trie, Map<ByteComparable, ByteBuffer> items)
     {
         for (Map.Entry<ByteComparable, ByteBuffer> en : items.entrySet())
         {
+            if (VERBOSE)
+                System.out.println("Checking " + asString(en.getKey()) + ": " + ByteBufferUtil.bytesToHex(en.getValue()));
             assertEquals(en.getValue(), trie.get(en.getKey()));
         }
     }
@@ -458,6 +565,7 @@ public abstract class MemtableTrieTestBase
         assertUnorderedValuesEqual(trie, map);
         assertMapEquals(trie, map, Direction.REVERSE);
         assertForEachEntryEquals(trie, map, Direction.REVERSE);
+        checkGet(trie, map);
     }
 
     private static void assertValuesEqual(Trie<ByteBuffer> trie, SortedMap<ByteComparable, ByteBuffer> map)
@@ -562,7 +670,7 @@ public abstract class MemtableTrieTestBase
         }
         if (!failedAt.isEmpty())
         {
-            String message = "Failed at " + Lists.transform(failedAt, MemtableTrieTestBase::asString);
+            String message = "Failed at " + Lists.transform(failedAt, InMemoryTrieTestBase::asString);
             System.err.println(message);
             System.err.println(b);
             Assert.fail(message);
@@ -619,7 +727,8 @@ public abstract class MemtableTrieTestBase
             while (p < m)
                 bytes[p++] = (byte) r2.nextInt(256);
         }
-        return ByteComparable.fixedLength(bytes);
+        return prefixFree ? v -> ByteSource.withTerminator(ByteSource.TERMINATOR, ByteSource.of(bytes, v))
+                          : ByteComparable.fixedLength(bytes);
     }
 
     static String asString(ByteComparable bc)
@@ -627,7 +736,7 @@ public abstract class MemtableTrieTestBase
         return bc != null ? bc.byteComparableAsString(VERSION) : "null";
     }
 
-    <T, M> void putSimpleResolve(MemtableTrie<T> trie,
+    <T, M> void putSimpleResolve(InMemoryTrie<T> trie,
                                  ByteComparable key,
                                  T value,
                                  Trie.MergeResolver<T> resolver)
@@ -635,7 +744,7 @@ public abstract class MemtableTrieTestBase
         putSimpleResolve(trie, key, value, resolver, usePut());
     }
 
-    static <T, M> void putSimpleResolve(MemtableTrie<T> trie,
+    static <T, M> void putSimpleResolve(InMemoryTrie<T> trie,
                                         ByteComparable key,
                                         T value,
                                         Trie.MergeResolver<T> resolver,
@@ -648,7 +757,7 @@ public abstract class MemtableTrieTestBase
                               (existing, update) -> existing != null ? resolver.resolve(existing, update) : update,
                               usePut);
         }
-        catch (MemtableTrie.SpaceExhaustedException e)
+        catch (TrieSpaceExhaustedException e)
         {
             throw Throwables.propagate(e);
         }

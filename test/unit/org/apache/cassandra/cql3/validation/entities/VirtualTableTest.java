@@ -80,11 +80,11 @@ public class VirtualTableTest extends CQLTester
         public void apply(PartitionUpdate update)
         {
             String key = (String) metadata().partitionKeyType.compose(update.partitionKey().getKey());
-            update.forEach(row ->
-                           {
-                               Integer value = Int32Type.instance.compose(row.getCell(valueColumn).buffer());
-                               backingMap.put(key, value);
-                           });
+            update.rows().forEach(row ->
+                                  {
+                                      Integer value = Int32Type.instance.compose(row.getCell(valueColumn).buffer());
+                                      backingMap.put(key, value);
+                                  });
         }
     }
 

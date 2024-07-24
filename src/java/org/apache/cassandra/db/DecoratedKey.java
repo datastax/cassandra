@@ -107,10 +107,25 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
     {
         // Note: In the legacy version one encoding could be a prefix of another as the escaping is only weakly
         // prefix-free (see ByteSourceTest.testDecoratedKeyPrefixes()).
-        // The OSS41 version avoids this by adding a terminator.
-        return ByteSource.withTerminator(version == Version.LEGACY ? ByteSource.END_OF_STREAM : ByteSource.TERMINATOR,
-                                         token.asComparableBytes(version),
-                                         keyComparableBytes(version));
+        // The OSS41 and 50 versions avoids this by adding a terminator.
+        return ByteSource.withTerminatorMaybeLegacy(version,
+                                                    ByteSource.END_OF_STREAM,
+                                                    token.asComparableBytes(version),
+                                                    keyComparableBytes(version));
+    }
+
+    @Override
+    public ByteComparable asComparableBound(boolean before)
+    {
+        return version ->
+        {
+            assert (version != Version.LEGACY) : "Decorated key bounds are not supported by the legacy encoding.";
+
+            return ByteSource.withTerminator(
+                    before ? ByteSource.LT_NEXT_COMPONENT : ByteSource.GT_NEXT_COMPONENT,
+                    token.asComparableBytes(version),
+                    keyComparableBytes(version));
+        };
     }
 
     protected ByteSource keyComparableBytes(Version version)
@@ -181,11 +196,22 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
                                                Version version,
                                                IPartitioner partitioner)
     {
-        ByteSource.Peekable peekable = byteComparable.asPeekableBytes(version);
+        return keyFromByteSource(byteComparable.asPeekableBytes(version), version, partitioner);
+    }
+
+
+    public static byte[] keyFromByteSource(ByteSource.Peekable peekableByteSource,
+                                           Version version,
+                                           IPartitioner partitioner)
+    {
+        assert version != Version.LEGACY;   // reverse translation is not supported for LEGACY version.
         // Decode the token from the first component of the multi-component sequence representing the whole decorated key.
         // We won't use it, but the decoding also positions the byte source after it.
-        partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), version);
+        partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekableByteSource), version);
         // Decode the key bytes from the second component.
-        return ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
+        byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekableByteSource));
+        int terminator = peekableByteSource.next();
+        assert terminator == ByteSource.TERMINATOR : "Decorated key encoding must end in terminator.";
+        return keyBytes;
     }
 }

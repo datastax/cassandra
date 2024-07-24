@@ -39,7 +39,8 @@ public class DecoratedKeyByteSourceTest
     @Parameterized.Parameters(name = "version={0}")
     public static Iterable<ByteComparable.Version> versions()
     {
-        return ImmutableList.of(ByteComparable.Version.OSS41);
+        return ImmutableList.of(ByteComparable.Version.OSS41,
+                                ByteComparable.Version.OSS50);
     }
 
     private final ByteComparable.Version version;

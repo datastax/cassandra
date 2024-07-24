@@ -133,8 +133,18 @@ public enum Direction
 
     /** Returns the result of the operation corresponding to a<b for the forward direction */
     public abstract boolean lt(int a, int b);
+    /** Returns the result of the operation corresponding to a>b for the forward direction */
+    public boolean gt(int a, int b)
+    {
+        return lt(b, a);
+    }
     /** Returns the result of the operation corresponding to a<=b for the forward direction */
     public abstract boolean le(int a, int b);
+    /** Returns the result of the operation corresponding to a>=b for the forward direction */
+    public boolean ge(int a, int b)
+    {
+        return le(b, a);
+    }
     /** Returns the result of the operation corresponding to min(a, b) for the forward direction */
     public abstract int min(int a, int b);
     /** Returns the result of the operation corresponding to max(a, b) for the forward direction */
@@ -163,4 +173,9 @@ public enum Direction
     public abstract boolean isForward();
 
     public abstract Direction opposite();
+
+    public static Direction fromBoolean(boolean reversed)
+    {
+        return reversed ? REVERSE : FORWARD;
+    }
 }

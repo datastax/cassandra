@@ -59,7 +59,7 @@ public class Commit
 
     public static Commit newProposal(UUID ballot, PartitionUpdate update)
     {
-        PartitionUpdate withNewTimestamp = new PartitionUpdate.Builder(update, 0).updateAllTimestamp(UUIDGen.microsTimestamp(ballot)).build();
+        PartitionUpdate withNewTimestamp = update.withUpdatedTimestamps(UUIDGen.microsTimestamp(ballot));
         return new Commit(ballot, withNewTimestamp);
     }
 

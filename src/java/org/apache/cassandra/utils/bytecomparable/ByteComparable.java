@@ -19,9 +19,18 @@
 package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Interface indicating a value can be represented/identified by a comparable {@link ByteSource}.
+ *
+ * All Cassandra types that can be used as part of a primary key have a corresponding byte-comparable translation,
+ * detailed in ByteComparable.md. Byte-comparable representations are used in some memtable as well as primary and
+ * secondary index implementations.
  */
 public interface ByteComparable
 {
@@ -39,6 +48,7 @@ public interface ByteComparable
     {
         LEGACY,
         OSS41,  // CASSANDRA 4.1 encoding, used in trie-based indices
+        OSS50,  // CASSANDRA 5.0 encoding, used by the trie memtable
     }
 
     ByteComparable EMPTY = (Version version) -> ByteSource.EMPTY;
@@ -57,10 +67,20 @@ public interface ByteComparable
         return builder.toString();
     }
 
+    /**
+     * Returns the full byte-comparable representation of the value as a byte array.
+     */
+    default byte[] asByteComparableArray(Version version)
+    {
+        return ByteSourceInverse.readBytes(asComparableBytes(version));
+    }
+
     // Simple factories used for testing
 
+    @VisibleForTesting
     static ByteComparable of(String s)
     {
+        // Note: This is not prefix-free
         return v -> ByteSource.of(s, v);
     }
 

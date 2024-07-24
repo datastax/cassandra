@@ -77,6 +77,17 @@ public class SlabAllocator extends MemtableBufferAllocator
         return ensureOnHeap;
     }
 
+    @Override
+    public long unusedReservedOnHeapMemory()
+    {
+        if (!allocateOnHeapOnly)
+            return 0;
+        Region current = currentRegion.get();
+        if (current == null)
+            return 0;
+        return current.unusedReservedMemory();
+    }
+
     public ByteBuffer allocate(int size)
     {
         return allocate(size, null);
@@ -213,6 +224,11 @@ public class SlabAllocator extends MemtableBufferAllocator
         {
             return "Region@" + System.identityHashCode(this) +
                    "waste=" + Math.max(0, data.capacity() - nextFreeOffset.get());
+        }
+
+        long unusedReservedMemory()
+        {
+            return data.capacity() - nextFreeOffset.get();
         }
     }
 }

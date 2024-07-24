@@ -21,10 +21,22 @@ import java.nio.ByteBuffer;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 @BenchmarkMode(Mode.AverageTime)
@@ -34,7 +46,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @Fork(value = 1,jvmArgsAppend = { "-Xmx4G", "-Xms4G", "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"})
 @Threads(1) // no concurrent writes
 @State(Scope.Benchmark)
-public class MemtableTrieWriteBench
+public class InMemoryTrieWriteBench
 {
     @Param({"ON_HEAP", "OFF_HEAP"})
     BufferType bufferType = BufferType.OFF_HEAP;
@@ -45,16 +57,16 @@ public class MemtableTrieWriteBench
     @Param({"8"})
     int keyLength = 8;
 
-    final static MemtableTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
+    final static InMemoryTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
 
     // Set this to true to print the trie sizes after insertions for sanity checking.
     // This might affect the timings, do not commit with this set to true.
     final static boolean PRINT_SIZES = false;
 
     @Benchmark
-    public void putSequential(Blackhole bh) throws MemtableTrie.SpaceExhaustedException
+    public void putSequential(Blackhole bh) throws TrieSpaceExhaustedException
     {
-        MemtableTrie<Byte> trie = new MemtableTrie(bufferType);
+        InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         ByteBuffer buf = ByteBuffer.allocate(keyLength);
 
         for (long current = 0; current < count; ++current)
@@ -64,14 +76,18 @@ public class MemtableTrieWriteBench
             trie.putRecursive(ByteComparable.fixedLength(buf), Byte.valueOf((byte) (l >> 56)), resolver);
         }
         if (PRINT_SIZES)
-            System.out.println(trie.valuesCount());
+        {
+            System.out.println(String.format("Size on heap %s off heap %s",
+                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+        }
         bh.consume(trie);
     }
 
     @Benchmark
-    public void putRandom(Blackhole bh) throws MemtableTrie.SpaceExhaustedException
+    public void putRandom(Blackhole bh) throws TrieSpaceExhaustedException
     {
-        MemtableTrie<Byte> trie = new MemtableTrie(bufferType);
+        InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         Random rand = new Random(1);
         byte[] buf = new byte[keyLength];
 
@@ -81,14 +97,18 @@ public class MemtableTrieWriteBench
             trie.putRecursive(ByteComparable.fixedLength(buf), Byte.valueOf(buf[0]), resolver);
         }
         if (PRINT_SIZES)
-            System.out.println(trie.valuesCount());
+        {
+            System.out.println(String.format("Size on heap %s off heap %s",
+                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+        }
         bh.consume(trie);
     }
 
     @Benchmark
-    public void applySequential(Blackhole bh) throws MemtableTrie.SpaceExhaustedException
+    public void applySequential(Blackhole bh) throws TrieSpaceExhaustedException
     {
-        MemtableTrie<Byte> trie = new MemtableTrie(bufferType);
+        InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         ByteBuffer buf = ByteBuffer.allocate(keyLength);
 
         for (long current = 0; current < count; ++current)
@@ -98,14 +118,18 @@ public class MemtableTrieWriteBench
             trie.putSingleton(ByteComparable.fixedLength(buf), Byte.valueOf((byte) (l >> 56)), resolver);
         }
         if (PRINT_SIZES)
-            System.out.println(trie.valuesCount());
+        {
+            System.out.println(String.format("Size on heap %s off heap %s",
+                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+        }
         bh.consume(trie);
     }
 
     @Benchmark
-    public void applyRandom(Blackhole bh) throws MemtableTrie.SpaceExhaustedException
+    public void applyRandom(Blackhole bh) throws TrieSpaceExhaustedException
     {
-        MemtableTrie<Byte> trie = new MemtableTrie(bufferType);
+        InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         Random rand = new Random(1);
         byte[] buf = new byte[keyLength];
 
@@ -115,7 +139,11 @@ public class MemtableTrieWriteBench
             trie.putSingleton(ByteComparable.fixedLength(buf), Byte.valueOf(buf[0]), resolver);
         }
         if (PRINT_SIZES)
-            System.out.println(trie.valuesCount());
+        {
+            System.out.println(String.format("Size on heap %s off heap %s",
+                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+        }
         bh.consume(trie);
     }
 }

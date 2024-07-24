@@ -67,12 +67,15 @@ public abstract class MemtableSizeTestBase extends CQLTester
     public static List<Object> parameters()
     {
         return ImmutableList.of("SkipListMemtable",
+                                "TrieMemtableStage1",
                                 "TrieMemtable");
     }
 
     // Must be within 3% of the real usage. We are actually more precise than this, but the threshold is set higher to
     // avoid flakes. For on-heap allocators we allow for extra overheads below.
     final int MAX_DIFFERENCE_PERCENT = 3;
+    // Slab overhead, added when the memtable uses heap_buffers.
+    final int SLAB_OVERHEAD = 1024 * 1024;
     // Extra leniency for unslabbed buffers. We are not as precise there, and it's not a mode in real use.
     final int UNSLABBED_EXTRA_PERCENT = 2;
 
@@ -167,12 +170,18 @@ public abstract class MemtableSizeTestBase extends CQLTester
                               cfs.getTracker().getView().getCurrentMemtable());
 
             Memtable.MemoryUsage usage = Memtable.getMemoryUsage(memtable);
-            long calculatedHeap = usage.ownsOnHeap;
+            long reportedHeap = usage.ownsOnHeap;
             System.out.println(String.format("Memtable in %s mode: %d ops, %s serialized bytes, %s",
                                              DatabaseDescriptor.getMemtableAllocationType(),
                                              memtable.getOperations(),
                                              FBUtilities.prettyPrintMemory(memtable.getLiveDataSize()),
                                              usage));
+
+            if (memtable instanceof TrieMemtable)
+                ((TrieMemtable) memtable).releaseReferencesUnsafe();
+
+//            System.out.println("Take jmap -histo:live <pid>");
+//            Thread.sleep(10000);
 
             long deepSizeAfter = meter.measureDeep(memtable);
             System.out.println("Memtable deep size " +
@@ -180,16 +189,12 @@ public abstract class MemtableSizeTestBase extends CQLTester
 
             long actualHeap = deepSizeAfter - deepSizeBefore;
             long maxDifference = MAX_DIFFERENCE_PERCENT * actualHeap / 100;
-            long trieOverhead = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).unusedReservedMemory() : 0;
-            calculatedHeap += trieOverhead;    // adjust trie memory with unused buffer space if on-heap
+            long unusedReserved = memtable.unusedReservedOnHeapMemory();
+            System.out.println("Unused reserved " + FBUtilities.prettyPrintMemory(unusedReserved));
+            reportedHeap += unusedReserved;
+
             switch (DatabaseDescriptor.getMemtableAllocationType())
             {
-                case heap_buffers:
-                    // MemoryUsage only counts the memory actually used by cells,
-                    // so add in the slab overhead to match what MemoryMeter sees
-                    int slabCount = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).getShardCount() : 1;
-                    maxDifference += (long) SlabAllocator.REGION_SIZE * slabCount;
-                    break;
                 case unslabbed_heap_buffers:
                     // add a hardcoded slack factor
                     maxDifference += actualHeap * UNSLABBED_EXTRA_PERCENT / 100;
@@ -197,10 +202,10 @@ public abstract class MemtableSizeTestBase extends CQLTester
             }
             String message = String.format("Actual heap usage is %s, got %s, %s difference.\n",
                                            FBUtilities.prettyPrintMemory(actualHeap),
-                                           FBUtilities.prettyPrintMemory(calculatedHeap),
-                                           FBUtilities.prettyPrintMemory(actualHeap - calculatedHeap));
+                                           FBUtilities.prettyPrintMemory(reportedHeap),
+                                           FBUtilities.prettyPrintMemory(actualHeap - reportedHeap));
             System.out.println(message);
-            Assert.assertTrue(message, Math.abs(calculatedHeap - actualHeap) <= maxDifference);
+            Assert.assertTrue(message, Math.abs(reportedHeap - actualHeap) <= maxDifference);
         }
         finally
         {

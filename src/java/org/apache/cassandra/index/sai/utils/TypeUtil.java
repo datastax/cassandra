@@ -230,7 +230,7 @@ public class TypeUtil
         else if (type instanceof DecimalType)
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, DECIMAL_APPROXIMATION_BYTES);
         else
-            ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
+            ByteSourceInverse.readBytesMustFit(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
     }
 
     /**
@@ -543,7 +543,8 @@ public class TypeUtil
     public static ByteBuffer encodeDecimal(ByteBuffer value)
     {
         ByteSource bs = DecimalType.instance.asComparableBytes(value, ByteComparable.Version.OSS41);
-        bs = ByteSource.cutOrRightPad(bs, DECIMAL_APPROXIMATION_BYTES, 0);
-        return ByteBuffer.wrap(ByteSourceInverse.readBytes(bs, DECIMAL_APPROXIMATION_BYTES));
+        byte[] data = new byte[DECIMAL_APPROXIMATION_BYTES];    // initialized with 0s
+        bs.nextBytes(data); // reads up to the number of bytes in the array, leaving 0s in the remaining bytes
+        return ByteBuffer.wrap(data);
     }
 }

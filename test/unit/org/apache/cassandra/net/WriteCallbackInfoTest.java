@@ -61,7 +61,7 @@ public class WriteCallbackInfoTest
     {
         TableMetadata metadata = MockSchema.newTableMetadata("", "");
         Object payload = verb == Verb.PAXOS_COMMIT_REQ
-                         ? new Commit(UUID.randomUUID(), new PartitionUpdate.Builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build())
+                         ? new Commit(UUID.randomUUID(), PartitionUpdate.builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build())
                          : new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
 
         RequestCallbacks.WriteCallbackInfo wcbi = new RequestCallbacks.WriteCallbackInfo(Message.out(verb, payload), full(InetAddressAndPort.getByName("192.168.1.1")), null, cl, allowHints);

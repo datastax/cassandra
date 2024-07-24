@@ -120,7 +120,7 @@ public class PartitionerDefinedOrder extends AbstractType<ByteBuffer>
         assert version != Version.LEGACY;
         if (comparableBytes == null)
             return accessor.empty();
-        byte[] keyBytes = DecoratedKey.keyFromByteComparable(v -> comparableBytes, version, partitioner);
+        byte[] keyBytes = DecoratedKey.keyFromByteSource(comparableBytes, version, partitioner);
         return accessor.valueOf(keyBytes);
     }
 

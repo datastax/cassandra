@@ -31,7 +31,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -124,7 +124,7 @@ public class CompactionsPurgeTest
         FBUtilities.waitOnFutures(CompactionManager.instance.submitMaximal(cfs, Integer.MAX_VALUE, false));
         cfs.invalidateCachedPartition(dk(key));
 
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         assertEquals(1, partition.rowCount());
     }
 
@@ -169,7 +169,7 @@ public class CompactionsPurgeTest
 
         cfs.invalidateCachedPartition(dk(key));
 
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         assertEquals(1, partition.rowCount());
     }
 
@@ -213,7 +213,7 @@ public class CompactionsPurgeTest
 
         cfs.invalidateCachedPartition(dk(key));
 
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         assertEquals(1, partition.rowCount());
     }
 
@@ -255,7 +255,7 @@ public class CompactionsPurgeTest
 
         cfs.invalidateCachedPartition(dk(key));
 
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         assertEquals(1, partition.rowCount());
     }
 
@@ -315,7 +315,7 @@ public class CompactionsPurgeTest
 
         // verify that minor compaction still GC when key is present
         // in a non-compacted sstable but the timestamp ensures we won't miss anything
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key1).build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key1).build());
         assertEquals(1, partition.rowCount());
     }
 
@@ -363,9 +363,9 @@ public class CompactionsPurgeTest
 
         // We should have both the c1 and c2 tombstones still. Since the min timestamp in the c2 tombstone
         // sstable is older than the c1 tombstone, it is invalid to throw out the c1 tombstone.
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key3).build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key3).build());
         assertEquals(2, partition.rowCount());
-        for (Row row : partition)
+        for (Row row : partition.rows())
             assertFalse(row.hasLiveData(FBUtilities.nowInSeconds(), enforceStrictLiveness));
     }
 
@@ -471,7 +471,7 @@ public class CompactionsPurgeTest
         rm.add(PartitionUpdate.fullPartitionDelete(cfs.metadata(), dk(key), 4, FBUtilities.nowInSeconds()));
         rm.build().applyUnsafe();
 
-        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         assertFalse(partition.partitionLevelDeletion().isLive());
 
         // flush and major compact (with tombstone purging)

@@ -72,7 +72,7 @@ public class DeletePartitionTest
         // validate that data's written
         FilteredPartition partition = Util.getOnlyPartition(Util.cmd(store, key).build());
         assertTrue(partition.rowCount() > 0);
-        Row r = partition.iterator().next();
+        Row r = partition.rowIterator().next();
         assertTrue(r.getCell(column).value().equals(ByteBufferUtil.bytes("asdf")));
 
         if (flushBeforeRemove)
@@ -88,8 +88,8 @@ public class DeletePartitionTest
             store.forceBlockingFlush(UNIT_TESTS);
 
         // validate removal
-        ImmutableBTreePartition partitionUnfiltered = Util.getOnlyPartitionUnfiltered(Util.cmd(store, key).build());
+        Partition partitionUnfiltered = Util.getOnlyPartitionUnfiltered(Util.cmd(store, key).build());
         assertFalse(partitionUnfiltered.partitionLevelDeletion().isLive());
-        assertFalse(partitionUnfiltered.iterator().hasNext());
+        assertFalse(partitionUnfiltered.rowIterator().hasNext());
     }
 }

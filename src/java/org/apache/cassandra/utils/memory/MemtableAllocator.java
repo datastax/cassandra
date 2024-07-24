@@ -75,6 +75,11 @@ public abstract class MemtableAllocator
         return offHeap;
     }
 
+    public long unusedReservedOnHeapMemory()
+    {
+        return 0; // only slabbed allocators would have non-zero here
+    }
+
     /**
      * Mark this allocator reclaiming; this will permit any outstanding allocations to temporarily
      * overshoot the maximum memory limit so that flushing can begin immediately

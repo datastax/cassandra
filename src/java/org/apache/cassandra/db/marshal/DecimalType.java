@@ -84,7 +84,7 @@ public class DecimalType extends NumberType<BigDecimal>
      * We store:
      *     - sign bit inverted * 0x80 + 0x40 + signed exponent length, where exponent is negated if value is negative
      *     - zero or more exponent bytes (as given by length)
-     *     - 0x80 + first pair of decimal digits, negative is value is negative, rounded to -inf
+     *     - 0x80 + first pair of decimal digits, negative if value is negative, rounded to -inf
      *     - zero or more 0x80 + pair of decimal digits, always positive
      *     - trailing 0x00
      * Zero is special-cased as 0x80.
@@ -174,7 +174,7 @@ public class DecimalType extends NumberType<BigDecimal>
                 else
                 {
                     BigDecimal v = current.scaleByPowerOfTen(2);
-                    BigDecimal floor = v.setScale(0, BigDecimal.ROUND_FLOOR);
+                    BigDecimal floor = v.setScale(0, RoundingMode.FLOOR);
                     current = v.subtract(floor);
                     return floor.byteValueExact() + 0x80;
                 }

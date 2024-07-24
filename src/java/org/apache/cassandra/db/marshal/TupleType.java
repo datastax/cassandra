@@ -263,6 +263,20 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
     @Override
     public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
     {
+        switch (version)
+        {
+            case LEGACY:
+            case OSS41:
+                return asComparableBytesLegacy(accessor, data, version);
+            case OSS50:
+                return asComparableBytes50(accessor, data, version);
+            default:
+                throw new AssertionError();
+        }
+    }
+
+    private <V> ByteSource asComparableBytesLegacy(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
+    {
         if (accessor.isEmpty(data))
             return null;
 
@@ -270,27 +284,59 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
         ByteSource[] srcs = new ByteSource[subTypes.size()];
         for (int i = 0; i < bufs.length; ++i)
             srcs[i] = bufs[i] != null ? subTypes.get(i).asComparableBytes(accessor, bufs[i], version) : null;
+
         // We always have a fixed number of sources, with the trailing ones possibly being nulls.
         // This can only result in a prefix if the last type in the tuple allows prefixes. Since that type is required
         // to be weakly prefix-free, so is the tuple.
-        return ByteSource.withTerminator(ByteSource.END_OF_STREAM, srcs);
+        return ByteSource.withTerminatorLegacy(ByteSource.END_OF_STREAM, srcs);
+    }
+
+    private <V> ByteSource asComparableBytes50(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
+    {
+        if (accessor.isEmpty(data))
+            return null;
+
+        V[] bufs = split(accessor, data);
+        int lengthWithoutTrailingNulls = 0;
+        for (int i = 0; i < bufs.length; ++i)
+            if (bufs[i] != null)
+                lengthWithoutTrailingNulls = i + 1;
+
+        ByteSource[] srcs = new ByteSource[lengthWithoutTrailingNulls];
+        for (int i = 0; i < lengthWithoutTrailingNulls; ++i)
+            srcs[i] = bufs[i] != null ? subTypes.get(i).asComparableBytes(accessor, bufs[i], version) : null;
+
+        // Because we stop early when there are trailing nulls, there needs to be an explicit terminator to make the
+        // type prefix-free.
+        return ByteSource.withTerminator(ByteSource.TERMINATOR, srcs);
     }
 
     @Override
     public <V> V fromComparableBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, ByteComparable.Version version)
     {
+        assert version != ByteComparable.Version.LEGACY; // Reverse translation is not supported for the legacy version.
         if (comparableBytes == null)
             return accessor.empty();
 
         V[] componentBuffers = accessor.createArray(subTypes.size());
         for (int i = 0; i < subTypes.size(); ++i)
         {
+            if (comparableBytes.peek() == ByteSource.TERMINATOR)
+                break;  // the rest of the fields remain null
             AbstractType<?> componentType = subTypes.get(i);
             ByteSource.Peekable component = ByteSourceInverse.nextComponentSource(comparableBytes);
             if (component != null)
                 componentBuffers[i] = componentType.fromComparableBytes(accessor, component, version);
             else
                 componentBuffers[i] = null;
+        }
+        if (version == ByteComparable.Version.OSS50)
+        {
+            // consume terminator
+            int terminator = comparableBytes.next();
+            assert terminator == ByteSource.TERMINATOR : String.format("Expected TERMINATOR (0x%2x) after %d components",
+                                                                       ByteSource.TERMINATOR,
+                                                                       subTypes.size());
         }
         return buildValue(accessor, componentBuffers);
     }

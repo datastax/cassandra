@@ -41,8 +41,9 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.memtable.TrieMemtable;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -63,7 +64,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
-    private final MemtableTrie<PrimaryKeys> data;
+    private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
 
     private ByteBuffer minTerm;
@@ -80,7 +81,7 @@ public class TrieMemoryIndex extends MemoryIndex
     public TrieMemoryIndex(IndexContext indexContext)
     {
         super(indexContext);
-        this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
+        this.data = InMemoryTrie.longLived(TrieMemtable.BUFFER_TYPE, indexContext.owner().readOrdering());
         this.primaryKeysReducer = new PrimaryKeysReducer();
     }
 
@@ -112,16 +113,9 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
-                    {
-                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
-                    }
-                    else
-                    {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
-                    }
+                    data.putSingleton(encodedTerm, primaryKey, primaryKeysReducer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
-                catch (MemtableTrie.SpaceExhaustedException e)
+                catch (TrieSpaceExhaustedException e)
                 {
                     Throwables.throwAsUncheckedException(e);
                 }
@@ -258,38 +252,17 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return indexContext.isLiteral() ? version -> append(ByteSource.of(input, version), ByteSource.TERMINATOR)
-                                        : version -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), version);
+        return indexContext.isLiteral() ? version -> ByteSource.append(ByteSource.of(input, ByteComparable.Version.OSS41), ByteSource.TERMINATOR)
+                                        : version -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), ByteComparable.Version.OSS41);
     }
 
     private ByteComparable decode(ByteComparable term)
     {
-        return indexContext.isLiteral() ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
+        return indexContext.isLiteral() ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(ByteComparable.Version.OSS41)))
                                         : term;
     }
 
-    private ByteSource append(ByteSource src, int lastByte)
-    {
-        return new ByteSource()
-        {
-            boolean done = false;
-
-            @Override
-            public int next()
-            {
-                if (done)
-                    return END_OF_STREAM;
-                int n = src.next();
-                if (n != END_OF_STREAM)
-                    return n;
-
-                done = true;
-                return lastByte;
-            }
-        };
-    }
-
-    class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations = new LongAdder();
 

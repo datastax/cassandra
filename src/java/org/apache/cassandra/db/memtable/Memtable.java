@@ -20,6 +20,7 @@ package org.apache.cassandra.db.memtable;
 
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ListenableFuture;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -30,6 +31,7 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -145,6 +147,14 @@ public interface Memtable extends Comparable<Memtable>
         {
             return null;
         }
+
+        /**
+         * Override this method to provide a custom partition update factory for more efficient merging of updates.
+         */
+        default PartitionUpdate.Factory partitionUpdateFactory()
+        {
+            return BTreePartitionUpdate.FACTORY;
+        }
     }
 
     /**
@@ -165,6 +175,11 @@ public interface Memtable extends Comparable<Memtable>
         Iterable<Memtable> getIndexMemtables();
 
         ShardBoundaries localRangeSplits(int shardCount);
+
+        /**
+         * Get the op-order primitive that protects data for the duration of reads.
+         */
+        public OpOrder readOrdering();
     }
 
     // Main write and read operations
@@ -271,6 +286,19 @@ public interface Memtable extends Comparable<Memtable>
         memtable.addMemoryUsageTo(usage);
         return usage;
     }
+
+    /**
+     * Returns the amount of on-heap memory that has been allocated for this memtable but is not yet used.
+     * This is not counted in the memory usage to have a better flushing decision behaviour -- we do not want to flush
+     * immediately after allocating a new buffer but when we have actually used the space provided.
+     * The method is provided for testing the memory usage tracking of memtables.
+     */
+    @VisibleForTesting
+    default long unusedReservedOnHeapMemory()
+    {
+        return 0;
+    }
+
 
     class MemoryUsage
     {

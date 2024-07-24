@@ -20,6 +20,7 @@ package org.apache.cassandra.hints;
 import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.db.partitions.AbstractBTreePartition;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 
 import static junit.framework.Assert.assertEquals;
@@ -27,12 +28,11 @@ import static junit.framework.Assert.assertTrue;
 
 final class HintsTestUtil
 {
-    static void assertPartitionsEqual(AbstractBTreePartition expected, AbstractBTreePartition actual)
+    static void assertPartitionsEqual(Partition expected, Partition actual)
     {
         assertEquals(expected.partitionKey(), actual.partitionKey());
-        assertEquals(expected.deletionInfo(), actual.deletionInfo());
         assertEquals(expected.columns(), actual.columns());
-        assertTrue(Iterators.elementsEqual(expected.iterator(), actual.iterator()));
+        assertTrue(Iterators.elementsEqual(expected.unfilteredIterator(), actual.unfilteredIterator()));
     }
 
     static void assertHintsEqual(Hint expected, Hint actual)

@@ -24,9 +24,9 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 import static org.apache.lucene.index.PointValues.Relation.CELL_CROSSES_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_INSIDE_QUERY;
@@ -194,7 +194,7 @@ public class BKDQueriesTest extends SaiRandomizedTest
     {
         byte[] buffer = new byte[4];
         ByteSource source = Int32Type.instance.asComparableBytes(Int32Type.instance.decompose(value), ByteComparable.Version.OSS41);
-        ByteBufferUtil.toBytes(source, buffer);
+        ByteSourceInverse.readBytesMustFit(source, buffer);
         return buffer;
     }
 

@@ -26,12 +26,11 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
- * Memtable trie, i.e. an in-memory trie built for fast modification and reads executing concurrently with writes from
- * a single mutator thread.
+ * In-memory trie built for fast modification and reads executing concurrently with writes from a single mutator thread.
  *
- * This class provides the read-only functionality, expanded in {@link MemtableTrie} to writes.
+ * This class provides the read-only functionality, expanded in {@link InMemoryTrie} to writes.
  */
-public class MemtableReadTrie<T> extends Trie<T>
+public class InMemoryReadTrie<T> extends Trie<T>
 {
     /*
     TRIE FORMAT AND NODE TYPES
@@ -122,7 +121,7 @@ public class MemtableReadTrie<T> extends Trie<T>
      they are referencing. This currently causes a very low overhead (because we change data in place with the only
      exception of nodes needing to change type) and is planned to be addressed later.
 
-     For further descriptions and examples of the mechanics of the trie, see MemtableTrie.md.
+     For further descriptions and examples of the mechanics of the trie, see InMemoryTrie.md.
      */
 
     static final int BLOCK_SIZE = 32;
@@ -176,9 +175,6 @@ public class MemtableReadTrie<T> extends Trie<T>
     // Offset of the next pointer in a non-shared prefix node
     static final int PREFIX_POINTER_OFFSET = LAST_POINTER_OFFSET - PREFIX_OFFSET;
 
-    // Initial capacity for the node data buffer.
-    static final int INITIAL_BUFFER_CAPACITY = 256;
-
     /**
      * Value used as null for node pointers.
      * No node can use this address (we enforce this by not allowing chain nodes to grow to position 0).
@@ -206,8 +202,6 @@ public class MemtableReadTrie<T> extends Trie<T>
 
      Note that a buffer is not allowed to split 32-byte blocks (code assumes same buffer can be used for all bytes
      inside the block).
-
-     TODO: implement delay and retry on space hitting the 2GB barrier.
      */
 
     static final int BUF_START_SHIFT = 8;
@@ -216,10 +210,15 @@ public class MemtableReadTrie<T> extends Trie<T>
     static final int CONTENTS_START_SHIFT = 4;
     static final int CONTENTS_START_SIZE = 1 << CONTENTS_START_SHIFT;
 
+    static
+    {
+        assert BUF_START_SIZE % BLOCK_SIZE == 0 : "Initial buffer size must fit a full block.";
+    }
+
     final UnsafeBuffer[] buffers;
     final AtomicReferenceArray<T>[] contentArrays;
 
-    MemtableReadTrie(UnsafeBuffer[] buffers, AtomicReferenceArray<T>[] contentArrays, int root)
+    InMemoryReadTrie(UnsafeBuffer[] buffers, AtomicReferenceArray<T>[] contentArrays, int root)
     {
         this.buffers = buffers;
         this.contentArrays = contentArrays;
@@ -265,20 +264,31 @@ public class MemtableReadTrie<T> extends Trie<T>
         return getChunk(pos).getByte(inChunkPointer(pos)) & 0xFF;
     }
 
-    final int getUnsignedShort(int pos)
+    final int getUnsignedShortVolatile(int pos)
     {
-        return getChunk(pos).getShort(inChunkPointer(pos)) & 0xFFFF;
+        return getChunk(pos).getShortVolatile(inChunkPointer(pos)) & 0xFFFF;
     }
 
-    final int getInt(int pos)
+    /**
+     * Following a pointer must be done using a volatile read to enforce happens-before between reading the node we
+     * advance to and the preparation of that node that finishes in a volatile write of the pointer that makes it
+     * visible.
+     */
+    final int getIntVolatile(int pos)
     {
-        return getChunk(pos).getInt(inChunkPointer(pos));
+        return getChunk(pos).getIntVolatile(inChunkPointer(pos));
     }
 
-    T getContent(int index)
+    /**
+     * Get the content for the given content pointer.
+     *
+     * @param id content pointer, encoded as ~index where index is the position in the content array.
+     * @return the current content value.
+     */
+    T getContent(int id)
     {
-        int leadBit = getChunkIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inChunkPointer(index, leadBit, CONTENTS_START_SIZE);
+        int leadBit = getChunkIdx(~id, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+        int ofs = inChunkPointer(~id, leadBit, CONTENTS_START_SIZE);
         AtomicReferenceArray<T> array = contentArrays[leadBit];
         return array.get(ofs);
     }
@@ -329,7 +339,7 @@ public class MemtableReadTrie<T> extends Trie<T>
             case CHAIN_MAX_OFFSET:
                 if (trans != getUnsignedByte(node))
                     return NONE;
-                return getInt(node + 1);
+                return getIntVolatile(node + 1);
             default:
                 if (trans != getUnsignedByte(node))
                     return NONE;
@@ -348,7 +358,7 @@ public class MemtableReadTrie<T> extends Trie<T>
             if (b < BLOCK_SIZE)
                 node = node - PREFIX_OFFSET + b;
             else
-                node = getInt(node + PREFIX_POINTER_OFFSET);
+                node = getIntVolatile(node + PREFIX_POINTER_OFFSET);
 
             assert node >= 0 && offset(node) != PREFIX_OFFSET;
         }
@@ -386,7 +396,7 @@ public class MemtableReadTrie<T> extends Trie<T>
                         return NONE;
                 }
                 // All bytes matched, node is now positioned on the child pointer. Follow it.
-                return getInt(node);
+                return getIntVolatile(node);
         }
     }
 
@@ -399,7 +409,7 @@ public class MemtableReadTrie<T> extends Trie<T>
         {
             if (getUnsignedByte(node + SPARSE_BYTES_OFFSET + i) == trans)
             {
-                int child = getInt(node + SPARSE_CHILDREN_OFFSET + i * 4);
+                int child = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * 4);
 
                 // we can't trust the transition character read above, because it may have been fetched before a
                 // concurrent update happened, and the update may have managed to modify the pointer by now.
@@ -463,13 +473,13 @@ public class MemtableReadTrie<T> extends Trie<T>
     T getNodeContent(int node)
     {
         if (isLeaf(node))
-            return getContent(~node);
+            return getContent(node);
 
         if (offset(node) != PREFIX_OFFSET)
             return null;
 
-        int index = getInt(node + PREFIX_CONTENT_OFFSET);
-        return (index >= 0)
+        int index = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
+        return (isLeaf(index))
                ? getContent(index)
                : null;
     }
@@ -481,7 +491,7 @@ public class MemtableReadTrie<T> extends Trie<T>
 
     int getSplitBlockPointer(int node, int childIndex, int subLevelLimit)
     {
-        return getInt(splitBlockPointerAddress(node, childIndex, subLevelLimit));
+        return getIntVolatile(splitBlockPointerAddress(node, childIndex, subLevelLimit));
     }
 
     /**
@@ -526,7 +536,7 @@ public class MemtableReadTrie<T> extends Trie<T>
     /*
      * Cursor implementation.
      *
-     * MemtableTrie cursors maintain their backtracking state in CursorBacktrackingState where they store
+     * InMemoryTrie cursors maintain their backtracking state in CursorBacktrackingState where they store
      * information about the node to backtrack to and the transitions still left to take or attempt.
      *
      * This information is different for the different types of node:
@@ -541,6 +551,7 @@ public class MemtableReadTrie<T> extends Trie<T>
     class MemtableCursor extends CursorBacktrackingState implements Cursor<T>
     {
         private int currentNode;
+        private int currentFullNode;
         private int incomingTransition;
         private T content;
         private final Direction direction;
@@ -581,14 +592,42 @@ public class MemtableReadTrie<T> extends Trie<T>
             // Consume it to be the new state's incomingTransition.
             int transition = chunk.getByte(inChunkNode++) & 0xFF;
             // inChunkNode is now positioned on the child pointer.
-            int child = chunk.getInt(inChunkNode);
+            int child = chunk.getIntVolatile(inChunkNode);
             return descendInto(child, transition);
         }
 
         @Override
-        public int skipChildren()
+        public int skipTo(int skipDepth, int skipTransition)
         {
-            return backtrack();
+            if (skipDepth > depth)
+            {
+                // Descent requested. Jump to the given child transition or greater, and backtrack if there's no such.
+                assert skipDepth == depth + 1;
+                int advancedDepth = advanceToChildWithTarget(currentNode, skipTransition);
+                if (advancedDepth < 0)
+                    return backtrack();
+
+                assert advancedDepth == skipDepth;
+                return advancedDepth;
+            }
+
+            // Backtrack until we reach the requested depth. Note that we may have more than one entry for a given
+            // depth (split sublevels) and we ascend through them individually.
+            while (--backtrackDepth >= 0)
+            {
+                depth = depth(backtrackDepth);
+
+                if (depth < skipDepth - 1)
+                    return advanceToNextChild(node(backtrackDepth), data(backtrackDepth));
+
+                if (depth == skipDepth - 1)
+                {
+                    int advancedDepth = advanceToNextChildWithTarget(node(backtrackDepth), data(backtrackDepth), skipTransition);
+                    if (advancedDepth >= 0)
+                        return advancedDepth;
+                }
+            }
+            return depth = -1;
         }
 
         @Override
@@ -607,6 +646,18 @@ public class MemtableReadTrie<T> extends Trie<T>
         public int incomingTransition()
         {
             return incomingTransition;
+        }
+
+        @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        @Override
+        public Trie<T> tailTrie()
+        {
+            return new InMemoryReadTrie<>(buffers, contentArrays, currentFullNode);
         }
 
         private int backtrack()
@@ -633,6 +684,22 @@ public class MemtableReadTrie<T> extends Trie<T>
             }
         }
 
+        private int advanceToChildWithTarget(int node, int skipTransition)
+        {
+            if (isNullOrLeaf(node))
+                return -1;
+
+            switch (offset(node))
+            {
+                case SPLIT_OFFSET:
+                    return descendInSplitSublevelWithTarget(node, SPLIT_START_LEVEL_LIMIT, 0, SPLIT_LEVEL_SHIFT * 2, skipTransition);
+                case SPARSE_OFFSET:
+                    return advanceToSparseTransition(node, prepareOrderWord(node), skipTransition);
+                default:
+                    return advanceToChainTransition(node, skipTransition);
+            }
+        }
+
         private int advanceToNextChild(int node, int data)
         {
             assert (!isNullOrLeaf(node));
@@ -643,6 +710,21 @@ public class MemtableReadTrie<T> extends Trie<T>
                     return nextValidSplitTransition(node, data);
                 case SPARSE_OFFSET:
                     return nextValidSparseTransition(node, data);
+                default:
+                    throw new AssertionError("Unexpected node type in backtrack state.");
+            }
+        }
+
+        private int advanceToNextChildWithTarget(int node, int data, int transition)
+        {
+            assert (!isNullOrLeaf(node));
+
+            switch (offset(node))
+            {
+                case SPLIT_OFFSET:
+                    return advanceToSplitTransition(node, data, transition);
+                case SPARSE_OFFSET:
+                    return advanceToSparseTransition(node, data, transition);
                 default:
                     throw new AssertionError("Unexpected node type in backtrack state.");
             }
@@ -696,37 +778,89 @@ public class MemtableReadTrie<T> extends Trie<T>
         }
 
         /**
-         * Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in trans.
+         * As above, but also makes sure that the descend selects a value at least as big as the given
+         * {@code minTransition}.
          */
-        int nextValidSplitTransition(int node, int trans)
+        private int descendInSplitSublevelWithTarget(int node, int limit, int collected, int shift, int minTransition)
         {
-            assert trans >= 0 && trans <= 0xFF;
-            int childIndex = splitNodeChildIndex(trans);
+            minTransition -= collected;
+            if (minTransition >= limit << shift || minTransition < 0)
+                return -1;
+
+            while (true)
+            {
+                assert offset(node) == SPLIT_OFFSET;
+                int childIndex;
+                int child = NONE;
+                boolean isExact = true;
+                // find the first non-null child beyond minTransition
+                for (childIndex = minTransition >> shift;
+                     direction.inLoop(childIndex, 0, limit - 1);
+                     childIndex += direction.increase)
+                {
+                    child = getSplitBlockPointer(node, childIndex, limit);
+                    if (!isNull(child))
+                        break;
+                    isExact = false;
+                }
+                if (!isExact && (childIndex == limit || childIndex == -1))
+                    return -1;
+
+                // look for any more valid transitions and add backtracking if found
+                maybeAddSplitBacktrack(node, childIndex, limit, collected, shift);
+
+                // add the bits just found
+                collected |= childIndex << shift;
+                // descend to next sub-level or child
+                if (shift == 0)
+                    return descendInto(child, collected);
+
+                if (isExact)
+                    minTransition -= childIndex << shift;
+                else
+                    minTransition = direction.select(0, (1 << shift) - 1);
+
+                // continue with next sublevel; same as
+                // return descendInSplitSublevelWithTarget(child + SPLIT_OFFSET, 8, collected, shift - 3, minTransition)
+                node = child;
+                limit = SPLIT_OTHER_LEVEL_LIMIT;
+                shift -= SPLIT_LEVEL_SHIFT;
+            }
+        }
+
+        /**
+         * Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in data.
+         */
+        int nextValidSplitTransition(int node, int data)
+        {
+            // Note: This is equivalent to return advanceToSplitTransition(node, data, data) but quicker.
+            assert data >= 0 && data <= 0xFF;
+            int childIndex = splitNodeChildIndex(data);
             if (childIndex != direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1))
             {
                 maybeAddSplitBacktrack(node,
                                        childIndex,
                                        SPLIT_OTHER_LEVEL_LIMIT,
-                                       trans & -(1 << (SPLIT_LEVEL_SHIFT * 1)),
+                                       data & -(1 << (SPLIT_LEVEL_SHIFT * 1)),
                                        SPLIT_LEVEL_SHIFT * 0);
                 int child = getSplitBlockPointer(node, childIndex, SPLIT_OTHER_LEVEL_LIMIT);
-                return descendInto(child, trans);
+                return descendInto(child, data);
             }
-            int tailIndex = splitNodeTailIndex(trans);
+            int tailIndex = splitNodeTailIndex(data);
             if (tailIndex != direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1))
             {
                 maybeAddSplitBacktrack(node,
                                        tailIndex,
                                        SPLIT_OTHER_LEVEL_LIMIT,
-                                       trans & -(1 << (SPLIT_LEVEL_SHIFT * 2)),
+                                       data & -(1 << (SPLIT_LEVEL_SHIFT * 2)),
                                        SPLIT_LEVEL_SHIFT * 1);
                 int tail = getSplitBlockPointer(node, tailIndex, SPLIT_OTHER_LEVEL_LIMIT);
                 return descendInSplitSublevel(tail,
                                               SPLIT_OTHER_LEVEL_LIMIT,
-                                              trans & -(1 << SPLIT_LEVEL_SHIFT * 1),
+                                              data & -(1 << SPLIT_LEVEL_SHIFT * 1),
                                               SPLIT_LEVEL_SHIFT * 0);
             }
-            int midIndex = splitNodeMidIndex(trans);
+            int midIndex = splitNodeMidIndex(data);
             assert midIndex != direction.select(0, SPLIT_START_LEVEL_LIMIT - 1);
             maybeAddSplitBacktrack(node,
                                    midIndex,
@@ -736,8 +870,40 @@ public class MemtableReadTrie<T> extends Trie<T>
             int mid = getSplitBlockPointer(node, midIndex, SPLIT_START_LEVEL_LIMIT);
             return descendInSplitSublevel(mid,
                                           SPLIT_OTHER_LEVEL_LIMIT,
-                                          trans & -(1 << SPLIT_LEVEL_SHIFT * 2),
+                                          data & -(1 << SPLIT_LEVEL_SHIFT * 2),
                                           SPLIT_LEVEL_SHIFT * 1);
+        }
+
+        /**
+         * Backtrack to a split sub-level and advance to given transition if it fits within the sublevel.
+         * The level is identified by the lowest non-0 bits in data as above.
+         */
+        private int advanceToSplitTransition(int node, int data, int skipTransition)
+        {
+            assert data >= 0 && data <= 0xFF;
+            if (direction.lt(skipTransition, data))
+                return nextValidSplitTransition(node, data); // already went over the target in lower sublevel, just advance
+
+            int childIndex = splitNodeChildIndex(data);
+            if (childIndex != direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1))
+            {
+                int sublevelMask = -(1 << (SPLIT_LEVEL_SHIFT * 1));
+                int sublevelShift = SPLIT_LEVEL_SHIFT * 0;
+                int sublevelLimit = SPLIT_OTHER_LEVEL_LIMIT;
+                return descendInSplitSublevelWithTarget(node, sublevelLimit, data & sublevelMask, sublevelShift, skipTransition);
+            }
+            int tailIndex = splitNodeTailIndex(data);
+            if (tailIndex != direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1))
+            {
+                int sublevelMask = -(1 << (SPLIT_LEVEL_SHIFT * 2));
+                int sublevelShift = SPLIT_LEVEL_SHIFT * 1;
+                int sublevelLimit = SPLIT_OTHER_LEVEL_LIMIT;
+                return descendInSplitSublevelWithTarget(node, sublevelLimit, data & sublevelMask, sublevelShift, skipTransition);
+            }
+            int sublevelMask = -(1 << 8);
+            int sublevelShift = SPLIT_LEVEL_SHIFT * 2;
+            int sublevelLimit = SPLIT_START_LEVEL_LIMIT;
+            return descendInSplitSublevelWithTarget(node, sublevelLimit, data & sublevelMask, sublevelShift, skipTransition);
         }
 
         /**
@@ -768,19 +934,19 @@ public class MemtableReadTrie<T> extends Trie<T>
 
         private int nextValidSparseTransition(int node, int data)
         {
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
-
             // Peel off the next index.
             int index = data % SPARSE_CHILD_COUNT;
             data = data / SPARSE_CHILD_COUNT;
+
+            UnsafeBuffer chunk = getChunk(node);
+            int inChunkNode = inChunkPointer(node);
 
             // If there are remaining transitions, add backtracking entry.
             if (data != exhaustedOrderWord())
                 addBacktrack(node, data, depth);
 
             // Follow the transition.
-            int child = chunk.getInt(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
+            int child = chunk.getIntVolatile(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
             int transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
             return descendInto(child, transition);
         }
@@ -791,7 +957,7 @@ public class MemtableReadTrie<T> extends Trie<T>
          */
         int prepareOrderWord(int node)
         {
-            int fwdState = getUnsignedShort(node + SPARSE_ORDER_OFFSET);
+            int fwdState = getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET);
             if (direction.isForward())
                 return fwdState;
             else
@@ -832,6 +998,32 @@ public class MemtableReadTrie<T> extends Trie<T>
             return direction.select(0, 1);
         }
 
+        private int advanceToSparseTransition(int node, int data, int skipTransition)
+        {
+            UnsafeBuffer chunk = getChunk(node);
+            int inChunkNode = inChunkPointer(node);
+            int index;
+            int transition;
+            do
+            {
+                // Peel off the next index.
+                index = data % SPARSE_CHILD_COUNT;
+                data = data / SPARSE_CHILD_COUNT;
+                transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
+            }
+            while (direction.lt(transition, skipTransition) && data != exhaustedOrderWord());
+            if (direction.lt(transition, skipTransition))
+                return -1;
+
+            // If there are remaining transitions, add backtracking entry.
+            if (data != exhaustedOrderWord())
+                addBacktrack(node, data, depth);
+
+            // Follow the transition.
+            int child = chunk.getIntVolatile(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
+            return descendInto(child, transition);
+        }
+
         private int getChainTransition(int node)
         {
             // No backtracking needed.
@@ -842,7 +1034,23 @@ public class MemtableReadTrie<T> extends Trie<T>
             if (offset(next) <= CHAIN_MAX_OFFSET)
                 return descendIntoChain(next, transition);
             else
-                return descendInto(chunk.getInt(inChunkNode + 1), transition);
+                return descendInto(chunk.getIntVolatile(inChunkNode + 1), transition);
+        }
+
+        private int advanceToChainTransition(int node, int skipTransition)
+        {
+            // No backtracking needed.
+            UnsafeBuffer chunk = getChunk(node);
+            int inChunkNode = inChunkPointer(node);
+            int transition = chunk.getByte(inChunkNode) & 0xFF;
+            if (direction.gt(skipTransition, transition))
+                return -1;
+
+            int next = node + 1;
+            if (offset(next) <= CHAIN_MAX_OFFSET)
+                return descendIntoChain(next, transition);
+            else
+                return descendInto(chunk.getIntVolatile(inChunkNode + 1), transition);
         }
 
         int descendInto(int child, int transition)
@@ -850,6 +1058,7 @@ public class MemtableReadTrie<T> extends Trie<T>
             ++depth;
             incomingTransition = transition;
             content = getNodeContent(child);
+            currentFullNode = child;
             currentNode = followContentTransition(child);
             return depth;
         }
@@ -859,6 +1068,7 @@ public class MemtableReadTrie<T> extends Trie<T>
             ++depth;
             incomingTransition = transition;
             content = null;
+            currentFullNode = child;
             currentNode = child;
             return depth;
         }
@@ -882,6 +1092,7 @@ public class MemtableReadTrie<T> extends Trie<T>
      * Get the content mapped by the specified key.
      * Fast implementation using integer node addresses.
      */
+    @Override
     public T get(ByteComparable path)
     {
         int n = root;
@@ -927,9 +1138,9 @@ public class MemtableReadTrie<T> extends Trie<T>
             }
 
             @Override
-            public int skipChildren()
+            public int skipTo(int skipDepth, int skipTransition)
             {
-                return source.skipChildren();
+                return source.skipTo(skipDepth, skipTransition);
             }
 
             @Override
@@ -942,6 +1153,18 @@ public class MemtableReadTrie<T> extends Trie<T>
             public int incomingTransition()
             {
                 return source.incomingTransition();
+            }
+
+            @Override
+            public Direction direction()
+            {
+                return source.direction();
+            }
+
+            @Override
+            public Trie<String> tailTrie()
+            {
+                throw new AssertionError();
             }
 
             @Override
@@ -979,5 +1202,74 @@ public class MemtableReadTrie<T> extends Trie<T>
             }
         }
         return process(new TrieDumper<>(Function.identity()), new TypedNodesCursor());
+    }
+
+    /**
+     * For use in debugging, dump info about the given node.
+     */
+    @SuppressWarnings("unused")
+    String dumpNode(int node)
+    {
+        if (isNull(node))
+            return "NONE";
+        else if (isLeaf(node))
+            return "~" + (~node);
+        else
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.append(node + " ");
+            switch (offset(node))
+            {
+                case SPARSE_OFFSET:
+                {
+                    builder.append("Sparse: ");
+                    for (int i = 0; i < SPARSE_CHILD_COUNT; ++i)
+                    {
+                        int child = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * 4);
+                        if (child != NONE)
+                            builder.append(String.format("%02x", getUnsignedByte(node + SPARSE_BYTES_OFFSET + i)))
+                                   .append(" -> ")
+                                   .append(child)
+                                   .append('\n');
+                    }
+                    break;
+                }
+                case SPLIT_OFFSET:
+                {
+                    builder.append("Split: ");
+                    for (int i = 0; i < SPLIT_START_LEVEL_LIMIT; ++i)
+                    {
+                        int child = getIntVolatile(node - (SPLIT_START_LEVEL_LIMIT - 1 - i) * 4);
+                        if (child != NONE)
+                            builder.append(Integer.toBinaryString(i))
+                                   .append(" -> ")
+                                   .append(child)
+                                   .append('\n');
+                    }
+                    break;
+                }
+                case PREFIX_OFFSET:
+                {
+                    builder.append("Prefix: ");
+                    int flags = getUnsignedByte(node + PREFIX_FLAGS_OFFSET);
+                    final int content = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
+                    builder.append(content < 0 ? "~" + (~content) : "" + content);
+                    int child = followContentTransition(node);
+                    builder.append(" -> ")
+                           .append(child);
+                    break;
+                }
+                default:
+                {
+                    builder.append("Chain: ");
+                    for (int i = 0; i < chainBlockLength(node); ++i)
+                        builder.append(String.format("%02x", getUnsignedByte(node + i)));
+                    builder.append(" -> ")
+                           .append(getIntVolatile(node + chainBlockLength(node)));
+                    break;
+                }
+            }
+            return builder.toString();
+        }
     }
 }

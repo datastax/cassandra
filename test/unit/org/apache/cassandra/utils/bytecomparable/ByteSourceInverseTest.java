@@ -19,13 +19,16 @@ package org.apache.cassandra.utils.bytecomparable;
 
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -34,6 +37,7 @@ import java.util.function.LongConsumer;
 import java.util.stream.*;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 @RunWith(Parameterized.class)
 public class ByteSourceInverseTest
@@ -43,7 +47,8 @@ public class ByteSourceInverseTest
     @Parameterized.Parameters(name = "version={0}")
     public static Iterable<ByteComparable.Version> versions()
     {
-        return ImmutableList.of(ByteComparable.Version.OSS41);
+        return ImmutableList.of(ByteComparable.Version.OSS41,
+                                ByteComparable.Version.OSS50);
     }
 
     private final ByteComparable.Version version;
@@ -156,40 +161,88 @@ public class ByteSourceInverseTest
     @Test
     public void testBadByteSourceForFixedLengthNumbers()
     {
-        Stream.of("getSignedInt",
-                  "getSignedLong",
-                  "getSignedByte",
-                  "getSignedShort")
-              .map(methodName ->
-                   {
-                       try
-                       {
-                           return ByteSourceInverse.class.getMethod(methodName, ByteSource.class);
-                       }
-                       catch (NoSuchMethodException e)
-                       {
-                           Assert.fail("Expected ByteSourceInverse to have method called " + methodName
-                                               + " with a single parameter of type ByteSource");
-                       }
-                       return null;
-                   })
-              .forEach(fixedLengthNumberMethod ->
-                       {
-                           for (ByteSource badSource : Arrays.asList(null, ByteSource.EMPTY))
-                           {
-                               try
-                               {
-                                   fixedLengthNumberMethod.invoke(ByteSourceInverse.class, badSource);
-                                   Assert.fail("Expected IllegalArgumentException not thrown");
-                               }
-                               catch (Throwable maybe)
-                               {
-                                   if (!(maybe instanceof IllegalArgumentException
-                                           || maybe.getCause() instanceof IllegalArgumentException))
-                                       Assert.fail("Unexpected throwable " + maybe + " with cause " + maybe.getCause());
-                               }
-                           }
-                       });
+        byte[] bytes = new byte[8];
+        new Random().nextBytes(bytes);
+        for (Map.Entry<String, Integer> entries : ImmutableMap.of("getSignedInt", 4,
+                                                                  "getSignedLong", 8,
+                                                                  "getSignedByte", 1,
+                                                                  "getSignedShort", 2).entrySet())
+        {
+            String methodName = entries.getKey();
+            int length = entries.getValue();
+            try
+            {
+                Method fixedLengthNumberMethod = ByteSourceInverse.class.getMethod(methodName, ByteSource.class);
+                ArrayList<ByteSource> sources = new ArrayList<>();
+                sources.add(null);
+                sources.add(ByteSource.EMPTY);
+                for (int i = 0; i < length; ++i)
+                    sources.add(ByteSource.fixedLength(bytes, 0, i));
+                // Note: not testing invalid bytes (e.g. using the construction below) as they signify a programming
+                // error (throwing AssertionError) rather than something that could happen due to e.g. bad files.
+                //      ByteSource.withTerminatorLegacy(257, ByteSource.fixedLength(bytes, 0, length - 1));
+                for (ByteSource badSource : sources)
+                {
+                    try
+                    {
+                        fixedLengthNumberMethod.invoke(ByteSourceInverse.class, badSource);
+                        Assert.fail("Expected exception not thrown");
+                    }
+                    catch (Throwable maybe)
+                    {
+                        maybe = Throwables.unwrapped(maybe);
+                        final String message = "Unexpected throwable " + maybe + " with cause " + maybe.getCause();
+                        if (badSource == null)
+                            Assert.assertTrue(message,
+                                              maybe instanceof NullPointerException);
+                        else
+                            Assert.assertTrue(message,
+                                              maybe instanceof IllegalArgumentException);
+                    }
+                }
+            }
+            catch (NoSuchMethodException e)
+            {
+                Assert.fail("Expected ByteSourceInverse to have method called " + methodName
+                            + " with a single parameter of type ByteSource");
+            }
+        }
+    }
+
+    @Test
+    public void testBadByteSourceForVariableLengthNumbers()
+    {
+        for (long value : Arrays.asList(0L, 1L << 6, 1L << 13, 1L << 20, 1L << 27, 1L << 34, 1L << 41, 1L << 48, 1L << 55))
+        {
+            Assert.assertEquals(value, ByteSourceInverse.getVariableLengthInteger(ByteSource.variableLengthInteger(value)));
+
+            ArrayList<ByteSource> sources = new ArrayList<>();
+            sources.add(null);
+            sources.add(ByteSource.EMPTY);
+            int length = ByteComparable.length(version -> ByteSource.variableLengthInteger(value), ByteComparable.Version.OSS50);
+            for (int i = 0; i < length; ++i)
+                sources.add(ByteSource.cut(ByteSource.variableLengthInteger(value), i));
+
+            for (ByteSource badSource : sources)
+            {
+                try
+                {
+                    ByteSourceInverse.getVariableLengthInteger(badSource);
+                    Assert.fail("Expected exception not thrown");
+                }
+                catch (Throwable maybe)
+                {
+                    maybe = Throwables.unwrapped(maybe);
+                    final String message = "Unexpected throwable " + maybe + " with cause " + maybe.getCause();
+                    if (badSource == null)
+                        Assert.assertTrue(message,
+                                          maybe instanceof NullPointerException);
+                    else
+                        Assert.assertTrue(message,
+                                          maybe instanceof IllegalArgumentException);
+                }
+            }
+        }
     }
 
     @Test
@@ -226,41 +279,65 @@ public class ByteSourceInverseTest
     @Test
     public void testGetByteBuffer()
     {
-        Consumer<ByteBuffer> byteBufferConsumer = initial ->
+        for (Consumer<byte[]> byteArrayConsumer : Arrays.<Consumer<byte[]>>asList(initialBytes ->
+            {
+                ByteSource.Peekable byteSource = ByteSource.peekable(ByteSource.of(ByteBuffer.wrap(initialBytes), version));
+                byte[] decodedBytes = ByteSourceInverse.getUnescapedBytes(byteSource);
+                Assert.assertArrayEquals(initialBytes, decodedBytes);
+            },
+            initialBytes ->
+            {
+                ByteSource.Peekable byteSource = ByteSource.peekable(ByteSource.of(initialBytes, version));
+                byte[] decodedBytes = ByteSourceInverse.getUnescapedBytes(byteSource);
+                Assert.assertArrayEquals(initialBytes, decodedBytes);
+            },
+            initialBytes ->
+            {
+                long address = MemoryUtil.allocate(initialBytes.length);
+                try
+                {
+                    MemoryUtil.setBytes(address, initialBytes, 0, initialBytes.length);
+                    ByteSource.Peekable byteSource = ByteSource.peekable(ByteSource.ofMemory(address, initialBytes.length, version));
+                    byte[] decodedBytes = ByteSourceInverse.getUnescapedBytes(byteSource);
+                    Assert.assertArrayEquals(initialBytes, decodedBytes);
+                }
+                finally
+                {
+                    MemoryUtil.free(address, initialBytes.length);
+                }
+            }
+            ))
         {
-            ByteSource.Peekable byteSource = ByteSource.peekable(ByteSource.of(initial, version));
-            byte[] decodedBytes = ByteSourceInverse.getUnescapedBytes(byteSource);
-            byte[] initialBytes = ByteBufferUtil.getArray(initial);
-            Assert.assertTrue(Arrays.equals(initialBytes, decodedBytes));
-        };
+            for (byte[] tricky : Arrays.asList(
+            // ESCAPE - leading, in the middle, trailing
+            new byte[]{ 0, 2, 3, 4, 5 }, new byte[]{ 1, 2, 0, 4, 5 }, new byte[]{ 1, 2, 3, 4, 0 },
+            // END_OF_STREAM/ESCAPED_0_DONE - leading, in the middle, trailing
+            new byte[]{ -1, 2, 3, 4, 5 }, new byte[]{ 1, 2, -1, 4, 5 }, new byte[]{ 1, 2, 3, 4, -1 },
+            // ESCAPED_0_CONT - leading, in the middle, trailing
+            new byte[]{ -2, 2, 3, 4, 5 }, new byte[]{ 1, 2, -2, 4, 5 }, new byte[]{ 1, 2, 3, 4, -2 },
+            // ESCAPE + ESCAPED_0_DONE - leading, in the middle, trailing
+            new byte[]{ 0, -1, 3, 4, 5 }, new byte[]{ 1, 0, -1, 4, 5 }, new byte[]{ 1, 2, 3, 0, -1 },
+            // ESCAPE + ESCAPED_0_CONT + ESCAPED_0_DONE - leading, in the middle, trailing
+            new byte[]{ 0, -2, -1, 4, 5 }, new byte[]{ 1, 0, -2, -1, 5 }, new byte[]{ 1, 2, 0, -2, -1 }))
+            {
+                byteArrayConsumer.accept(tricky);
+            }
 
-        Arrays.asList(
-                // ESCAPE - leading, in the middle, trailing
-                new byte[] {0, 2, 3, 4, 5}, new byte[] {1, 2, 0, 4, 5}, new byte[] {1, 2, 3, 4, 0},
-                // END_OF_STREAM/ESCAPED_0_DONE - leading, in the middle, trailing
-                new byte[] {-1, 2, 3, 4, 5}, new byte[] {1, 2, -1, 4, 5}, new byte[] {1, 2, 3, 4, -1},
-                // ESCAPED_0_CONT - leading, in the middle, trailing
-                new byte[] {-2, 2, 3, 4, 5}, new byte[] {1, 2, -2, 4, 5}, new byte[] {1, 2, 3, 4, -2},
-                // ESCAPE + ESCAPED_0_DONE - leading, in the middle, trailing
-                new byte[] {0, -1, 3, 4, 5}, new byte[] {1, 0, -1, 4, 5}, new byte[] {1, 2, 3, 0, -1},
-                // ESCAPE + ESCAPED_0_CONT + ESCAPED_0_DONE - leading, in the middle, trailing
-                new byte[] {0, -2, -1, 4, 5}, new byte[] {1, 0, -2, -1, 5}, new byte[] {1, 2, 0, -2, -1})
-              .forEach(tricky -> byteBufferConsumer.accept(ByteBuffer.wrap(tricky)));
+            byte[] bytes = new byte[1000];
+            Random prng = new Random();
+            for (int i = 0; i < 1000; ++i)
+            {
+                prng.nextBytes(bytes);
+                byteArrayConsumer.accept(bytes);
+            }
 
-        byte[] bytes = new byte[1000];
-        Random prng = new Random();
-        for (int i = 0; i < 1000; ++i)
-        {
-            prng.nextBytes(bytes);
-            byteBufferConsumer.accept(ByteBuffer.wrap(bytes));
-        }
-
-        int stringLength = 10;
-        String random;
-        for (int i = 0; i < 1000; ++i)
-        {
-            random = newRandomAlphanumeric(prng, stringLength);
-            byteBufferConsumer.accept(ByteBufferUtil.bytes(random));
+            int stringLength = 10;
+            String random;
+            for (int i = 0; i < 1000; ++i)
+            {
+                random = newRandomAlphanumeric(prng, stringLength);
+                byteArrayConsumer.accept(random.getBytes(StandardCharsets.UTF_8));
+            }
         }
     }
 

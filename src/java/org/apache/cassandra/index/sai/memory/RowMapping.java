@@ -24,11 +24,10 @@ import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.tries.MemtableTrie;
-import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -65,7 +64,7 @@ public class RowMapping
         }
     };
 
-    private final MemtableTrie<Long> rowMapping = new MemtableTrie<>(BufferType.OFF_HEAP);
+    private final InMemoryTrie<Long> rowMapping = InMemoryTrie.shortLived();
 
     private volatile boolean complete = false;
 
@@ -146,12 +145,12 @@ public class RowMapping
     /**
      * Include PrimaryKey to RowId mapping
      */
-    public void add(PrimaryKey key, long sstableRowId) throws MemtableTrie.SpaceExhaustedException
+    public void add(PrimaryKey key, long sstableRowId) throws TrieSpaceExhaustedException
     {
         assert !complete : "Cannot modify built RowMapping.";
 
         ByteComparable byteComparable = v -> key.asComparableBytes(v);
-        rowMapping.apply(Trie.singleton(byteComparable, sstableRowId), (existing, neww) -> neww);
+        rowMapping.putSingleton(byteComparable, sstableRowId, (existing, neww) -> neww);
 
         maxSegmentRowId = Math.max(maxSegmentRowId, sstableRowId);
 

@@ -28,6 +28,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import org.junit.Assert;
@@ -75,6 +76,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
     {
         testType(UTF8Type.instance, testStrings);
         testDirect(x -> ByteSource.of(x, Version.OSS41), Ordering.<String>natural()::compare, testStrings);
+        testDirect(x -> ByteSource.of(x, Version.OSS50), Ordering.<String>natural()::compare, testStrings);
     }
 
     @Test
@@ -320,46 +322,147 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
         testCombinationSampling(rand, this::assertClusteringPairComparesSame);
     }
 
-    void assertClusteringPairComparesSame(AbstractType t1, AbstractType t2, Object o1, Object o2, Object o3, Object o4)
+    @Test
+    public void testNullsInClustering()
     {
-        EnumSet<ClusteringPrefix.Kind> skippedKinds = EnumSet.of(ClusteringPrefix.Kind.SSTABLE_LOWER_BOUND, ClusteringPrefix.Kind.SSTABLE_UPPER_BOUND);
-        for (Version v : Version.values())
-            for (ClusteringPrefix.Kind k1 : EnumSet.complementOf(skippedKinds))
-                for (ClusteringPrefix.Kind k2 : EnumSet.complementOf(skippedKinds))
-                {
-                    ClusteringComparator comp = new ClusteringComparator(t1, t2);
-                    ByteBuffer[] b = new ByteBuffer[2];
-                    ByteBuffer[] d = new ByteBuffer[2];
-                    b[0] = t1.decompose(o1);
-                    b[1] = t2.decompose(o2);
-                    d[0] = t1.decompose(o3);
-                    d[1] = t2.decompose(o4);
-                    ClusteringPrefix<?> c = makeBound(k1, b);
-                    ClusteringPrefix<?> e = makeBound(k2, d);
-                    final ByteComparable bsc = comp.asByteComparable(c);
-                    final ByteComparable bse = comp.asByteComparable(e);
-                    int expected = Integer.signum(comp.compare(c, e));
-                    assertEquals(String.format("Failed comparing %s and %s, %s vs %s version %s",
-                                               safeStr(c.clusteringString(comp.subtypes())),
-                                               safeStr(e.clusteringString(comp.subtypes())), bsc, bse, v),
-                                 expected, Integer.signum(ByteComparable.compare(bsc, bse, v)));
-                    maybeCheck41Properties(expected, bsc, bse, v);
-                    maybeAssertNotPrefix(bsc, bse, v);
-
-                    ClusteringComparator compR = new ClusteringComparator(ReversedType.getInstance(t1), ReversedType.getInstance(t2));
-                    final ByteComparable bsrc = compR.asByteComparable(c);
-                    final ByteComparable bsre = compR.asByteComparable(e);
-                    int expectedR = Integer.signum(compR.compare(c, e));
-                    assertEquals(String.format("Failed comparing reversed %s and %s, %s vs %s version %s",
-                                               safeStr(c.clusteringString(comp.subtypes())),
-                                               safeStr(e.clusteringString(comp.subtypes())), bsrc, bsre, v),
-                                 expectedR, Integer.signum(ByteComparable.compare(bsrc, bsre, v)));
-                    maybeCheck41Properties(expectedR, bsrc, bsre, v);
-                    maybeAssertNotPrefix(bsrc, bsre, v);
-                }
+        ByteBuffer[][] inputs = new ByteBuffer[][]
+                                {
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                                  decomposeAndRandomPad(Int32Type.instance, 0)},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                                  decomposeAndRandomPad(Int32Type.instance, null)},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                                  null},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, ""),
+                                                  decomposeAndRandomPad(Int32Type.instance, 0)},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, ""),
+                                                  decomposeAndRandomPad(Int32Type.instance, null)},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, ""),
+                                                  null},
+                                new ByteBuffer[] {null,
+                                                  decomposeAndRandomPad(Int32Type.instance, 0)},
+                                new ByteBuffer[] {null,
+                                                  decomposeAndRandomPad(Int32Type.instance, null)},
+                                new ByteBuffer[] {null,
+                                                  null}
+                                };
+        for (ByteBuffer[] input1 : inputs)
+            for (ByteBuffer[] input2 : inputs)
+            {
+                assertClusteringPairComparesSame(UTF8Type.instance, Int32Type.instance,
+                                                 input1[0], input1[1], input2[0], input2[1],
+                                                 (t, v) -> (ByteBuffer) v,
+                                                 input1[0] != null && input1[1] != null && input2[0] != null && input2[1] != null);
+            }
     }
 
-    static ClusteringPrefix<?> makeBound(ClusteringPrefix.Kind k1, ByteBuffer[] b)
+    @Test
+    public void testNullsInClusteringLegacy()
+    {
+        // verify the legacy encoding treats null clustering the same as null value
+        ClusteringPrefix<?> aNull = makeBound(ClusteringPrefix.Kind.CLUSTERING,
+                                              decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                              decomposeAndRandomPad(Int32Type.instance, null));
+        ClusteringPrefix<?> aEmpty = makeBound(ClusteringPrefix.Kind.CLUSTERING,
+                                               decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                               null);
+        ClusteringComparator comp = new ClusteringComparator(UTF8Type.instance, Int32Type.instance);
+        assertEquals(0, ByteComparable.compare(comp.asByteComparable(aNull), comp.asByteComparable(aEmpty), Version.LEGACY));
+        assertEquals(0, ByteComparable.compare(comp.asByteComparable(aNull), comp.asByteComparable(aEmpty), Version.OSS41));
+        ClusteringComparator compReversed = new ClusteringComparator(UTF8Type.instance, ReversedType.getInstance(Int32Type.instance));
+        assertEquals(0, ByteComparable.compare(compReversed.asByteComparable(aNull), compReversed.asByteComparable(aEmpty), Version.LEGACY));
+        assertEquals(0, ByteComparable.compare(compReversed.asByteComparable(aNull), compReversed.asByteComparable(aEmpty), Version.OSS41));
+    }
+
+    @Test
+    public void testEmptyClustering()
+    {
+        assertEmptyComparedToStatic(1, ClusteringPrefix.Kind.CLUSTERING, Version.OSS50);
+        assertEmptyComparedToStatic(0, ClusteringPrefix.Kind.STATIC_CLUSTERING, Version.OSS50);
+        assertEmptyComparedToStatic(1, ClusteringPrefix.Kind.INCL_START_BOUND, Version.OSS50);
+        assertEmptyComparedToStatic(1, ClusteringPrefix.Kind.INCL_END_BOUND, Version.OSS50);
+
+        assertEmptyComparedToStatic(1, ClusteringPrefix.Kind.CLUSTERING, Version.OSS41);
+        assertEmptyComparedToStatic(0, ClusteringPrefix.Kind.STATIC_CLUSTERING, Version.OSS41);
+        assertEmptyComparedToStatic(1, ClusteringPrefix.Kind.INCL_START_BOUND, Version.OSS41);
+        assertEmptyComparedToStatic(1, ClusteringPrefix.Kind.INCL_END_BOUND, Version.OSS41);
+
+        assertEmptyComparedToStatic(1, ClusteringPrefix.Kind.CLUSTERING, Version.LEGACY);
+        assertEmptyComparedToStatic(0, ClusteringPrefix.Kind.STATIC_CLUSTERING, Version.LEGACY);
+        assertEmptyComparedToStatic(-1, ClusteringPrefix.Kind.INCL_START_BOUND, Version.LEGACY);
+        assertEmptyComparedToStatic(1, ClusteringPrefix.Kind.INCL_END_BOUND, Version.LEGACY);
+    }
+
+    private void assertEmptyComparedToStatic(int expected, ClusteringPrefix.Kind kind, Version version)
+    {
+        ClusteringPrefix<?> empty = makeBound(kind);
+        ClusteringComparator compEmpty = new ClusteringComparator();
+        assertEquals(expected, Integer.signum(ByteComparable.compare(compEmpty.asByteComparable(empty),
+                                                                     compEmpty.asByteComparable(Clustering.STATIC_CLUSTERING),
+                                                                     version)));
+    }
+
+    void assertClusteringPairComparesSame(AbstractType<?> t1, AbstractType<?> t2, Object o1, Object o2, Object o3, Object o4)
+    {
+        assertClusteringPairComparesSame(t1, t2, o1, o2, o3, o4, AbstractType::decompose, true);
+    }
+
+    void assertClusteringPairComparesSame(AbstractType<?> t1, AbstractType<?> t2,
+                                          Object o1, Object o2, Object o3, Object o4,
+                                          BiFunction<AbstractType, Object, ByteBuffer> decompose,
+                                          boolean testLegacy)
+    {
+        // Explicitly pass version values to have the failing kind in the stack trace.
+        if (testLegacy)
+            assertClusteringPairComparesSame(t1, t2, o1, o2, o3, o4, decompose, Version.LEGACY);
+        if (o1 != null && o2 != null && o3 != null && o4 != null)
+            assertClusteringPairComparesSame(t1, t2, o1, o2, o3, o4, decompose, Version.OSS41);
+
+        assertClusteringPairComparesSame(t1, t2, o1, o2, o3, o4, decompose, Version.OSS50);
+    }
+
+    void assertClusteringPairComparesSame(AbstractType<?> t1, AbstractType<?> t2,
+                                          Object o1, Object o2, Object o3, Object o4,
+                                          BiFunction<AbstractType, Object, ByteBuffer> decompose,
+                                          ByteComparable.Version v)
+    {
+        EnumSet<ClusteringPrefix.Kind> skippedKinds = EnumSet.of(ClusteringPrefix.Kind.SSTABLE_LOWER_BOUND, ClusteringPrefix.Kind.SSTABLE_UPPER_BOUND);
+        for (ClusteringPrefix.Kind k1 : EnumSet.complementOf(skippedKinds))
+            for (ClusteringPrefix.Kind k2 : EnumSet.complementOf(skippedKinds))
+            {
+                ClusteringComparator comp = new ClusteringComparator(t1, t2);
+                ByteBuffer[] b = new ByteBuffer[2];
+                ByteBuffer[] d = new ByteBuffer[2];
+                b[0] = decompose.apply(t1, o1);
+                b[1] = decompose.apply(t2, o2);
+                d[0] = decompose.apply(t1, o3);
+                d[1] = decompose.apply(t2, o4);
+                ClusteringPrefix<?> c = makeBound(k1, b);
+                ClusteringPrefix<?> e = makeBound(k2, d);
+                final ByteComparable bsc = comp.asByteComparable(c);
+                final ByteComparable bse = comp.asByteComparable(e);
+                int expected = Integer.signum(comp.compare(c, e));
+                assertEquals(String.format("Failed comparing %s and %s, %s vs %s version %s",
+                                           safeStr(c.clusteringString(comp.subtypes())),
+                                           safeStr(e.clusteringString(comp.subtypes())), bsc, bse, v),
+                             expected, Integer.signum(ByteComparable.compare(bsc, bse, v)));
+                maybeCheck41Properties(expected, bsc, bse, v);
+                maybeAssertNotPrefix(bsc, bse, v);
+
+                ClusteringComparator compR = new ClusteringComparator(ReversedType.getInstance(t1), ReversedType.getInstance(t2));
+                final ByteComparable bsrc = compR.asByteComparable(c);
+                final ByteComparable bsre = compR.asByteComparable(e);
+                int expectedR = Integer.signum(compR.compare(c, e));
+                assertEquals(String.format("Failed comparing reversed %s and %s, %s vs %s version %s",
+                                           safeStr(c.clusteringString(comp.subtypes())),
+                                           safeStr(e.clusteringString(comp.subtypes())), bsrc, bsre, v),
+                             expectedR, Integer.signum(ByteComparable.compare(bsrc, bsre, v)));
+                maybeCheck41Properties(expectedR, bsrc, bsre, v);
+                maybeAssertNotPrefix(bsrc, bsre, v);
+            }
+    }
+
+    static ClusteringPrefix<?> makeBound(ClusteringPrefix.Kind k1, ByteBuffer... b)
     {
         return makeBound(ByteBufferAccessor.instance.factory(), k1, b);
     }
@@ -385,7 +488,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
             return Clustering.STATIC_CLUSTERING;
 
         default:
-            throw new AssertionError();
+            throw new AssertionError(k1);
         }
     }
 
@@ -402,31 +505,62 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
         TupleType tt = new TupleType(ImmutableList.of(UTF8Type.instance, Int32Type.instance));
         List<ByteBuffer> tests = ImmutableList.of
             (
-            TupleType.buildValue(ByteBufferAccessor.instance, new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, ""),
-                                                                                decomposeAndRandomPad(Int32Type.instance, 0)}),
+            TupleType.buildValue(ByteBufferAccessor.instance,
+                                 decomposeAndRandomPad(UTF8Type.instance, ""),
+                                 decomposeAndRandomPad(Int32Type.instance, 0)),
             // Note: a decomposed null (e.g. decomposeAndRandomPad(Int32Type.instance, null)) should not reach a tuple
-            TupleType.buildValue(ByteBufferAccessor.instance, new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, ""),
-                                                                                null}),
-            TupleType.buildValue(ByteBufferAccessor.instance, new ByteBuffer[] {null,
-                                                                                decomposeAndRandomPad(Int32Type.instance, 0)}),
-            TupleType.buildValue(ByteBufferAccessor.instance, new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, "")}),
-            TupleType.buildValue(ByteBufferAccessor.instance, new ByteBuffer[] {null}),
-            TupleType.buildValue(ByteBufferAccessor.instance, new ByteBuffer[0])
+            TupleType.buildValue(ByteBufferAccessor.instance,
+                                 decomposeAndRandomPad(UTF8Type.instance, ""),
+                                 null),
+            TupleType.buildValue(ByteBufferAccessor.instance,
+                                 null,
+                                 decomposeAndRandomPad(Int32Type.instance, 0)),
+            TupleType.buildValue(ByteBufferAccessor.instance,
+                                 decomposeAndRandomPad(UTF8Type.instance, "")),
+            TupleType.buildValue(ByteBufferAccessor.instance, (ByteBuffer) null),
+            TupleType.buildValue(ByteBufferAccessor.instance)
             );
         testBuffers(tt, tests);
     }
 
+    @Test
+    public void testTupleNewField()
+    {
+        TupleType t1 = new TupleType(ImmutableList.of(UTF8Type.instance));
+        TupleType t2 = new TupleType(ImmutableList.of(UTF8Type.instance, Int32Type.instance));
+
+        ByteBuffer vOne = TupleType.buildValue(ByteBufferAccessor.instance,
+                                               decomposeAndRandomPad(UTF8Type.instance, "str"));
+        ByteBuffer vOneAndNull = TupleType.buildValue(ByteBufferAccessor.instance,
+                                                      decomposeAndRandomPad(UTF8Type.instance, "str"),
+                                                      null);
+
+        ByteComparable bOne1 = typeToComparable(t1, vOne);
+        ByteComparable bOne2 = typeToComparable(t2, vOne);
+        ByteComparable bOneAndNull2 = typeToComparable(t2, vOneAndNull);
+
+        assertEquals("The byte-comparable version of a one-field tuple must be the same as a two-field tuple with non-present second component.",
+                     bOne1.byteComparableAsString(Version.OSS50),
+                     bOne2.byteComparableAsString(Version.OSS50));
+        assertEquals("The byte-comparable version of a one-field tuple must be the same as a two-field tuple with null as second component.",
+                     bOne1.byteComparableAsString(Version.OSS50),
+                     bOneAndNull2.byteComparableAsString(Version.OSS50));
+    }
+
+
     void assertTupleComparesSame(AbstractType t1, AbstractType t2, Object o1, Object o2, Object o3, Object o4)
     {
         TupleType tt = new TupleType(ImmutableList.of(t1, t2));
-        ByteBuffer b1 = TupleType.buildValue(ByteBufferAccessor.instance, new ByteBuffer[] {decomposeForTuple(t1, o1),
-                                                                                            decomposeForTuple(t2, o2)});
-        ByteBuffer b2 = TupleType.buildValue(ByteBufferAccessor.instance, new ByteBuffer[] {decomposeForTuple(t1, o3),
-                                                                                            decomposeForTuple(t2, o4)});
+        ByteBuffer b1 = TupleType.buildValue(ByteBufferAccessor.instance,
+                                             decomposeForTuple(t1, o1),
+                                             decomposeForTuple(t2, o2));
+        ByteBuffer b2 = TupleType.buildValue(ByteBufferAccessor.instance,
+                                             decomposeForTuple(t1, o3),
+                                             decomposeForTuple(t2, o4));
         assertComparesSameBuffers(tt, b1, b2);
     }
 
-    static ByteBuffer decomposeForTuple(AbstractType t, Object o)
+    static <T> ByteBuffer decomposeForTuple(AbstractType<T> t, T o)
     {
         return o != null ? t.decompose(o) : null;
     }
@@ -520,7 +654,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
 
                 tests.add(l);
             }
-        testType(tt, tests.toArray());
+        testType(tt, tests);
     }
 
     @Test
@@ -536,10 +670,10 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
     }
 
     @Test
-    public void testDecoratedKeyPrefixesVOSS41()
+    public void testDecoratedKeyPrefixesVOSS50()
     {
         // This should pass with the OSS 4.1 encoding
-        testDecoratedKeyPrefixes(Version.OSS41);
+        testDecoratedKeyPrefixes(Version.OSS50);
     }
 
     @Test
@@ -613,6 +747,72 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
 
         expectedException.expect(IllegalArgumentException.class);
         ByteSource.fixedLength(bytes, 4, 1);
+    }
+
+    @Test
+    public void testSeparatorGT()
+    {
+        testSeparator(ByteComparable::separatorGt, testLongs, LongType.instance);
+    }
+
+    @Test
+    public void testSeparatorPrefix()
+    {
+        testSeparator(ByteComparable::separatorPrefix, testLongs, LongType.instance);
+    }
+
+    @Test
+    public void testSeparatorPrefixViaDiffPoint()
+    {
+        testSeparator((x, y) -> version -> ByteSource.cut(y.asComparableBytes(version),
+                                                          ByteComparable.diffPoint(x, y, version)),
+                      testLongs,
+                      LongType.instance);
+    }
+    @Test
+    public void testSeparatorNext()
+    {
+        // Appending a 00 byte at the end gives the immediate next possible value after x.
+        testSeparator((x, y) -> version -> ByteSource.append(x.asComparableBytes(version), 0),
+                      testLongs,
+                      LongType.instance);
+    }
+
+    private <T> void testSeparator(BiFunction<ByteComparable, ByteComparable, ByteComparable> separatorMethod, T[] testValues, AbstractType<T> type)
+    {
+        for (T v1 : testValues)
+            for (T v2 : testValues)
+            {
+                if (v1 == null || v2 == null)
+                    continue;
+                if (type.compare(type.decompose(v1), type.decompose(v2)) >= 0)
+                    continue;
+                ByteComparable bc1 = getByteComparable(type, v1);
+                ByteComparable bc2 = getByteComparable(type, v2);
+                ByteComparable separator = separatorMethod.apply(bc1, bc2);
+
+                for (Version version : Version.values())
+                {
+                    Assert.assertTrue("Sanity check failed", ByteComparable.compare(bc1, bc2, version) < 0);
+                    Assert.assertTrue(String.format("Separator %s must be greater than left %s (for %s) (version %s)",
+                                                    separator.byteComparableAsString(version),
+                                                    bc1.byteComparableAsString(version),
+                                                    v1,
+                                                    version),
+                                      ByteComparable.compare(bc1, separator, version) < 0);
+                    Assert.assertTrue(String.format("Separator %s must be less than or equal to right %s (for %s) (version %s)",
+                                                    separator.byteComparableAsString(version),
+                                                    bc2.byteComparableAsString(version),
+                                                    v2,
+                                                    version),
+                                      ByteComparable.compare(separator, bc2, version) <= 0);
+                }
+            }
+    }
+
+    private <T> ByteComparable getByteComparable(AbstractType<T> type, T v1)
+    {
+        return version -> type.asComparableBytes(type.decompose(v1), version);
     }
 
     public void testDecoratedKeyPrefixes(Version version)
@@ -690,22 +890,30 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
 
     private void maybeAssertNotPrefix(ByteComparable s1, ByteComparable s2, Version version)
     {
-        if (version == Version.OSS41)
+        if (version != Version.LEGACY)
             assertNotPrefix(s1.asComparableBytes(version), s2.asComparableBytes(version));
     }
 
     private void maybeCheck41Properties(int expectedComparison, ByteComparable s1, ByteComparable s2, Version version)
     {
-        if (version != Version.OSS41)
+        if (version == Version.LEGACY)
             return;
 
         if (s1 == null || s2 == null || 0 == expectedComparison)
             return;
-        int b1 = ThreadLocalRandom.current().nextInt(ByteSource.MIN_SEPARATOR, ByteSource.MAX_SEPARATOR + 1);
-        int b2 = ThreadLocalRandom.current().nextInt(ByteSource.MIN_SEPARATOR, ByteSource.MAX_SEPARATOR + 1);
+        int b1 = randomTerminator();
+        int b2 = randomTerminator();
         assertEquals(String.format("Comparison failed for %s(%s + %02x) and %s(%s + %02x)", s1, s1.byteComparableAsString(version), b1, s2, s2.byteComparableAsString(version), b2),
                 expectedComparison, Integer.signum(compare(ByteSource.withTerminator(b1, s1.asComparableBytes(version)), ByteSource.withTerminator(b2, s2.asComparableBytes(version)))));
         assertNotPrefix(ByteSource.withTerminator(b1, s1.asComparableBytes(version)), ByteSource.withTerminator(b2, s2.asComparableBytes(version)));
+    }
+
+    private static int randomTerminator()
+    {
+        var rand = ThreadLocalRandom.current();
+        return rand.nextBoolean()
+               ? rand.nextInt(ByteSource.MIN_SEPARATOR, ByteSource.MIN_NEXT_COMPONENT)
+               : rand.nextInt(ByteSource.MAX_NEXT_COMPONENT + 1, ByteSource.MAX_SEPARATOR + 1);
     }
 
     <K, V, M extends Map<K, V>> void testMap(MapType<K, V> tt, K[] keys, V[] values, Supplier<M> gen, Random rand)
@@ -721,13 +929,13 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
 
                 tests.add(l);
             }
-        testType(tt, tests.toArray());
+        testType(tt, tests);
     }
 
     /*
      * Convert type to a comparable.
      */
-    private ByteComparable typeToComparable(AbstractType type, ByteBuffer value)
+    private ByteComparable typeToComparable(AbstractType<?> type, ByteBuffer value)
     {
         return new ByteComparable()
         {
@@ -745,24 +953,29 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
         };
     }
 
-    public void testType(AbstractType type, Object[] values)
+    public <T> void testType(AbstractType<T> type, Object[] values)
     {
-        for (Object i : values) {
+        testType(type, Iterables.transform(Arrays.asList(values), x -> (T) x));
+    }
+
+    public <T> void testType(AbstractType<? super T> type, Iterable<T> values)
+    {
+        for (T i : values) {
             ByteBuffer b = decomposeAndRandomPad(type, i);
             logger.info("Value {} ({}) bytes {} ByteSource {}",
                               safeStr(i),
                               safeStr(type.getSerializer().toCQLLiteral(b)),
                               safeStr(ByteBufferUtil.bytesToHex(b)),
-                              typeToComparable(type, b).byteComparableAsString(Version.OSS41));
+                              typeToComparable(type, b).byteComparableAsString(Version.OSS50));
         }
-        for (Object i : values)
-            for (Object j : values)
+        for (T i : values)
+            for (T j : values)
                 assertComparesSame(type, i, j);
         if (!type.isReversed())
             testType(ReversedType.getInstance(type), values);
     }
 
-    public void testBuffers(AbstractType type, List<ByteBuffer> values)
+    public void testBuffers(AbstractType<?> type, List<ByteBuffer> values)
     {
         try
         {
@@ -770,7 +983,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                 logger.info("Value {} bytes {} ByteSource {}",
                             safeStr(type.getSerializer().toCQLLiteral(b)),
                             safeStr(ByteBufferUtil.bytesToHex(b)),
-                            typeToComparable(type, b).byteComparableAsString(Version.OSS41));
+                            typeToComparable(type, b).byteComparableAsString(Version.OSS50));
             }
         }
         catch (UnsupportedOperationException e)
@@ -783,7 +996,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                 assertComparesSameBuffers(type, i, j);
     }
 
-    void assertComparesSameBuffers(AbstractType type, ByteBuffer b1, ByteBuffer b2)
+    void assertComparesSameBuffers(AbstractType<?> type, ByteBuffer b1, ByteBuffer b2)
     {
         int expected = Integer.signum(type.compare(b1, b2));
         final ByteComparable bs1 = typeToComparable(type, b1);
@@ -804,6 +1017,8 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
         for (ByteBuffer i : values)
             for (ByteBuffer j : values)
                 assertComparesSameDecoratedKeys(type, i, j);
+        for (ByteBuffer i : values)
+            assertDecoratedKeyBounds(type, i);
     }
 
     void assertComparesSameDecoratedKeys(IPartitioner type, ByteBuffer b1, ByteBuffer b2)
@@ -828,6 +1043,51 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                          actual);
             maybeAssertNotPrefix(k1, k2, version);
         }
+    }
+
+    void assertDecoratedKeyBounds(IPartitioner type, ByteBuffer b)
+    {
+        Version version = Version.OSS50;
+        DecoratedKey k = type.decorateKey(b);
+        final ByteComparable after = k.asComparableBound(false);
+        final ByteComparable before = k.asComparableBound(true);
+
+        int actual = Integer.signum(ByteComparable.compare(k, before, version));
+        assertEquals(String.format("Failed comparing bound before (%s) for %s[%s](%s)\npartitioner %s version %s",
+                                   before.byteComparableAsString(version),
+                                   ByteBufferUtil.bytesToHex(b),
+                                   k,
+                                   k.byteComparableAsString(version),
+                                   type,
+                                   version),
+                     1,
+                     actual);
+        maybeAssertNotPrefix(k, before, version);
+
+        actual = Integer.signum(ByteComparable.compare(k, after, version));
+        assertEquals(String.format("Failed comparing bound after (%s) for %s[%s](%s)\npartitioner %s version %s",
+                                   after.byteComparableAsString(version),
+                                   ByteBufferUtil.bytesToHex(b),
+                                   k,
+                                   k.byteComparableAsString(version),
+                                   type,
+                                   version),
+                     -1,
+                     actual);
+        maybeAssertNotPrefix(k, after, version);
+
+        actual = Integer.signum(ByteComparable.compare(before, after, version));
+        assertEquals(String.format("Failed comparing bound before (%s) to after (%s) for %s[%s](%s)\npartitioner %s version %s",
+                                   before.byteComparableAsString(version),
+                                   after.byteComparableAsString(version),
+                                   ByteBufferUtil.bytesToHex(b),
+                                   k,
+                                   k.byteComparableAsString(version),
+                                   type,
+                                   version),
+                     -1,
+                     actual);
+        maybeAssertNotPrefix(after, before, version);
     }
 
     static Object safeStr(Object i)
@@ -866,7 +1126,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
         assertEquals(String.format("Failed comparing %s and %s", v1, v2), expected, actual);
     }
 
-    void assertComparesSame(AbstractType type, Object v1, Object v2)
+    <T> void assertComparesSame(AbstractType<T> type, T v1, T v2)
     {
         ByteBuffer b1 = decomposeAndRandomPad(type, v1);
         ByteBuffer b2 = decomposeAndRandomPad(type, v2);
@@ -891,13 +1151,22 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                     assertEquals(String.format("Failed comparing reversed %s(%s, %s) and %s(%s, %s) direct (%d) and as clustering", safeStr(v1), ByteBufferUtil.bytesToHex(b1), c1, safeStr(v2), ByteBufferUtil.bytesToHex(b2), c2, actual), expected, actualcc);
                 }
                 else
-                    assertEquals(String.format("Failed comparing %s(%s) and %s(%s)", safeStr(v1), ByteBufferUtil.bytesToHex(b1), safeStr(v2), ByteBufferUtil.bytesToHex(b2)), expected, actual);
+                    assertEquals(String.format("Failed comparing %s(%s BC %s) and %s(%s BC %s) version %s",
+                                               safeStr(v1),
+                                               ByteBufferUtil.bytesToHex(b1),
+                                               bc1.byteComparableAsString(version),
+                                               safeStr(v2),
+                                               ByteBufferUtil.bytesToHex(b2),
+                                               bc2.byteComparableAsString(version),
+                                               version),
+                                 expected,
+                                 actual);
             }
             maybeCheck41Properties(expected, bc1, bc2, version);
         }
     }
 
-    ByteBuffer decomposeAndRandomPad(AbstractType type, Object v)
+    <T> ByteBuffer decomposeAndRandomPad(AbstractType<T> type, T v)
     {
         ByteBuffer b = type.decompose(v);
         Random rand = new Random(0);
