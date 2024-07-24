@@ -59,6 +59,7 @@ public class StandaloneVerifier
     private static final String TOOL_NAME = "sstableverify";
     private static final String VERBOSE_OPTION  = "verbose";
     private static final String EXTENDED_OPTION = "extended";
+    private static final String VALIDATE_ALL_ROWS = "validate_all_rows";
     private static final String DEBUG_OPTION  = "debug";
     private static final String HELP_OPTION  = "help";
     private static final String CHECK_VERSION = "check_version";
@@ -125,6 +126,7 @@ public class StandaloneVerifier
             }
             IVerifier.Options verifyOptions = IVerifier.options().invokeDiskFailurePolicy(false)
                                                        .extendedVerification(options.extended)
+                                                       .validateAllRows(options.validateAllRows)
                                                        .checkVersion(options.checkVersion)
                                                        .mutateRepairStatus(options.mutateRepairStatus)
                                                        .checkOwnsTokens(!options.tokens.isEmpty())
@@ -182,6 +184,7 @@ public class StandaloneVerifier
         public boolean debug;
         public boolean verbose;
         public boolean extended;
+        public boolean validateAllRows;
         public boolean checkVersion;
         public boolean mutateRepairStatus;
         public boolean quick;
@@ -225,6 +228,7 @@ public class StandaloneVerifier
                 opts.debug = cmd.hasOption(DEBUG_OPTION);
                 opts.verbose = cmd.hasOption(VERBOSE_OPTION);
                 opts.extended = cmd.hasOption(EXTENDED_OPTION);
+                opts.validateAllRows = cmd.hasOption(VALIDATE_ALL_ROWS);
                 opts.checkVersion = cmd.hasOption(CHECK_VERSION);
                 opts.mutateRepairStatus = cmd.hasOption(MUTATE_REPAIR_STATUS);
                 opts.quick = cmd.hasOption(QUICK);
