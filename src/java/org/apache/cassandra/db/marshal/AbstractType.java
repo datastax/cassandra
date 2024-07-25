@@ -28,12 +28,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Streams;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -357,18 +360,20 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     }
 
     /**
-     * Returns true if this comparator is compatible with the provided
-     * previous comparator, that is if previous can safely be replaced by this.
+     * Returns true if this comparator is compatible with the provided previous comparator, that is if previous can
+     * safely be replaced by this.
      * A comparator cn should be compatible with a previous one cp if forall columns c1 and c2,
      * if   cn.validate(c1) and cn.validate(c2) and cn.compare(c1, c2) == v,
      * then cp.validate(c1) and cp.validate(c2) and cp.compare(c1, c2) == v.
      * <p/>
-     * Note that a type should be compatible with at least itself and when in
-     * doubt, keep the default behavior of not being compatible with any other comparator!
+     * Note that a type should be compatible with at least itself and when in doubt, keep the default behavior
+     * of not being compatible with any other comparator!
      * <p/>
      * Used for user functions and aggregates to validate the returning type when the function is replaced.
      * Used for validation of table metadata when replacing metadata in ref (alterting a table) and when scrubbing
      * an sstable to validate whether metadata stored in the sstable is compatible with the current metadata.
+     * <p/>
+     * Note that this will never return true when one type is multicell and the other is not.
      */
     public boolean isCompatibleWith(AbstractType<?> previous)
     {
@@ -398,7 +403,15 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public final boolean isValueCompatibleWith(AbstractType<?> previous)
     {
-        return unwrap().isValueCompatibleWithInternal(previous.unwrap());
+        if (previous == null)
+            return false;
+
+        AbstractType<T> unwrapped = this.unwrap();
+        AbstractType<?> previousUnwrapped = previous.unwrap();
+        if (unwrapped.equals(previousUnwrapped))
+            return true;
+
+        return unwrapped.isValueCompatibleWithInternal(previousUnwrapped);
     }
 
     /**
@@ -407,9 +420,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      * compatibility recursively, they should call {@link #isValueCompatibleWith} instead of this method
      * so that reversed types are ignored even if nested.
      */
-    protected boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
-        return isCompatibleWith(otherType);
+        return isCompatibleWith(previous);
     }
 
     /**
@@ -971,5 +984,25 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public int hashCode()
     {
         return hashCode;
+    }
+
+    /**
+     * Checks whether this type's subtypes are compatible with the provided type's subtypes using a provided predicate.
+     * Regardless of the predicate, this method returns false if this type has fewer subtypes than the provided type
+     * because in that case it could not safely replace the provided type in any situation.
+     *
+     * @param previous  the type against which the verification is done - in other words, the type which was originally
+     *                  used to serialize the values
+     * @param predicate one of the methodsd isXXXCompatibleWith
+     * @return {@code true} if this type has at least the same number of subtypes as the previous type and the predicate
+     * is satisfied for the corresponding subtypes
+     */
+    protected boolean isSubTypesCompatibleWith(AbstractType<?> previous, BiPredicate<AbstractType<?>, AbstractType<?>> predicate)
+    {
+        if (subTypes.size() < previous.subTypes.size())
+            return false;
+
+        return Streams.zip(subTypes.stream().limit(previous.subTypes.size()), previous.subTypes.stream(), predicate::test)
+                      .allMatch(Predicate.isEqual(true));
     }
 }

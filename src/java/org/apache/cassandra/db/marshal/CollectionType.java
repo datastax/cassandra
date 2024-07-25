@@ -170,64 +170,37 @@ public abstract class CollectionType<T> extends MultiCellCapableType<T>
     }
 
     @Override
-    public boolean isCompatibleWith(AbstractType<?> previous)
+    protected boolean isCompatibleWithFrozen(MultiCellCapableType<?> previous)
     {
-        if (this == previous)
-            return true;
-
-        if (!getClass().equals(previous.getClass()))
+        if (getClass() != previous.getClass())
             return false;
 
-        CollectionType<?> tprev = (CollectionType<?>) previous;
-        if (this.isMultiCell() != tprev.isMultiCell())
-            return false;
-
-        // subclasses should handle compatibility checks for frozen collections
-        if (!this.isMultiCell())
-            return isCompatibleWithFrozen(tprev);
-
-        if (!this.nameComparator().isCompatibleWith(tprev.nameComparator()))
-            return false;
-
-        // the value comparator is only used for Cell values, so sorting doesn't matter
-        return this.valueComparator().isSerializationCompatibleWith(tprev.valueComparator());
+        // When frozen, the full collection is a blob, so everything must be sorted-compatible for the whole blob to
+        // be sorted-compatible.
+        return isSubTypesCompatibleWith(previous, AbstractType::isCompatibleWith);
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    protected boolean isCompatibleWithMultiCell(MultiCellCapableType<?> previous)
     {
-        // for multi-cell collections, compatibility and value-compatibility are the same
-        if (this.isMultiCell())
-            return isCompatibleWith(previous);
-
-        if (this == previous)
-            return true;
-
-        if (!getClass().equals(previous.getClass()))
+        if (getClass() != previous.getClass())
             return false;
 
-        CollectionType<?> tprev = (CollectionType<?>) previous;
-        if (this.isMultiCell() != tprev.isMultiCell())
-            return false;
-
-        // subclasses should handle compatibility checks for frozen collections
-        return isValueCompatibleWithFrozen(tprev);
+        // When multi-cell, the name comparator is the one used to compare cell-path so must be sorted-compatible
+        // but the value comparator is never used for sorting so serialization-compatibility is enough.
+        return this.nameComparator().isCompatibleWith(previous.nameComparator()) &&
+               this.valueComparator().isSerializationCompatibleWith(((CollectionType<?>) previous).valueComparator());
     }
 
     @Override
-    public boolean isSerializationCompatibleWith(AbstractType<?> previous)
+    protected boolean isValueCompatibleWithFrozen(MultiCellCapableType<?> previous)
     {
-        if (!isValueCompatibleWith(previous))
+        if (getClass() != previous.getClass())
             return false;
 
-        return valueComparator().isSerializationCompatibleWith(((CollectionType<?>)previous).valueComparator());
+        return nameComparator().isCompatibleWith(previous.nameComparator()) &&
+               valueComparator().isValueCompatibleWith(((CollectionType<?>) previous).valueComparator());
     }
-
-    /** A version of isCompatibleWith() to deal with non-multicell (frozen) collections */
-    protected abstract boolean isCompatibleWithFrozen(CollectionType<?> previous);
-
-    /** A version of isValueCompatibleWith() to deal with non-multicell (frozen) collections */
-    protected abstract boolean isValueCompatibleWithFrozen(CollectionType<?> previous);
 
     public CQL3Type asCQL3Type()
     {
