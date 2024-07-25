@@ -196,25 +196,41 @@ public class V1SearchableIndex implements SearchableIndex
                                                              int limit) throws IOException
     {
         var iterators = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(segments.size());
-        for (Segment segment : segments)
+        try
         {
-            if (segment.intersects(keyRange))
+            for (Segment segment : segments)
             {
-                iterators.add(segment.orderBy(expression, keyRange, context, limit));
+                if (segment.intersects(keyRange))
+                {
+                    iterators.add(segment.orderBy(expression, keyRange, context, limit));
+                }
             }
-        }
 
-        return iterators;
+            return iterators;
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(iterators);
+            throw t;
+        }
     }
 
     @Override
     public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>(segments.size());
-        for (Segment segment : segments)
-            results.add(segment.orderResultsBy(context, keys, exp, limit));
+        try
+        {
+            for (Segment segment : segments)
+                results.add(segment.orderResultsBy(context, keys, exp, limit));
 
-        return results;
+            return results;
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(results);
+            throw t;
+        }
     }
 
     @Override
