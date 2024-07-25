@@ -25,5 +25,5 @@ public interface OrdinalPostingList extends PostingList
      *
      * @return the ordinal of the posting that will be returned on the next call to {@link #nextPosting()}
      */
-    long getOrdinal();
+    int getOrdinal();
 }

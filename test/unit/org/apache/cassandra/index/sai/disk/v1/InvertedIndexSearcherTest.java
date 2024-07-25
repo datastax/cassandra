@@ -105,7 +105,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
                     for (int p = 0; p < numPostings; ++p)
                     {
-                        final long expectedToken = termsEnum.get(t).postings.get(p);
+                        final int expectedToken = termsEnum.get(t).postings.get(p);
                         assertTrue(results.hasNext());
                         final long actualToken = results.next().token().getLongValue();
                         assertEquals(expectedToken, actualToken);
@@ -150,7 +150,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     public void testUnsupportedOperator() throws Exception
     {
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
-        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(Version.latest(), numTerms, numPostings);
+        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
@@ -195,10 +195,10 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
             SSTableContext sstableContext = mock(SSTableContext.class);
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
             when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
-            final IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext,
-                                                                                            indexContext,
-                                                                                            indexFiles,
-                                                                                            segmentMetadata);
+            final IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext,
+                                                                                   indexContext,
+                                                                                   indexFiles,
+                                                                                   segmentMetadata);
             assertThat(searcher, is(instanceOf(InvertedIndexSearcher.class)));
             return searcher;
         }
