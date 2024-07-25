@@ -109,6 +109,8 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     {
         if (indexContext.isVector())
             return new V2VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
+        if (indexContext.isLiteral())
+            return new V2InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
     }
 

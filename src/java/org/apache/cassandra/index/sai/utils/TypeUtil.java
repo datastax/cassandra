@@ -45,6 +45,7 @@ import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.MarshalException;
@@ -105,20 +106,20 @@ public class TypeUtil
 
     /**
      * Returns the smaller of two {@code ByteBuffer} values, based on the result of {@link
-     * #compare(ByteBuffer, ByteBuffer, AbstractType)} comparision.
+     * #compare(ByteBuffer, ByteBuffer, AbstractType, Version)} comparision.
      */
-    public static ByteBuffer min(ByteBuffer a, ByteBuffer b, AbstractType<?> type)
+    public static ByteBuffer min(ByteBuffer a, ByteBuffer b, AbstractType<?> type, Version version)
     {
-        return a == null ?  b : (b == null || compare(b, a, type) > 0) ? a : b;
+        return a == null ?  b : (b == null || compare(b, a, type, version) > 0) ? a : b;
     }
 
     /**
      * Returns the greater of two {@code ByteBuffer} values, based on the result of {@link
-     * #compare(ByteBuffer, ByteBuffer, AbstractType)} comparision.
+     * #compare(ByteBuffer, ByteBuffer, AbstractType, Version)} comparision.
      */
-    public static ByteBuffer max(ByteBuffer a, ByteBuffer b, AbstractType<?> type)
+    public static ByteBuffer max(ByteBuffer a, ByteBuffer b, AbstractType<?> type, Version version)
     {
-        return a == null ?  b : (b == null || compare(b, a, type) < 0) ? a : b;
+        return a == null ?  b : (b == null || compare(b, a, type, version) < 0) ? a : b;
     }
 
     /**
@@ -208,6 +209,11 @@ public class TypeUtil
         return type.fromString(value);
     }
 
+    public static ByteComparable asComparableBytes(ByteBuffer value, AbstractType<?> type)
+    {
+        return version -> asComparableBytes(value, type, version);
+    }
+
     public static ByteSource asComparableBytes(ByteBuffer value, AbstractType<?> type, ByteComparable.Version version)
     {
         if (type instanceof InetAddressType || type instanceof IntegerType || type instanceof DecimalType)
@@ -218,6 +224,15 @@ public class TypeUtil
         else if (type instanceof LongType)
             return ByteSource.optionalSignedFixedLengthNumber(ByteBufferAccessor.instance, value);
         return type.asComparableBytes(value, version);
+    }
+
+    /**
+     * Convenience method to create a {@link ByteComparable} from a {@link ByteBuffer} value for a given {@link CompositeType}
+     * with a terminator. This method is in this class to keep references to the {@link ByteBufferAccessor#instance} here.
+     */
+    public static ByteComparable asComparableBytes(ByteBuffer value, int terminator, CompositeType type)
+    {
+        return v -> type.asComparableBytes(ByteBufferAccessor.instance, value, v, terminator);
     }
 
     /**
@@ -267,16 +282,14 @@ public class TypeUtil
      *
      * Note: This should be used for all term comparison
      */
-    public static int compare(ByteBuffer b1, ByteBuffer b2, AbstractType<?> type)
+    public static int compare(ByteBuffer b1, ByteBuffer b2, AbstractType<?> type, Version version)
     {
         if (isInetAddress(type))
             return compareInet(b1, b2);
-        // BigInteger values, frozen types and composite types (map entries) use compareUnsigned to maintain
-        // a consistent order between the in-memory index and the on-disk index.
-        else if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozen(type))
+        else if (useFastByteOperations(type, version))
             return FastByteOperations.compareUnsigned(b1, b2);
 
-        return type.compare(b1, b2 );
+        return type.compare(b1, b2);
     }
 
     /**
@@ -290,8 +303,8 @@ public class TypeUtil
     {
         if (isInetAddress(type))
             return compareInet(requestedValue.encoded, columnValue.encoded);
-        // Override comparisons for frozen collections and composite types (map entries)
-        else if (isCompositeOrFrozen(type))
+        // Override comparisons for frozen collections
+        else if (isFrozen(type))
             return FastByteOperations.compareUnsigned(requestedValue.raw, columnValue.raw);
 
         return type.compare(requestedValue.raw, columnValue.raw);
@@ -315,13 +328,25 @@ public class TypeUtil
         return stream.iterator();
     }
 
-    public static Comparator<ByteBuffer> comparator(AbstractType<?> type)
+    public static Comparator<ByteBuffer> comparator(AbstractType<?> type, Version version)
     {
-        // Override the comparator for BigInteger, frozen collections and composite types
-        if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozen(type))
+        // Override the comparator for BigInteger, frozen collections (not including composite types) and
+        // composite types before DB version to maintain a consistent order between the in-memory index and the on-disk index.
+        if (useFastByteOperations(type, version))
             return FastByteOperations::compareUnsigned;
 
         return type;
+    }
+
+    private static boolean useFastByteOperations(AbstractType<?> type, Version version)
+    {
+        // BigInteger types, BigDecimal types, frozen types and composite types (map entries) use compareUnsigned to
+        // maintain a consistent order between the in-memory index and the on-disk index. Starting with Version.DB,
+        // composite types are compared using their AbstractType.
+        return isBigInteger(type)
+               || isBigDecimal(type)
+               || (!isComposite(type) && isFrozen(type))
+               || (isComposite(type) && !version.onOrAfter(Version.DB));
     }
 
     public static float[] decomposeVector(AbstractType<?> type, ByteBuffer byteBuffer)
