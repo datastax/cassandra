@@ -173,6 +173,7 @@ public class V1OnDiskFormat implements OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isLiteral())
+            // We filter because the CA format wrote maps acording to a different order than their abstract type.
             return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, Version.AA, true);
         return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
     }

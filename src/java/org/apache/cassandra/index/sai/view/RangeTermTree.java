@@ -60,8 +60,8 @@ public class RangeTermTree implements TermTree
             // Get the bounds given the version. Notice that we use the partially-encoded representation for bounds
             // because that is how we store them in the range tree. The comparator is used to compare the bounds to
             // each tree's min/max to see if the sstable index is in the query range.
-            Term minTerm = e.lower == null ? rangeTree.min() : new Term(e.getPartiallyEncodedLowerBound(version), comparator);
-            Term maxTerm = e.upper == null ? rangeTree.max() : new Term(e.getPartiallyEncodedUpperBound(version), comparator);
+            Term minTerm = e.lower == null ? rangeTree.min() : new Term(e.getPartiallyEncodedLowerBound(version), comparator, version);
+            Term maxTerm = e.upper == null ? rangeTree.max() : new Term(e.getPartiallyEncodedUpperBound(version), comparator, version);
             result.addAll(rangeTree.search(Interval.create(minTerm, maxTerm, null)));
         });
         return result;
@@ -80,7 +80,9 @@ public class RangeTermTree implements TermTree
         public void addIndex(SSTableIndex index)
         {
             Interval<Term, SSTableIndex> interval =
-                    Interval.create(new Term(index.minTerm(), comparator), new Term(index.maxTerm(), comparator), index);
+                    Interval.create(new Term(index.minTerm(), comparator, index.getVersion()),
+                                    new Term(index.maxTerm(), comparator, index.getVersion()),
+                                    index);
 
             if (logger.isTraceEnabled())
             {
@@ -117,22 +119,25 @@ public class RangeTermTree implements TermTree
     {
         private final ByteBuffer term;
         private final AbstractType<?> comparator;
+        private final Version version;
 
-        Term(ByteBuffer term, AbstractType<?> comparator)
+        Term(ByteBuffer term, AbstractType<?> comparator, Version version)
         {
             this.term = term;
             this.comparator = comparator;
+            this.version = version;
         }
 
         public int compareTo(Term o)
         {
+            assert version == o.version : "Cannot compare terms from different versions, but found " + version + " and " + o.version;
             if (term == null && o.term == null)
                 return 0;
             if (term == null)
                 return -1;
             if (o.term == null)
                 return 1;
-            return TypeUtil.compare(term, o.term, comparator);
+            return TypeUtil.compare(term, o.term, comparator, version);
         }
     }
 }

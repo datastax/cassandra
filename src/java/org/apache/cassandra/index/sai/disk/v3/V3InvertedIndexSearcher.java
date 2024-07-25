@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v4;
+package org.apache.cassandra.index.sai.disk.v3;
 
 import java.io.IOException;
 
@@ -28,15 +28,16 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 
 /**
- * The key override for this class is the use of {@link Version#DB}, which allows us to skip filtering range results.
+ * The key override for this class is the use of {@link Version#CA}.
  */
-class V4InvertedIndexSearcher extends InvertedIndexSearcher
+class V3InvertedIndexSearcher extends InvertedIndexSearcher
 {
-    V4InvertedIndexSearcher(SSTableContext sstableContext,
+    V3InvertedIndexSearcher(SSTableContext sstableContext,
                             PerIndexFiles perIndexFiles,
                             SegmentMetadata segmentMetadata,
                             IndexContext indexContext) throws IOException
     {
-        super(sstableContext, perIndexFiles, segmentMetadata, indexContext, Version.DB, false);
+        // We filter because the CA format wrote maps acording to a different order than their abstract type.
+        super(sstableContext, perIndexFiles, segmentMetadata, indexContext, Version.CA, true);
     }
 }

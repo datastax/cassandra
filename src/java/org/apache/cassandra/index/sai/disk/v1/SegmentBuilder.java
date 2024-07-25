@@ -463,9 +463,9 @@ public abstract class SegmentBuilder
         minKey = minKey == null ? key : minKey;
         maxKey = key;
 
-        // These terms are intentionally not encoded. The TypeUtil is an SAI class and is version aware.
-        minTerm = TypeUtil.min(term, minTerm, termComparator);
-        maxTerm = TypeUtil.max(term, maxTerm, termComparator);
+        // Note that the min and max terms are not encoded.
+        minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
+        maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
 
         rowCount++;
 

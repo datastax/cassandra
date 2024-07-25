@@ -253,8 +253,8 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         assert term != null;
 
-        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator());
-        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator());
+        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator(), Version.latest());
+        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
     }
 
     private ByteComparable encode(ByteBuffer input)

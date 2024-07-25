@@ -100,20 +100,20 @@ public class TypeUtil
 
     /**
      * Returns the smaller of two {@code ByteBuffer} values, based on the result of {@link
-     * #compare(ByteBuffer, ByteBuffer, AbstractType)} comparision.
+     * #compare(ByteBuffer, ByteBuffer, AbstractType, Version)} comparision.
      */
-    public static ByteBuffer min(ByteBuffer a, ByteBuffer b, AbstractType<?> type)
+    public static ByteBuffer min(ByteBuffer a, ByteBuffer b, AbstractType<?> type, Version version)
     {
-        return a == null ?  b : (b == null || compare(b, a, type) > 0) ? a : b;
+        return a == null ?  b : (b == null || compare(b, a, type, version) > 0) ? a : b;
     }
 
     /**
      * Returns the greater of two {@code ByteBuffer} values, based on the result of {@link
-     * #compare(ByteBuffer, ByteBuffer, AbstractType)} comparision.
+     * #compare(ByteBuffer, ByteBuffer, AbstractType, Version)} comparision.
      */
-    public static ByteBuffer max(ByteBuffer a, ByteBuffer b, AbstractType<?> type)
+    public static ByteBuffer max(ByteBuffer a, ByteBuffer b, AbstractType<?> type, Version version)
     {
-        return a == null ?  b : (b == null || compare(b, a, type) < 0) ? a : b;
+        return a == null ?  b : (b == null || compare(b, a, type, version) < 0) ? a : b;
     }
 
     /**
@@ -273,11 +273,11 @@ public class TypeUtil
      *
      * Note: This should be used for all term comparison
      */
-    public static int compare(ByteBuffer b1, ByteBuffer b2, AbstractType<?> type)
+    public static int compare(ByteBuffer b1, ByteBuffer b2, AbstractType<?> type, Version version)
     {
         if (isInetAddress(type))
             return compareInet(b1, b2);
-        else if (useFastByteOperations(type))
+        else if (useFastByteOperations(type, version))
             return FastByteOperations.compareUnsigned(b1, b2);
 
         return type.compare(b1, b2);
@@ -319,17 +319,17 @@ public class TypeUtil
         return stream.iterator();
     }
 
-    public static Comparator<ByteBuffer> comparator(AbstractType<?> type)
+    public static Comparator<ByteBuffer> comparator(AbstractType<?> type, Version version)
     {
         // Override the comparator for BigInteger, frozen collections (not including composite types) and
         // composite types before DB version to maintain a consistent order between the in-memory index and the on-disk index.
-        if (useFastByteOperations(type))
+        if (useFastByteOperations(type, version))
             return FastByteOperations::compareUnsigned;
 
         return type;
     }
 
-    private static boolean useFastByteOperations(AbstractType<?> type)
+    private static boolean useFastByteOperations(AbstractType<?> type, Version version)
     {
         // BigInteger types, BigDecimal types, frozen types and composite types (map entries) use compareUnsigned to
         // maintain a consistent order between the in-memory index and the on-disk index. Starting with Version.DB,
@@ -337,7 +337,7 @@ public class TypeUtil
         return isBigInteger(type)
                || isBigDecimal(type)
                || (!isComposite(type) && isFrozen(type))
-               || (isComposite(type) && !Version.latest().onOrAfter(Version.DB));
+               || (isComposite(type) && !version.onOrAfter(Version.DB));
     }
 
     public static float[] decomposeVector(AbstractType<?> type, ByteBuffer byteBuffer)
