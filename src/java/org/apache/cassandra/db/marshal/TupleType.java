@@ -98,7 +98,7 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
     @Override
     public TupleType with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
     {
-        return new TupleType(freeze(subTypes), isMultiCell);
+        return new TupleType(subTypes, isMultiCell);
     }
 
     @Override
@@ -459,45 +459,30 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
     }
 
     @Override
-    public boolean isCompatibleWith(AbstractType<?> previous)
+    protected boolean isCompatibleWithFrozen(MultiCellCapableType<?> previous)
     {
         if (!(previous instanceof TupleType))
             return false;
 
-        // Extending with new components is fine, removing is not
-        TupleType tt = (TupleType)previous;
-        if (size() < tt.size())
-            return false;
-
-        for (int i = 0; i < tt.size(); i++)
-        {
-            AbstractType<?> tprev = tt.type(i);
-            AbstractType<?> tnew = type(i);
-            if (!tnew.isCompatibleWith(tprev))
-                return false;
-        }
-        return true;
+        return isSubTypesCompatibleWith(previous, AbstractType::isCompatibleWith);
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isCompatibleWithMultiCell(MultiCellCapableType<?> previous)
     {
-        if (!(otherType instanceof TupleType))
+        if (!(previous instanceof TupleType))
             return false;
 
-        // Extending with new components is fine, removing is not
-        TupleType tt = (TupleType) otherType;
-        if (size() < tt.size())
+        return isSubTypesCompatibleWith(previous, AbstractType::isSerializationCompatibleWith);
+    }
+
+    @Override
+    protected boolean isValueCompatibleWithFrozen(MultiCellCapableType<?> previous)
+    {
+        if (!(previous instanceof TupleType))
             return false;
 
-        for (int i = 0; i < tt.size(); i++)
-        {
-            AbstractType<?> tprev = tt.type(i);
-            AbstractType<?> tnew = type(i);
-            if (!tnew.isValueCompatibleWith(tprev))
-                return false;
-        }
-        return true;
+        return isSubTypesCompatibleWith(previous, AbstractType::isValueCompatibleWith);
     }
 
     @Override

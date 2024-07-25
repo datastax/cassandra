@@ -55,12 +55,6 @@ public class DurationType extends AbstractType<Duration>
         return decompose(Duration.from(source));
     }
 
-    @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
-    {
-        return this == otherType;
-    }
-
     public Term fromJSONObject(Object parsed) throws MarshalException
     {
         try
