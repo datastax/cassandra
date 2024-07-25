@@ -32,9 +32,6 @@ import java.util.concurrent.ForkJoinPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.disk.RandomAccessReader;
-import io.github.jbellis.jvector.disk.ReaderSupplier;
-import io.github.jbellis.jvector.disk.SimpleReader;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.disk.Feature;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
@@ -42,11 +39,11 @@ import io.github.jbellis.jvector.graph.disk.FusedADC;
 import io.github.jbellis.jvector.graph.disk.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.util.Accountable;
-import io.github.jbellis.jvector.util.PhysicalCoreExecutor;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.ArrayByteSequence;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -59,32 +56,37 @@ import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
-import org.apache.cassandra.index.sai.utils.IndexFileUtils;
+import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.Pair;
 
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
-import static org.apache.cassandra.utils.Pair.create;
 
 public class CompactionGraph implements Closeable, Accountable
 {
     private static final Logger logger = LoggerFactory.getLogger(CompactionGraph.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
+    private static final ForkJoinPool compactionFjp = new ForkJoinPool(Runtime.getRuntime().availableProcessors(),
+                                                                       new LowPriorityThreadFactory(),
+                                                                       null,
+                                                                       false);
 
     private final GraphIndexBuilder builder;
     private final VectorType.VectorSerializer serializer;
@@ -92,7 +94,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
     private final PQVectors pqVectors;
     private final ArrayList<ByteSequence<?>> pqVectorsList;
-    private final IndexDescriptor descriptor;
+    private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext context;
     private final boolean unitVectors;
     private final int postingsEntriesAllocated;
@@ -103,10 +105,10 @@ public class CompactionGraph implements Closeable, Accountable
     private final OnDiskGraphIndexWriter writer;
     private final long termsOffset;
 
-    public CompactionGraph(IndexDescriptor descriptor, IndexContext context, ProductQuantization compressor, boolean unitVectors, long keyCount) throws IOException
+    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, ProductQuantization compressor, boolean unitVectors, long keyCount) throws IOException
     {
-        this.descriptor = descriptor;
-        this.context = context;
+        this.perIndexComponents = perIndexComponents;
+        this.context = perIndexComponents.context();
         this.unitVectors = unitVectors;
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
@@ -119,11 +121,11 @@ public class CompactionGraph implements Closeable, Accountable
         // If our estimate turns out to be too small, it's not the end of the world, we'll flush this segment
         // and start another to avoid crashing CM.  But we'd rather not do this because the whole goal of
         // CompactionGraph is to write one segment only.
-        var dd = descriptor.descriptor;
-        var rowsPerKey = Keyspace.open(dd.ksname).getColumnFamilyStore(dd.cfname).getMeanRowsPerPartition();
+        var dd = perIndexComponents.descriptor();
+        var rowsPerKey = max(1, Keyspace.open(dd.ksname).getColumnFamilyStore(dd.cfname).getMeanRowsPerPartition());
         long estimatedRows = (long) (1.1 * keyCount * rowsPerKey); // 10% fudge factor
         int maxRowsInGraph = Integer.MAX_VALUE - 100_000; // leave room for a few more async additions until we flush
-        postingsEntriesAllocated = estimatedRows > maxRowsInGraph ? maxRowsInGraph : (int) estimatedRows;
+        postingsEntriesAllocated = max(1000, (int) min(estimatedRows, maxRowsInGraph));
 
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
@@ -132,7 +134,7 @@ public class CompactionGraph implements Closeable, Accountable
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         Component tmpComponent = new Component(Component.Type.CUSTOM, "chronicle" + Descriptor.TMP_EXT);
-        postingsFile = descriptor.descriptor.fileFor(tmpComponent);
+        postingsFile = dd.fileFor(tmpComponent);
         postingsMap = ChronicleMapBuilder.of((Class<VectorFloat<?>>) (Class) VectorFloat.class, (Class<CompactionVectorPostings>) (Class) CompactionVectorPostings.class)
                                          .averageKeySize(dimension * Float.BYTES)
                                          .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
@@ -148,17 +150,17 @@ public class CompactionGraph implements Closeable, Accountable
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
-                                        1.5f,
+                                        1.2f,
                                         dimension > 3 ? 1.2f : 1.4f,
-                                        PhysicalCoreExecutor.pool(), ForkJoinPool.commonPool());
+                                        compactionFjp, compactionFjp);
 
-        var indexFile = descriptor.fileFor(IndexComponent.TERMS_DATA, context);
+        var indexFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
         termsOffset = (indexFile.exists() ? indexFile.length() : 0)
                       + SAICodecUtils.headerSize();
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
                             .withStartOffset(termsOffset)
                             .with(new InlineVectors(dimension))
-                            .withMapper(new OnDiskGraphIndexWriter.IdentityMapper());
+                            .withMapper(new OrdinalMapper.IdentityMapper());
         if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
         {
             writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getMaximumNodeConnections(), compressor));
@@ -243,7 +245,7 @@ public class CompactionGraph implements Closeable, Accountable
         return builder.addGraphNode(result.ordinal, result.vector);
     }
 
-    public SegmentMetadata.ComponentMetadataMap flush(IndexDescriptor __, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap flush(Set<Integer> deletedOrdinals) throws IOException
     {
         assert deletedOrdinals.isEmpty(); // this is only to provide a consistent api with CassandraOnHeapGraph
 
@@ -262,10 +264,8 @@ public class CompactionGraph implements Closeable, Accountable
             logger.debug("Estimated size is {} + {}", pqVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
         }
 
-        var pqOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.PQ, context);
-        var postingsOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.POSTING_LISTS, context);
-        try (var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), postingsOrder, true);
-             var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, context), pqOrder, true))
+        try (var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
+             var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true))
         {
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(pqOutput);
@@ -279,26 +279,27 @@ public class CompactionGraph implements Closeable, Accountable
             // write postings asynchronously while we run cleanup().  this requires the index header to be present
             writer.writeHeader();
             long postingsOffset = postingsOutput.getFilePointer();
-            var es = Executors.newSingleThreadExecutor();
-            var indexHandle = descriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, context);
-            var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset);
-            var postingsFuture = es.submit(() -> {
-                try (var view = index.getView())
-                {
-                    return new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
-                           .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
-                }
-            });
+            var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
+            long postingsLength;
+            try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createFileHandle();
+                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
+            {
+                var postingsFuture = es.submit(() -> {
+                    try (var view = index.getView())
+                    {
+                        return new VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
+                               .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
+                    }
+                });
 
-            // complete internal graph clean up
-            builder.cleanup();
+                // complete internal graph clean up
+                builder.cleanup();
 
-            // wait for postings to finish writing and clean up related resources
-            long postingsEnd = postingsFuture.get();
-            long postingsLength = postingsEnd - postingsOffset;
-            es.shutdown();
-            index.close();
-            indexHandle.close();
+                // wait for postings to finish writing and clean up related resources
+                long postingsEnd = postingsFuture.get();
+                postingsLength = postingsEnd - postingsOffset;
+                es.shutdown();
+            }
 
             // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();

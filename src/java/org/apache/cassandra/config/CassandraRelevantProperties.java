@@ -413,6 +413,9 @@ public enum CassandraRelevantProperties
 
     // Allow disabling deletions of corrupt index components for troubleshooting
     DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
+    // Allow restoring legacy behavior of deleting sai components before a rebuild (which implies a rebuild cannot be
+    // done without first stopping reads on that index)
+    IMMUTABLE_SAI_COMPONENTS("cassandra.sai.immutable_components", "false"),
 
     // Enables parallel index read.
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
@@ -467,7 +470,17 @@ public enum CassandraRelevantProperties
     /**
      * Number of replicas required to store batchlog for atomicity, only accepts values of 1 or 2.
      */
-    REQUIRED_BATCHLOG_REPLICA_COUNT("cassandra.batchlog.required_replica_count", "2");
+    REQUIRED_BATCHLOG_REPLICA_COUNT("cassandra.batchlog.required_replica_count", "2"),
+
+    /**
+     * This property should be enabled when upgrading from the version of Cassandra that allowed to create maps with
+     * duration type as a key if the schema contains such columns. It was a bug that the validation didn't prevent
+     * from creating such maps but once they are created, we need to be able to read them - hence this property.
+     * When the check is enabled, Cassandra falls back to the old behavior and let the user load the data with such
+     * maps. When the check is disabled, Cassandra will refuse to load the data with such maps and won't start if
+     * the schema contains them.
+     */
+    DURATION_IN_MAPS_COMPATIBILITY_MODE("cassandra.types.map.duration_in_map_compatibility_mode", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

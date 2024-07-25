@@ -35,6 +35,8 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -42,6 +44,8 @@ import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
+
+import static java.lang.Math.max;
 
 /**
  * Each segment represents an on-disk index structure (kdtree/terms/postings) flushed by memory limit or token boundaries,
@@ -73,7 +77,7 @@ public class Segment implements Closeable, SegmentOrdering
         this.indexFiles = indexFiles;
         this.metadata = metadata;
 
-        var version = sstableContext.indexDescriptor.getVersion(indexContext);
+        var version = indexFiles.usedPerIndexComponents().version();
         IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
         logger.info("Opened searcher {} for segment {}:{} for index [{}] on column [{}] at version {}",
                     searcher.getClass().getSimpleName(),
@@ -199,5 +203,33 @@ public class Segment implements Closeable, SegmentOrdering
     public String toString()
     {
         return String.format("Segment{metadata=%s}", metadata);
+    }
+
+    /**
+     * Estimate how many nodes the index will visit to find the top `limit` results
+     * given the number of candidates that match other predicates and taking into
+     * account the size of the index itself.  (The smaller
+     * the number of candidates, the more nodes we expect to visit just to find
+     * results that are in that set.)
+     */
+    public int estimateAnnNodesVisited(int limit, int candidates)
+    {
+        IndexSearcher searcher = getIndexSearcher();
+        assert searcher instanceof V2VectorIndexSearcher : searcher;
+        return ((V2VectorIndexSearcher) searcher).estimateNodesVisited(limit, candidates);
+    }
+
+    /**
+     * Returns a modified LIMIT (top k) to use with the ANN index that is proportional
+     * to the number of rows in this segment, relative to the total rows in the sstable.
+     */
+    public int proportionalAnnLimit(int limit, long totalRows)
+    {
+        // We expect the number of top results found in each segment to be proportional to its number of rows
+        // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
+        long segmentRows = 1 + metadata.maxSSTableRowId - metadata.minSSTableRowId;
+        return V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
+               ? max(1, (int) (limit * ((double) segmentRows / totalRows)))
+               : limit;
     }
 }

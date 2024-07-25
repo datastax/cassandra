@@ -33,6 +33,7 @@ import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnSpecification;
@@ -53,6 +54,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.github.jamm.Unmetered;
 
 import static com.google.common.collect.Iterables.transform;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DURATION_IN_MAPS_COMPATIBILITY_MODE;
 import static org.apache.cassandra.db.marshal.AbstractType.ComparisonType.CUSTOM;
 
 /**
@@ -287,6 +289,12 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return compare(v1, v2);
     }
 
+    /**
+     * Returns the serializer for this type.
+     * Note that the method must return a different instance of serializer for different types even if the types
+     * use the same serializer - in this case, the method should return separate instances for which equals() returns
+     * false.
+     */
     public abstract TypeSerializer<T> getSerializer();
 
     public boolean isCounter()
@@ -703,11 +711,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                : this;
     }
 
-    public boolean referencesDuration()
+    public final boolean referencesDuration()
+    {
+        return referencesDuration(false);
+    }
+
+    public boolean referencesDuration(boolean legacyMode)
     {
         // Note that non-complex types have no subtypes, so will return false, and DurationType overrides this to return
         // true.
-        return subTypes().stream().anyMatch(AbstractType::referencesDuration);
+        return subTypes().stream().anyMatch(abstractType -> abstractType.referencesDuration(legacyMode));
     }
 
     public final boolean referencesCounter()
@@ -760,7 +773,8 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                                   boolean isPrimaryKeyColumn,
                                   boolean isCounterTable,
                                   boolean isDroppedColumn,
-                                  boolean isForOfflineTool)
+                                  boolean isForOfflineTool,
+                                  boolean durationLegacyMode)
     {
         if (isPrimaryKeyColumn)
         {
@@ -773,10 +787,13 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
             // We don't allow durations in anything sorted (primary key here, or in the "name-comparator" part of
             // collections below). This isn't really a technical limitation, but duration sorts in a somewhat random
             // way, so CASSANDRA-11873 decided to reject them when sorting was involved.
-            if (referencesDuration())
+            if (referencesDuration(durationLegacyMode))
+            {
                 throw columnException(columnName,
-                                      "duration types are not supported within PRIMARY KEY columns");
-
+                                      "duration types are not supported within PRIMARY KEY columns. If you've just " +
+                                      "upgraded and the column type references a map that references a duration type in " +
+                                      "its key type, you may consider enabling %s", DURATION_IN_MAPS_COMPATIBILITY_MODE.name());
+            }
             if (comparisonType == ComparisonType.NOT_COMPARABLE)
                 throw columnException(columnName,
                                       "type %s is not comparable and cannot be used for PRIMARY KEY columns", asCQL3Type().toSchemaString());
@@ -804,14 +821,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                 {
                     AbstractType<?> nameComparator = ((MultiCellCapableType<?>) this).nameComparator();
                     // As mentioned above, CASSANDRA-11873 decided to reject durations when sorting was involved.
-                    if (nameComparator.referencesDuration())
+                    if (nameComparator.referencesDuration(durationLegacyMode))
                     {
                         // Trying to profile a more precise error message
                         String what = this instanceof MapType
                                       ? "map keys"
                                       : (this instanceof SetType ? "sets" : category());
                         throw columnException(columnName,
-                                              "duration types are not supported within non-frozen %s", what);
+                                              "duration types are not supported within non-frozen %s. If you've just " +
+                                              "upgraded and the column type references a map that references a duration type in " +
+                                              "its key type, you may consider enabling %s", what, DURATION_IN_MAPS_COMPATIBILITY_MODE.name());
                     }
                 }
             }

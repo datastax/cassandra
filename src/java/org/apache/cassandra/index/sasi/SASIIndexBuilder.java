@@ -134,7 +134,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
 
     private void completeSSTable(PerSSTableIndexWriter indexWriter, SSTableReader sstable, Collection<ColumnIndex> indexes)
     {
-        indexWriter.complete();
+        indexWriter.complete(sstable);
 
         for (ColumnIndex index : indexes)
         {

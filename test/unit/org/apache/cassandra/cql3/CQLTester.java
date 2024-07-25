@@ -995,7 +995,7 @@ public abstract class CQLTester
         schemaChange(formattedQuery);
     }
 
-    protected String createIndex(String query)
+    public String createIndex(String query)
     {
         return createIndex(KEYSPACE, query);
     }
@@ -1111,7 +1111,7 @@ public abstract class CQLTester
         QueryProcessor.executeOnceInternal(fullQuery);
     }
 
-    protected void dropIndex(String query) throws Throwable
+    public void dropIndex(String query)
     {
         String fullQuery = String.format(query, KEYSPACE);
         logger.info(fullQuery);
@@ -2477,6 +2477,11 @@ public abstract class CQLTester
         public void printSeedOnFailure()
         {
             System.err.println("Randomized test failed. To rerun test use -Dcassandra.test.random.seed=" + seed);
+        }
+
+        public Random getRandom()
+        {
+            return random;
         }
 
         public int nextInt()

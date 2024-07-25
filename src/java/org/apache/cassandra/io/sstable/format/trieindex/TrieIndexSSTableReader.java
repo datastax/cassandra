@@ -137,7 +137,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     private TrieIndexSSTableReader cloneInternal(DecoratedKey first, OpenReason openReason, IFilter bf)
     {
         TrieIndexSSTableReader clone = new TrieIndexSSTableReader(descriptor,
-                                                                  components,
+                                                                  components(),
                                                                   metadata,
                                                                   maxDataAge,
                                                                   sstableMetadata,

@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -52,6 +51,7 @@ import io.github.jbellis.jvector.graph.disk.Feature;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
 import io.github.jbellis.jvector.graph.disk.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
@@ -76,14 +76,14 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
-import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -119,7 +119,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private final NonBlockingHashMap<T, VectorFloat<?>> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private final VectorSourceModel sourceModel;
-    private final IndexContext context;
     private final InvalidVectorBehavior invalidVectorBehavior;
     private volatile boolean hasDeletions;
 
@@ -131,7 +130,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
      */
     public CassandraOnHeapGraph(IndexContext context, boolean forSearching)
     {
-        this.context = context;
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
@@ -167,6 +165,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
     public boolean isEmpty()
     {
         return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
+    }
+
+    public int getOrdinal(VectorFloat<?> vector)
+    {
+        return postingsMap.get(vector).getOrdinal();
     }
 
     /**
@@ -310,7 +313,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
         var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
         var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
-        Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+        Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results",
+                      limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
         // Threshold based searches do not support resuming the search.
         return threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
@@ -331,7 +335,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return deletedOrdinals;
     }
 
-    public SegmentMetadata.ComponentMetadataMap flush(IndexDescriptor descriptor, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap flush(IndexComponents.ForWrite perIndexComponents, Set<Integer> deletedOrdinals) throws IOException
     {
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -343,26 +347,46 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                                                                   postingsMap.keySet().size(), vectorValues.size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
-        // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
-        // null if remapping is not possible
-        final BiMap <Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
-        boolean canFastFindRows = ordinalMap != null;
-        IntUnaryOperator reverseOrdinalMapper = canFastFindRows
-                                                ? x -> ordinalMap.inverse().getOrDefault(x, x)
-                                                : x -> x;
-        var finalOrdinalMap = ordinalMap == null ? OnDiskGraphIndexWriter.sequentialRenumbering(builder.getGraph()) : ordinalMap;
+        // remove deleted ordinals from the graph.  this is not done at remove() time, because the same vector
+        // could be added back again, "undeleting" the ordinal, and the concurrency gets tricky
+        if (V3OnDiskFormat.ENABLE_JVECTOR_DELETES)
+        {
+            deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
+            deletedOrdinals = Set.of();
+        }
+        builder.cleanup();
 
-        var indexFile = descriptor.fileFor(IndexComponent.TERMS_DATA, context);
+        // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
+        // null if remapping is not possible because vectors:rows are not 1:1
+        final BiMap<Integer, Integer> ordinalMap = buildOrdinalMap();
+        boolean postingsOneToOne = ordinalMap != null;
+        IntUnaryOperator newToOldMapper; // new ordinal -> old ordinal
+        OrdinalMapper ordinalMapper;
+        if (postingsOneToOne)
+        {
+            // we have a 1:1 correspondence between vectors and rows, so we can simplify the question of
+            // "what rowid does this ordinal correspond to" by remapping the graph ordinals to their corresponding rowid
+            ordinalMapper = new OrdinalMapper.MapMapper(ordinalMap);
+            newToOldMapper = x -> ordinalMap.inverse().get(x);
+        }
+        else
+        {
+            // vectors:rows are not 1:1 so there is no point in renumbering the ordinals, we're going to have to
+            // write the ordinal<->rowid mapping out explicitly
+            ordinalMapper = new OrdinalMapper.MapMapper(OnDiskGraphIndexWriter.sequentialRenumbering(builder.getGraph()));
+            newToOldMapper = ordinalMapper::newToOld;
+        }
+
+        IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
+        var indexFile = termsDataComponent.file();
         long termsOffset = SAICodecUtils.headerSize();
         if (indexFile.exists())
             termsOffset += indexFile.length();
-        var pqOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.PQ, context);
-        var postingsOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.POSTING_LISTS, context);
-        try (var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, context), pqOrder, true);
-             var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), postingsOrder, true);
+        try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
+             var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
                                .withVersion(JVECTOR_2_VERSION) // always write old-version format since we're not using the new features
-                               .withMap(finalOrdinalMap)
+                               .withMapper(ordinalMapper)
                                .with(new InlineVectors(vectorValues.dimension()))
                                .withStartOffset(termsOffset)
                                .build())
@@ -375,19 +399,17 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper, context);
+            long pqPosition = writePQ(pqOutput.asSequentialWriter(), newToOldMapper, perIndexComponents.context());
             long pqLength = pqPosition - pqOffset;
 
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
-            long postingsPosition = new VectorPostingsWriter<T>(canFastFindRows, reverseOrdinalMapper)
+            long postingsPosition = new VectorPostingsWriter<T>(postingsOneToOne, builder.getGraph().size(), newToOldMapper)
                                             .writePostings(postingsOutput.asSequentialWriter(),
                                                            vectorValues, postingsMap, deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
 
-            // complete (internal clean up) and write the graph
-            builder.cleanup();
-
+            // write the graph
             var start = System.nanoTime();
             var suppliers = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
             indexWriter.write(suppliers);
@@ -407,10 +429,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
     static SegmentMetadata.ComponentMetadataMap createMetadataMap(long termsOffset, long termsLength, long postingsOffset, long postingsLength, long pqOffset, long pqLength)
     {
         SegmentMetadata.ComponentMetadataMap metadataMap = new SegmentMetadata.ComponentMetadataMap();
-        metadataMap.put(IndexComponent.TERMS_DATA, -1, termsOffset, termsLength, Map.of());
-        metadataMap.put(IndexComponent.POSTING_LISTS, -1, postingsOffset, postingsLength, Map.of());
+        metadataMap.put(IndexComponentType.TERMS_DATA, -1, termsOffset, termsLength, Map.of());
+        metadataMap.put(IndexComponentType.POSTING_LISTS, -1, postingsOffset, postingsLength, Map.of());
         Map<String, String> vectorConfigs = Map.of("SEGMENT_ID", ByteBufferUtil.bytesToHex(ByteBuffer.wrap(StringHelper.randomId())));
-        metadataMap.put(IndexComponent.PQ, -1, pqOffset, pqLength, vectorConfigs);
+        metadataMap.put(IndexComponentType.PQ, -1, pqOffset, pqLength, vectorConfigs);
         return metadataMap;
     }
 
@@ -452,31 +474,32 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return cvi;
     }
 
-    private BiMap <Integer, Integer> buildOrdinalMap()
+    /**
+     * @return a map of vector ordinal to row id, or null if the vectors are not 1:1 with rows
+     */
+    private BiMap<Integer, Integer> buildOrdinalMap()
     {
-        BiMap <Integer, Integer> ordinalMap = HashBiMap.create();
+        BiMap<Integer, Integer> ordinalMap = HashBiMap.create();
         int minRow = Integer.MAX_VALUE;
         int maxRow = Integer.MIN_VALUE;
         for (VectorPostings<T> vectorPostings : postingsMap.values())
         {
             if (vectorPostings.getRowIds().size() != 1)
             {
+                // multiple rows associated with this vector
                 return null;
             }
             int rowId = vectorPostings.getRowIds().getInt(0);
             int ordinal = vectorPostings.getOrdinal();
             minRow = Math.min(minRow, rowId);
             maxRow = Math.max(maxRow, rowId);
-            if (ordinalMap.containsKey(ordinal))
-            {
-                return null;
-            } else {
-                ordinalMap.put(ordinal, rowId);
-            }
+            assert !ordinalMap.containsKey(ordinal); // vector <-> ordinal should be unique
+            ordinalMap.put(ordinal, rowId);
         }
 
         if (minRow != 0 || maxRow != postingsMap.values().size() - 1)
         {
+            // not every row had a vector associated with it
             return null;
         }
         return ordinalMap;

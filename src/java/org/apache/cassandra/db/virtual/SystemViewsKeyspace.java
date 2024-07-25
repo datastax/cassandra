@@ -22,7 +22,6 @@ import java.util.Collection;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.index.sai.virtual.AnalyzerView;
 import org.apache.cassandra.index.sai.virtual.IndexesSystemView;
 import org.apache.cassandra.index.sai.virtual.SSTablesSystemView;
 import org.apache.cassandra.index.sai.virtual.SegmentsSystemView;
@@ -55,7 +54,6 @@ public final class SystemViewsKeyspace extends VirtualKeyspace
                   .add(new InternodeInboundTable(VIRTUAL_VIEWS))
                   .add(new SSTablesSystemView(VIRTUAL_VIEWS))
                   .add(new SegmentsSystemView(VIRTUAL_VIEWS))
-                  .add(new AnalyzerView(VIRTUAL_VIEWS))
                   .addAll(TableMetricTables.getAll(VIRTUAL_VIEWS));
         if (CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_ALL.getBoolean()
             || CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_LOCAL_AND_PEERS.getBoolean())

@@ -18,8 +18,9 @@
 
 package org.apache.cassandra.index.sai.disk.format;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 import com.google.common.io.Files;
 import org.junit.After;
@@ -28,6 +29,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import jnr.ffi.annotations.In;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -40,8 +42,16 @@ import org.apache.cassandra.io.util.PathUtils;
 
 import static org.apache.cassandra.index.sai.SAIUtil.setLatestVersion;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+/**
+ * At the time of this writing, the test of this class mostly test the "fallback-scan-disk" mode of component discovery
+ * from IndexDescriptor, because they don't create a proper sstable with a TOC, they just "touch" a bunch of the
+ * component files. The "normal" discovery path that uses the TOC is however effectively tested by pretty much
+ * every other SAI test, so it is a reasonable way to test that fallback. Besides, the test also test the parsing of
+ * of the component filename at various versions, and that code is common to both paths.
+ */
 public class IndexDescriptorTest
 {
     private TemporaryFolder temporaryFolder = new TemporaryFolder();
@@ -69,17 +79,28 @@ public class IndexDescriptorTest
         temporaryFolder.delete();
     }
 
+    private IndexDescriptor loadDescriptor(IndexContext... contexts)
+    {
+        IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
+        indexDescriptor.reload(new HashSet<>(Arrays.asList(contexts)));
+        return indexDescriptor;
+    }
+
+
     @Test
     public void versionAAPerSSTableComponentIsParsedCorrectly() throws Throwable
     {
         setLatestVersion(Version.AA);
 
+        // As mentioned in the class javadoc, we rely on the no-TOC fallback path and that only kick in if there is a
+        // data file. Otherwise, it assumes the SSTable simply does not exist at all.
+        createFileOnDisk("-Data.db");
         createFileOnDisk("-SAI_GroupComplete.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = loadDescriptor();
 
-        assertEquals(Version.AA, indexDescriptor.getVersion());
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
+        assertEquals(Version.AA, indexDescriptor.perSSTableComponents().version());
+        assertTrue(indexDescriptor.perSSTableComponents().has(IndexComponentType.GROUP_COMPLETION_MARKER));
     }
 
     @Test
@@ -87,14 +108,15 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.AA);
 
+        createFileOnDisk("-Data.db");
         createFileOnDisk("-SAI_GroupComplete.db");
         createFileOnDisk("-SAI_test_index_ColumnComplete.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
+        IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
 
-        assertEquals(Version.AA, indexDescriptor.getVersion());
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
+        assertEquals(Version.AA, indexDescriptor.perSSTableComponents().version());
+        assertTrue(indexDescriptor.perIndexComponents(indexContext).has(IndexComponentType.COLUMN_COMPLETION_MARKER));
     }
 
     @Test
@@ -102,12 +124,13 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.BA);
 
+        createFileOnDisk("-Data.db");
         createFileOnDisk("-SAI+ba+GroupComplete.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = loadDescriptor();
 
-        assertEquals(Version.BA, indexDescriptor.getVersion());
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
+        assertEquals(Version.BA, indexDescriptor.perSSTableComponents().version());
+        assertTrue(indexDescriptor.perSSTableComponents().has(IndexComponentType.GROUP_COMPLETION_MARKER));
     }
 
     @Test
@@ -115,13 +138,14 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.BA);
 
+        createFileOnDisk("-Data.db");
         createFileOnDisk("-SAI+ba+test_index+ColumnComplete.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
+        IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
 
-        assertEquals(Version.BA, indexDescriptor.getVersion());
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
+        assertEquals(Version.BA, indexDescriptor.perSSTableComponents().version());
+        assertTrue(indexDescriptor.perIndexComponents(indexContext).has(IndexComponentType.COLUMN_COMPLETION_MARKER));
     }
 
     @Test
@@ -129,17 +153,18 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.AA);
 
+        createFileOnDisk("-Data.db");
         createFileOnDisk("-SAI_GroupComplete.db");
         createFileOnDisk("-SAI_GroupMeta.db");
         createFileOnDisk("-SAI_TokenValues.db");
         createFileOnDisk("-SAI_OffsetsValues.db");
 
-        IndexDescriptor result = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor result = loadDescriptor();
 
-        assertTrue(result.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
-        assertTrue(result.hasComponent(IndexComponent.GROUP_META));
-        assertTrue(result.hasComponent(IndexComponent.TOKEN_VALUES));
-        assertTrue(result.hasComponent(IndexComponent.OFFSETS_VALUES));
+        assertTrue(result.perSSTableComponents().has(IndexComponentType.GROUP_COMPLETION_MARKER));
+        assertTrue(result.perSSTableComponents().has(IndexComponentType.GROUP_META));
+        assertTrue(result.perSSTableComponents().has(IndexComponentType.TOKEN_VALUES));
+        assertTrue(result.perSSTableComponents().has(IndexComponentType.OFFSETS_VALUES));
     }
 
     @Test
@@ -147,6 +172,7 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.AA);
 
+        createFileOnDisk("-Data.db");
         createFileOnDisk("-SAI_GroupComplete.db");
         createFileOnDisk("-SAI_test_index_ColumnComplete.db");
         createFileOnDisk("-SAI_test_index_Meta.db");
@@ -154,13 +180,14 @@ public class IndexDescriptorTest
         createFileOnDisk("-SAI_test_index_PostingLists.db");
 
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
+        IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
 
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.META, indexContext));
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.TERMS_DATA, indexContext));
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.POSTING_LISTS, indexContext));
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(indexContext);
+        assertTrue(components.has(IndexComponentType.COLUMN_COMPLETION_MARKER));
+        assertTrue(components.has(IndexComponentType.META));
+        assertTrue(components.has(IndexComponentType.TERMS_DATA));
+        assertTrue(components.has(IndexComponentType.POSTING_LISTS));
     }
 
     @Test
@@ -168,19 +195,53 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.AA);
 
+        createFileOnDisk("-Data.db");
         createFileOnDisk("-SAI_GroupComplete.db");
         createFileOnDisk("-SAI_test_index_ColumnComplete.db");
         createFileOnDisk("-SAI_test_index_Meta.db");
         createFileOnDisk("-SAI_test_index_KDTree.db");
         createFileOnDisk("-SAI_test_index_KDTreePostingLists.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
+        IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
 
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.META, indexContext));
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.KD_TREE, indexContext));
-        assertTrue(indexDescriptor.hasComponent(IndexComponent.KD_TREE_POSTING_LISTS, indexContext));
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(indexContext);
+        assertTrue(components.has(IndexComponentType.COLUMN_COMPLETION_MARKER));
+        assertTrue(components.has(IndexComponentType.META));
+        assertTrue(components.has(IndexComponentType.KD_TREE));
+        assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
+    }
+
+    @Test
+    public void testReload() throws Throwable
+    {
+        setLatestVersion(latest);
+
+        // We create the descriptor first, with no files, so it should initially be empty.
+        IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
+        IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
+
+        assertFalse(indexDescriptor.perSSTableComponents().isComplete());
+        assertFalse(indexDescriptor.perIndexComponents(indexContext).isComplete());
+
+        // We then create the proper files and call reload
+        createFileOnDisk("-Data.db");
+        createFileOnDisk("-SAI_GroupComplete.db");
+        createFileOnDisk("-SAI_test_index_ColumnComplete.db");
+        createFileOnDisk("-SAI_test_index_Meta.db");
+        createFileOnDisk("-SAI_test_index_KDTree.db");
+        createFileOnDisk("-SAI_test_index_KDTreePostingLists.db");
+        indexDescriptor.reload(Set.of(indexContext));
+
+        // Both the perSSTableComponents and perIndexComponents should now be complete and the components should be present
+
+        assertTrue(indexDescriptor.perSSTableComponents().isComplete());
+
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(indexContext);
+        assertTrue(components.isComplete());
+        assertTrue(components.has(IndexComponentType.META));
+        assertTrue(components.has(IndexComponentType.KD_TREE));
+        assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
     }
 
     private void createFileOnDisk(String filename) throws Throwable

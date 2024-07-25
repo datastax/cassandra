@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
@@ -73,18 +74,18 @@ public class V1SearchableIndex implements SearchableIndex
     private final long numRows;
     private PerIndexFiles indexFiles;
 
-    public V1SearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
+    public V1SearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        this.indexContext = indexContext;
+        this.indexContext = perIndexComponents.context();
         try
         {
-            this.indexFiles = new PerIndexFiles(sstableContext.indexDescriptor, indexContext);
+            this.indexFiles = new PerIndexFiles(perIndexComponents);
 
             ImmutableList.Builder<Segment> segmentsBuilder = ImmutableList.builder();
 
-            final MetadataSource source = MetadataSource.loadColumnMetadata(sstableContext.indexDescriptor, indexContext);
+            final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
-            metadatas = SegmentMetadata.load(source, sstableContext.indexDescriptor.primaryKeyFactory);
+            metadatas = SegmentMetadata.load(source, sstableContext.primaryKeyFactory());
 
             for (SegmentMetadata metadata : metadatas)
             {
@@ -97,8 +98,9 @@ public class V1SearchableIndex implements SearchableIndex
             this.minKey = metadatas.get(0).minKey.partitionKey();
             this.maxKey = metadatas.get(metadatas.size() - 1).maxKey.partitionKey();
 
-            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
-            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
+            var version = perIndexComponents.version();
+            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
+            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
 
             this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
 
@@ -193,7 +195,8 @@ public class V1SearchableIndex implements SearchableIndex
     public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
                                                              AbstractBounds<PartitionPosition> keyRange,
                                                              QueryContext context,
-                                                             int limit) throws IOException
+                                                             int limit,
+                                                             long totalRows) throws IOException
     {
         var iterators = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(segments.size());
         try
@@ -202,7 +205,8 @@ public class V1SearchableIndex implements SearchableIndex
             {
                 if (segment.intersects(keyRange))
                 {
-                    iterators.add(segment.orderBy(expression, keyRange, context, limit));
+                    var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
+                    iterators.add(segment.orderBy(expression, keyRange, context, segmentLimit));
                 }
             }
 
@@ -216,13 +220,16 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit, long totalRows) throws IOException
     {
         List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>(segments.size());
         try
         {
             for (Segment segment : segments)
-                results.add(segment.orderResultsBy(context, keys, exp, limit));
+            {
+                var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
+                results.add(segment.orderResultsBy(context, keys, exp, segmentLimit));
+            }
 
             return results;
         }

@@ -91,8 +91,12 @@ public abstract class Reservations
         @Override
         public void debugOutput(int selectedCount, int proposedCount, int remaining)
         {
-            logger.debug("Selected {} compactions (out of {} pending). Compactions per level {} (no reservations) remaining {}.",
-                         selectedCount, proposedCount, perLevel, remaining);
+            if (proposedCount > 0)
+                logger.debug("Selected {} compactions (out of {} pending). Compactions per level {} (no reservations) remaining {}.",
+                             selectedCount, proposedCount, perLevel, remaining);
+            else
+                logger.trace("Selected {} compactions (out of {} pending). Compactions per level {} (no reservations) remaining {}.",
+                             selectedCount, proposedCount, perLevel, remaining);
         }
     }
 
@@ -193,8 +197,12 @@ public abstract class Reservations
         @Override
         public void debugOutput(int selectedCount, int proposedCount, int remaining)
         {
-            logger.debug("Selected {} compactions (out of {} pending). Compactions per level {} (reservations level or below {}{}) remaining {}.",
-                         selectedCount, proposedCount, perLevel, perLevelCount, oneRemainderPerLevel ? "+1" : "", remaining);
+            if (proposedCount > 0)
+                logger.debug("Selected {} compactions (out of {} pending). Compactions per level {} (reservations level or below {}{}) remaining {}.",
+                             selectedCount, proposedCount, perLevel, perLevelCount, oneRemainderPerLevel ? "+1" : "", remaining);
+            else
+                logger.trace("Selected {} compactions (out of {} pending). Compactions per level {} (reservations level or below {}{}) remaining {}.",
+                             selectedCount, proposedCount, perLevel, perLevelCount, oneRemainderPerLevel ? "+1" : "", remaining);
         }
     }
 }

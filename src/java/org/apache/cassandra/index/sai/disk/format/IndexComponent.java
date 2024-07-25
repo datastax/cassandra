@@ -18,101 +18,67 @@
 
 package org.apache.cassandra.index.sai.disk.format;
 
-/**
- * This is a definitive list of all the on-disk components for all versions
- */
-public enum IndexComponent
+import java.io.IOException;
+import java.nio.ByteOrder;
+
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
+import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.lucene.store.ChecksumIndexInput;
+
+public interface IndexComponent
 {
-    /**
-     * Stores per-index metadata.
-     *
-     * V1
-     */
-    META("Meta"),
-    /**
-     * KDTree written by {@code BKDWriter} indexes mappings of term to one ore more segment row IDs
-     * (segment row ID = SSTable row ID - segment row ID offset).
-     *
-     * V1
-     */
-    KD_TREE("KDTree"),
-    KD_TREE_POSTING_LISTS("KDTreePostingLists"),
+    IndexComponents parent();
 
-    /**
-     * Vector index components
-     */
-    VECTOR("Vector"),
-    PQ("PQ"),
+    IndexComponentType componentType();
 
-    /**
-     * Term dictionary written by {@code TrieTermsDictionaryWriter} stores mappings of term and
-     * file pointer to posting block on posting file.
-     *
-     * V1
-     */
-    TERMS_DATA("TermsData"),
-    /**
-     * Stores postings written by {@code PostingsWriter}
-     *
-     * V1
-     */
-    POSTING_LISTS("PostingLists"),
-    /**
-     * If present indicates that the column index build completed successfully
-     *
-     * V1
-     */
-    COLUMN_COMPLETION_MARKER("ColumnComplete"),
+    ByteOrder byteOrder();
 
-    // per-sstable components
-    /**
-     * Partition key token value for rows including row tombstone and static row. (access key is rowId)
-     *
-     * V1 V2
-     */
-    TOKEN_VALUES("TokenValues"),
-    /**
-     * Partition key offset in sstable data file for rows including row tombstone and static row. (access key is
-     * rowId)
-     *
-     * V1
-     */
-    OFFSETS_VALUES("OffsetsValues"),
-    /**
-     * An on-disk trie containing the primary keys used for looking up the rowId from a partition key
-     *
-     * V2
-     */
-    PRIMARY_KEY_TRIE("PrimaryKeyTrie"),
-    /**
-     * Prefix-compressed blocks of primary keys used for rowId to partition key lookups
-     *
-     * V2
-     */
-    PRIMARY_KEY_BLOCKS("PrimaryKeyBlocks"),
-    /**
-     * Encoded sequence of offsets to primary key blocks
-     *
-     * V2
-     */
-    PRIMARY_KEY_BLOCK_OFFSETS("PrimaryKeyBlockOffsets"),
-    /**
-     * Stores per-sstable metadata.
-     *
-     * V1
-     */
-    GROUP_META("GroupMeta"),
-    /**
-     * If present indicates that the per-sstable index build completed successfully
-     *
-     * V1 V2
-     */
-    GROUP_COMPLETION_MARKER("GroupComplete");
+    String fileNamePart();
+    Component asCustomComponent();
+    File file();
 
-    public final String representation;
-
-    IndexComponent(String representation)
+    default boolean isCompletionMarker()
     {
-        this.representation = representation;
+        return componentType() == parent().completionMarkerComponent();
+    }
+
+    interface ForRead extends IndexComponent
+    {
+        @Override
+        IndexComponents.ForRead parent();
+
+        FileHandle createFileHandle();
+
+        /**
+         * Opens a file handle for the provided index component similarly to {@link #createFileHandle()},
+         * but this method shoud be called instead of the aforemented one if the access is done "as part of flushing", that is
+         * before the full index that this is a part of has been finalized.
+         * <p>
+         * The use of this method can allow specific storage providers, typically tiered storage ones, to distinguish accesses
+         * that happen "at flush time" from other accesses, as the related file may be in different tier of storage.
+         */
+        FileHandle createFlushTimeFileHandle();
+
+        IndexInput openInput();
+
+        ChecksumIndexInput openCheckSummedInput();
+    }
+
+    interface ForWrite extends IndexComponent
+    {
+        @Override
+        IndexComponents.ForWrite parent();
+
+        default IndexOutputWriter openOutput() throws IOException
+        {
+            return openOutput(false);
+        }
+
+        IndexOutputWriter openOutput(boolean append) throws IOException;
+
+        void createEmpty() throws IOException;
     }
 }

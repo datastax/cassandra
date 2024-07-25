@@ -91,7 +91,8 @@ public class WhereClauseMutationTest extends CQLTester
                                                                         rawStatement.selectClause,
                                                                         rawStatement.whereClause.mutateRelations(r -> mutateRelation(r)),
                                                                         rawStatement.limit,
-                                                                        rawStatement.perPartitionLimit);
+                                                                        rawStatement.perPartitionLimit,
+                                                                        null);
 
                         selectStatement = rawStatement.prepare(queryState.getClientState());
                         return selectStatement.execute(queryState, options, queryStartNanoTime);

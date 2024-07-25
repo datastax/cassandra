@@ -22,16 +22,21 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 
 import com.google.common.base.Charsets;
+import com.google.common.collect.Iterables;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.After;
 import org.junit.Assume;
@@ -50,6 +55,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.Verifier;
 import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
@@ -62,8 +68,6 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
@@ -110,6 +114,8 @@ public class VerifyTest
     public static final String CORRUPT_CF = "Corrupt1";
     public static final String CORRUPT_CF2 = "Corrupt2";
     public static final String CORRUPT_CF3 = "Corrupt3";
+    public static final String CORRUPT_COMPRESSED_CF = "CorruptCompressed";
+    public static final int CORRUPT_COMPRESSED_CF_CHUNK_LENGTH = 4096;
     public static final String CORRUPTCOUNTER_CF = "CounterCorrupt1";
     public static final String CORRUPTCOUNTER_CF2 = "CounterCorrupt2";
 
@@ -135,6 +141,7 @@ public class VerifyTest
                        standardCFMD(KEYSPACE, CORRUPT_CF),
                        standardCFMD(KEYSPACE, CORRUPT_CF2),
                        standardCFMD(KEYSPACE, CORRUPT_CF3),
+                       standardCFMD(KEYSPACE, CORRUPT_COMPRESSED_CF).compression(CompressionParams.lz4(CORRUPT_COMPRESSED_CF_CHUNK_LENGTH)),
                        counterCFMD(KEYSPACE, COUNTER_CF).compression(compressionParameters),
                        counterCFMD(KEYSPACE, COUNTER_CF2).compression(compressionParameters),
                        counterCFMD(KEYSPACE, COUNTER_CF3),
@@ -408,6 +415,79 @@ public class VerifyTest
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).extendedVerification(true).build()))
         {
             // Now try extended verify
+            try
+            {
+                verifier.verify();
+
+            }
+            catch (CorruptSSTableException err)
+            {
+                return;
+            }
+            fail("Expected a CorruptSSTableException to be thrown");
+        }
+    }
+
+    @Test
+    public void testVerifyCorruptCellInTheMiddleOfPartitionCorrectDigest() throws IOException, WriteTimeoutException
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CORRUPT_COMPRESSED_CF);
+
+        // insert wide partition data
+        int partitions = 1;
+        int rowsPerPartition = 5000;
+        fillCF(cfs, partitions, rowsPerPartition);
+
+        SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
+        long partitionStart = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("0"), cfs.getPartitioner()), SSTableReader.Operator.EQ).position;
+        try (FileChannel channel = FileChannel.open(sstable.getDataFile().toPath(), StandardOpenOption.WRITE))
+        {
+            // Corrupt data after first chunk of the partition. Verifier will have to iterate rows inside partition to detect it
+            long middle = partitionStart + CORRUPT_COMPRESSED_CF_CHUNK_LENGTH + 20;
+            channel.position(middle);
+
+            byte[] buffer = new byte[50];
+            ThreadLocalRandom.current().nextBytes(buffer);
+            channel.write(ByteBuffer.wrap(buffer));
+        }
+
+        // Update the Digest to have the updated file Checksum
+        writeChecksum(simpleFullChecksum(sstable.getFilename()), sstable.descriptor.fileFor(Component.DIGEST));
+        ChunkCache.instance.clear();
+
+        try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
+        {
+            // First a simple verify checking digest, which should succeed
+            try
+            {
+                verifier.verify();
+            }
+            catch (CorruptSSTableException err)
+            {
+                fail("Simple verify should have succeeded as digest matched");
+            }
+        }
+        try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true)
+                                                                           .extendedVerification(true).build()))
+        {
+            // Extended verify withotu validating all rows won't detect corruption inside partition
+            try
+            {
+                verifier.verify();
+            }
+            catch (CorruptSSTableException err)
+            {
+                fail("Simple verify should have succeeded as corruption is in the middle of partition");
+            }
+        }
+        try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true)
+                                                                           .extendedVerification(true)
+                                                                           .validateAllRows(true)
+                                                                           .build()))
+        {
+            // Now try extended verify with validating all rows
             try
             {
                 verifier.verify();
@@ -855,6 +935,23 @@ public class VerifyTest
                          .newRow("c1").add("val", "1")
                          .newRow("c2").add("val", "2")
                          .apply();
+        }
+
+        cfs.forceBlockingFlush(UNIT_TESTS);
+    }
+
+    protected static void fillCF(ColumnFamilyStore cfs, int partitionsPerSSTable, int rowsPerPartition)
+    {
+        for (int i = 0; i < partitionsPerSSTable; i++)
+        {
+            for (int r = 0; r < rowsPerPartition; r++)
+            {
+                PartitionUpdate update = UpdateBuilder.create(cfs.metadata(), String.valueOf(i))
+                                                      .newRow(String.valueOf(r)).add("val", "1")
+                                                      .build();
+
+                new Mutation(update).applyUnsafe();
+            }
         }
 
         cfs.forceBlockingFlush(UNIT_TESTS);

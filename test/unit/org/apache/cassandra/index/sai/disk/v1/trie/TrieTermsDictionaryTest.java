@@ -32,6 +32,8 @@ import org.junit.Test;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
@@ -70,7 +72,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestExactMatch(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
         {
             writer.add(asByteComparable.apply("ab"), 0);
             writer.add(asByteComparable.apply("abb"), 1);
@@ -80,7 +83,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(NOT_FOUND, reader.exactMatch(asByteComparable.apply("a")));
@@ -101,7 +104,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestCeiling(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
         {
             writer.add(asByteComparable.apply("ab"), 0);
             writer.add(asByteComparable.apply("abb"), 1);
@@ -113,34 +117,35 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
+        IndexComponent.ForRead termsData = components.get(IndexComponentType.TERMS_DATA);
         ByteComparable key13 = asByteComparable.apply("A");
-        readAndAssertCeiling(fp, 0, key13);
+        readAndAssertCeiling(fp, 0, key13, termsData);
         ByteComparable key12 = asByteComparable.apply("a");
-        readAndAssertCeiling(fp, 0, key12);
+        readAndAssertCeiling(fp, 0, key12, termsData);
         ByteComparable key11 = asByteComparable.apply("z");
-        readAndAssertCeiling(fp, NOT_FOUND, key11);
+        readAndAssertCeiling(fp, NOT_FOUND, key11, termsData);
         ByteComparable key10 = asByteComparable.apply("ab");
-        readAndAssertCeiling(fp, 0, key10);
+        readAndAssertCeiling(fp, 0, key10, termsData);
         ByteComparable key9 = asByteComparable.apply("abbb");
-        readAndAssertCeiling(fp, 2, key9);
+        readAndAssertCeiling(fp, 2, key9, termsData);
         ByteComparable key8 = asByteComparable.apply("abc");
-        readAndAssertCeiling(fp, 2, key8);
+        readAndAssertCeiling(fp, 2, key8, termsData);
         ByteComparable key7 = asByteComparable.apply("abca");
-        readAndAssertCeiling(fp, 3, key7);
+        readAndAssertCeiling(fp, 3, key7, termsData);
         ByteComparable key6 = asByteComparable.apply("abb");
-        readAndAssertCeiling(fp, 1, key6);
+        readAndAssertCeiling(fp, 1, key6, termsData);
         ByteComparable key5 = asByteComparable.apply("abba");
-        readAndAssertCeiling(fp, 2, key5);
+        readAndAssertCeiling(fp, 2, key5, termsData);
         ByteComparable key4 = asByteComparable.apply("cb");
-        readAndAssertCeiling(fp, 5, key4);
+        readAndAssertCeiling(fp, 5, key4, termsData);
         ByteComparable key3 = asByteComparable.apply("c");
-        readAndAssertCeiling(fp, 5, key3);
+        readAndAssertCeiling(fp, 5, key3, termsData);
         ByteComparable key2 = asByteComparable.apply("cbb");
-        readAndAssertCeiling(fp, 5, key2);
+        readAndAssertCeiling(fp, 5, key2, termsData);
         ByteComparable key1 = asByteComparable.apply("cbbb");
-        readAndAssertCeiling(fp, 6, key1);
+        readAndAssertCeiling(fp, 6, key1, termsData);
         ByteComparable key = asByteComparable.apply("cbbbbb");
-        readAndAssertCeiling(fp, NOT_FOUND, key);
+        readAndAssertCeiling(fp, NOT_FOUND, key, termsData);
     }
 
     @Test
@@ -152,7 +157,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestCeilingStateful(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
         {
             writer.add(asByteComparable.apply("ab"), 0);
             writer.add(asByteComparable.apply("abb"), 1);
@@ -164,7 +170,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(0, reader.ceiling(asByteComparable.apply("a")));
@@ -186,7 +192,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestCeilingWithEmulatedPrimaryKey(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
         {
             writer.add(primaryKey(asByteComparable, "ab", "cd", "def"), 0);
             writer.add(primaryKey(asByteComparable, "ab", "cde", "def"), 1);
@@ -196,55 +203,57 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
+        IndexComponent.ForRead termsData = components.get(IndexComponentType.TERMS_DATA);
+
         // Validate token only searches
         ByteComparable key17 = primaryKey(asByteComparable, "a", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 0, key17);
+        readAndAssertCeiling(fp, 0, key17, termsData);
         ByteComparable key16 = primaryKey(asByteComparable, "ab", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 0, key16);
+        readAndAssertCeiling(fp, 0, key16, termsData);
         ByteComparable key15 = primaryKey(asByteComparable, "aa", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 0, key15);
+        readAndAssertCeiling(fp, 0, key15, termsData);
         ByteComparable key14 = primaryKey(asByteComparable, "abc", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, NOT_FOUND, key14);
+        readAndAssertCeiling(fp, NOT_FOUND, key14, termsData);
         ByteComparable key13 = primaryKey(asByteComparable, "ba", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, NOT_FOUND, key13);
+        readAndAssertCeiling(fp, NOT_FOUND, key13, termsData);
 
         // Validate token and partition key only searches
         ByteComparable key12 = primaryKey(asByteComparable, "a", "b", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 0, key12);
+        readAndAssertCeiling(fp, 0, key12, termsData);
         ByteComparable key11 = primaryKey(asByteComparable, "ab", "b", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 0, key11);
+        readAndAssertCeiling(fp, 0, key11, termsData);
         ByteComparable key10 = primaryKey(asByteComparable, "ab", "ce", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 2, key10);
+        readAndAssertCeiling(fp, 2, key10, termsData);
         ByteComparable key9 = primaryKey(asByteComparable, "ab", "cee", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 4, key9);
+        readAndAssertCeiling(fp, 4, key9, termsData);
         ByteComparable key8 = primaryKey(asByteComparable, "ab", "d", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, NOT_FOUND, key8);
+        readAndAssertCeiling(fp, NOT_FOUND, key8, termsData);
         ByteComparable key7 = primaryKey(asByteComparable, "abb", "a", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, NOT_FOUND, key7);
+        readAndAssertCeiling(fp, NOT_FOUND, key7, termsData);
         ByteComparable key6 = primaryKey(asByteComparable, "aa", "d", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 0, key6);
+        readAndAssertCeiling(fp, 0, key6, termsData);
         ByteComparable key5 = primaryKey(asByteComparable, "abc", "a", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, NOT_FOUND, key5);
+        readAndAssertCeiling(fp, NOT_FOUND, key5, termsData);
         ByteComparable key4 = primaryKey(asByteComparable, "ba", "a", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, NOT_FOUND, key4);
+        readAndAssertCeiling(fp, NOT_FOUND, key4, termsData);
 
 
         // Validate token, partition key, and clustring column searches
         ByteComparable key3 = primaryKey(asByteComparable, "a", "b", "c", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 0, key3);
+        readAndAssertCeiling(fp, 0, key3, termsData);
         ByteComparable key2 = primaryKey(asByteComparable, "ab", "cdd", "a", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 1, key2);
+        readAndAssertCeiling(fp, 1, key2, termsData);
         ByteComparable key1 = primaryKey(asByteComparable, "ab", "cde", "a", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 1, key1);
+        readAndAssertCeiling(fp, 1, key1, termsData);
         ByteComparable key = primaryKey(asByteComparable, "ab", "cde", "z", ByteSource.LT_NEXT_COMPONENT);
-        readAndAssertCeiling(fp, 2, key);
+        readAndAssertCeiling(fp, 2, key, termsData);
     }
 
     // Tests using this method are verifying the correctness of individual calls to ceiling. Because the reader is
     // stateful across calls to ceiling, a new one must be opened for each call.
-    private void readAndAssertCeiling(long root, long expected, ByteComparable key)
+    private void readAndAssertCeiling(long root, long expected, ByteComparable key, IndexComponent.ForRead termsData)
     {
-        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+        try (FileHandle input = termsData.createFileHandle();
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), root, VERSION))
         {
             assertEquals(expected, reader.ceiling(key));
@@ -260,7 +269,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestFloor(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
         {
             writer.add(asByteComparable.apply("ab"), 0);
             writer.add(asByteComparable.apply("abb"), 1);
@@ -273,7 +283,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(NOT_FOUND, reader.floor(asByteComparable.apply("a")));
@@ -301,7 +311,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestFloorWithEmulatedPrimaryKey(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
         {
             writer.add(primaryKey(asByteComparable, "ab", "cd", "def"), 0);
             writer.add(primaryKey(asByteComparable, "ab", "cde", "def"), 1);
@@ -311,7 +322,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             // Validate token only searches
@@ -353,7 +364,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         final List<ByteComparable> byteComparables = generateSortedByteComparables(asByteComparable);
 
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
         {
             for (int i = 0; i < byteComparables.size(); ++i)
             {
@@ -362,7 +374,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
              TrieTermsDictionaryReader iterator = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION);
              ReverseTrieTermsDictionaryReader reverseIterator = new ReverseTrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
@@ -398,7 +410,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         final List<ByteComparable> byteComparables = generateSortedByteComparables(asByteComparable);
 
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
         {
             for (int i = 0; i < byteComparables.size(); ++i)
             {
@@ -407,7 +420,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             final ByteComparable expectedMaxTerm = byteComparables.get(byteComparables.size() - 1);
