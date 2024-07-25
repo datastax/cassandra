@@ -195,7 +195,8 @@ public class LegacyOnDiskFormatTest
                                                   components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
                                                   components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
                                                   root,
-                                                  footerPointer);
+                                                  footerPointer,
+                                                  Version.AA); // These tests are for AA, so no need to parameterize
         Expression expression = new Expression(textContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
         ByteComparable term = ByteComparable.fixedLength(expression.lower.value.encoded);
 

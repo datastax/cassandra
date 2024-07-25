@@ -41,8 +41,9 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
@@ -52,8 +53,9 @@ import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.BytesRefBuilder;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
@@ -112,8 +114,8 @@ public abstract class SegmentBuilder
     private PrimaryKey minKey;
     private PrimaryKey maxKey;
     // in termComparator order
-    private ByteBuffer minTerm;
-    private ByteBuffer maxTerm;
+    protected ByteBuffer minTerm;
+    protected ByteBuffer maxTerm;
 
     protected final AtomicInteger updatesInFlight = new AtomicInteger(0);
     protected final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
@@ -176,16 +178,16 @@ public abstract class SegmentBuilder
     public static class RAMStringSegmentBuilder extends SegmentBuilder
     {
         final RAMStringIndexer ramIndexer;
-
-        final BytesRefBuilder stringBuffer = new BytesRefBuilder();
+        private final ByteComparable.Version byteComparableVersion;
 
         RAMStringSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
-
-            ramIndexer = new RAMStringIndexer(termComparator);
+            this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
+            ramIndexer = new RAMStringIndexer();
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+
         }
 
         public boolean isEmpty()
@@ -195,8 +197,14 @@ public abstract class SegmentBuilder
 
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
-            BytesRefUtil.copyBufferToBytesRef(term, stringBuffer);
-            return ramIndexer.add(stringBuffer.get(), segmentRowId);
+            var encodedTerm = components.version().onDiskFormat().encodeForTrie(term, termComparator);
+            // Use the source term to estimate the length of the array we'll need. This is unlikely to be exact, but
+            // it will hopefully prevent intermediate array creation as ByteSourceInverse consumes the ByteSource.
+            // This 5% addition was added as a guess, and could possibly be improved.
+            var estimatedLength = Math.round(term.remaining() * 1.05f);
+            var bytes = ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(byteComparableVersion), estimatedLength);
+            var bytesRef = new BytesRef(bytes);
+            return ramIndexer.add(bytesRef, segmentRowId);
         }
 
         @Override
@@ -204,7 +212,7 @@ public abstract class SegmentBuilder
         {
             try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
             {
-                return writer.writeAll(ramIndexer.getTermsWithPostings());
+                return writer.writeAll(ramIndexer.getTermsWithPostings(minTerm, maxTerm));
             }
         }
 
@@ -451,8 +459,9 @@ public abstract class SegmentBuilder
         minKey = minKey == null ? key : minKey;
         maxKey = key;
 
-        minTerm = TypeUtil.min(term, minTerm, termComparator);
-        maxTerm = TypeUtil.max(term, maxTerm, termComparator);
+        // Note that the min and max terms are not encoded.
+        minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
+        maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
 
         rowCount++;
 
