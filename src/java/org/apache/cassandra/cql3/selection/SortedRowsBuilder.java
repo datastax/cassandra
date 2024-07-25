@@ -28,7 +28,6 @@ import java.util.function.Supplier;
 import com.google.common.math.IntMath;
 
 import org.apache.cassandra.index.Index;
-import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.PriorityQueue;
 
 import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
@@ -95,11 +94,7 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
     {
-        // Heap and hybrid approaches are only useful when the limit is smaller than the number of collected rows.
-        // If there is no limit we will return all the collected rows, so we can simply use the list approach.
-        return limit == NO_LIMIT
-               ? WithListSort.create(limit, offset, comparator)
-               : WithHybridSort.create(limit, offset, comparator);
+        return WithHybridSort.create(limit, offset, comparator);
     }
 
     /**
@@ -112,11 +107,7 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
     {
-        // Heap and hybrid approaches are only useful when the limit is smaller than the number of collected rows.
-        // If there is no limit we will return all the collected rows, so we can simply use the list approach.
-        return limit == NO_LIMIT
-               ? WithListSort.create(limit, offset, scorer)
-               : WithHybridSort.create(limit, offset, scorer);
+        return WithHybridSort.create(limit, offset, scorer);
     }
 
     /**
@@ -244,13 +235,11 @@ public abstract class SortedRowsBuilder
      */
     public static class WithHeapSort<T extends WithHeapSort.RowWithId> extends SortedRowsBuilder
     {
-        public static final int MAX_SIZE = ArrayUtil.MAX_ARRAY_LENGTH;
-        public static final String LIMIT_REQUIRED_ERROR = "Queries fetching more than " + MAX_SIZE + " rows cannot use WithHeapSort.";
-
         private final BiFunction<List<ByteBuffer>, Integer, T> decorator;
-        private final PriorityQueue<T> heap;
+        private final Comparator<T> comparator;
 
         private List<T> initialRows = new ArrayList<>(); // first limit+offset rows to be added with PriorityQueue#addAll
+        private PriorityQueue<T> heap; // lazily built for inital rows in #heapifyInitialRows
         private int numAddedRows = 0;
         private boolean built = false;
 
@@ -276,9 +265,29 @@ public abstract class SortedRowsBuilder
                              Comparator<T> comparator)
         {
             super(limit, offset);
-            assert fetchLimit < MAX_SIZE : LIMIT_REQUIRED_ERROR;
             this.decorator = decorator;
-            heap = new PriorityQueue<>(fetchLimit)
+            this.comparator = comparator;
+        }
+
+        @Override
+        public void add(List<ByteBuffer> row)
+        {
+            assert !built : "Cannot add more rows after calling build()";
+
+            T decoratedRow = decorator.apply(row, numAddedRows++);
+
+            if (heap != null)
+                heap.insertWithOverflow(decoratedRow);
+            else
+                initialRows.add(decoratedRow);
+
+            if (heap == null && numAddedRows >= fetchLimit)
+                heapifyInitialRows();
+        }
+
+        private void heapifyInitialRows()
+        {
+            heap = new PriorityQueue<>(initialRows.size())
             {
                 @Override
                 protected boolean lessThan(T t1, T t2)
@@ -289,26 +298,6 @@ public abstract class SortedRowsBuilder
                     return cmp == 0 ? t1.id > t2.id : cmp > 0;
                 }
             };
-        }
-
-        @Override
-        public void add(List<ByteBuffer> row)
-        {
-            assert !built : "Cannot add more rows after calling build()";
-
-            T decoratedRow = decorator.apply(row, numAddedRows++);
-
-            if (initialRows != null && numAddedRows >= fetchLimit)
-                heapifyInitialRows();
-
-            if (initialRows != null)
-                initialRows.add(decoratedRow);
-            else
-                heap.insertWithOverflow(decoratedRow);
-        }
-
-        private void heapifyInitialRows()
-        {
             heap.addAll(initialRows);
             initialRows = null;
         }
@@ -318,7 +307,7 @@ public abstract class SortedRowsBuilder
         {
             built = true;
 
-            if (initialRows != null)
+            if (heap == null)
                 heapifyInitialRows();
 
             int toPeek = heap.size() - offset;
@@ -384,7 +373,7 @@ public abstract class SortedRowsBuilder
 
         private WithListSort<L> list;
         private final Supplier<WithHeapSort<Q>> heapSupplier;
-        private final int threshold; // at what number of rows we switch from list to heap
+        private final int threshold; // at what number of rows we switch from list to heap, -1 means no switch
 
         private WithHeapSort<Q> heap;
 
@@ -402,6 +391,7 @@ public abstract class SortedRowsBuilder
                                         () -> WithHeapSort.create(limit, offset, scorer));
         }
 
+        @SuppressWarnings("UnstableApiUsage")
         private WithHybridSort(int limit, int offset,
                                WithListSort<L> list,
                                Supplier<WithHeapSort<Q>> heapSupplier)
@@ -409,16 +399,17 @@ public abstract class SortedRowsBuilder
             super(limit, offset);
             this.list = list;
             this.heapSupplier = heapSupplier;
-            this.threshold = fetchLimit >= WithHeapSort.MAX_SIZE
-                             ? Integer.MAX_VALUE // will never use the heap
-                             : (limit + offset) * SWITCH_FACTOR;
+
+            // The heap approach is only useful when the limit is smaller than the number of collected rows.
+            // If there is no limit we will return all the collected rows, so we can simply use the list approach.
+            this.threshold = limit == NO_LIMIT ? -1 : IntMath.saturatedMultiply(fetchLimit, SWITCH_FACTOR);
         }
 
         @Override
         public void add(List<ByteBuffer> row)
         {
             // start using the heap if the list is full
-            if (list != null && list.rows.size() >= threshold)
+            if (list != null && threshold > 0 && list.rows.size() >= threshold)
             {
                 heap = heapSupplier.get();
                 for (L r : list.rows)
