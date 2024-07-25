@@ -690,7 +690,7 @@ public class AbstractTypeTest
         return version -> type.asComparableBytes(bb, version);
     }
 
-    @Test
+    @Test // TODO fix this test - it seems like something is broken with DateRange and geometric types comparisons
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void ordering()
     {
@@ -702,6 +702,7 @@ public class AbstractTypeTest
         Gen<AbstractType<?>> types = baseline.withCompositeElementGen(new TypeGenBuilder(baseline).withDefaultSizeGen(1).withMaxDepth(1).build())
                                              .build();
         qt().withShrinkCycles(0).forAll(examples(10, types)).checkAssert(example -> {
+            logger.info("Testing type {}", example.type);
             AbstractType type = example.type;
             List<ByteBuffer> actual = decompose(type, example.samples);
             actual.sort(type);
@@ -1553,6 +1554,10 @@ public class AbstractTypeTest
             primitiveValueCompatibleWith.put(BytesType.instance, TimestampType.instance);
             primitiveValueCompatibleWith.put(BytesType.instance, UTF8Type.instance);
             primitiveValueCompatibleWith.put(BytesType.instance, UUIDType.instance);
+            primitiveValueCompatibleWith.put(BytesType.instance, LineStringType.instance);
+            primitiveValueCompatibleWith.put(BytesType.instance, PointType.instance);
+            primitiveValueCompatibleWith.put(BytesType.instance, PolygonType.instance);
+            primitiveValueCompatibleWith.put(BytesType.instance, DateRangeType.instance);
             primitiveValueCompatibleWith.put(IntegerType.instance, Int32Type.instance);
             primitiveValueCompatibleWith.put(IntegerType.instance, LongType.instance);
             primitiveValueCompatibleWith.put(IntegerType.instance, TimestampType.instance);
@@ -1573,6 +1578,10 @@ public class AbstractTypeTest
             primitiveSerializationCompatibleWith.put(BytesType.instance, SimpleDateType.instance);
             primitiveSerializationCompatibleWith.put(BytesType.instance, TimeType.instance);
             primitiveSerializationCompatibleWith.put(BytesType.instance, UTF8Type.instance);
+            primitiveSerializationCompatibleWith.put(BytesType.instance, LineStringType.instance);
+            primitiveSerializationCompatibleWith.put(BytesType.instance, PointType.instance);
+            primitiveSerializationCompatibleWith.put(BytesType.instance, PolygonType.instance);
+            primitiveSerializationCompatibleWith.put(BytesType.instance, DateRangeType.instance);
             primitiveSerializationCompatibleWith.put(LongType.instance, TimestampType.instance);
             primitiveSerializationCompatibleWith.put(TimestampType.instance, LongType.instance);
             primitiveSerializationCompatibleWith.put(UTF8Type.instance, AsciiType.instance);
