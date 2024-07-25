@@ -39,7 +39,15 @@ public interface TermsIterator extends Iterator<ByteComparable>, Closeable
      */
     PostingList postings() throws IOException;
 
+    /**
+     * Get the minimum term in the iterator. Due to legacy design, this is the term as represented on disk without
+     * any special encoding.
+     */
     ByteBuffer getMinTerm();
 
+    /**
+     * Get the maximum term in the iterator. Due to legacy design, this is the term as represented on disk without
+     * any special encoding.
+     */
     ByteBuffer getMaxTerm();
 }
