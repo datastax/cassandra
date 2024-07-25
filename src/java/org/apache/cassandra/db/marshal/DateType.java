@@ -20,16 +20,16 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.Date;
 
-import org.apache.cassandra.cql3.Constants;
-import org.apache.cassandra.cql3.Term;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
-import org.apache.cassandra.serializers.TypeSerializer;
-import org.apache.cassandra.serializers.TimestampSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.TimestampSerializer;
+import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -46,6 +46,8 @@ public class DateType extends AbstractType<Date>
     private static final Logger logger = LoggerFactory.getLogger(DateType.class);
 
     public static final DateType instance = new DateType();
+
+    private static final TypeSerializer<Date> serializer = new TimestampSerializer();
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDeserializer(instance);
     private static final ByteBuffer MASKED_VALUE = instance.decompose(new Date(0));
 
@@ -121,9 +123,9 @@ public class DateType extends AbstractType<Date>
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
-        return this == otherType || otherType == TimestampType.instance || otherType == LongType.instance;
+        return this == previous || previous == TimestampType.instance || previous == LongType.instance;
     }
 
     @Override
@@ -134,7 +136,7 @@ public class DateType extends AbstractType<Date>
 
     public TypeSerializer<Date> getSerializer()
     {
-        return TimestampSerializer.instance;
+        return serializer;
     }
 
     @Override

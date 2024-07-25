@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.db.marshal;
 
+import java.nio.ByteBuffer;
+
+import com.esri.core.geometry.ogc.OGCLineString;
 import org.apache.cassandra.db.marshal.geometry.GeometricType;
 import org.apache.cassandra.db.marshal.geometry.LineString;
 
@@ -25,8 +28,16 @@ public class LineStringType extends AbstractGeometricType<LineString>
 {
     public static final LineStringType instance = new LineStringType();
 
+    private static final ByteBuffer MASKED_VALUE = new LineString((OGCLineString) OGCLineString.fromText("LINESTRING EMPTY")).asWellKnownBinary();
+
     public LineStringType()
     {
         super(GeometricType.LINESTRING);
+    }
+
+    @Override
+    public ByteBuffer getMaskedValue()
+    {
+        return MASKED_VALUE;
     }
 }

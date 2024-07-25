@@ -39,6 +39,8 @@ public class DateRangeType extends AbstractType<DateRange>
 {
     public static final DateRangeType instance = new DateRangeType();
 
+    private static final ByteBuffer MASKED_VALUE = DateRangeSerializer.instance.serialize(new DateRange(DateRange.DateRangeBound.UNBOUNDED, DateRange.DateRangeBound.UNBOUNDED));
+
     private DateRangeType()
     {
         super(ComparisonType.BYTE_ORDER);
@@ -91,5 +93,11 @@ public class DateRangeType extends AbstractType<DateRange>
     public TypeSerializer<DateRange> getSerializer()
     {
         return DateRangeSerializer.instance;
+    }
+
+    @Override
+    public ByteBuffer getMaskedValue()
+    {
+        return MASKED_VALUE;
     }
 }
