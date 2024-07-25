@@ -53,20 +53,19 @@ import org.apache.cassandra.cql3.functions.masking.ColumnMask;
 import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.db.guardrails.UserKeyspaceFilter;
+import org.apache.cassandra.db.guardrails.UserKeyspaceFilterProvider;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CounterColumnType;
 import org.apache.cassandra.db.marshal.EmptyType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
-import org.apache.cassandra.db.guardrails.UserKeyspaceFilter;
-import org.apache.cassandra.db.guardrails.UserKeyspaceFilterProvider;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -231,20 +230,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
         Map<ColumnIdentifier, ColumnProperties> columns = new TreeMap<>(comparing(o -> o.bytes));
         rawColumns.forEach((column, properties) -> columns.put(column, properties.prepare(keyspaceName, tableName, column, types)));
 
-        // check for nested non-frozen UDTs or collections in a non-frozen UDT
-        columns.forEach((column, properties) ->
-        {
-            AbstractType<?> type = properties.type;
-            if (type.isUDT() && type.isMultiCell())
-            {
-                ((UserType) type).fieldTypes().forEach(field ->
-                {
-                    if (field.isMultiCell())
-                        throw ire("Non-frozen UDTs with nested non-frozen collections are not supported");
-                });
-            }
-        });
-
         /*
          * Deal with PRIMARY KEY columns
          */
@@ -258,22 +243,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
             if (!primaryKeyColumns.add(column))
                 throw ire("Duplicate column '%s' in PRIMARY KEY clause for table '%s'", column, tableName);
-
-            AbstractType<?> type = properties.type;
-            if (type.isMultiCell())
-            {
-                CQL3Type cqlType = properties.cqlType;
-                if (type.isCollection())
-                    throw ire("Invalid non-frozen collection type %s for PRIMARY KEY column '%s'", cqlType, column);
-                else
-                    throw ire("Invalid non-frozen user-defined type %s for PRIMARY KEY column '%s'", cqlType, column);
-            }
-
-            if (type.isCounter())
-                throw ire("counter type is not supported for PRIMARY KEY column '%s'", column);
-
-            if (type.referencesDuration())
-                throw ire("duration type is not supported for PRIMARY KEY column '%s'", column);
 
             if (staticColumns.contains(column))
                 throw ire("Static column '%s' cannot be part of the PRIMARY KEY", column);
@@ -336,11 +305,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
         boolean hasCounters = rawColumns.values().stream().anyMatch(c -> c.rawType.isCounter());
         if (hasCounters)
         {
-            // We've handled anything that is not a PRIMARY KEY so columns only contains NON-PK columns. So
-            // if it's a counter table, make sure we don't have non-counter types
-            if (columns.values().stream().anyMatch(t -> !t.type.isCounter()))
-                throw ire("Cannot mix counter and non counter columns in the same table");
-
             if (params.defaultTimeToLive > 0)
                 throw ire("Cannot set %s on a table with counters", TableParams.Option.DEFAULT_TIME_TO_LIVE);
         }
