@@ -35,6 +35,7 @@ public class VectorPostingList implements PostingList
 
     public VectorPostingList(CloseableIterator<ScoredRowId> source)
     {
+        // TODO find int specific data structure?
         segmentRowIds = new LongHeap(32);
         int n = 0;
         // Once the source is consumed, we have to close it.
@@ -50,23 +51,23 @@ public class VectorPostingList implements PostingList
     }
 
     @Override
-    public long nextPosting() throws IOException
+    public int nextPosting() throws IOException
     {
         if (segmentRowIds.size() == 0)
             return PostingList.END_OF_STREAM;
-        return segmentRowIds.pop();
+        return (int) segmentRowIds.pop();
     }
 
     @Override
-    public long size()
+    public int size()
     {
         return size;
     }
 
     @Override
-    public long advance(long targetRowID) throws IOException
+    public int advance(int targetRowID) throws IOException
     {
-        long rowId;
+        int rowId;
         do
         {
             rowId = nextPosting();

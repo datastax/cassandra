@@ -34,7 +34,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.agrona.collections.LongArrayList;
+import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
@@ -92,7 +92,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
     public interface DocMapper
     {
-        long oldToNew(long rowID);
+        int oldToNew(int rowID);
     }
 
     @VisibleForTesting
@@ -106,15 +106,15 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         return new IteratorState(docMapper);
     }
 
-    public class IteratorState extends AbstractIterator<Long> implements Comparable<IteratorState>, Closeable
+    public class IteratorState extends AbstractIterator<Integer> implements Comparable<IteratorState>, Closeable
     {
         public final byte[] scratch;
 
         private final IndexInput bkdInput;
         private final IndexInput bkdPostingsInput;
         private final byte[] packedValues = new byte[maxPointsInLeafNode * packedBytesLength];
-        private final LongArrayList tempPostings = new LongArrayList();
-        private final long[] postings = new long[maxPointsInLeafNode];
+        private final IntArrayList tempPostings = new IntArrayList();
+        private final int[] postings = new int[maxPointsInLeafNode];
         private final DocMapper docMapper;
         private final Iterator<Map.Entry<Long,Integer>> iterator;
 
@@ -161,7 +161,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
 
         @Override
-        protected Long computeNext()
+        protected Integer computeNext()
         {
             while (true)
             {
@@ -228,8 +228,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                         final IndexInput bkdInput,
                         final byte[] packedValues,
                         final IndexInput bkdPostingsInput,
-                        long[] postings,
-                        LongArrayList tempPostings) throws IOException
+                        int[] postings,
+                        IntArrayList tempPostings) throws IOException
     {
         bkdInput.seek(filePointer);
         final int count = bkdInput.readVInt();
@@ -297,7 +297,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             // gather the postings into tempPostings
             while (true)
             {
-                final long rowid = postingsReader.nextPosting();
+                final int rowid = postingsReader.nextPosting();
                 if (rowid == PostingList.END_OF_STREAM) break;
                 tempPostings.add(rowid);
             }
@@ -306,7 +306,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             for (int x = 0; x < tempPostings.size(); x++)
             {
                 int idx = origIndex[x];
-                final long rowid = tempPostings.get(idx);
+                final int rowid = tempPostings.get(idx);
 
                 postings[x] = rowid;
             }

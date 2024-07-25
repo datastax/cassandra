@@ -52,7 +52,7 @@ public class PostingsReader implements OrdinalPostingList
     protected final IndexInput input;
     protected final InputCloser runOnClose;
     private final int blockSize;
-    private final long numPostings;
+    private final int numPostings;
     private final LongArray blockOffsets;
     private final LongArray blockMaxValues;
     private final SeekingRandomAccessInput seekingInput;
@@ -63,12 +63,12 @@ public class PostingsReader implements OrdinalPostingList
 
     private int postingsBlockIdx;
     private int blockIdx; // position in block
-    private long totalPostingsRead;
-    private long actualSegmentRowId;
+    private int totalPostingsRead;
+    private int actualSegmentRowId;
 
     private long currentPosition;
     private LongValues currentFORValues;
-    private long postingsDecoded = 0;
+    private int postingsDecoded = 0;
 
     @VisibleForTesting
     public PostingsReader(IndexInput input, long summaryOffset, QueryEventListener.PostingListEventListener listener) throws IOException
@@ -109,7 +109,7 @@ public class PostingsReader implements OrdinalPostingList
     }
 
     @Override
-    public long getOrdinal()
+    public int getOrdinal()
     {
         return totalPostingsRead;
     }
@@ -140,7 +140,8 @@ public class PostingsReader implements OrdinalPostingList
 
             input.seek(offset);
             this.blockSize = input.readVInt();
-            //TODO This should need to change because we can potentially end up with postings of more than Integer.MAX_VALUE?
+            // This is the count of row ids in a single posting list. For now, a segment cannot have more than
+            // Integer.MAX_VALUE row ids, so it is safe to use an int here.
             this.numPostings = input.readVInt();
 
             final SeekingRandomAccessInput randomAccessInput = new SeekingRandomAccessInput(input);
@@ -218,7 +219,7 @@ public class PostingsReader implements OrdinalPostingList
     }
 
     @Override
-    public long size()
+    public int size()
     {
         return numPostings;
     }
@@ -238,7 +239,7 @@ public class PostingsReader implements OrdinalPostingList
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
     @Override
-    public long advance(long targetRowID) throws IOException
+    public int advance(int targetRowID) throws IOException
     {
         listener.onAdvance();
         int block = binarySearchBlock(targetRowID);
@@ -260,11 +261,11 @@ public class PostingsReader implements OrdinalPostingList
         return slowAdvance(targetRowID);
     }
 
-    private long slowAdvance(long targetRowID) throws IOException
+    private int slowAdvance(int targetRowID) throws IOException
     {
         while (totalPostingsRead < numPostings)
         {
-            long segmentRowId = peekNext();
+            int segmentRowId = peekNext();
 
             advanceOnePosition(segmentRowId);
 
@@ -320,7 +321,7 @@ public class PostingsReader implements OrdinalPostingList
     private void lastPosInBlock(int block)
     {
         // blockMaxValues is integer only
-        actualSegmentRowId = blockMaxValues.get(block);
+        actualSegmentRowId = Math.toIntExact(blockMaxValues.get(block));
         //upper bound, since we might've advanced to the last block, but upper bound is enough
         totalPostingsRead += (blockSize - blockIdx) + (block - postingsBlockIdx + 1) * blockSize;
 
@@ -329,9 +330,9 @@ public class PostingsReader implements OrdinalPostingList
     }
 
     @Override
-    public long nextPosting() throws IOException
+    public int nextPosting() throws IOException
     {
-        final long next = peekNext();
+        final int next = peekNext();
         if (next != END_OF_STREAM)
         {
             advanceOnePosition(next);
@@ -345,7 +346,7 @@ public class PostingsReader implements OrdinalPostingList
         return blockSize;
     }
 
-    private long peekNext() throws IOException
+    private int peekNext() throws IOException
     {
         if (totalPostingsRead >= numPostings)
         {
@@ -374,7 +375,7 @@ public class PostingsReader implements OrdinalPostingList
         }
     }
 
-    private void advanceOnePosition(long nextRowID)
+    private void advanceOnePosition(int nextRowID)
     {
         actualSegmentRowId = nextRowID;
         totalPostingsRead++;
