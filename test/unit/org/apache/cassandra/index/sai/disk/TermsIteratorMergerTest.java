@@ -55,7 +55,7 @@ public class TermsIteratorMergerTest extends SAITester
         String[] expectedTerms = expected.keySet().toArray(new String[] {});
         for (int termIteratorCount = 0; termIteratorCount < iterators.length; termIteratorCount++)
         {
-            TreeMap<ByteBuffer, Long[]> termMap = new TreeMap<>();
+            TreeMap<ByteBuffer, Integer[]> termMap = new TreeMap<>();
             for (int termCount = 0; termCount < getRandom().nextIntBetween(2, expected.size() - 1); termCount++)
             {
                 String term = expectedTerms[getRandom().nextIntBetween(0, expected.size() - 1)];
@@ -74,7 +74,7 @@ public class TermsIteratorMergerTest extends SAITester
                     }
                 }
                 postings.sort(Long::compareTo);
-                termMap.put(UTF8Type.instance.decompose(term), postings.toArray(new Long[] {}));
+                termMap.put(UTF8Type.instance.decompose(term), postings.toArray(new Integer[] {}));
                 iterators[termIteratorCount] = new TermsIteratorImpl(termMap);
             }
         }
@@ -100,11 +100,11 @@ public class TermsIteratorMergerTest extends SAITester
 
     public static class TermsIteratorImpl implements TermsIterator
     {
-        final TreeMap<ByteBuffer, Long[]> map;
-        final Iterator<Map.Entry<ByteBuffer, Long[]>> iterator;
-        Map.Entry<ByteBuffer, Long[]> current;
+        final TreeMap<ByteBuffer, Integer[]> map;
+        final Iterator<Map.Entry<ByteBuffer, Integer[]>> iterator;
+        Map.Entry<ByteBuffer, Integer[]> current;
 
-        public TermsIteratorImpl(TreeMap<ByteBuffer, Long[]> map)
+        public TermsIteratorImpl(TreeMap<ByteBuffer, Integer[]> map)
         {
             this.map = map;
             iterator = map.entrySet().iterator();
@@ -117,10 +117,10 @@ public class TermsIteratorMergerTest extends SAITester
             return new PostingList()
             {
                 int index = 0;
-                Long[] postings = current.getValue();
+                Integer[] postings = current.getValue();
 
                 @Override
-                public long nextPosting() throws IOException
+                public int nextPosting() throws IOException
                 {
                     if (index == postings.length)
                         return END_OF_STREAM;
@@ -128,13 +128,13 @@ public class TermsIteratorMergerTest extends SAITester
                 }
 
                 @Override
-                public long size()
+                public int size()
                 {
                     return postings.length;
                 }
 
                 @Override
-                public long advance(long targetRowID) throws IOException
+                public int advance(int targetRowID) throws IOException
                 {
                     throw new UnsupportedOperationException();
                 }
