@@ -200,7 +200,7 @@ public class V1OnDiskFormat implements OnDiskFormat
             logger.debug(index.getIndexContext().logMessage("Starting a compaction index build. Global segment memory usage: {}"),
                          prettyPrintMemory(limiter.currentBytesUsed()));
 
-            return new SSTableIndexWriter(perIndexComponents, limiter, index.isIndexValid(), keyCount, Version.latest());
+            return new SSTableIndexWriter(perIndexComponents, limiter, index.isIndexValid(), keyCount);
         }
 
         return new MemtableIndexWriter(context.getPendingMemtableIndex(tracker),

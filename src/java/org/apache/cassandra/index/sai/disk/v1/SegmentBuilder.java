@@ -180,13 +180,11 @@ public abstract class SegmentBuilder
     public static class RAMStringSegmentBuilder extends SegmentBuilder
     {
         final RAMStringIndexer ramIndexer;
-        private final Version version;
         private final ByteComparable.Version byteComparableVersion;
 
-        RAMStringSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, NamedMemoryLimiter limiter, Version version)
+        RAMStringSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
-            this.version = version;
             this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
             ramIndexer = new RAMStringIndexer();
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
@@ -201,7 +199,7 @@ public abstract class SegmentBuilder
 
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
-            var encodedTerm = version.onDiskFormat().encodeForTrie(term, termComparator);
+            var encodedTerm = components.version().onDiskFormat().encodeForTrie(term, termComparator);
             // Use the source term to estimate the length of the array we'll need. This is unlikely to be exact, but
             // it will hopefully prevent intermediate array creation as ByteSourceInverse consumes the ByteSource.
             // This 5% addition was added as a guess, and could possibly be improved.

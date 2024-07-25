@@ -72,10 +72,9 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     // segment writer
     private SegmentBuilder currentBuilder;
-    private final Version version;
     private final List<SegmentMetadata> segments = new ArrayList<>();
 
-    public SSTableIndexWriter(IndexComponents.ForWrite perIndexComponents, NamedMemoryLimiter limiter, BooleanSupplier isIndexValid, long keyCount, Version version)
+    public SSTableIndexWriter(IndexComponents.ForWrite perIndexComponents, NamedMemoryLimiter limiter, BooleanSupplier isIndexValid, long keyCount)
     {
         this.perIndexComponents = perIndexComponents;
         this.indexContext = perIndexComponents.context();
@@ -84,7 +83,6 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
         this.keyCount = keyCount;
-        this.version = version;
     }
 
     @Override
@@ -373,7 +371,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
         else if (indexContext.isLiteral())
         {
-            builder = new SegmentBuilder.RAMStringSegmentBuilder(perIndexComponents, rowIdOffset, limiter, version);
+            builder = new SegmentBuilder.RAMStringSegmentBuilder(perIndexComponents, rowIdOffset, limiter);
         }
         else
         {

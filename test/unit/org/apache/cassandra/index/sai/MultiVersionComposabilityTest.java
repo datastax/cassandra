@@ -36,15 +36,6 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 public class MultiVersionComposabilityTest extends SAITester
 {
     @Test
-    public void test100Times() throws Throwable
-    {
-        for (int i = 0; i < 100; i++)
-        {
-            testMultiVersionMapRangeQuery();
-        }
-    }
-
-    @Test
     public void testMultiVersionMapRangeQuery() throws Throwable
     {
         // The map type is selected because the encoding changes over time.
