@@ -107,6 +107,8 @@ public class PostingsWriter implements Closeable
     private int bufferUpto;
     private long lastSegmentRowId;
     private long maxDelta;
+    // This number is the count of row ids written to the postings for this segment. Because a segment row id can be in
+    // multiple postings list for the segment, this number could exceed Integer.MAX_VALUE, so we use a long.
     private long totalPostings;
 
     public PostingsWriter(IndexComponents.ForWrite components) throws IOException
@@ -183,7 +185,7 @@ public class PostingsWriter implements Closeable
         blockOffsets.clear();
         blockMaxIDs.clear();
 
-        long segmentRowId;
+        int segmentRowId;
         // When postings list are merged, we don't know exact size, just an upper bound.
         // We need to count how many postings we added to the block ourselves.
         int size = 0;
