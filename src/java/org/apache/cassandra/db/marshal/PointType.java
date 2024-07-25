@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.marshal;
 
+import java.nio.ByteBuffer;
+
 import org.apache.cassandra.db.marshal.geometry.GeometricType;
 import org.apache.cassandra.db.marshal.geometry.Point;
 
@@ -25,8 +27,16 @@ public class PointType extends AbstractGeometricType<Point>
 {
     public static final PointType instance = new PointType();
 
+    private static final ByteBuffer MASKED_VALUE = new Point(0, 0).asWellKnownBinary();
+
     public PointType()
     {
         super(GeometricType.POINT);
+    }
+
+    @Override
+    public ByteBuffer getMaskedValue()
+    {
+        return MASKED_VALUE;
     }
 }
