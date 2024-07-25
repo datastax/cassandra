@@ -40,6 +40,7 @@ public final class DroppedColumn
      */
     public DroppedColumn(ColumnMetadata column, long droppedTime)
     {
+        assert column.isDropped() : column.debugString() + " should be dropped";
         this.column = column;
         this.droppedTime = droppedTime;
     }
@@ -73,7 +74,7 @@ public final class DroppedColumn
     {
         return String.format("DROPPED COLUMN RECORD %s %s%s USING TIMESTAMP %d",
                              column.name.toCQLString(),
-                             column.type.asCQL3Type(),
+                             column.type.asCQL3Type().toSchemaString(),
                              column.isStatic() ? " static" : "",
                              droppedTime);
     }

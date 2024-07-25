@@ -345,9 +345,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                 {
                     throw ire("Cannot add a column '%s' of type %s, incompatible with previously dropped column '%s' of type %s",
                               name,
-                              type.asCQL3Type(),
+                              type.asCQL3Type().toSchemaString(),
                               name,
-                              droppedColumn.type.asCQL3Type());
+                              droppedColumn.type.asCQL3Type().toSchemaString());
                 }
 
                 if (droppedColumn.isStatic() != isStatic)
@@ -421,14 +421,6 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
 
             if (currentColumn.isPrimaryKeyColumn())
                 throw ire("Cannot drop PRIMARY KEY column %s", column);
-
-            /*
-             * Cannot allow dropping top-level columns of user defined types that aren't frozen because we cannot convert
-             * the type into an equivalent tuple: we only support frozen tuples currently. And as such we cannot persist
-             * the correct type in system_schema.dropped_columns.
-             */
-            if (currentColumn.type.isUDT() && currentColumn.type.isMultiCell())
-                throw ire("Cannot drop non-frozen column %s of user type %s", column, currentColumn.type.asCQL3Type());
 
             // TODO: some day try and find a way to not rely on Keyspace/IndexManager/Index to find dependent indexes
             Set<IndexMetadata> dependentIndexes = Keyspace.openAndGetStore(table).indexManager.getDependentIndexes(currentColumn);

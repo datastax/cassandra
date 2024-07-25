@@ -38,7 +38,6 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.NumberType;
-import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.StringType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -288,8 +287,7 @@ public abstract class Constants
 
         private ByteBuffer parsedValue(AbstractType<?> validator) throws InvalidRequestException
         {
-            if (validator instanceof ReversedType<?>)
-                validator = ((ReversedType<?>) validator).baseType;
+            validator = validator.unwrap();
             try
             {
                 if (type == Type.HEX)
