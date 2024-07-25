@@ -19,12 +19,14 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -43,7 +45,6 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
@@ -56,6 +57,25 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 {
     public static final int LIMIT = Integer.MAX_VALUE;
 
+    // Use a shared index context to prevent creating too many metrics unnecessarily
+    private final IndexContext indexContext = SAITester.createIndexContext("meh", UTF8Type.instance);
+
+    @ParametersFactory()
+    public static Collection<Object[]> data()
+    {
+        // Required because it configures SEGMENT_BUILD_MEMORY_LIMIT, which is needed for Version.AA
+        if (DatabaseDescriptor.getRawConfig() == null)
+            DatabaseDescriptor.setConfig(DatabaseDescriptor.loadConfig());
+        return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
+    }
+
+    private final Version version;
+
+    public InvertedIndexSearcherTest(Version version)
+    {
+        this.version = version;
+    }
+
     @BeforeClass
     public static void setupCQLTester()
     {
@@ -66,26 +86,26 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     @Test
     public void testEqQueriesAgainstStringIndex() throws Exception
     {
-        doTestEqQueriesAgainstStringIndex();
+        doTestEqQueriesAgainstStringIndex(version);
     }
 
-    private void doTestEqQueriesAgainstStringIndex() throws Exception
+    private void doTestEqQueriesAgainstStringIndex(Version version) throws Exception
     {
         final int numTerms = randomIntBetween(64, 512), numPostings = randomIntBetween(256, 1024);
-        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
             for (int t = 0; t < numTerms; ++t)
             {
-                try (RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
-                        .add(Operator.EQ, wrap(termsEnum.get(t).left)), null, new QueryContext(), false, LIMIT))
+                try (RangeIterator results = searcher.search(new Expression(indexContext)
+                        .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
 
                     for (int p = 0; p < numPostings; ++p)
                     {
-                        final long expectedToken = termsEnum.get(t).right.get(p);
+                        final long expectedToken = termsEnum.get(t).postings.get(p);
                         assertTrue(results.hasNext());
                         final long actualToken = results.next().token().getLongValue();
                         assertEquals(expectedToken, actualToken);
@@ -93,20 +113,20 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     assertFalse(results.hasNext());
                 }
 
-                try (RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
-                        .add(Operator.EQ, wrap(termsEnum.get(t).left)), null, new QueryContext(), false, LIMIT))
+                try (RangeIterator results = searcher.search(new Expression(indexContext)
+                        .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
 
                     // test skipping to the last block
                     final int idxToSkip = numPostings - 7;
                     // tokens are equal to their corresponding row IDs
-                    final long tokenToSkip = termsEnum.get(t).right.get(idxToSkip);
+                    final long tokenToSkip = termsEnum.get(t).postings.get(idxToSkip);
                     results.skipTo(SAITester.TEST_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(tokenToSkip)));
 
                     for (int p = idxToSkip; p < numPostings; ++p)
                     {
-                        final long expectedToken = termsEnum.get(t).right.get(p);
+                        final long expectedToken = termsEnum.get(t).postings.get(p);
                         final long actualToken = results.next().token().getLongValue();
                         assertEquals(expectedToken, actualToken);
                     }
@@ -115,13 +135,13 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
             // try searching for terms that weren't indexed
             final String tooLongTerm = randomSimpleString(10, 12);
-            RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
-                                                                .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false, LIMIT);
+            RangeIterator results = searcher.search(new Expression(indexContext)
+                                                    .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false, LIMIT);
             assertFalse(results.hasNext());
 
             final String tooShortTerm = randomSimpleString(1, 2);
-            results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
-                                                      .add(Operator.EQ, UTF8Type.instance.decompose(tooShortTerm)), null, new QueryContext(), false, LIMIT);
+            results = searcher.search(new Expression(indexContext)
+                                      .add(Operator.EQ, UTF8Type.instance.decompose(tooShortTerm)), null, new QueryContext(), false, LIMIT);
             assertFalse(results.hasNext());
         }
     }
@@ -130,11 +150,11 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     public void testUnsupportedOperator() throws Exception
     {
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
-        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(Version.latest(), numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
-            searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
+            searcher.search(new Expression(indexContext)
                             .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false, LIMIT);
 
             fail("Expect IllegalArgumentException thrown, but didn't");
@@ -145,7 +165,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         }
     }
 
-    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<Pair<ByteComparable, LongArrayList>> termsEnum) throws IOException
+    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<InvertedIndexBuilder.TermsEnum> termsEnum) throws IOException
     {
         final int size = terms * postings;
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
@@ -156,7 +176,8 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
-            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, termsEnum.iterator()));
+            var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).iterator();
+            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter));
         }
 
         final SegmentMetadata segmentMetadata = new SegmentMetadata(0,
@@ -165,8 +186,8 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                                                                     Long.MAX_VALUE,
                                                                     SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
                                                                     SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()),
-                                                                    wrap(termsEnum.get(0).left),
-                                                                    wrap(termsEnum.get(terms - 1).left),
+                                                                    termsEnum.get(0).originalTermBytes,
+                                                                    termsEnum.get(terms - 1).originalTermBytes,
                                                                     indexMetas);
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(components))
@@ -175,17 +196,17 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
             when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
             final IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext,
-                                                                                          SAITester.createIndexContext(index, UTF8Type.instance),
-                                                                                          indexFiles,
-                                                                                          segmentMetadata);
+                                                                                            indexContext,
+                                                                                            indexFiles,
+                                                                                            segmentMetadata);
             assertThat(searcher, is(instanceOf(InvertedIndexSearcher.class)));
             return searcher;
         }
     }
 
-    private List<Pair<ByteComparable, LongArrayList>> buildTermsEnum(int terms, int postings)
+    private List<InvertedIndexBuilder.TermsEnum> buildTermsEnum(Version version, int terms, int postings)
     {
-        return InvertedIndexBuilder.buildStringTermsEnum(terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
+        return InvertedIndexBuilder.buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
     }
 
     private ByteBuffer wrap(ByteComparable bc)

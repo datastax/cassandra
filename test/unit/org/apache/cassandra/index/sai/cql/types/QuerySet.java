@@ -28,6 +28,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport.NUMBER_OF_VALUES;
+import static org.junit.Assert.assertEquals;
 
 public abstract class QuerySet extends CQLTester
 {
@@ -368,6 +369,16 @@ public abstract class QuerySet extends CQLTester
                 Object value2 = map.get(key2);
                 assertRowsIgnoringOrder(tester.execute("SELECT * FROM %s WHERE value[?] = ? AND value[?] = ?",
                         key1, value1, key2, value2), getExpectedRows(key1, value1, key2, value2, allRows));
+
+                // This element is defined to be a key in all the maps
+                var keyInAllMaps = elementDataSet.values[0];
+                var randomElement = elementDataSet.values[getRandom().nextIntBetween(0, allRows.length - 1)];
+                var gt = tester.execute("SELECT * FROM %s WHERE value[?] > ?", keyInAllMaps, randomElement);
+                var lte = tester.execute("SELECT * FROM %s WHERE value[?] <= ?", keyInAllMaps, randomElement);
+                assertEquals(elementDataSet.values.length, lte.size() + gt.size());
+                var lt = tester.execute("SELECT * FROM %s WHERE value[?] < ?", keyInAllMaps, randomElement);
+                var gte = tester.execute("SELECT * FROM %s WHERE value[?] >= ?", keyInAllMaps, randomElement);
+                assertEquals(elementDataSet.values.length, lt.size() + gte.size());
             }
         }
 
