@@ -26,9 +26,9 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
-import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.LongSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -132,9 +132,9 @@ public class LongType extends NumberType<Long>
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
-        return this == otherType || otherType == DateType.instance || otherType == TimestampType.instance;
+        return this == previous || previous == DateType.instance || previous == TimestampType.instance;
     }
 
     public CQL3Type asCQL3Type()

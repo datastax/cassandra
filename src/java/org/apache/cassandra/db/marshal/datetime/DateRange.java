@@ -383,13 +383,13 @@ public class DateRange
             return withUpperBound(Instant.parse(upperBound), precision);
         }
 
-        DateRangeBuilder withLowerBound(Instant lowerBound, DateRangeBound.Precision precision)
+        public DateRangeBuilder withLowerBound(Instant lowerBound, DateRangeBound.Precision precision)
         {
             this.lowerBound = DateRangeBound.lowerBound(lowerBound, precision);
             return this;
         }
 
-        DateRangeBuilder withUpperBound(Instant upperBound, DateRangeBound.Precision precision)
+        public DateRangeBuilder withUpperBound(Instant upperBound, DateRangeBound.Precision precision)
         {
             this.upperBound = DateRangeBound.upperBound(upperBound, precision);
             return this;
