@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.utils.Throwables;
@@ -77,7 +78,11 @@ public interface PostingList extends Closeable
         return new PeekablePostingList(this);
     }
 
-    class PeekablePostingList implements PostingList
+    /**
+     * Note: this class has a natural ordering that is inconsistent with equals in order to
+     * use {@link PriorityQueue}'s O(N) constructor.
+     */
+    class PeekablePostingList implements PostingList, Comparable<PeekablePostingList>
     {
         private final PostingList wrapped;
 
@@ -152,6 +157,12 @@ public interface PostingList extends Closeable
         public void close() throws IOException
         {
             wrapped.close();
+        }
+
+        @Override
+        public int compareTo(PeekablePostingList o)
+        {
+            return Long.compare(peek(), o.peek());
         }
     }
 
