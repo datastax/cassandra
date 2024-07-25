@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -190,20 +190,20 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(startTermInclusive);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(endTermExclusive);
 
-        final AbstractIterator<Pair<ByteComparable, LongArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
+        final AbstractIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private int currentTerm = startTermInclusive;
             private int currentRowId = 0;
 
             @Override
-            protected Pair<ByteComparable, LongArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 if (currentTerm >= endTermExclusive)
                 {
                     return endOfData();
                 }
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
-                final LongArrayList postings = new LongArrayList();
+                final IntArrayList postings = new IntArrayList();
                 postings.add(currentRowId++);
                 final ByteSource encoded = Int32Type.instance.asComparableBytes(term, ByteComparable.Version.OSS50);
                 return Pair.create(v -> encoded, postings);

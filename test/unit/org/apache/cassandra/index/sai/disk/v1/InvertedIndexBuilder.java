@@ -25,7 +25,7 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.Pair;
@@ -51,7 +51,7 @@ public class InvertedIndexBuilder
         final List<TermsEnum> termsEnum = new ArrayList<>();
         for (ByteBuffer term : sortedTerms)
         {
-            final LongArrayList postingsList = new LongArrayList();
+            final IntArrayList postingsList = new IntArrayList();
 
             IntStream.generate(postingsGenerator)
                      .distinct()
@@ -75,16 +75,16 @@ public class InvertedIndexBuilder
         // Store the original term to ensure that searching by it is successful
         final ByteBuffer originalTermBytes;
         final ByteComparable byteComparableBytes;
-        final LongArrayList postings;
+        final IntArrayList postings;
 
-        TermsEnum(ByteBuffer originalTermBytes, ByteComparable byteComparableBytes, LongArrayList postings)
+        TermsEnum(ByteBuffer originalTermBytes, ByteComparable byteComparableBytes, IntArrayList postings)
         {
             this.originalTermBytes = originalTermBytes;
             this.byteComparableBytes = byteComparableBytes;
             this.postings = postings;
         }
 
-        public Pair<ByteComparable, LongArrayList> toPair()
+        public Pair<ByteComparable, IntArrayList> toPair()
         {
             return Pair.create(byteComparableBytes, postings);
         }
