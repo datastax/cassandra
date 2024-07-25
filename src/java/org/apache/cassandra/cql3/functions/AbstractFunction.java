@@ -25,7 +25,6 @@ import org.apache.commons.lang3.text.StrBuilder;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQL3Type.Tuple;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -67,7 +66,7 @@ public abstract class AbstractFunction implements Function
     {
         return argTypes().stream()
                          .map(AbstractType::asCQL3Type)
-                         .map(CQL3Type::toString)
+                         .map(CQL3Type::toSchemaString)
                          .collect(toList());
     }
 
@@ -104,7 +103,7 @@ public abstract class AbstractFunction implements Function
         // We should ignore the fact that the receiver type is frozen in our comparison as functions do not support
         // frozen types for return type
         AbstractType<?> returnType = returnType();
-        if (receiver.type.isFreezable() && !receiver.type.isMultiCell())
+        if (!receiver.type.isMultiCell())
             returnType = returnType.freeze();
 
         if (receiver.type.equals(returnType))
@@ -158,8 +157,7 @@ public abstract class AbstractFunction implements Function
      */
     protected String toCqlString(AbstractType<?> type)
     {
-        return type.isTuple() ? ((Tuple) type.asCQL3Type()).toString(false)
-                              : type.asCQL3Type().toString();
+        return type.asCQL3Type().toString();
     }
 
     @Override

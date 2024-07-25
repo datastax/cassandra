@@ -75,9 +75,9 @@ public class SimpleDateType extends TemporalType<Integer>
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
-        return this == otherType || otherType == Int32Type.instance;
+        return this == previous || previous == Int32Type.instance;
     }
 
     public Term fromJSONObject(Object parsed) throws MarshalException

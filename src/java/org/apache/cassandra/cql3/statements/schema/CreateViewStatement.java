@@ -379,7 +379,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
             boolean reverse = !clusteringOrder.get(column.name);
 
             if (type.isReversed() && !reverse)
-                return ((ReversedType<?>) type).baseType;
+                return type.unwrap();
 
             if (!type.isReversed() && reverse)
                 return ReversedType.getInstance(type);

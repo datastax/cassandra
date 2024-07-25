@@ -76,7 +76,7 @@ public class BigSSTableReaderLoadingBuilder extends SortedTableReaderLoadingBuil
                 builder.setKeyCache(new KeyCache(CacheService.instance.keyCache));
 
             StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.STATS, MetadataType.HEADER, MetadataType.VALIDATION);
-            builder.setSerializationHeader(statsComponent.serializationHeader(builder.getTableMetadataRef().getLocal()));
+            builder.setSerializationHeader(statsComponent.serializationHeader(descriptor, builder.getTableMetadataRef().getLocal()));
             checkArgument(!online || builder.getSerializationHeader() != null);
 
             builder.setStatsMetadata(statsComponent.statsMetadata());
@@ -181,7 +181,7 @@ public class BigSSTableReaderLoadingBuilder extends SortedTableReaderLoadingBuil
     public KeyReader buildKeyReader(TableMetrics tableMetrics) throws IOException
     {
         StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.STATS, MetadataType.HEADER, MetadataType.VALIDATION);
-        SerializationHeader header = statsComponent.serializationHeader(tableMetadataRef.getLocal());
+        SerializationHeader header = statsComponent.serializationHeader(descriptor, tableMetadataRef.getLocal());
         try (FileHandle indexFile = indexFileBuilder(null).complete())
         {
             return createKeyReader(indexFile, header, tableMetrics);

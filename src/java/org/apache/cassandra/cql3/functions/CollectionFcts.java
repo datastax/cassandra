@@ -122,7 +122,7 @@ public class CollectionFcts
      */
     private static <K, V> NativeScalarFunction makeMapKeysFunction(String name, MapType<K, V> inputType)
     {
-        SetType<K> outputType = SetType.getInstance(inputType.getKeysType(), false);
+        SetType<K> outputType = SetType.getInstance((AbstractType<K>) inputType.getKeysType().freeze(), false);
 
         return new NativeScalarFunction(name, outputType, inputType)
         {
@@ -150,7 +150,7 @@ public class CollectionFcts
      */
     private static <K, V> NativeScalarFunction makeMapValuesFunction(String name, MapType<K, V> inputType)
     {
-        ListType<V> outputType = ListType.getInstance(inputType.getValuesType(), false);
+        ListType<V> outputType = ListType.getInstance((AbstractType<V>) inputType.getValuesType().freeze(), false);
 
         return new NativeScalarFunction(name, outputType, inputType)
         {

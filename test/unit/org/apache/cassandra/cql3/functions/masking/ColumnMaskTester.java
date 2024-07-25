@@ -134,7 +134,7 @@ public class ColumnMaskTester extends CQLTester
         UntypedResultSet columnRows = execute("SELECT * FROM system_schema.columns " +
                                               "WHERE keyspace_name = ? AND table_name = ? AND column_name = ?",
                                               KEYSPACE, table, column);
-        ColumnMetadata persistedColumn = SchemaKeyspace.createColumnFromRow(columnRows.one(), keyspaceMetadata.types, UserFunctions.none());
+        ColumnMetadata persistedColumn = SchemaKeyspace.createColumnFromRow(columnRows.one(), keyspaceMetadata.types, UserFunctions.none(), tableMetadata.isCounter());
 
         // Verify the column mask in the persisted schema
         ColumnMask savedMask = persistedColumn.getMask();
