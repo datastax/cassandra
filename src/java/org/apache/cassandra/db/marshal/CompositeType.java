@@ -217,6 +217,11 @@ public class CompositeType extends AbstractCompositeType
     @Override
     public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, Version version)
     {
+        return asComparableBytes(accessor, data, version, ByteSource.TERMINATOR);
+    }
+
+    public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, Version version, int terminator)
+    {
         if (data == null || accessor.isEmpty(data))
             return null;
 
@@ -251,7 +256,10 @@ public class CompositeType extends AbstractCompositeType
         if (i * 2 + 1 < srcs.length)
             srcs = Arrays.copyOfRange(srcs, 0, i * 2 + 1);
 
-        return ByteSource.withTerminatorMaybeLegacy(version, ByteSource.END_OF_STREAM, srcs);
+        if (version == Version.LEGACY)
+            return ByteSource.withTerminatorLegacy(ByteSource.END_OF_STREAM, srcs);
+        else
+            return ByteSource.withTerminator(terminator, srcs);
     }
 
     @Override
