@@ -121,10 +121,10 @@ public class BKDReaderTest extends SaiRandomizedTest
         // Start by testing that the iteratorState returns rowIds in order
         BKDReader reader1 = createReader(10);
         BKDReader.IteratorState it1 = reader1.iteratorState();
-        Long expectedRowId = 0L;
+        int expectedRowId = 0;
         while (it1.hasNext())
         {
-            assertEquals(expectedRowId++, it1.next());
+            assertEquals(expectedRowId++, (int) it1.next());
         }
         it1.close();
 
