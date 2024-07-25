@@ -132,6 +132,6 @@ if [ ! -f $CASSANDRA_HOME/build/test/benchmarks.jar ] ; then
     exit 1
 fi
 
-exec $NUMACTL "$JAVA" -cp "$CLASSPATH:$CASSANDRA_HOME/build/test/benchmarks.jar:$CASSANDRA_HOME/build/test/deps.jar" org.openjdk.jmh.Main -prof stack -jvmArgs="$cassandra_parms" $@
+exec $NUMACTL "$JAVA" -cp "$CLASSPATH:$CASSANDRA_HOME/build/test/benchmarks.jar:$CASSANDRA_HOME/build/test/deps.jar" org.openjdk.jmh.Main -jvmArgs="$cassandra_parms" $@
 
 # vi:ai sw=4 ts=4 tw=0 et

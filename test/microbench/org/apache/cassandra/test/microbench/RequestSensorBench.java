@@ -116,8 +116,15 @@ public class RequestSensorBench
         {
             Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
             requestSensors.getSensor(f.context, f.type).get().increment(1);
+
         }
         requestSensors.syncAllSensors();
+
+        for (int i = 0; i < SENSORS_PER_THREAD; i++)
+        {
+            if (SensorsRegistry.instance.getSensor(fixtures[benchState.idx][i].context, fixtures[benchState.idx][i].type).get().getValue() < 1)
+                System.exit(1);
+        }
     }
 
     @Benchmark
@@ -136,6 +143,12 @@ public class RequestSensorBench
             requestSensors.getSensor(f.context, f.type).get().increment(1);
         }
         requestSensors.syncAllSensorsNew();
+
+        for (int i = 0; i < SENSORS_PER_THREAD; i++)
+        {
+            if (SensorsRegistry.instance.getSensor(fixtures[benchState.idx][i].context, fixtures[benchState.idx][i].type).get().getValue() < 1)
+                System.exit(1);
+        }
     }
 
     // Note: replacing existing lock with striped lock (1000 stripes) increases throughput by 3X
@@ -156,7 +169,8 @@ public class RequestSensorBench
         }
     }
 
-    public static void main(String... args) throws Exception {
+    public static void main(String... args) throws Exception
+    {
         Options options = new OptionsBuilder().include(RequestSensorBench.class.getSimpleName()).build();
         new Runner(options).run();
     }

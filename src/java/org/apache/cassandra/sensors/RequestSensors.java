@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -48,7 +50,7 @@ public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
     private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Sensor, Double> latestSyncedValuePerSensor = new ConcurrentHashMap<>();
+    private final Map<Sensor, Double> latestSyncedValuePerSensor = new HashMap<>();
     private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
 
     public RequestSensors()
