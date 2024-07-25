@@ -164,17 +164,24 @@ public class SensorsRegistry implements SchemaChangeListener
 
             // Create a candidate sensor and try inserting in the identity map: this is to make sure concurrent calls will
             // use the same sensor below
-            Sensor sensor = identity.computeIfAbsent(Pair.create(context, type), (ignored) -> {
+            Pair<Context, Type> contextAndType = Pair.create(context, type);
+            Sensor sensor = identity.get(contextAndType);
+            sensor = sensor != null ? sensor : identity.computeIfAbsent(contextAndType, (ignored) -> {
                 Sensor created = new Sensor(context, type);
                 notifyOnSensorCreated(created);
                 return created;
             });
 
-            Set<Sensor> keyspaceSet = byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
+            Set<Sensor> keyspaceSet = byKeyspace.get(sensor.getContext().getKeyspace());
+            keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
             keyspaceSet.add(sensor);
-            Set<Sensor> tableSet = byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
+
+            Set<Sensor> tableSet = byTableId.get(sensor.getContext().getTableId());
+            tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
             tableSet.add(sensor);
-            Set<Sensor> opSet = byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
+
+            Set<Sensor> opSet = byType.get(sensor.getType().name());
+            opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
             opSet.add(sensor);
 
             return Optional.of(sensor);

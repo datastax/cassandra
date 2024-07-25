@@ -42,11 +42,14 @@ public class Sensor
     private final Type type;
     private final AtomicDouble value;
 
+    private final int hashCode;
+
     protected Sensor(Context context, Type type)
     {
         this.context = context;
         this.type = type;
         this.value = new AtomicDouble();
+        this.hashCode = Objects.hash(context, type);
     }
 
     @VisibleForTesting
@@ -94,7 +97,7 @@ public class Sensor
     @Override
     public int hashCode()
     {
-        return Objects.hash(context, type);
+        return hashCode;
     }
 
     @Override

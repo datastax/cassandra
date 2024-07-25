@@ -33,7 +33,6 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -53,10 +52,11 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 public class RequestSensorBench
 {
     private static final int NUM_SENSORS = 1000;
-    private static final int THREADS = 50;
-    private static final int NUM_FIXTURES = 20000;
+    private static final int THREADS = 100;
+    private static final int SENSORS_PER_THREAD = 100;
+    private static final int UPDATES_PER_THREAD = 1000;
     private static final ConcurrentMap<Integer, Context> contextFixtures = new ConcurrentHashMap();
-    private static final Fixture[] fixtures = new Fixture[NUM_FIXTURES];
+    private static final Fixture[][] fixtures = new Fixture[THREADS][SENSORS_PER_THREAD];
     private static final RequestSensors[] requestSensorsPool = new RequestSensors[THREADS];
     private static final Random randomGen = new Random(1234567890);
     private static final AtomicInteger threadIdx = new AtomicInteger();
@@ -68,16 +68,13 @@ public class RequestSensorBench
     {
         Context context;
         Type type;
-        double delta;
 
-        Fixture(Context context, Type type, double delta)
+        Fixture(Context context, Type type)
         {
             this.context = context;
-            this.delta = delta;
             this.type = type;
         }
     }
-
 
     @Setup
     public void generateFixtures()
@@ -90,14 +87,18 @@ public class RequestSensorBench
             SensorsRegistry.instance.onCreateTable(TableMetadata.builder(context.getKeyspace(), context.getTable()).id(TableId.fromString(context.getTableId())).build());
             contextFixtures.put(i, context);
         }
-        IntStream.range(0, THREADS).forEach( n -> requestSensorsPool[n]=new RequestSensors());
-        IntStream.range(0, NUM_FIXTURES).forEach(n -> fixtures[n] = new Fixture((contextFixtures.get(zipfDistributionContext.sample())), Type.values()[randomGen.nextInt(Type.values().length)], Math.random()));
+
+        IntStream.range(0, THREADS).forEach(t -> {
+            requestSensorsPool[t] = new RequestSensors();
+            IntStream.range(0, SENSORS_PER_THREAD).forEach(s -> fixtures[t][s] = new Fixture((contextFixtures.get(zipfDistributionContext.sample())), Type.values()[randomGen.nextInt(Type.values().length)]));
+        });
     }
 
     @State(Scope.Thread)
     public static class BenchState
     {
-        RequestSensors requestSensors = requestSensorsPool[threadIdx.getAndIncrement()];
+        int idx = threadIdx.getAndIncrement();
+        RequestSensors requestSensors = requestSensorsPool[idx];
     }
 
     // A lots of CPU cycles spent in `syncAllSensors` with `latestSyncedValuePerSensor` map
@@ -106,45 +107,52 @@ public class RequestSensorBench
     public void syncAllSensors(BenchState benchState)
     {
         RequestSensors requestSensors = benchState.requestSensors; // each thread has it's own RequestSensors
-        for(int i = 0; i < NUM_FIXTURES; i++)
+        for(int i = 0; i < SENSORS_PER_THREAD; i++)
         {
-            Fixture f = fixtures[i];
+            Fixture f = fixtures[benchState.idx][i];
             requestSensors.registerSensor(f.context, f.type); // invoking every time simulates worst-case
-            requestSensors.incrementSensor(f.context, f.type, f.delta);
-            if (i % 5 == 0)
-                // arbitrary picked to sync after every 5 increments
-                requestSensors.syncAllSensors();
         }
+        for (int i = 0; i < UPDATES_PER_THREAD; i++)
+        {
+            Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
+            requestSensors.getSensor(f.context, f.type).get().increment(1);
+        }
+        requestSensors.syncAllSensors();
     }
 
-    // Due to using `syncAllSensorsNew` throughput increased between 8X-10X (depends on how often sync is called)
     @Benchmark
     @Threads(THREADS)
     public void syncAllSensorsNew(BenchState benchState)
     {
-        RequestSensors requestSensors = benchState.requestSensors; // each thread has its own RequestSensors
-        for(int i = 0; i < NUM_FIXTURES; i++)
+        RequestSensors requestSensors = benchState.requestSensors; // each thread has it's own RequestSensors
+        for(int i = 0; i < SENSORS_PER_THREAD; i++)
         {
-            Fixture f = fixtures[i];
-            requestSensors.registerSensor(f.context, f.type);
-            requestSensors.incrementSensor(f.context, f.type, f.delta);
-            if (i % 5 == 0)
-                // arbitrary picked to sync after every 5 increments
-                requestSensors.syncAllSensorsNew();
+            Fixture f = fixtures[benchState.idx][i];
+            requestSensors.registerSensor(f.context, f.type); // invoking every time simulates worst-case
         }
+        for (int i = 0; i < UPDATES_PER_THREAD; i++)
+        {
+            Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
+            requestSensors.getSensor(f.context, f.type).get().increment(1);
+        }
+        requestSensors.syncAllSensorsNew();
     }
 
     // Note: replacing existing lock with striped lock (1000 stripes) increases throughput by 3X
     // To benchmark striped version set SensorRegistry.USE_STRIPED_LOCK in benchmark setup function
     @Benchmark
     @Threads(THREADS)
-    public void benchUsingSensorRegistryDirectly()
+    public void benchUsingSensorRegistryDirectly(BenchState benchState)
     {
-        for(int i = 0; i < NUM_FIXTURES; i++)
+        for (int i = 0; i < SENSORS_PER_THREAD; i++)
         {
-            Fixture f = fixtures[i];
-            Sensor sensor = SensorsRegistry.instance.getOrCreateSensor(f.context, f.type).orElseThrow();
-            sensor.increment(f.delta);
+            Fixture f = fixtures[benchState.idx][i];
+            SensorsRegistry.instance.getOrCreateSensor(f.context, f.type).orElseThrow();
+        }
+        for (int i = 0; i < UPDATES_PER_THREAD; i++)
+        {
+            Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
+            SensorsRegistry.instance.getSensor(f.context, f.type).get().increment(1);
         }
     }
 
