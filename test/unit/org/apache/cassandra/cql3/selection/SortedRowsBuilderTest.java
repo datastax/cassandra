@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
 import org.junit.Test;
@@ -53,9 +55,21 @@ public class SortedRowsBuilderTest
     {
         List<List<ByteBuffer>> rows = toRows(values);
 
-        for (int limit = 1; limit <= values.length + 1; limit++)
+        List<Integer> limits = IntStream.range(1, values.length + 1).boxed().collect(Collectors.toList());
+        limits.add(Integer.MAX_VALUE);
+        limits.add(Integer.MAX_VALUE - 1);
+        limits.add(Integer.MAX_VALUE / 2);
+        limits.add(Integer.MAX_VALUE / 4);
+
+        List<Integer> offsets = IntStream.range(0, values.length).boxed().collect(Collectors.toList());
+        offsets.add(Integer.MAX_VALUE);
+        offsets.add(Integer.MAX_VALUE - 1);
+        offsets.add(Integer.MAX_VALUE / 2);
+        offsets.add(Integer.MAX_VALUE / 4);
+
+        for (int limit : limits)
         {
-            for (int offset = 0; offset <= values.length + 1; offset++)
+            for (int offset : offsets)
             {
                 // with insertion order
                 test(rows, SortedRowsBuilder.create(limit, offset), null);
@@ -87,15 +101,15 @@ public class SortedRowsBuilderTest
                              SortedRowsBuilder builder,
                              @Nullable Comparator<List<ByteBuffer>> comparator)
     {
-        int limit = builder.limit;
         int offset = builder.offset;
+        int fetchLimit = builder.fetchLimit;
 
         // get the expected values...
         List<List<ByteBuffer>> expecetedRows = new ArrayList<>(rows);
         if (comparator != null)
             expecetedRows.sort(comparator);
         expecetedRows = expecetedRows.subList(Math.min(offset, expecetedRows.size()),
-                                              Math.min(offset + limit, expecetedRows.size()));
+                                              Math.min(fetchLimit, expecetedRows.size()));
         List<Integer> expectedValues = fromRows(expecetedRows);
 
         // get the actual values...
