@@ -24,13 +24,11 @@
 
 package org.apache.cassandra.index.sai.view;
 
-import java.nio.ByteBuffer;
 import java.util.Set;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 
 public interface TermTree
 {
@@ -39,7 +37,6 @@ public interface TermTree
     abstract class Builder
     {
         protected final AbstractType<?> comparator;
-        protected ByteBuffer min, max;
 
         protected Builder(AbstractType<?> comparator)
         {
@@ -49,11 +46,6 @@ public interface TermTree
         public final void add(SSTableIndex index)
         {
             addIndex(index);
-
-            if (index.minTerm() != null)
-                min = min == null || TypeUtil.compare(min, index.minTerm(), comparator) > 0 ? index.minTerm() : min;
-            if (index.maxTerm() != null)
-                max = max == null || TypeUtil.compare(max, index.maxTerm(), comparator) < 0 ? index.maxTerm() : max;
         }
 
         protected abstract void addIndex(SSTableIndex index);
