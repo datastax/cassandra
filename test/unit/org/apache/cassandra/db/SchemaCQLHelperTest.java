@@ -27,15 +27,11 @@ import org.junit.Before;
 import org.junit.Test;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.apache.cassandra.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
-import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
-import org.apache.cassandra.schema.*;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -47,6 +43,27 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.FieldIdentifier;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Indexes;
+import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.Tables;
+import org.apache.cassandra.schema.Types;
+import org.assertj.core.api.Assertions;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
@@ -623,6 +640,57 @@ public class SchemaCQLHelperTest extends CQLTester
 
         Assert.assertTrue(cfs.getDirectories().getSnapshotManifestFile(SNAPSHOT).exists());
         Assert.assertFalse(cfs.getDirectories().getSnapshotSchemaFile(SNAPSHOT).exists());
+    }
+
+    @Test
+    public void testDroppedType()
+    {
+        String typeA = createType("CREATE TYPE %s (a1 varint, a2 varint, a3 varint);");
+        String typeB = createType("CREATE TYPE %s (b1 frozen<" + typeA + ">, b2 frozen<" + typeA + ">, b3 frozen<" + typeA + ">);");
+
+        String tableName = createTable("CREATE TABLE IF NOT EXISTS %s (" +
+                                       "pk1 varint," +
+                                       "ck1 varint," +
+                                       "reg1 " + typeB + ',' +
+                                       "reg2 varint," +
+                                       "PRIMARY KEY (pk1, ck1));");
+
+        alterTable("ALTER TABLE %s DROP reg1 USING TIMESTAMP 10000;");
+
+        Runnable validate = () -> {
+            try
+            {
+                ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(tableName);
+                cfs.snapshot(SNAPSHOT);
+                String schema = Files.asCharSource(cfs.getDirectories().getSnapshotSchemaFile(SNAPSHOT).toJavaIOFile(),
+                                                   Charset.defaultCharset()).read();
+
+                Assertions.assertThat(schema)
+                          .startsWith("CREATE TABLE IF NOT EXISTS " + keyspace() + '.' + tableName + " (\n" +
+                                      "    pk1 varint,\n" +
+                                      "    ck1 varint,\n" +
+                                      "    reg2 varint,\n" +
+                                      "    PRIMARY KEY (pk1, ck1)\n)");
+
+                // Note that the dropped record will have converted the initial UDT to a tuple. Further, that tuple
+                // will be genuinely non-frozen (the parsing code will interpret it as non-frozen).
+                Assertions.assertThat(schema)
+                          .contains("DROPPED COLUMN RECORD reg1 tuple<" +
+                                    "frozen<tuple<varint, varint, varint>>, " +
+                                    "frozen<tuple<varint, varint, varint>>, " +
+                                    "frozen<tuple<varint, varint, varint>>>");
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
+        };
+
+        // Validate before and after the type drop
+        validate.run();
+        schemaChange("DROP TYPE " + keyspace() + '.' + typeB);
+        schemaChange("DROP TYPE " + keyspace() + '.' + typeA);
+        validate.run();
     }
 
     @Test
