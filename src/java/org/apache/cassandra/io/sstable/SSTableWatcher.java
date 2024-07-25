@@ -72,8 +72,16 @@ public interface SSTableWatcher
     default void appendTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Component.TOC);
+        writeTOC(tocFile, components, APPEND);
+    }
+
+    /**
+     * Write TOC file with given components and write mode
+     */
+    default void writeTOC(File tocFile, Collection<Component> components, File.WriteMode writeMode)
+    {
         FileOutputStreamPlus fos = null;
-        try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(APPEND))))
+        try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(writeMode))))
         {
             for (Component component : components)
                 w.println(component.name);
