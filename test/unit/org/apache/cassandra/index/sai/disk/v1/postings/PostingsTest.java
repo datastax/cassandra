@@ -161,7 +161,7 @@ public class PostingsTest extends SaiRandomizedTest
             input = postingLists.openInput();
             try (PostingsReader reader = new PostingsReader(input, postingPointers[i], listener))
             {
-                long tokenToAdvance = -1;
+                int tokenToAdvance = -1;
                 expectedPostingList.reset();
                 for (int p = 0; p < numPostings - 7; ++p)
                 {
