@@ -124,7 +124,7 @@ public class ResultMessageTest
         TupleType tt = new TupleType(asList(Int32Type.instance, udt));
         allTypes.add(tt);
         allTypes.add(Int32Type.instance);
-        ReversedType rt = ReversedType.getInstance(udt);
+        AbstractType<?> rt = ReversedType.getInstance(udt);
         allTypes.add(rt);
 
         ColumnSpecification cs1 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("a", true), Int32Type.instance);
@@ -198,8 +198,7 @@ public class ResultMessageTest
         }
         else if (type.isReversed())
         {
-            ReversedType<?> rt = (ReversedType<?>) type;
-            checkType(rt.baseType, keyspaceName);
+            checkType(type.unwrap(), keyspaceName);
         }
         else if (type.isCollection())
         {

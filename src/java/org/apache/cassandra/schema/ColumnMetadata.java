@@ -41,6 +41,7 @@ import org.apache.cassandra.cql3.selection.Selector;
 import org.apache.cassandra.cql3.selection.SimpleSelector;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.rows.Cell;
@@ -253,11 +254,10 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     {
         if (kind.isPrimaryKeyKind() || !type.isMultiCell())
             return null;
+        assert !type.isReversed() : "This should not happen because reversed types can be only constructed for " +
+                                    "clustering columns which are part of primary keys and should be excluded by the above condition";
 
-        AbstractType<?> nameComparator = type.isCollection()
-                                       ? ((CollectionType) type).nameComparator()
-                                       : ((UserType) type).nameComparator();
-
+        AbstractType<?> nameComparator = ((MultiCellCapableType<?>) type).nameComparator();
 
         return (path1, path2) ->
         {
@@ -625,5 +625,15 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     public AbstractType<?> getExactTypeIfKnown(String keyspace)
     {
         return type;
+    }
+
+    /**
+     * Validate whether the column definition is valid (mostly, that the type is valid for the type of column this is).
+     *
+     * @param isCounterTable whether the table the column is part of is a counter table.
+     */
+    public void validate(boolean isCounterTable)
+    {
+        type.validateForColumn(name.bytes, isPrimaryKeyColumn(), isCounterTable, isDropped, false);
     }
 }

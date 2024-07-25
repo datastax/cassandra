@@ -311,10 +311,10 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (column.isPartitionKey() && table.partitionKeyColumns().size() == 1)
             throw ire(ONLY_PARTITION_KEY, column);
 
-        if (baseType.isFrozenCollection() && target.type != Type.FULL)
+        if (baseType.isCollection() && !baseType.isMultiCell() && target.type != Type.FULL)
             throw ire(CREATE_ON_FROZEN_COLUMN, target.type, column, column.name.toCQLString());
 
-        if (!baseType.isFrozenCollection() && target.type == Type.FULL)
+        if ((!baseType.isCollection() || baseType.isMultiCell) && target.type == Type.FULL)
             throw ire(FULL_ON_FROZEN_COLLECTIONS);
 
         if (!baseType.isCollection() && target.type != Type.SIMPLE)
