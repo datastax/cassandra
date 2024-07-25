@@ -386,7 +386,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         protected void doPrepare()
         {
             transactionals.get().forEach(Transactional::prepareToCommit);
-            new StatsComponent(finalizeMetadata()).save(descriptor);
+            new StatsComponent(descriptor, finalizeMetadata()).save(descriptor);
 
             // save the table of components
             TOCComponent.updateTOC(descriptor, components);
