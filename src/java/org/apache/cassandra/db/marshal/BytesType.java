@@ -23,9 +23,9 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
-import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.BytesSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Hex;
@@ -82,13 +82,14 @@ public class BytesType extends AbstractType<ByteBuffer>
     @Override
     public boolean isCompatibleWith(AbstractType<?> previous)
     {
+        // TODO BytesType is actually compatible with all types which use BYTE_ORDER comparison type
         // Both asciiType and utf8Type really use bytes comparison and
         // bytesType validate everything, so it is compatible with the former.
         return this == previous || previous == AsciiType.instance || previous == UTF8Type.instance;
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
         // BytesType can read anything
         return true;
