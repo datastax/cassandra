@@ -201,7 +201,7 @@ public abstract class SegmentBuilder
 
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
-            var encodedTerm = version.onDiskFormat().encodeForOnDiskTrie(term, termComparator);
+            var encodedTerm = version.onDiskFormat().encodeForTrie(term, termComparator);
             // Use the source term to estimate the length of the array we'll need. This is unlikely to be exact, but
             // it will hopefully prevent intermediate array creation as ByteSourceInverse consumes the ByteSource.
             // This 5% addition was added as a guess, and could possibly be improved.

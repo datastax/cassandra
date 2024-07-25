@@ -336,51 +336,47 @@ public class Expression
     }
 
     /**
-     * Returns the lower bound of the expression as a ByteComparable with an encoding based on the version, the
-     * validator, and whether the expression is in memory or on disk.
+     * Returns the lower bound of the expression as a ByteComparable with an encoding based on the version and the
+     * validator.
      * @param version the version of the index
-     * @param inMemory whether the expression is in memory or on disk
      * @return
      */
-    public ByteComparable getEncodedLowerBoundByteComparable(Version version, boolean inMemory)
+    public ByteComparable getEncodedLowerBoundByteComparable(Version version)
     {
         // Note: this value was encoded using the TypeUtil.encode method, but it wasn't
         var bound = getPartiallyEncodedLowerBound(version);
         if (bound == null)
             return null;
         var terminator = lower.inclusive ? ByteSource.TERMINATOR : ByteSource.GT_NEXT_COMPONENT;
-        return getBoundByteComparable(bound, version, inMemory, terminator);
+        return getBoundByteComparable(bound, version, terminator);
     }
 
     /**
-     * Returns the upper bound of the expression as a ByteComparable with an encoding based on the version, the
-     * validator, and whether the expression is in memory or on disk.
+     * Returns the upper bound of the expression as a ByteComparable with an encoding based on the version and the
+     * validator.
      * @param version the version of the index
-     * @param inMemory whether the expression is in memory or on disk
      * @return
      */
-    public ByteComparable getEncodedUpperBoundByteComparable(Version version, boolean inMemory)
+    public ByteComparable getEncodedUpperBoundByteComparable(Version version)
     {
         var bound = getPartiallyEncodedUpperBound(version);
         if (bound == null)
             return null;
         var terminator = upper.inclusive ? ByteSource.TERMINATOR : ByteSource.LT_NEXT_COMPONENT;
-        return getBoundByteComparable(bound, version, inMemory, terminator);
+        return getBoundByteComparable(bound, version, terminator);
     }
 
     // This call encodes the byte buffer into a ByteComparable object based on the version of the index, the validator,
     // and whether the expression is in memory or on disk.
-    private ByteComparable getBoundByteComparable(ByteBuffer unencodedBound, Version version, boolean inMemory, int terminator)
+    private ByteComparable getBoundByteComparable(ByteBuffer unencodedBound, Version version, int terminator)
     {
         if (TypeUtil.isComposite(validator) && version.onOrAfter(Version.DB))
             // Note that for ranges that have one unrestricted bound, we technically do not need the terminator
             // because we use the 0 or the 1 at the end of the first component as the bound. However, it works
             // with the terminator, so we use it for simplicity.
             return TypeUtil.asComparableBytes(unencodedBound, terminator, (CompositeType) validator);
-        else if (inMemory)
-            return version.onDiskFormat().encodeForInMemoryTrie(unencodedBound, validator);
         else
-            return version.onDiskFormat().encodeForOnDiskTrie(unencodedBound, validator);
+            return version.onDiskFormat().encodeForTrie(unencodedBound, validator);
     }
 
     /**

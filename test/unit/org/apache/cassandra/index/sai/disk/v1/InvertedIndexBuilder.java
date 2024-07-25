@@ -61,7 +61,7 @@ public class InvertedIndexBuilder
 
             // This logic feels a bit fragile, but it mimics the way we call unescape in the TrieMemoryIndex
             // before writing to the on disk format.
-            var encoded = version.onDiskFormat().encodeForOnDiskTrie(term, UTF8Type.instance);
+            var encoded = version.onDiskFormat().encodeForTrie(term, UTF8Type.instance);
             termsEnum.add(new TermsEnum(term, encoded, postingsList));
         }
         return termsEnum;

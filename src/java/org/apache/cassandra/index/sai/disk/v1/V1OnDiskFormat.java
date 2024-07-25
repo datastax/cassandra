@@ -292,25 +292,8 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public ByteComparable encodeForInMemoryTrie(ByteBuffer input, AbstractType<?> type)
+    public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type)
     {
-        // All elements
-        return TypeUtil.isLiteral(type) ? version -> ByteSource.appendTerminator(ByteSource.of(input, version), ByteSource.TERMINATOR)
-                                        : TypeUtil.asComparableBytes(input, type);
-    }
-
-    @Override
-    public ByteComparable convertFromInMemoryToOnDiskEncoding(ByteComparable term, AbstractType<?> type)
-    {
-        return TypeUtil.isLiteral(type) ? v -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(v)))
-                                        : term;
-    }
-
-    @Override
-    public ByteComparable encodeForOnDiskTrie(ByteBuffer input, AbstractType<?> type)
-    {
-        // Note that fixedLength is the same as unescape(escape(input, type), type), but we skip some steps, so this
-        // is a bit faster.
         return TypeUtil.isLiteral(type) ? ByteComparable.fixedLength(input)
                                         : TypeUtil.asComparableBytes(input, type);
     }

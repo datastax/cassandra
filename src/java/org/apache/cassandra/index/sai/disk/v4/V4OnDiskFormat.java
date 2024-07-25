@@ -49,32 +49,12 @@ public class V4OnDiskFormat extends V3OnDiskFormat
     }
 
     @Override
-    public ByteComparable encodeForInMemoryTrie(ByteBuffer input, AbstractType<?> type)
+    public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type)
     {
         // Composite types use their individual type to ensure they sorted correctly in the trie so we can do
         // range queries over entries.
         return TypeUtil.isLiteral(type) && !TypeUtil.isComposite(type)
-               ? version -> ByteSource.appendTerminator(ByteSource.of(input, version), ByteSource.TERMINATOR)
+               ? ByteComparable.fixedLength(input)
                : TypeUtil.asComparableBytes(input, type);
-    }
-
-    @Override
-    public ByteComparable convertFromInMemoryToOnDiskEncoding(ByteComparable term, AbstractType<?> type)
-    {
-        // Composite types are not escaped, so we don't need to unescape them. The ByteSource.of call above
-        // is what requires unescaping. Note unescape removes the terminator for affected types.
-        return TypeUtil.isLiteral(type) && !TypeUtil.isComposite(type)
-               ? v -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(v)))
-               : term;
-    }
-
-    @Override
-    public ByteComparable encodeForOnDiskTrie(ByteBuffer term, AbstractType<?> type)
-    {
-        // Note that fixedLength is the same as unescape(escape(input, type), type), but we skip some steps, so this
-        // is a bit faster.
-        return TypeUtil.isLiteral(type) && !TypeUtil.isComposite(type)
-               ? ByteComparable.fixedLength(term)
-               : TypeUtil.asComparableBytes(term, type);
     }
 }

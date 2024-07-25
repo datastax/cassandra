@@ -106,15 +106,15 @@ public class InvertedIndexSearcher extends IndexSearcher
         // We use the version to encode the search boundaries for the trie to ensure we use version appropriate bounds.
         if (exp.getOp().isEquality() || exp.getOp() == Expression.Op.MATCH)
         {
-            final ByteComparable term = version.onDiskFormat().encodeForOnDiskTrie(exp.lower.value.encoded, indexContext.getValidator());
+            final ByteComparable term = version.onDiskFormat().encodeForTrie(exp.lower.value.encoded, indexContext.getValidator());
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             return reader.exactMatch(term, listener, context);
         }
         else if (exp.getOp() == Expression.Op.RANGE)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-            var lower = exp.getEncodedLowerBoundByteComparable(version, false);
-            var upper = exp.getEncodedUpperBoundByteComparable(version, false);
+            var lower = exp.getEncodedLowerBoundByteComparable(version);
+            var upper = exp.getEncodedUpperBoundByteComparable(version);
             return reader.rangeMatch(filterRangeResults ? exp : null, lower, upper, listener, context);
         }
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));

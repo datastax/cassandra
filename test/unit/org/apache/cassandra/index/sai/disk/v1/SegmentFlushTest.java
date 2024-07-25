@@ -40,7 +40,6 @@ import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
@@ -63,7 +62,6 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 import static org.apache.cassandra.Util.dk;
 import static org.junit.Assert.assertEquals;
@@ -178,8 +176,8 @@ public class SegmentFlushTest
         minKey = SAITester.TEST_FACTORY.createTokenOnly(key1.getToken());
         DecoratedKey maxDecoratedKey = segments == 1 ? key2 : key1;
         maxKey = SAITester.TEST_FACTORY.createTokenOnly(maxDecoratedKey.getToken());
-        minTerm = encodeUnescapeThenDecode(term1, UTF8Type.instance);
-        maxTerm = encodeUnescapeThenDecode(segments == 1 ? term2 : term1, UTF8Type.instance);
+        minTerm = term1;
+        maxTerm = segments == 1 ? term2 : term1;
         numRowsPerSegment = segments == 1 ? 2 : 1;
         verifySegmentMetadata(segmentMetadata);
         verifyStringIndex(components, segmentMetadata);
@@ -192,8 +190,8 @@ public class SegmentFlushTest
             maxSegmentRowId = 0;
             minKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());
             maxKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());;
-            minTerm = encodeUnescapeThenDecode(term2, UTF8Type.instance);
-            maxTerm = encodeUnescapeThenDecode(term2, UTF8Type.instance);
+            minTerm = term2;
+            maxTerm = term2;
             numRowsPerSegment = 1;
 
             segmentMetadata = segmentMetadatas.get(1);
@@ -257,12 +255,6 @@ public class SegmentFlushTest
         builder1.newRow(Clustering.EMPTY);
         builder1.addCell(BufferCell.live(column, 0, value));
         return builder1.build();
-    }
-
-    private ByteBuffer encodeUnescapeThenDecode(ByteBuffer original, AbstractType<?> type)
-    {
-        var encoded = version.onDiskFormat().encodeForOnDiskTrie(original, type);
-        return ByteBuffer.wrap(ByteSourceInverse.readBytes(encoded.asComparableBytes(ByteComparable.Version.OSS41)));
     }
 
     private void assertOverflow(long sstableRowId1, long sstableRowId2) throws Exception

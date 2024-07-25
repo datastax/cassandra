@@ -153,7 +153,7 @@ public class TrieMemoryIndex extends MemoryIndex
             public Pair<ByteComparable, PrimaryKeys> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(unescape(entry.getKey()), entry.getValue());
+                return Pair.create(entry.getKey(), entry.getValue());
             }
         };
     }
@@ -195,7 +195,7 @@ public class TrieMemoryIndex extends MemoryIndex
         boolean lowerInclusive, upperInclusive;
         if (expression.lower != null)
         {
-            lowerBound = expression.getEncodedLowerBoundByteComparable(Version.latest(), true);
+            lowerBound = expression.getEncodedLowerBoundByteComparable(Version.latest());
             lowerInclusive = expression.lower.inclusive;
         }
         else
@@ -206,7 +206,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         if (expression.upper != null)
         {
-            upperBound = expression.getEncodedUpperBoundByteComparable(Version.latest(), true);
+            upperBound = expression.getEncodedUpperBoundByteComparable(Version.latest());
             upperInclusive = expression.upper.inclusive;
         }
         else
@@ -222,8 +222,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 // Before version DB, we encoded composite types using a non order-preserving function. In order to
                 // perform a range query on a map, we use the bounds to get all entries for a given map key and then
                 // only keep the map entries that satisfy the expression.
-                ByteComparable unescaped = unescape(entry.getKey());
-                byte[] key = ByteSourceInverse.readBytes(unescaped.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(ByteComparable.Version.OSS41));
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
                     cd.processContent(entry.getValue());
             });
@@ -259,12 +258,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return Version.latest().onDiskFormat().encodeForInMemoryTrie(input, indexContext.getValidator());
-    }
-
-    private ByteComparable unescape(ByteComparable term)
-    {
-        return Version.latest().onDiskFormat().convertFromInMemoryToOnDiskEncoding(term, indexContext.getValidator());
+        return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
     class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>

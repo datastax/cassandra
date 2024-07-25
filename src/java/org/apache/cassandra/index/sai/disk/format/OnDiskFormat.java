@@ -190,31 +190,17 @@ public interface OnDiskFormat
      * Return the {@link ByteOrder} for the given {@link IndexComponentType} and {@link IndexContext}.
      *
      * @param component - The {@link IndexComponentType} for the index
-     * @param context - The {@link IndexContext} for the index
+     * @param context   - The {@link IndexContext} for the index
      * @return The {@link ByteOrder} for the file associated with the {@link IndexComponentType}
      */
     public ByteOrder byteOrderFor(IndexComponentType component, IndexContext context);
 
     /**
      * Encode the given {@link ByteBuffer} into a {@link ByteComparable} object based on the provided {@link AbstractType}
-     * for storage in the in memory trie index. This is valid for term insertion and for encoding search bounds.
+     * for storage in the trie index. This is used for both in memory and on disk tries. This is valid for encoding
+     * terms to be inserted, search terms, and search bounds.
+     *
      * @return The encoded {@link ByteComparable} object
      */
-    public ByteComparable encodeForInMemoryTrie(ByteBuffer input, AbstractType<?> type);
-
-    /**
-     * Convert the given {@link ByteComparable} encoding based on the provided {@link AbstractType} from the in memory
-     * trie index to the on-disk trie index. This is needed for historical reasons and may not be needed in the future.
-     * @return The unescaped {@link ByteComparable} object
-     */
-    public ByteComparable convertFromInMemoryToOnDiskEncoding(ByteComparable term, AbstractType<?> type);
-
-    /**
-     * Encode the given {@link ByteBuffer} into a {@link ByteComparable} object for use in the on-disk trie index.
-     * This is valid for term insertion and for encoding search bounds.
-     * @param input The term to encode
-     * @param type The type of the term
-     * @return The encoded term
-     */
-    public ByteComparable encodeForOnDiskTrie(ByteBuffer input, AbstractType<?> type);
+    public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type);
 }
