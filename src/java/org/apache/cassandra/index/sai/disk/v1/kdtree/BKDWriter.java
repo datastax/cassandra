@@ -280,7 +280,7 @@ public class BKDWriter implements Closeable
     public static class RowIDAndIndex
     {
         public int valueOrderIndex;
-        public long rowID;
+        public int rowID;
 
         @Override
         public String toString()
@@ -299,7 +299,7 @@ public class BKDWriter implements Closeable
         final List<Long> leafBlockFPs = new ArrayList<>();
         final List<byte[]> leafBlockStartValues = new ArrayList<>();
         final byte[] leafValues = new byte[maxPointsInLeafNode * packedBytesLength];
-        final long[] leafDocs = new long[maxPointsInLeafNode];
+        final int[] leafDocs = new int[maxPointsInLeafNode];
         private long valueCount;
         private int leafCount;
         final RowIDAndIndex[] rowIDAndIndexes = new RowIDAndIndex[maxPointsInLeafNode];
@@ -334,7 +334,7 @@ public class BKDWriter implements Closeable
         final byte[] lastPackedValue;
         private long lastDocID;
 
-        void add(byte[] packedValue, long docID) throws IOException
+        void add(byte[] packedValue, int docID) throws IOException
         {
             assert valueInOrder(valueCount + leafCount,
                                 0, lastPackedValue, packedValue, 0, docID, lastDocID);
@@ -998,7 +998,7 @@ public class BKDWriter implements Closeable
 
     // only called from assert
     private boolean valuesInOrderAndBounds(int count, int sortedDim, byte[] minPackedValue, byte[] maxPackedValue,
-                                           IntFunction<BytesRef> values, long[] docs, int docsOffset) throws IOException
+                                           IntFunction<BytesRef> values, int[] docs, int docsOffset) throws IOException
     {
         byte[] lastPackedValue = new byte[packedBytesLength];
         long lastDoc = -1;

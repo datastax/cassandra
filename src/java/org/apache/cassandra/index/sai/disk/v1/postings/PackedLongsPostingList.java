@@ -37,11 +37,13 @@ public class PackedLongsPostingList implements PostingList
     }
 
     @Override
-    public long nextPosting()
+    public int nextPosting()
     {
         if (iterator.hasNext())
         {
-            return iterator.next();
+            // This is assumed to be safe because we only insert segment row ids, which are always integers,
+            // into the packed longs object
+            return Math.toIntExact(iterator.next());
         }
         else
         {
@@ -50,13 +52,14 @@ public class PackedLongsPostingList implements PostingList
     }
 
     @Override
-    public long size()
+    public int size()
     {
-        return values.size();
+        // We know that the size of the packed longs object is less than or equal to Integer.MAX_VALUE
+        return Math.toIntExact(values.size());
     }
 
     @Override
-    public long advance(long targetRowID) throws IOException
+    public int advance(int targetRowID) throws IOException
     {
         throw new UnsupportedOperationException();
     }

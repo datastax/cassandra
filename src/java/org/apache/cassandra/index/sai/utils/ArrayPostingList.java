@@ -34,13 +34,13 @@ public class ArrayPostingList implements OrdinalPostingList
     }
 
     @Override
-    public long getOrdinal()
+    public int getOrdinal()
     {
         return idx;
     }
 
     @Override
-    public long nextPosting()
+    public int nextPosting()
     {
         if (idx >= postings.length)
         {
@@ -50,13 +50,13 @@ public class ArrayPostingList implements OrdinalPostingList
     }
 
     @Override
-    public long size()
+    public int size()
     {
         return postings.length;
     }
 
     @Override
-    public long advance(long targetRowID)
+    public int advance(int targetRowID)
     {
         for (int i = idx; i < postings.length; ++i)
         {
