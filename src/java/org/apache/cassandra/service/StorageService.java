@@ -3909,11 +3909,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return verify(extendedVerify, false, false, false, false, false, keyspaceName, tableNames);
     }
 
+    @Deprecated
     public int verify(boolean extendedVerify, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    {
+        return verify(extendedVerify, false, checkVersion, diskFailurePolicy, mutateRepairStatus, checkOwnsTokens, quick, keyspaceName, tableNames);
+    }
+
+    public int verify(boolean extendedVerify, boolean validateAllRows, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
         Verifier.Options options = Verifier.options().invokeDiskFailurePolicy(diskFailurePolicy)
                                                      .extendedVerification(extendedVerify)
+                                                     .validateAllRows(validateAllRows)
                                                      .checkVersion(checkVersion)
                                                      .mutateRepairStatus(mutateRepairStatus)
                                                      .checkOwnsTokens(checkOwnsTokens)

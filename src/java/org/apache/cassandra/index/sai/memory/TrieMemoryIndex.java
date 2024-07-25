@@ -39,13 +39,13 @@ import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
@@ -54,7 +54,6 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 public class TrieMemoryIndex extends MemoryIndex
@@ -106,6 +105,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 if (!indexContext.validateMaxTermSize(key, term))
                     continue;
 
+                // Note that this term is already encoded once by the TypeUtil.encode call above.
                 setMinMaxTerm(term.duplicate());
 
                 final ByteComparable encodedTerm = encode(term.duplicate());
@@ -153,7 +153,7 @@ public class TrieMemoryIndex extends MemoryIndex
             public Pair<ByteComparable, PrimaryKeys> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(decode(entry.getKey()), entry.getValue());
+                return Pair.create(entry.getKey(), entry.getValue());
             }
         };
     }
@@ -195,7 +195,7 @@ public class TrieMemoryIndex extends MemoryIndex
         boolean lowerInclusive, upperInclusive;
         if (expression.lower != null)
         {
-            lowerBound = encode(expression.getLowerBound());
+            lowerBound = expression.getEncodedLowerBoundByteComparable(Version.latest());
             lowerInclusive = expression.lower.inclusive;
         }
         else
@@ -206,7 +206,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         if (expression.upper != null)
         {
-            upperBound = encode(expression.getUpperBound());
+            upperBound = expression.getEncodedUpperBoundByteComparable(Version.latest());
             upperInclusive = expression.upper.inclusive;
         }
         else
@@ -217,12 +217,12 @@ public class TrieMemoryIndex extends MemoryIndex
 
         Collector cd = new Collector(keyRange);
         Trie<PrimaryKeys> subtrie = data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
-        if (expression.validator instanceof CompositeType)
+        if (!Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
             subtrie.entrySet().forEach(entry -> {
-                // When stored in memory, the keys of the trie are encoded, so we must decode them before we can
-                // compare them to the expression.
-                ByteComparable decoded = decode(entry.getKey());
-                byte[] key = ByteSourceInverse.readBytes(decoded.asComparableBytes(ByteComparable.Version.OSS41));
+                // Before version DB, we encoded composite types using a non order-preserving function. In order to
+                // perform a range query on a map, we use the bounds to get all entries for a given map key and then
+                // only keep the map entries that satisfy the expression.
+                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(ByteComparable.Version.OSS41));
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
                     cd.processContent(entry.getValue());
             });
@@ -252,41 +252,13 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         assert term != null;
 
-        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator());
-        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator());
+        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator(), Version.latest());
+        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
     }
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return indexContext.isLiteral() ? version -> append(ByteSource.of(input, version), ByteSource.TERMINATOR)
-                                        : version -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), version);
-    }
-
-    private ByteComparable decode(ByteComparable term)
-    {
-        return indexContext.isLiteral() ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
-                                        : term;
-    }
-
-    private ByteSource append(ByteSource src, int lastByte)
-    {
-        return new ByteSource()
-        {
-            boolean done = false;
-
-            @Override
-            public int next()
-            {
-                if (done)
-                    return END_OF_STREAM;
-                int n = src.next();
-                if (n != END_OF_STREAM)
-                    return n;
-
-                done = true;
-                return lastByte;
-            }
-        };
+        return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
     class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
