@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.db.marshal;
 
+import java.nio.ByteBuffer;
+
+import com.esri.core.geometry.ogc.OGCPolygon;
 import org.apache.cassandra.db.marshal.geometry.GeometricType;
 import org.apache.cassandra.db.marshal.geometry.Polygon;
 
@@ -25,8 +28,16 @@ public class PolygonType extends AbstractGeometricType<Polygon>
 {
     public static final PolygonType instance = new PolygonType();
 
+    private static final ByteBuffer MASKED_VALUE = new Polygon((OGCPolygon) OGCPolygon.fromText("POLYGON EMPTY")).asWellKnownBinary();
+
     public PolygonType()
     {
         super(GeometricType.POLYGON);
+    }
+
+    @Override
+    public ByteBuffer getMaskedValue()
+    {
+        return MASKED_VALUE;
     }
 }

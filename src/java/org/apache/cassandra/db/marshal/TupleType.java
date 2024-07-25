@@ -26,6 +26,7 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 
@@ -67,6 +68,7 @@ public class TupleType extends AbstractType<ByteBuffer>
         this(types, true);
     }
 
+    @VisibleForTesting
     public TupleType(List<AbstractType<?>> types, boolean freezeInner)
     {
         super(ComparisonType.CUSTOM);
@@ -83,7 +85,7 @@ public class TupleType extends AbstractType<ByteBuffer>
     {
         return true;
     }
-    
+
     public TupleType overrideKeyspace(Function<String, String> overrideKeyspace)
     {
         return new TupleType(types.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell());
@@ -545,7 +547,7 @@ public class TupleType extends AbstractType<ByteBuffer>
     @Override
     public boolean equals(Object o)
     {
-        if(!(o instanceof TupleType))
+        if (o.getClass() != TupleType.class)
             return false;
 
         TupleType that = (TupleType)o;
