@@ -85,7 +85,7 @@ public class TupleType extends AbstractType<ByteBuffer>
     {
         return true;
     }
-    
+
     public TupleType overrideKeyspace(Function<String, String> overrideKeyspace)
     {
         return new TupleType(types.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell());

@@ -46,6 +46,8 @@ public class DateType extends AbstractType<Date>
     private static final Logger logger = LoggerFactory.getLogger(DateType.class);
 
     public static final DateType instance = new DateType();
+
+    private static final TypeSerializer<Date> serializer = new TimestampSerializer();
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDeserializer(instance);
     private static final ByteBuffer MASKED_VALUE = instance.decompose(new Date(0));
 
@@ -134,7 +136,7 @@ public class DateType extends AbstractType<Date>
 
     public TypeSerializer<Date> getSerializer()
     {
-        return TimestampSerializer.instance;
+        return serializer;
     }
 
     @Override

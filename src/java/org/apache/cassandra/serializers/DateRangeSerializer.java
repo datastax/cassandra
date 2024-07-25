@@ -190,11 +190,7 @@ public final class DateRangeSerializer extends TypeSerializer<DateRange>
     @Override
     public <V> void validate(V value, ValueAccessor<V> accessor) throws MarshalException
     {
-        if (accessor.isEmpty(value))
-        {
-            return;
-        }
-        else if (!VALID_SERIALIZED_LENGTHS.contains(accessor.size(value)))
+        if (!VALID_SERIALIZED_LENGTHS.contains(accessor.size(value)))
         {
             throw new MarshalException(String.format("Date range should be have %s bytes, got %d instead.", VALID_SERIALIZED_LENGTHS, accessor.size(value)));
         }
