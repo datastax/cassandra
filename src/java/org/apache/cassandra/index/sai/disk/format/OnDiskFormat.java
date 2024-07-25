@@ -19,11 +19,13 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Set;
 
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -38,6 +40,7 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * An interface to the on-disk format of an index. This provides format agnostics methods
@@ -187,8 +190,17 @@ public interface OnDiskFormat
      * Return the {@link ByteOrder} for the given {@link IndexComponentType} and {@link IndexContext}.
      *
      * @param component - The {@link IndexComponentType} for the index
-     * @param context - The {@link IndexContext} for the index
+     * @param context   - The {@link IndexContext} for the index
      * @return The {@link ByteOrder} for the file associated with the {@link IndexComponentType}
      */
     public ByteOrder byteOrderFor(IndexComponentType component, IndexContext context);
+
+    /**
+     * Encode the given {@link ByteBuffer} into a {@link ByteComparable} object based on the provided {@link AbstractType}
+     * for storage in the trie index. This is used for both in memory and on disk tries. This is valid for encoding
+     * terms to be inserted, search terms, and search bounds.
+     *
+     * @return The encoded {@link ByteComparable} object
+     */
+    public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type);
 }

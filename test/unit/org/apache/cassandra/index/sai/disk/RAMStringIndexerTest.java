@@ -26,8 +26,8 @@ import java.util.List;
 import org.junit.Assert;
 import org.junit.Test;
 
-import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
@@ -39,7 +39,7 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
     @Test
     public void test() throws Exception
     {
-        RAMStringIndexer indexer = new RAMStringIndexer(UTF8Type.instance);
+        RAMStringIndexer indexer = new RAMStringIndexer();
 
         indexer.add(new BytesRef("0"), 100);
         indexer.add(new BytesRef("2"), 102);
@@ -51,7 +51,7 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
         matches.add(Arrays.asList(100L, 200L));
         matches.add(Arrays.asList(102L, 202L, 302L));
 
-        try (TermsIterator terms = indexer.getTermsWithPostings())
+        try (TermsIterator terms = indexer.getTermsWithPostings(ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("2")))
         {
             int ord = 0;
             while (terms.hasNext())
@@ -68,13 +68,16 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
                     assertEquals(matches.get(ord++), results);
                 }
             }
+            // The min and max are configured, not calculated.
+            assertArrayEquals("0".getBytes(), terms.getMinTerm().array());
+            assertArrayEquals("2".getBytes(), terms.getMaxTerm().array());
         }
     }
 
     @Test
     public void testLargeSegment() throws IOException
     {
-        final RAMStringIndexer indexer = new RAMStringIndexer(UTF8Type.instance);
+        final RAMStringIndexer indexer = new RAMStringIndexer();
         final int numTerms = between(1 << 10, 1 << 13);
         final int numPostings = between(1 << 5, 1 << 10);
 
@@ -87,7 +90,7 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
             }
         }
 
-        final TermsIterator terms = indexer.getTermsWithPostings();
+        final TermsIterator terms = indexer.getTermsWithPostings(ByteBufferUtil.EMPTY_BYTE_BUFFER, ByteBufferUtil.EMPTY_BYTE_BUFFER);
 
         ByteComparable term;
         long termOrd = 0L;
@@ -120,7 +123,7 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
         {
             RAMStringIndexer.MAX_BLOCK_BYTE_POOL_SIZE = 1024 * 1024 * 100;
             // primary behavior we're testing is that exceptions aren't thrown due to overflowing backing structures
-            RAMStringIndexer indexer = new RAMStringIndexer(UTF8Type.instance);
+            RAMStringIndexer indexer = new RAMStringIndexer();
 
             Assert.assertFalse(indexer.requiresFlush());
             for (int i = 0; i < Integer.MAX_VALUE; i++)

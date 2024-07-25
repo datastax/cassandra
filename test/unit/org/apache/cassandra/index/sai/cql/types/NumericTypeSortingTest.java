@@ -22,18 +22,39 @@ import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.stream.Collectors;
 
 import org.junit.Test;
 
 import com.carrotsearch.randomizedtesting.RandomizedTest;
+import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 public class NumericTypeSortingTest extends RandomizedTest
 {
+
+    private final Version version;
+    @ParametersFactory()
+    public static Collection<Object[]> data()
+    {
+        // Required because it configures SEGMENT_BUILD_MEMORY_LIMIT, which is needed for Version.AA
+        if (DatabaseDescriptor.getRawConfig() == null)
+            DatabaseDescriptor.setConfig(DatabaseDescriptor.loadConfig());
+        return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
+    }
+
+    public NumericTypeSortingTest(Version version)
+    {
+        this.version = version;
+    }
+
     @Test
     public void testBigDecimalEncoding()
     {
@@ -60,7 +81,7 @@ public class NumericTypeSortingTest extends RandomizedTest
 
             ByteBuffer b1 = TypeUtil.asIndexBytes(DecimalType.instance.decompose(i1), DecimalType.instance);
 
-            assertTrue(i0 + " <= " + i1, TypeUtil.compare(b0, b1, DecimalType.instance) <= 0);
+            assertTrue(i0 + " <= " + i1, TypeUtil.compare(b0, b1, DecimalType.instance, version) <= 0);
         }
     }
 
@@ -90,7 +111,7 @@ public class NumericTypeSortingTest extends RandomizedTest
 
             ByteBuffer b1 = TypeUtil.asIndexBytes(IntegerType.instance.decompose(i1), IntegerType.instance);
 
-            assertTrue(i0 + " <= " + i1, TypeUtil.compare(b0, b1, IntegerType.instance) <= 0);
+            assertTrue(i0 + " <= " + i1, TypeUtil.compare(b0, b1, IntegerType.instance, version) <= 0);
         }
     }
 }
