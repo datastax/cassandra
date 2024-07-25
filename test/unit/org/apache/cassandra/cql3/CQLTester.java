@@ -3118,6 +3118,11 @@ public abstract class CQLTester
             System.err.println("Randomized test failed. To rerun test use -Dcassandra.test.random.seed=" + seed);
         }
 
+        public Random getRandom()
+        {
+            return random;
+        }
+
         public int nextInt()
         {
             return random.nextInt();
