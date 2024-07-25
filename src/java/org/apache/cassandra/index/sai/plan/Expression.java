@@ -347,7 +347,9 @@ public class Expression
         var bound = getPartiallyEncodedLowerBound(version);
         if (bound == null)
             return null;
-        var terminator = lower.inclusive ? ByteSource.TERMINATOR : ByteSource.GT_NEXT_COMPONENT;
+        // If the lower bound is inclusive, we use the LT_NEXT_COMPONENT terminator to make sure the bound is not a
+        // prefix of some other key. This ensures reverse iteration works correctly too.
+        var terminator = lower.inclusive ? ByteSource.LT_NEXT_COMPONENT : ByteSource.GT_NEXT_COMPONENT;
         return getBoundByteComparable(bound, version, terminator);
     }
 
@@ -362,7 +364,9 @@ public class Expression
         var bound = getPartiallyEncodedUpperBound(version);
         if (bound == null)
             return null;
-        var terminator = upper.inclusive ? ByteSource.TERMINATOR : ByteSource.LT_NEXT_COMPONENT;
+        // If the upper bound is inclusive, we use the LT_NEXT_COMPONENT terminator to make sure the bound is not a
+        // prefix of some other key. This ensures reverse iteration works correctly too.
+        var terminator = upper.inclusive ? ByteSource.GT_NEXT_COMPONENT : ByteSource.LT_NEXT_COMPONENT;
         return getBoundByteComparable(bound, version, terminator);
     }
 
