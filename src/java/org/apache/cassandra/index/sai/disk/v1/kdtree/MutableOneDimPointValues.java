@@ -95,7 +95,7 @@ public abstract class MutableOneDimPointValues extends MutablePointValues
          *  should scrutinize the packedValue to decide whether to accept it.  In the 1D case,
          *  values are visited in increasing order, and in the case of ties, in increasing
          *  docID order. */
-        void visit(long docID, byte[] packedValue) throws IOException;
+        void visit(int docID, byte[] packedValue) throws IOException;
     }
 
     @Override

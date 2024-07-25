@@ -20,7 +20,7 @@ package org.apache.cassandra.index.sai.memory;
 import java.util.Collections;
 import java.util.Iterator;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
@@ -44,7 +44,7 @@ public class RowMapping
     public static final RowMapping DUMMY = new RowMapping()
     {
         @Override
-        public Iterator<Pair<ByteComparable, LongArrayList>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
+        public Iterator<Pair<ByteComparable, IntArrayList>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
 
         @Override
         public void complete() {}
@@ -65,14 +65,14 @@ public class RowMapping
         }
     };
 
-    private final InMemoryTrie<Long> rowMapping = new InMemoryTrie<>(BufferType.OFF_HEAP);
+    private final InMemoryTrie<Integer> rowMapping = new InMemoryTrie<>(BufferType.OFF_HEAP);
 
     private volatile boolean complete = false;
 
     public PrimaryKey minKey;
     public PrimaryKey maxKey;
 
-    public long maxSegmentRowId = -1;
+    public int maxSegmentRowId = -1;
 
     public int count;
 
@@ -97,32 +97,32 @@ public class RowMapping
      *
      * @return iterator of index term to postings mapping exists in the sstable
      */
-    public Iterator<Pair<ByteComparable, LongArrayList>> merge(MemtableIndex index)
+    public Iterator<Pair<ByteComparable, IntArrayList>> merge(MemtableIndex index)
     {
         assert complete : "RowMapping is not built.";
 
         Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
-        return new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
+        return new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
         {
             @Override
-            protected Pair<ByteComparable, LongArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 while (iterator.hasNext())
                 {
                     Pair<ByteComparable, Iterator<PrimaryKey>> pair = iterator.next();
 
-                    LongArrayList postings = null;
+                    IntArrayList postings = null;
                     Iterator<PrimaryKey> primaryKeys = pair.right;
 
                     while (primaryKeys.hasNext())
                     {
                         PrimaryKey primaryKey = primaryKeys.next();
                         ByteComparable byteComparable = primaryKey::asComparableBytes;
-                        Long segmentRowId = rowMapping.get(byteComparable);
+                        Integer segmentRowId = rowMapping.get(byteComparable);
 
                         if (segmentRowId != null)
                         {
-                            postings = postings == null ? new LongArrayList() : postings;
+                            postings = postings == null ? new IntArrayList() : postings;
                             postings.add(segmentRowId);
                         }
                     }
@@ -150,10 +150,17 @@ public class RowMapping
     {
         assert !complete : "Cannot modify built RowMapping.";
 
-        ByteComparable byteComparable = v -> key.asComparableBytes(v);
-        rowMapping.apply(Trie.singleton(byteComparable, sstableRowId), (existing, neww) -> neww);
+        if (sstableRowId > Integer.MAX_VALUE)
+            throw new IllegalArgumentException("RowId must be less than or equal to Integer.MAX_VALUE");
 
-        maxSegmentRowId = Math.max(maxSegmentRowId, sstableRowId);
+        // We only build this mapping for memtables, and because those only have a single segment, we know
+        // that the segment row id is the same as the sstable row id.
+        int segmentRowId = (int) sstableRowId;
+
+        ByteComparable byteComparable = v -> key.asComparableBytes(v);
+        rowMapping.apply(Trie.singleton(byteComparable, segmentRowId), (existing, neww) -> neww);
+
+        maxSegmentRowId = Math.max(maxSegmentRowId, segmentRowId);
 
         // data is written in token sorted order
         if (minKey == null)
@@ -164,8 +171,8 @@ public class RowMapping
 
     public int get(PrimaryKey key)
     {
-        Long sstableRowId = rowMapping.get(v -> key.asComparableBytes(v));
-        return sstableRowId == null ? -1 : Math.toIntExact(sstableRowId);
+        Integer sstableRowId = rowMapping.get(v -> key.asComparableBytes(v));
+        return sstableRowId == null ? -1 : sstableRowId;
     }
 
     public int size()

@@ -61,8 +61,8 @@ public class NumericIndexWriter implements Closeable
      */
     public NumericIndexWriter(IndexComponents.ForWrite components,
                               int bytesPerDim,
-                              long maxSegmentRowId,
-                              long numRows,
+                              int maxSegmentRowId,
+                              int numRows,
                               IndexWriterConfig config) throws IOException
     {
         this(components, MAX_POINTS_IN_LEAF_NODE, bytesPerDim, maxSegmentRowId, numRows, config);
@@ -71,8 +71,8 @@ public class NumericIndexWriter implements Closeable
     public NumericIndexWriter(IndexComponents.ForWrite components,
                               int maxPointsInLeafNode,
                               int bytesPerDim,
-                              long maxSegmentRowId,
-                              long numRows,
+                              int maxSegmentRowId,
+                              int numRows,
                               IndexWriterConfig config) throws IOException
     {
         checkArgument(maxSegmentRowId >= 0,
@@ -86,7 +86,7 @@ public class NumericIndexWriter implements Closeable
         this.components = components;
         this.bytesPerDim = bytesPerDim;
         this.config = config;
-        this.writer = new BKDWriter(maxSegmentRowId + 1,
+        this.writer = new BKDWriter(maxSegmentRowId + 1L,
                                     1,
                                     bytesPerDim,
                                     maxPointsInLeafNode,

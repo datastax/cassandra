@@ -111,9 +111,9 @@ public class TermsIteratorMerger implements TermsIterator
         }
 
         @Override
-        public long nextPosting() throws IOException
+        public int nextPosting() throws IOException
         {
-            long next = monitored.nextPosting();
+            int next = monitored.nextPosting();
             if (next != PostingList.END_OF_STREAM)
             {
                 minSSTableRowId = Math.min(minSSTableRowId, next);
@@ -123,13 +123,13 @@ public class TermsIteratorMerger implements TermsIterator
         }
 
         @Override
-        public long size()
+        public int size()
         {
             return monitored.size();
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public int advance(int targetRowID) throws IOException
         {
             return monitored.advance(targetRowID);
         }
