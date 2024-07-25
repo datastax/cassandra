@@ -24,7 +24,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
@@ -83,7 +83,7 @@ public class ImmutableOneDimPointValuesTest
             int postingCounter = 0;
 
             @Override
-            public void visit(long docID, byte[] packedValue)
+            public void visit(int docID, byte[] packedValue)
             {
                 final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
                 final ByteComparable expectedTerm = ByteComparable.of(term);
@@ -109,19 +109,19 @@ public class ImmutableOneDimPointValuesTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(from);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(to);
 
-        final AbstractIterator<Pair<ByteComparable, LongArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
+        final AbstractIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private int currentTerm = from;
 
             @Override
-            protected Pair<ByteComparable, LongArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 if (currentTerm <= to)
                 {
                     return endOfData();
                 }
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
-                LongArrayList postings = new LongArrayList();
+                IntArrayList postings = new IntArrayList();
                 postings.add(0, 1, 2);
                 return Pair.create(ByteComparable.fixedLength(term), postings);
             }

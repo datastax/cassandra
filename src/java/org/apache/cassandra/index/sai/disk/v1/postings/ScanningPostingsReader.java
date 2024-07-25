@@ -37,7 +37,7 @@ public class ScanningPostingsReader extends PostingsReader
     }
 
     @Override
-    public long advance(long targetRowId)
+    public int advance(int targetRowId)
     {
         throw new UnsupportedOperationException("Cannot advance a scanning postings reader");
     }

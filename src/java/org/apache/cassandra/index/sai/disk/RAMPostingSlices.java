@@ -50,7 +50,7 @@ class RAMPostingSlices
         return new PostingList()
         {
             @Override
-            public long nextPosting() throws IOException
+            public int nextPosting() throws IOException
             {
                 if (reader.eof())
                 {
@@ -64,13 +64,13 @@ class RAMPostingSlices
             }
 
             @Override
-            public long size()
+            public int size()
             {
                 return sizes[termID];
             }
 
             @Override
-            public long advance(long targetRowID)
+            public int advance(int targetRowID)
             {
                 throw new UnsupportedOperationException();
             }

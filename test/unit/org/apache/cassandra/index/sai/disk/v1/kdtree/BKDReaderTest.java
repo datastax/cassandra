@@ -121,18 +121,18 @@ public class BKDReaderTest extends SaiRandomizedTest
         // Start by testing that the iteratorState returns rowIds in order
         BKDReader reader1 = createReader(10);
         BKDReader.IteratorState it1 = reader1.iteratorState();
-        Long expectedRowId = 0L;
+        int expectedRowId = 0;
         while (it1.hasNext())
         {
-            assertEquals(expectedRowId++, it1.next());
+            assertEquals(expectedRowId++, (int) it1.next());
         }
         it1.close();
 
         // Next test that an intersection only returns the query values
-        List<Long> expected = Lists.list(8L, 9L);
+        List<Integer> expected = Lists.list(8, 9);
         int expectedCount = 0;
         PostingList intersection = reader1.intersect(buildQuery(8, 9), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-        for (Long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
+        for (Integer id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
         {
             assertEquals(expected.get(expectedCount++), id);
         }
@@ -140,7 +140,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         reader1.close();
 
         // Finally test that merger returns the correct values
-        expected = Lists.list(8L, 9L, 18L, 19L);
+        expected = Lists.list(8, 9, 18, 19);
         expectedCount = 0;
 
         reader1 = createReader(10);
@@ -155,7 +155,7 @@ public class BKDReaderTest extends SaiRandomizedTest
 
         intersection = reader.intersect(buildQuery(queryMin, queryMax), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
 
-        for (Long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
+        for (Integer id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
         {
             assertEquals(expected.get(expectedCount++), id);
         }

@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 
 import org.junit.Test;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -115,7 +115,7 @@ public class TermsReaderTest extends SaiRandomizedTest
                                                   termsFooterPointer,
                                                   version))
         {
-            try (TermsIterator actualTermsEnum = reader.allTerms(0))
+            try (TermsIterator actualTermsEnum = reader.allTerms())
             {
                 int i = 0;
                 for (ByteComparable term = actualTermsEnum.next(); term != null; term = actualTermsEnum.next())
@@ -156,14 +156,14 @@ public class TermsReaderTest extends SaiRandomizedTest
                                                   version))
         {
             var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).collect(Collectors.toList());
-            for (Pair<ByteComparable, LongArrayList> pair : iter)
+            for (Pair<ByteComparable, IntArrayList> pair : iter)
             {
                 final byte[] bytes = ByteSourceInverse.readBytes(pair.left.asComparableBytes(ByteComparable.Version.OSS50));
                 try (PostingList actualPostingList = reader.exactMatch(ByteComparable.fixedLength(bytes),
                                                                        (QueryEventListener.TrieIndexEventListener)NO_OP_TRIE_LISTENER,
                                                                        new QueryContext()))
                 {
-                    final LongArrayList expectedPostingList = pair.right;
+                    final IntArrayList expectedPostingList = pair.right;
 
                     assertNotNull(actualPostingList);
                     assertEquals(expectedPostingList.size(), actualPostingList.size());
@@ -184,11 +184,11 @@ public class TermsReaderTest extends SaiRandomizedTest
                                                                        (QueryEventListener.TrieIndexEventListener)NO_OP_TRIE_LISTENER,
                                                                        new QueryContext()))
                 {
-                    final LongArrayList expectedPostingList = pair.right;
+                    final IntArrayList expectedPostingList = pair.right;
                     // test skipping to the last block
                     final int idxToSkip = numPostings - 2;
                     // tokens are equal to their corresponding row IDs
-                    final long tokenToSkip = expectedPostingList.get(idxToSkip);
+                    final int tokenToSkip = expectedPostingList.get(idxToSkip);
 
                     long advanceResult = actualPostingList.advance(tokenToSkip);
                     assertEquals(tokenToSkip, advanceResult);
