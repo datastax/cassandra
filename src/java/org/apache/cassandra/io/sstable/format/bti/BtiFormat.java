@@ -319,6 +319,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         // bb (DSE 6.8.5): added hostId of the node from which the sstable originated (DB-4629)
         // ca (DSE-DB aka Stargazer based on OSS 4.0): bb fields without maxColumnValueLengths + all OSS fields
         // cb (OSS 5.0): token space coverage
+        // cc : added explicitly frozen tuples in header, non-frozen UDT columns dropping support
 
         // versions aa-cz are not supported in OSS
         // da (5.0): initial version of the BIT format
@@ -348,6 +349,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         private final boolean hasPartitionLevelDeletionsPresenceMarker;
         private final boolean hasKeyRange;
         private final boolean hasUIntDeletionTime;
+        private final boolean hasExplicitlyFrozenTuples;
 
         BtiVersion(BtiFormat format, String version)
         {
@@ -376,6 +378,8 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             hasMaxColumnValueLengths = bOrLater && !cOrLater; // DSE only field
             hasZeroCopyMetadata = bOrLater && !cOrLater; // DSE only field
             hasIncrementalNodeSyncMetadata = bOrLater && !cOrLater; // DSE only field
+
+            hasExplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include explicitly frozen tuples
         }
 
         @Override
@@ -519,6 +523,12 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         public boolean hasMaxColumnValueLengths()
         {
             return hasMaxColumnValueLengths;
+        }
+
+        @Override
+        public boolean hasImplicitlyFrozenTuples()
+        {
+            return hasExplicitlyFrozenTuples;
         }
     }
 

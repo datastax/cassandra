@@ -19,12 +19,20 @@
 package org.apache.cassandra.cql3.selection;
 
 import java.math.BigDecimal;
-import java.util.*;
+import java.util.List;
+import java.util.UUID;
 
 import org.junit.Test;
 
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.Duration;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.TypeParser;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.junit.Assert.assertEquals;
@@ -191,10 +199,10 @@ public class TermSelectionTest extends CQLTester
                             tuple(tuple("three", "three"), tuple("three", "three", 3L, "three")))));
 
         // single element tuple: tuple(t) incompatible with tuple(long, long)
-        assertInvalidMessage("(t) is not of the expected type: frozen<tuple<bigint, bigint>>",
+        assertInvalidMessage("(t) is not of the expected type: tuple<bigint, bigint>",
                              "SELECT [(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (t)] FROM %s");
 
-        assertInvalidMessage("(cast(ck as bigint)) is not of the expected type: frozen<tuple<text, text>>",
+        assertInvalidMessage("(cast(ck as bigint)) is not of the expected type: tuple<text, text>",
                              "SELECT [(t, t), (CAST(ck AS BIGINT))] FROM %s");
 
         // single element tuple: tuple(long) compatible with tuple(long, long)
@@ -308,7 +316,7 @@ public class TermSelectionTest extends CQLTester
                            tuple(tuple("three", "three"), tuple("three", "three", 3L, "three")))));
 
         // getExactType for (t) is null
-        assertInvalidMessage("(t) is not of the expected type: frozen<tuple<bigint, bigint>>",
+        assertInvalidMessage("(t) is not of the expected type: tuple<bigint, bigint>",
                              "SELECT {(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (t), (CAST(pk AS BIGINT), CAST(ck AS BIGINT))} FROM %s");
 
         // Test UDTs nested within Sets
@@ -465,7 +473,7 @@ public class TermSelectionTest extends CQLTester
 
 
         // Test Litteral Set with Duration elements
-        assertInvalidMessage("Durations are not allowed inside sets: set<duration>",
+        assertInvalidMessage("Durations are not allowed inside sets: frozen<set<duration>>",
                              "SELECT pk, ck, (set<duration>){2d, 1mo} FROM %s");
 
         assertInvalidMessage("Invalid field selection: system.min(ck) of type int is not a user type",
@@ -494,7 +502,7 @@ public class TermSelectionTest extends CQLTester
                    row(map(2, Duration.from("10h"))),
                    row(map(3, Duration.from("11h"))));
 
-        assertInvalidMessage("Durations are not allowed as map keys: map<duration, int>",
+        assertInvalidMessage("Durations are not allowed as map keys: frozen<map<duration, int>>",
                              "SELECT (map<duration, int>){d1 : ck, d2 :ck} FROM %s");
     }
 
@@ -502,7 +510,7 @@ public class TermSelectionTest extends CQLTester
     public void testSelectUDTLiteral() throws Throwable
     {
         String type = createType("CREATE TYPE %s(a int, b text)");
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + type + ")");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + type + ')');
 
         execute("INSERT INTO %s(k, v) VALUES (?, ?)", 0, userType("a", 3, "b", "foo"));
 
@@ -579,7 +587,7 @@ public class TermSelectionTest extends CQLTester
         assertColumnSpec(boundNames.get(0), "[selection]", Int32Type.instance);
         assertColumnSpec(boundNames.get(1), "adecimal", DecimalType.instance);
         assertColumnSpec(boundNames.get(2), "[selection]", UTF8Type.instance);
-        assertColumnSpec(boundNames.get(3), "atuple", TypeParser.parse("TupleType(Int32Type,UTF8Type)"));
+        assertColumnSpec(boundNames.get(3), "atuple", TypeParser.parse("TupleType(Int32Type,UTF8Type)").freeze());
         assertColumnSpec(boundNames.get(4), "pk", Int32Type.instance);
 
 
@@ -590,7 +598,7 @@ public class TermSelectionTest extends CQLTester
         assertColumnSpec(resultNames.get(0), "(int)?", Int32Type.instance);
         assertColumnSpec(resultNames.get(1), "(decimal)?", DecimalType.instance);
         assertColumnSpec(resultNames.get(2), "(text)?", UTF8Type.instance);
-        assertColumnSpec(resultNames.get(3), "(tuple<int, text>)?", TypeParser.parse("TupleType(Int32Type,UTF8Type)"));
+        assertColumnSpec(resultNames.get(3), "(tuple<int, text>)?", TypeParser.parse("TupleType(Int32Type,UTF8Type)").freeze());
         assertColumnSpec(resultNames.get(4), "pk", Int32Type.instance);
         assertColumnSpec(resultNames.get(5), "ck", Int32Type.instance);
         assertColumnSpec(resultNames.get(6), "t", UTF8Type.instance);

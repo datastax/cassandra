@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -81,6 +82,7 @@ import static org.apache.cassandra.io.sstable.format.AbstractTestVersionSupporte
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -140,7 +142,7 @@ public class LegacySSTableTest
         StorageService.instance.initServer();
         Keyspace.setInitialized();
         createKeyspace();
-        
+
         legacyVersions = getValidLegacyVersions();
         for (String legacyVersion : legacyVersions)
         {
@@ -557,7 +559,7 @@ public class LegacySSTableTest
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_clust_be_index_summary", legacyVersion)).forceMajorCompaction();
     }
 
-    public static void loadLegacyTables(String legacyVersion) throws Exception
+    public static void loadLegacyTables(String legacyVersion)
     {
         logger.info("Preparing legacy version {}", legacyVersion);
         loadLegacyTable(legacyVersion, "simple");
@@ -568,7 +570,7 @@ public class LegacySSTableTest
         loadLegacyTable(legacyVersion, "clust_be_index_summary");
     }
 
-    private static void verifyCache(String legacyVersion, long startCount) throws InterruptedException, java.util.concurrent.ExecutionException
+    private static void verifyCache(String legacyVersion, long startCount)
     {
         // Only perform test if format uses cache.
         SSTableReader sstable = Iterables.getFirst(Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_simple", legacyVersion)).getLiveSSTables(), null);
@@ -580,7 +582,14 @@ public class LegacySSTableTest
         //well as loads the correct number of keys
         long endCount = CacheService.instance.keyCache.size();
         Assert.assertTrue(endCount > startCount);
-        CacheService.instance.keyCache.submitWrite(Integer.MAX_VALUE).get();
+        try
+        {
+            CacheService.instance.keyCache.submitWrite(Integer.MAX_VALUE).get(60, TimeUnit.MINUTES);
+        }
+        catch (Exception e)
+        {
+            throw new AssertionError(e);
+        }
         CacheService.instance.invalidateKeyCache();
         Assert.assertEquals(startCount, CacheService.instance.keyCache.size());
         CacheService.instance.keyCache.loadSaved();
@@ -705,7 +714,7 @@ public class LegacySSTableTest
         }
     }
 
-    private static void loadLegacyTable(String legacyVersion, String tableSuffix) throws IOException
+    private static void loadLegacyTable(String legacyVersion, String tableSuffix)
     {
         String table = String.format("legacy_%s_%s", legacyVersion, tableSuffix);
         logger.info("Loading legacy table {}", table);
@@ -714,10 +723,20 @@ public class LegacySSTableTest
 
         for (File cfDir : cfs.getDirectories().getCFDirectories())
         {
-            copySstablesToTestData(legacyVersion, table, cfDir);
+            try
+            {
+                copySstablesToTestData(legacyVersion, table, cfDir);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError(e);
+            }
         }
 
+        int s0 = cfs.getLiveSSTables().size();
         cfs.loadNewSSTables();
+        int s1 = cfs.getLiveSSTables().size();
+        assertThat(s1).isGreaterThan(s0);
     }
 
     /**
