@@ -95,7 +95,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                            ByteBuffer maxTerm,
                            ComponentMetadataMap componentMetadatas)
     {
-        assert numRows < Integer.MAX_VALUE;
+        // numRows can exceed Integer.MAX_VALUE because it is the count of unique term and segmentRowId pairs.
         Objects.requireNonNull(minKey);
         Objects.requireNonNull(maxKey);
         Objects.requireNonNull(minTerm);

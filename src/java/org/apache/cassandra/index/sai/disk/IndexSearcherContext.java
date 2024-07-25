@@ -63,7 +63,7 @@ public class IndexSearcherContext
         return segmentRowIdOffset;
     }
 
-    long count()
+    int count()
     {
         return postingList.size();
     }
