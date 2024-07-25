@@ -167,23 +167,23 @@ public class PostingListRangeIterator extends RangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetRowID;
+            long targetSstableRowId;
             if (skipToToken instanceof PrimaryKeyWithSource
                 && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
             {
-                targetRowID = ((PrimaryKeyWithSource) skipToToken).getSourceRowId();
+                targetSstableRowId = ((PrimaryKeyWithSource) skipToToken).getSourceRowId();
             }
             else
             {
-                targetRowID = primaryKeyMap.ceiling(skipToToken);
+                targetSstableRowId = primaryKeyMap.ceiling(skipToToken);
                 // skipToToken is larger than max token in token file
-                if (targetRowID < 0)
+                if (targetSstableRowId < 0)
                 {
                     return PostingList.END_OF_STREAM;
                 }
             }
-
-            segmentRowId = postingList.advance(targetRowID - searcherContext.getSegmentRowIdOffset());
+            int targetSegmentRowId = Math.toIntExact(targetSstableRowId - searcherContext.getSegmentRowIdOffset());
+            segmentRowId = postingList.advance(targetSegmentRowId);
             needsSkipping = false;
         }
         else
