@@ -22,7 +22,6 @@ import java.util.NoSuchElementException;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.ArrayUtil;
@@ -39,7 +38,6 @@ public class RAMStringIndexer
 {
     @VisibleForTesting
     public static int MAX_BLOCK_BYTE_POOL_SIZE = Integer.MAX_VALUE;
-    private final AbstractType<?> termComparator;
     private final BytesRefHash termsHash;
     private final RAMPostingSlices slices;
     // counters need to be separate so that we can trigger flushes if either ByteBlockPool hits maximum size
@@ -49,9 +47,8 @@ public class RAMStringIndexer
     private int rowCount = 0;
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
-    public RAMStringIndexer(AbstractType<?> termComparator)
+    public RAMStringIndexer()
     {
-        this.termComparator = termComparator;
         termsBytesUsed = Counter.newCounter();
         slicesBytesUsed = Counter.newCounter();
 
@@ -86,7 +83,7 @@ public class RAMStringIndexer
      * EXPENSIVE OPERATION due to sorting the terms, only call once.
      */
     // TODO: assert or throw and exception if getTermsWithPostings is called > 1
-    public TermsIterator getTermsWithPostings()
+    public TermsIterator getTermsWithPostings(ByteBuffer minTerm, ByteBuffer maxTerm)
     {
         final int[] sortedTermIDs = termsHash.sort();
 
@@ -101,19 +98,13 @@ public class RAMStringIndexer
             @Override
             public ByteBuffer getMinTerm()
             {
-                BytesRef term = new BytesRef();
-                int minTermID = sortedTermIDs[0];
-                termsHash.get(minTermID, term);
-                return ByteBuffer.wrap(term.bytes, term.offset, term.length);
+                return minTerm;
             }
 
             @Override
             public ByteBuffer getMaxTerm()
             {
-                BytesRef term = new BytesRef();
-                int maxTermID = sortedTermIDs[valueCount-1];
-                termsHash.get(maxTermID, term);
-                return ByteBuffer.wrap(term.bytes, term.offset, term.length);
+                return maxTerm;
             }
 
             public void close() {}
@@ -144,6 +135,7 @@ public class RAMStringIndexer
 
             private ByteComparable asByteComparable(byte[] bytes, int offset, int length)
             {
+                // The bytes were encoded when they were inserted into the termsHash.
                 return v -> ByteSource.fixedLength(bytes, offset, length);
             }
         };
