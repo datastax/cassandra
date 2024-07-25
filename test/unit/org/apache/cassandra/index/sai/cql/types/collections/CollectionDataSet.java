@@ -156,7 +156,9 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
                 values[index] = new HashMap<>();
                 for (int element = 0; element < getRandom().nextIntBetween(2, 8); element++)
                 {
-                    T key = elementDataSet.values[getRandom().nextIntBetween(0, elementDataSet.values.length - 1)];
+                    // This guarantees that every map will have at least 2 of the same keys. This makes
+                    // tests on map entries more meaningful.
+                    T key = elementDataSet.values[element % elementDataSet.values.length];
                     T value = elementDataSet.values[getRandom().nextIntBetween(0, elementDataSet.values.length - 1)];
                     values[index].put(key, value);
                 }
