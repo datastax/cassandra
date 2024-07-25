@@ -19,12 +19,11 @@
 package org.apache.cassandra.test.microbench;
 
 
-import java.util.Set;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.apache.commons.math3.distribution.ZipfDistribution;
@@ -34,7 +33,6 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -54,114 +52,103 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 public class RequestSensorBench
 {
     private static final int NUM_SENSORS = 1000;
-    private static final int THREADS = 16;
-    private static final int NUM_FIXTURES = 100; // simulates scanned rows per request
+    private static final int THREADS = 100;
+    private static final int SENSORS_PER_THREAD = 100;
+    private static final int UPDATES_PER_THREAD = 1000;
+    private static final ConcurrentMap<Integer, Context> contextFixtures = new ConcurrentHashMap();
+    private static final Fixture[][] fixtures = new Fixture[THREADS][SENSORS_PER_THREAD];
     private static final RequestSensors[] requestSensorsPool = new RequestSensors[THREADS];
-    private static final FixtureContainer[] perRequestFixtureContainerPool = new FixtureContainer[THREADS];
+    private static final Random randomGen = new Random(1234567890);
     private static final AtomicInteger threadIdx = new AtomicInteger();
 
     // Zipfian should more realisticly represent workload (few tenants generating most of the load)
     private static final ZipfDistribution zipfDistributionContext = new ZipfDistribution(NUM_SENSORS - 1, 1);
-    private static final ZipfDistribution zipfDistributionTypes = new ZipfDistribution(Type.values().length -1, 1);
 
     private static class Fixture
     {
         Context context;
         Type type;
-        double delta;
 
-        Fixture(Context context, Type type, double delta)
+        Fixture(Context context, Type type)
         {
             this.context = context;
-            this.delta = delta;
             this.type = type;
         }
     }
 
-    // Holds fixtures for one request
-    private static class FixtureContainer
-    {
-        Fixture[] fixtures = new Fixture[NUM_FIXTURES];
-        Set<Fixture> uniqueFixtures;
-    }
-
-
     @Setup
     public void generateFixtures()
     {
-        for (int j =0; j < THREADS; j++)
+        SensorsRegistry.USE_STRIPED_LOCK = true;
+        for (int i = 0; i < NUM_SENSORS; i++)
         {
-            RequestSensors requestSensors = new RequestSensors();
-            requestSensorsPool[j] = requestSensors;
-            FixtureContainer fixtureContainer = new FixtureContainer();
-            perRequestFixtureContainerPool[j] = fixtureContainer;
-
-            ConcurrentMap<Integer, Fixture> uniqueFixtures = new ConcurrentHashMap();
-            for (int i = 0; i < NUM_SENSORS; i++)
-            {
-                UUID tableUUID = UUID.randomUUID();
-                if (j % 2 == 0)
-                {
-                    // want half non-unique
-                   String uuidStrPre = "table" + i;
-                   tableUUID = UUID.nameUUIDFromBytes(uuidStrPre.getBytes());
-                }
-
-                Context context = new Context("keyspace" + i, "table" + i, tableUUID.toString());
-                SensorsRegistry.instance.onCreateKeyspace(KeyspaceMetadata.create(context.getKeyspace(), null));
-                SensorsRegistry.instance.onCreateTable(TableMetadata.builder(context.getKeyspace(), context.getTable()).id(TableId.fromUUID(tableUUID)).build());
-                Type type = Type.values()[zipfDistributionTypes.sample()];
-                Fixture fixture = new Fixture(context, type, Math.random());
-                uniqueFixtures.put(i, fixture);
-                fixtureContainer.uniqueFixtures = uniqueFixtures.values().stream().collect(Collectors.toSet());
-            }
-            // adding fixtures into fixture container per request using zipf distribution to pick from unique set
-            IntStream.range(0, NUM_FIXTURES).forEach(n -> fixtureContainer.fixtures[n] = uniqueFixtures.get(zipfDistributionContext.sample()));
+            Context context = new Context("keyspace" + i, "table" + i, UUID.randomUUID().toString());
+            SensorsRegistry.instance.onCreateKeyspace(KeyspaceMetadata.create(context.getKeyspace(), null));
+            SensorsRegistry.instance.onCreateTable(TableMetadata.builder(context.getKeyspace(), context.getTable()).id(TableId.fromString(context.getTableId())).build());
+            contextFixtures.put(i, context);
         }
 
+        IntStream.range(0, THREADS).forEach(t -> {
+            requestSensorsPool[t] = new RequestSensors();
+            IntStream.range(0, SENSORS_PER_THREAD).forEach(s -> fixtures[t][s] = new Fixture((contextFixtures.get(zipfDistributionContext.sample())), Type.values()[randomGen.nextInt(Type.values().length)]));
+        });
     }
 
     @State(Scope.Thread)
     public static class BenchState
     {
-        RequestSensors requestSensors = requestSensorsPool[threadIdx.get()];
-        FixtureContainer fixtureContainer = perRequestFixtureContainerPool[threadIdx.getAndIncrement()];
+        int idx = threadIdx.getAndIncrement();
+        RequestSensors requestSensors = requestSensorsPool[idx];
     }
 
+    // A lots of CPU cycles spent in `syncAllSensors` with `latestSyncedValuePerSensor` map
     @Benchmark
     @Threads(THREADS)
     public void syncAllSensors(BenchState benchState)
     {
         RequestSensors requestSensors = benchState.requestSensors; // each thread has it's own RequestSensors
-        for (Fixture uniqueFixture: benchState.fixtureContainer.uniqueFixtures)
+        for(int i = 0; i < SENSORS_PER_THREAD; i++)
         {
-            requestSensors.registerSensor(uniqueFixture.context, uniqueFixture.type);
+            Fixture f = fixtures[benchState.idx][i];
+            requestSensors.registerSensor(f.context, f.type); // invoking every time simulates worst-case
         }
-        Fixture[] fixtures = benchState.fixtureContainer.fixtures;
-        for(int i = 0; i < fixtures.length; i++)
+        for (int i = 0; i < UPDATES_PER_THREAD; i++)
         {
-            Fixture f = fixtures[i];
-            requestSensors.incrementSensor(f.context, f.type, f.delta);
+            Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
+            requestSensors.getSensor(f.context, f.type).get().increment(1);
+
         }
         requestSensors.syncAllSensors();
+
+        for (int i = 0; i < SENSORS_PER_THREAD; i++)
+        {
+            if (SensorsRegistry.instance.getSensor(fixtures[benchState.idx][i].context, fixtures[benchState.idx][i].type).get().getValue() < 1)
+                System.exit(1);
+        }
     }
 
     @Benchmark
     @Threads(THREADS)
     public void syncAllSensorsNew(BenchState benchState)
     {
-        RequestSensors requestSensors = benchState.requestSensors; // each thread has its own RequestSensors
-        for (Fixture uniqueFixture: benchState.fixtureContainer.uniqueFixtures)
+        RequestSensors requestSensors = benchState.requestSensors; // each thread has it's own RequestSensors
+        for(int i = 0; i < SENSORS_PER_THREAD; i++)
         {
-            requestSensors.registerSensor(uniqueFixture.context, uniqueFixture.type);
+            Fixture f = fixtures[benchState.idx][i];
+            requestSensors.registerSensor(f.context, f.type); // invoking every time simulates worst-case
         }
-        Fixture[] fixtures = benchState.fixtureContainer.fixtures;; // each request has unique set of fixtures with zipf distribution
-        for(int i = 0; i < fixtures.length; i++)
+        for (int i = 0; i < UPDATES_PER_THREAD; i++)
         {
-            Fixture f = fixtures[i];
-            requestSensors.incrementSensor(f.context, f.type, f.delta);
+            Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
+            requestSensors.getSensor(f.context, f.type).get().increment(1);
         }
         requestSensors.syncAllSensorsNew();
+
+        for (int i = 0; i < SENSORS_PER_THREAD; i++)
+        {
+            if (SensorsRegistry.instance.getSensor(fixtures[benchState.idx][i].context, fixtures[benchState.idx][i].type).get().getValue() < 1)
+                System.exit(1);
+        }
     }
 
     // Note: replacing existing lock with striped lock (1000 stripes) increases throughput by 3X
@@ -170,16 +157,20 @@ public class RequestSensorBench
     @Threads(THREADS)
     public void benchUsingSensorRegistryDirectly(BenchState benchState)
     {
-        Fixture[] fixtures = benchState.fixtureContainer.fixtures;; // each request has unique set of fixtures with zipf distribution
-        for(int i = 0; i < fixtures.length; i++)
+        for (int i = 0; i < SENSORS_PER_THREAD; i++)
         {
-            Fixture f = fixtures[i];
-            Sensor sensor = SensorsRegistry.instance.getOrCreateSensor(f.context, f.type).orElseThrow();
-            sensor.increment(f.delta);
+            Fixture f = fixtures[benchState.idx][i];
+            SensorsRegistry.instance.getOrCreateSensor(f.context, f.type).orElseThrow();
+        }
+        for (int i = 0; i < UPDATES_PER_THREAD; i++)
+        {
+            Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
+            SensorsRegistry.instance.getSensor(f.context, f.type).get().increment(1);
         }
     }
 
-    public static void main(String... args) throws Exception {
+    public static void main(String... args) throws Exception
+    {
         Options options = new OptionsBuilder().include(RequestSensorBench.class.getSimpleName()).build();
         new Runner(options).run();
     }

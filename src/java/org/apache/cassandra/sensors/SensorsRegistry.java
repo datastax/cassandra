@@ -156,33 +156,42 @@ public class SensorsRegistry implements SchemaChangeListener
 
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
-        Lock lock = readLock(context.getKeyspace());
-        try
-        {
-            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
-                return Optional.empty();
+        return getSensor(context, type).or(() -> {
+            Lock lock = readLock(context.getKeyspace());
+            try
+            {
+                if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
+                    return Optional.empty();
 
-            // Create a candidate sensor and try inserting in the identity map: this is to make sure concurrent calls will
-            // use the same sensor below
-            Sensor sensor = identity.computeIfAbsent(Pair.create(context, type), (ignored) -> {
-                Sensor created = new Sensor(context, type);
-                notifyOnSensorCreated(created);
-                return created;
-            });
+                // Create a candidate sensor and try inserting in the identity map: this is to make sure concurrent calls will
+                // use the same sensor below
+                Pair<Context, Type> contextAndType = Pair.create(context, type);
+                Sensor sensor = identity.get(contextAndType);
+                sensor = sensor != null ? sensor : identity.computeIfAbsent(contextAndType, (ignored) -> {
+                    Sensor created = new Sensor(context, type);
+                    notifyOnSensorCreated(created);
+                    return created;
+                });
 
-            Set<Sensor> keyspaceSet = byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
-            keyspaceSet.add(sensor);
-            Set<Sensor> tableSet = byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
-            tableSet.add(sensor);
-            Set<Sensor> opSet = byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
-            opSet.add(sensor);
+                Set<Sensor> keyspaceSet = byKeyspace.get(sensor.getContext().getKeyspace());
+                keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
+                keyspaceSet.add(sensor);
 
-            return Optional.of(sensor);
-        }
-        finally
-        {
-            lock.unlock();
-        }
+                Set<Sensor> tableSet = byTableId.get(sensor.getContext().getTableId());
+                tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
+                tableSet.add(sensor);
+
+                Set<Sensor> opSet = byType.get(sensor.getType().name());
+                opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
+                opSet.add(sensor);
+
+                return Optional.of(sensor);
+            }
+            finally
+            {
+                lock.unlock();
+            }
+        });
     }
 
     protected void incrementSensor(Context context, Type type, double value)
@@ -271,7 +280,7 @@ public class SensorsRegistry implements SchemaChangeListener
      * Remove sensors from a collection of candidates based on the given predicate
      *
      * @param candidates the candidates to remove from
-     * @param accept the predicate used to select the sensors to remove
+     * @param accept     the predicate used to select the sensors to remove
      * @return the set of removed sensors
      */
     private Set<Sensor> removeSensor(Collection<? extends Collection<Sensor>> candidates, Predicate<Sensor> accept)
@@ -318,7 +327,7 @@ public class SensorsRegistry implements SchemaChangeListener
 
     private void tryNotifyListeners(Sensor sensor, BiConsumer<SensorsRegistryListener, Sensor> notification, String action)
     {
-        for (SensorsRegistryListener l: listeners)
+        for (SensorsRegistryListener l : listeners)
         {
             try
             {
