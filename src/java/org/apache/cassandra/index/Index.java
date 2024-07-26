@@ -37,7 +37,6 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;

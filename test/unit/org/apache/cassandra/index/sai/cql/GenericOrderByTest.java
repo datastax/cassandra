@@ -106,4 +106,31 @@ public class GenericOrderByTest extends SAITester
             assertRows(execute("SELECT pk FROM %s WHERE val < 0 ORDER BY str_val DESC LIMIT 1"), row(-4));
         });
     }
+
+    @Test
+    public void testMultiplePrimaryKeysForSameTerm() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, x int, val int, str_val ascii, PRIMARY KEY (pk, x))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // We use a primary key with the same partition column value to ensure it goes to the same shard in the
+        // memtable, which reproduces a bug we hit.
+        execute("INSERT INTO %s (pk, x, val, str_val) VALUES (?, ?, ?, ?)", 1, 1, 1, "A");
+        execute("INSERT INTO %s (pk, x, val, str_val) VALUES (?, ?, ?, ?)", 1, 2, 1, "A");
+        // Goes to a different shard in the memtable
+        execute("INSERT INTO %s (pk, x, val, str_val) VALUES (?, ?, ?, ?)", 2, 3, 2, "B");
+
+        beforeAndAfterFlush(() -> {
+            // Literal order by
+            assertRows(execute("SELECT x FROM %s ORDER BY str_val ASC LIMIT 2"), row(1), row(2));
+            assertRows(execute("SELECT x FROM %s ORDER BY str_val DESC LIMIT 1"), row(3));
+            assertRows(execute("SELECT x FROM %s WHERE val = 1 ORDER BY str_val ASC LIMIT 2"), row(1), row(2));
+            // Numeric order by
+            assertRows(execute("SELECT x FROM %s ORDER BY val ASC LIMIT 2"), row(1), row(2));
+            assertRows(execute("SELECT x FROM %s ORDER BY val DESC LIMIT 1"), row(3));
+            assertRows(execute("SELECT x FROM %s WHERE str_val = 'A' ORDER BY val ASC LIMIT 2"), row(1), row(2));
+        });
+    }
 }

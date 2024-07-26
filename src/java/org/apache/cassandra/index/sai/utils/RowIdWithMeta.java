@@ -34,7 +34,7 @@ public abstract class RowIdWithMeta
         this.segmentRowId = segmentRowId;
     }
 
-    public final long getSegmentRowId()
+    public final int getSegmentRowId()
     {
         return segmentRowId;
     }
