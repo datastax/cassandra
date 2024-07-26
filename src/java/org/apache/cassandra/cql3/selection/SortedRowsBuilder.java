@@ -25,7 +25,10 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import com.google.common.math.IntMath;
+
 import org.apache.cassandra.index.Index;
+import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.PriorityQueue;
 
 import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
@@ -37,12 +40,15 @@ public abstract class SortedRowsBuilder
 {
     public final int limit;
     public final int offset;
+    public final int fetchLimit; // limit + offset, saturated to Integer.MAX_VALUE
 
+    @SuppressWarnings("UnstableApiUsage")
     private SortedRowsBuilder(int limit, int offset)
     {
         assert limit > 0 && offset >= 0;
         this.limit = limit;
         this.offset = offset;
+        this.fetchLimit = IntMath.saturatedAdd(limit, offset);
     }
 
     /**
@@ -89,6 +95,8 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
     {
+        // Heap and hybrid approaches are only useful when the limit is smaller than the number of collected rows.
+        // If there is no limit we will return all the collected rows, so we can simply use the list approach.
         return limit == NO_LIMIT
                ? WithListSort.create(limit, offset, comparator)
                : WithHybridSort.create(limit, offset, comparator);
@@ -104,6 +112,8 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
     {
+        // Heap and hybrid approaches are only useful when the limit is smaller than the number of collected rows.
+        // If there is no limit we will return all the collected rows, so we can simply use the list approach.
         return limit == NO_LIMIT
                ? WithListSort.create(limit, offset, scorer)
                : WithHybridSort.create(limit, offset, scorer);
@@ -195,7 +205,7 @@ public abstract class SortedRowsBuilder
 
             // trim the results and undecorate them
             List<List<ByteBuffer>> result = new ArrayList<>();
-            for (int i = offset; i < Math.min(limit + offset, rows.size()); i++)
+            for (int i = offset; i < Math.min(fetchLimit, rows.size()); i++)
             {
                 result.add(undecorator.apply(rows.get(i)));
             }
@@ -234,9 +244,11 @@ public abstract class SortedRowsBuilder
      */
     public static class WithHeapSort<T extends WithHeapSort.RowWithId> extends SortedRowsBuilder
     {
+        public static final int MAX_SIZE = ArrayUtil.MAX_ARRAY_LENGTH;
+        public static final String LIMIT_REQUIRED_ERROR = "Queries fetching more than " + MAX_SIZE + " rows cannot use WithHeapSort.";
+
         private final BiFunction<List<ByteBuffer>, Integer, T> decorator;
         private final PriorityQueue<T> heap;
-        private final int heapCapacity;
 
         private List<T> initialRows = new ArrayList<>(); // first limit+offset rows to be added with PriorityQueue#addAll
         private int numAddedRows = 0;
@@ -264,10 +276,9 @@ public abstract class SortedRowsBuilder
                              Comparator<T> comparator)
         {
             super(limit, offset);
-            assert limit != NO_LIMIT : "Queries without a limit should use WithListSort instead.";
+            assert fetchLimit < MAX_SIZE : LIMIT_REQUIRED_ERROR;
             this.decorator = decorator;
-            heapCapacity = limit + offset;
-            heap = new PriorityQueue<>(limit + offset)
+            heap = new PriorityQueue<>(fetchLimit)
             {
                 @Override
                 protected boolean lessThan(T t1, T t2)
@@ -287,7 +298,7 @@ public abstract class SortedRowsBuilder
 
             T decoratedRow = decorator.apply(row, numAddedRows++);
 
-            if (initialRows != null && numAddedRows >= heapCapacity)
+            if (initialRows != null && numAddedRows >= fetchLimit)
                 heapifyInitialRows();
 
             if (initialRows != null)
@@ -398,7 +409,9 @@ public abstract class SortedRowsBuilder
             super(limit, offset);
             this.list = list;
             this.heapSupplier = heapSupplier;
-            this.threshold = (limit + offset) * SWITCH_FACTOR;
+            this.threshold = fetchLimit >= WithHeapSort.MAX_SIZE
+                             ? Integer.MAX_VALUE // will never use the heap
+                             : (limit + offset) * SWITCH_FACTOR;
         }
 
         @Override
