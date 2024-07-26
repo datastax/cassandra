@@ -30,7 +30,6 @@ import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import javax.annotation.Nullable;
@@ -460,7 +459,7 @@ public final class Types implements Iterable<UserType>
 
                 ImmutableList<AbstractType<?>> preparedFieldTypes =
                 fieldTypes.stream()
-                          .map(t -> t.prepareInternal(keyspace, types).getType())
+                          .map(t -> t.prepare(keyspace, types).getType())
                           .collect(toImmutableList());
 
                 return new UserType(keyspace, bytes(name), preparedFieldNames, preparedFieldTypes, true);

@@ -34,7 +34,6 @@ import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.ByteType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CollectionType;
-import org.apache.cassandra.db.marshal.CollectionType.Kind;
 import org.apache.cassandra.db.marshal.CounterColumnType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.DoubleType;
@@ -798,11 +797,6 @@ public interface CQL3Type
          */
         public abstract CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException;
 
-        public CQL3Type prepareInternal(String keyspace, Types udts) throws InvalidRequestException
-        {
-            return prepare(keyspace, udts);
-        }
-
         public boolean referencesUserType(String name)
         {
             return false;
@@ -947,41 +941,9 @@ public interface CQL3Type
             }
 
             @Override
-            public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
-            {
-                return prepare(keyspace, udts, false);
-            }
-
-            @Override
-            public CQL3Type prepareInternal(String keyspace, Types udts)
-            {
-                return prepare(keyspace, udts, true);
-            }
-
-            public CQL3Type prepare(String keyspace, Types udts, boolean isInternal) throws InvalidRequestException
+            public CQL3Type prepare(String keyspace, Types udts)
             {
                 assert values != null : "Got null values type for a collection";
-
-                if (!frozen && values.supportsFreezing() && !values.frozen)
-                    throwNestedNonFrozenError(values);
-
-                // we represent supercolumns as maps, internally, and we do allow counters in supercolumns. Thus,
-                // for internal type parsing (think schema) we have to make an exception and allow counters as (map) values
-                if (values.isCounter() && !isInternal)
-                    throw new InvalidRequestException("Counters are not allowed inside collections: " + this);
-
-                if (values.isDuration() && kind == Kind.SET)
-                    throw new InvalidRequestException("Durations are not allowed inside sets: " + this);
-
-                if (keys != null)
-                {
-                    if (keys.isCounter())
-                        throw new InvalidRequestException("Counters are not allowed inside collections: " + this);
-                    if (keys.isDuration())
-                        throw new InvalidRequestException("Durations are not allowed as map keys: " + this);
-                    if (!frozen && keys.supportsFreezing() && !keys.frozen)
-                        throwNestedNonFrozenError(keys);
-                }
 
                 AbstractType<?> valueType = values.prepare(keyspace, udts).getType();
                 switch (kind)
@@ -994,15 +956,8 @@ public interface CQL3Type
                         assert keys != null : "Got null keys type for a collection";
                         return new Collection(MapType.getInstance(keys.prepare(keyspace, udts).getType(), valueType, !frozen));
                 }
-                throw new AssertionError();
-            }
 
-            private void throwNestedNonFrozenError(Raw innerType)
-            {
-                if (innerType instanceof RawCollection)
-                    throw new InvalidRequestException("Non-frozen collections are not allowed inside collections: " + this);
-                else if (innerType.isUDT())
-                    throw new InvalidRequestException("Non-frozen UDTs are not allowed inside collections: " + this);
+                throw new AssertionError();
             }
 
             @Override
