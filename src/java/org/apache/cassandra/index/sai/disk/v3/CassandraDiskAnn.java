@@ -51,7 +51,6 @@ import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.PQVersion;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
-import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
@@ -70,7 +69,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     public static final int PQ_MAGIC = 0xB011A61C; // PQ_MAGIC, with a lot of liberties taken
 
     private final FileHandle graphHandle;
-    private final OnDiskOrdinalsMap ordinalsMap;
+    private final V3OnDiskOrdinalsMap ordinalsMap;
     private final Set<FeatureId> features;
     private final GraphIndex graph;
     private final VectorSimilarityFunction similarityFunction;
@@ -152,7 +151,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         }
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
-        ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
+        ordinalsMap = new V3OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcher(graph));
     }

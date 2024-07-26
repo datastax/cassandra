@@ -83,6 +83,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v3.V3VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
@@ -404,7 +405,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
-            long postingsPosition = new VectorPostingsWriter<T>(postingsOneToOne, builder.getGraph().size(), newToOldMapper)
+            long postingsPosition = new V3VectorPostingsWriter<T>(postingsOneToOne, builder.getGraph().size(), newToOldMapper)
                                             .writePostings(postingsOutput.asSequentialWriter(),
                                                            vectorValues, postingsMap, deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
