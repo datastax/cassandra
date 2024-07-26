@@ -188,6 +188,9 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
     }
 
+    /**
+     * Apply FADV_DONTNEED to the file region.
+     */
     public void trySkipCache(long offset, long length)
     {
         int fd = INativeLibrary.instance.getfd(channel);
