@@ -279,6 +279,7 @@ public class FileHandle extends SharedCloseableImpl
 
         private boolean mmapped = false;
         private boolean compressed = false;
+        private boolean adviseRandom = false;
         private long length = -1;
 
         public Builder(File file)
@@ -383,6 +384,12 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+        public Builder adviseRandom()
+        {
+            adviseRandom = true;
+            return this;
+        }
+
         /**
          * Complete building {@link FileHandle} without overriding file length.
          *
@@ -431,7 +438,7 @@ public class FileHandle extends SharedCloseableImpl
                 {
                     if (compressed)
                     {
-                        regions = MmappedRegions.map(channelCopy, compressionMetadata, sliceDescriptor.sliceStart);
+                        regions = MmappedRegions.map(channelCopy, compressionMetadata, sliceDescriptor.sliceStart, adviseRandom);
                         rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata, regions, sliceDescriptor.sliceStart));
                     }
                     else
@@ -442,6 +449,9 @@ public class FileHandle extends SharedCloseableImpl
                 }
                 else
                 {
+                    if (adviseRandom)
+                        logger.warn("adviseRandom ignored for non-mmapped FileHandle {}", file);
+
                     regions = null;
                     if (compressed)
                     {
@@ -507,7 +517,7 @@ public class FileHandle extends SharedCloseableImpl
             }
 
             if (regions == null)
-                regions = MmappedRegions.map(channel, length, startOffset);
+                regions = MmappedRegions.map(channel, length, startOffset, adviseRandom);
             else
                 regions.extend(length);
         }

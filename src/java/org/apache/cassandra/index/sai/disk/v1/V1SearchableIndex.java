@@ -35,7 +35,6 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
@@ -47,7 +46,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Throwables;
 
-import static java.lang.Math.max;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COLUMN_NAME;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COMPONENT_METADATA;
@@ -100,8 +98,9 @@ public class V1SearchableIndex implements SearchableIndex
             this.minKey = metadatas.get(0).minKey.partitionKey();
             this.maxKey = metadatas.get(metadatas.size() - 1).maxKey.partitionKey();
 
-            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
-            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
+            var version = perIndexComponents.version();
+            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
+            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
 
             this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
 
