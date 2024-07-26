@@ -53,7 +53,8 @@ public class MergePrimaryWithSortKeyIterator extends AbstractIterator<PrimaryKey
     {
         int size = !iterators.isEmpty() ? iterators.size() : 1;
         Comparator<PeekingIterator<? extends PrimaryKeyWithSortKey>> comparator = Comparator.comparing(PeekingIterator::peek);
-        this.pq = new PriorityQueue<>(size, orderer.isAscending() ? comparator : comparator.reversed());
+        // ANN's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
+        this.pq = new PriorityQueue<>(size, orderer.isAscending() || orderer.isANN() ? comparator : comparator.reversed());
         for (CloseableIterator<? extends PrimaryKeyWithSortKey> iterator : iterators)
             if (iterator.hasNext())
                 pq.add(Iterators.peekingIterator(iterator));

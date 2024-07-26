@@ -217,7 +217,8 @@ public class TrieMemtableIndex implements MemtableIndex
     {
         if (keys.isEmpty())
             return CloseableIterator.emptyIterator();
-        Comparator<PrimaryKeyWithSortKey> comparator = orderer.isAscending()
+        // ANN's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
+        Comparator<PrimaryKeyWithSortKey> comparator = orderer.isAscending() || orderer.isANN()
                                                        ? Comparator.naturalOrder()
                                                        : Comparator.reverseOrder();
         var pq = new PriorityQueue<>(comparator);
