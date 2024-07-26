@@ -215,6 +215,11 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     long dataPosition = keys.isExhausted() ? sstable.uncompressedLength() : keys.dataPosition();
                     bytesProcessed += dataPosition - previousKeyPosition;
                     previousKeyPosition = dataPosition;
+
+                    // Fail fast if index build has been aborted. Index writer won't throw when it's aborted. Because
+                    // it's used during compaction and we don't want to fail compaction on index error.
+                    if (indexWriter.isAborted())
+                        throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
@@ -311,13 +316,16 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             components.forWrite().forceDeleteAllComponents();
     }
 
-    private void completeSSTable(SSTableFlushObserver indexWriter,
+    private void completeSSTable(StorageAttachedIndexWriter indexWriter,
                                  SSTableReader sstable,
                                  Set<StorageAttachedIndex> indexes,
                                  CountDownLatch latch,
                                  Set<Component> replacedComponents) throws InterruptedException
     {
-        indexWriter.complete();
+        indexWriter.complete(sstable);
+
+        if (indexWriter.isAborted())
+            throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
 
         if (latch != null)
         {

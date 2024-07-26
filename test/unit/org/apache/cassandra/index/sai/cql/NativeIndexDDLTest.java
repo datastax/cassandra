@@ -24,6 +24,7 @@ package org.apache.cassandra.index.sai.cql;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -59,6 +60,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexBuilder;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
@@ -80,6 +82,7 @@ import org.mockito.Mockito;
 
 import static java.util.Collections.singletonList;
 import static junit.framework.TestCase.fail;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -95,6 +98,11 @@ public class NativeIndexDDLTest extends SAITester
 
     private static final Injection failNDIInitialializaion = Injections.newCustom("fail_ndi_initialization")
                                                                        .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndexBuilder.class).onMethod("build"))
+                                                                       .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
+                                                                       .build();
+
+    private static final Injection failNumericIndexBuild = Injections.newCustom("fail_numeric_index_build")
+                                                                       .add(InvokePointBuilder.newInvokePoint().onClass(SegmentBuilder.KDTreeSegmentBuilder.class).onMethod("addInternal"))
                                                                        .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                        .build();
 
@@ -886,6 +894,40 @@ public class NativeIndexDDLTest extends SAITester
 
         assertEquals("Segment memory limiter should revert to zero after truncate.", 0L, getSegmentBufferUsedBytes());
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
+    }
+
+    @Test
+    public void testIndexRebuildAborted() throws Throwable
+    {
+        // prepare schema and data
+        createTable(CREATE_TABLE_TEMPLATE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+        flush();
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+        assertEquals(2, rows.all().size());
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        SecondaryIndexManager sim = cfs.getIndexManager();
+        StorageAttachedIndex sai = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        assertThat(sai.getIndexContext().getView().getIndexes()).hasSize(1);
+
+        StorageAttachedIndexGroup saiGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        assertThat(saiGroup.sstableContextManager().size()).isEqualTo(1);
+
+        // rebuild index with byteman error
+        Injections.inject(failNumericIndexBuild);
+
+        // rebuild should fail
+        assertThatThrownBy(() -> sim.buildIndexesBlocking(cfs.getLiveSSTables(), new HashSet<>(sim.listIndexes()), true))
+                          .isInstanceOf(RuntimeException.class).hasMessageContaining("is aborted");
+
+        // index is no longer queryable
+        assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0"))
+        .isInstanceOf(ReadFailureException.class);
     }
 
     @Test

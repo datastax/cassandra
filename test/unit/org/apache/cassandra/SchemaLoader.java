@@ -814,7 +814,7 @@ public static TableMetadata.Builder clusteringSASICFMD(String ksName, String cfN
         Schema.instance.transform(SchemaTransformations.addTable(metadata, true));
     }
 
-    private static CompressionParams compressionParams(int chunkLength)
+    public static CompressionParams compressionParams(int chunkLength)
     {
         String algo = System.getProperty("cassandra.test.compression.algo", "lz4").toLowerCase();
         switch (algo)

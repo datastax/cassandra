@@ -43,6 +43,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
@@ -1271,7 +1272,7 @@ public class CustomIndexTest extends CQLTester
                 }
 
                 @Override
-                public void complete()
+                public void complete(SSTable sstable)
                 {
                     completeFlushCalls.incrementAndGet();
                 }
@@ -1667,10 +1668,10 @@ public class CustomIndexTest extends CQLTester
                     }
 
                     @Override
-                    public void complete()
+                    public void complete(SSTable sstable)
                     {
                         completeFlushCalls.incrementAndGet();
-                        observers.forEach(SSTableFlushObserver::complete);
+                        observers.forEach(obs -> obs.complete(sstable));
                     }
                 };
             }

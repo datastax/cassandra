@@ -74,6 +74,8 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
 
 public class CompactionGraph implements Closeable, Accountable
@@ -120,10 +122,10 @@ public class CompactionGraph implements Closeable, Accountable
         // and start another to avoid crashing CM.  But we'd rather not do this because the whole goal of
         // CompactionGraph is to write one segment only.
         var dd = perIndexComponents.descriptor();
-        var rowsPerKey = Keyspace.open(dd.ksname).getColumnFamilyStore(dd.cfname).getMeanRowsPerPartition();
+        var rowsPerKey = max(1, Keyspace.open(dd.ksname).getColumnFamilyStore(dd.cfname).getMeanRowsPerPartition());
         long estimatedRows = (long) (1.1 * keyCount * rowsPerKey); // 10% fudge factor
         int maxRowsInGraph = Integer.MAX_VALUE - 100_000; // leave room for a few more async additions until we flush
-        postingsEntriesAllocated = estimatedRows > maxRowsInGraph ? maxRowsInGraph : (int) estimatedRows;
+        postingsEntriesAllocated = max(1000, (int) min(estimatedRows, maxRowsInGraph));
 
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
@@ -278,25 +280,26 @@ public class CompactionGraph implements Closeable, Accountable
             writer.writeHeader();
             long postingsOffset = postingsOutput.getFilePointer();
             var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
-            var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createFileHandle();
-            var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset);
-            var postingsFuture = es.submit(() -> {
-                try (var view = index.getView())
-                {
-                    return new VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
-                           .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
-                }
-            });
+            long postingsLength;
+            try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createFileHandle();
+                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
+            {
+                var postingsFuture = es.submit(() -> {
+                    try (var view = index.getView())
+                    {
+                        return new VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
+                               .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
+                    }
+                });
 
-            // complete internal graph clean up
-            builder.cleanup();
+                // complete internal graph clean up
+                builder.cleanup();
 
-            // wait for postings to finish writing and clean up related resources
-            long postingsEnd = postingsFuture.get();
-            long postingsLength = postingsEnd - postingsOffset;
-            es.shutdown();
-            index.close();
-            indexHandle.close();
+                // wait for postings to finish writing and clean up related resources
+                long postingsEnd = postingsFuture.get();
+                postingsLength = postingsEnd - postingsOffset;
+                es.shutdown();
+            }
 
             // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();

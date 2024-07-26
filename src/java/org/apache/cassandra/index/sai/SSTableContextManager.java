@@ -90,7 +90,7 @@ public class SSTableContextManager
             if (!perSSTableComponents.isComplete())
             {
                 // This usually means no index has been built for that sstable yet (the alternative would be that we
-                // lost the completion marker somehow, but that case is currently not considered). Not point in running
+                // lost the completion marker when index build failed). Not point in running
                 // validation (it would fail), and we also don't want to add it to the returned contexts, since it's
                 // not ready yet. We know a future call of this method will be triggered for that sstable once the
                 // index finishes building.

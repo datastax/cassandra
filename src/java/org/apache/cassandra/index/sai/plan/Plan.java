@@ -30,7 +30,6 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,7 +39,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
-import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -143,6 +141,19 @@ abstract public class Plan
         this.factory = factory;
         this.access = access;
     }
+
+    /** selectivity comparisons to 0 will probably cause bugs, use this instead */
+    protected static boolean isEffectivelyZero(double a) {
+        assert a >= 0;
+        return a < 1e-9;
+    }
+
+    /** dividing by extremely tiny numbers can cause overflow so clamp the minimum to 1e-9 */
+    protected static double boundedSelectivity(double selectivity) {
+        assert 0 <= selectivity && selectivity <= 1.0;
+        return Math.max(1e-9, selectivity);
+    }
+
     /**
      * Returns a new list containing subplans of this node.
      * The list can be later freely modified by the caller and does not affect the original plan.
@@ -548,10 +559,19 @@ abstract public class Plan
 
         protected abstract KeysIterationCost estimateCost();
 
-        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor);
+        /**
+         * Executes the operation represented by this node.
+         * The node itself isn't supposed for doing the actual work, but rather serves as a director which
+         * delegates the work to the query controller through the passed Executor.
+         *
+         * @param executor  does all the hard work like fetching keys from the indexes or ANN sort
+         * @param softLimit the number of keys likely to be requested from the returned iterator;
+         *                  this is a hint only - it does not change the result set, but may change performance
+         */
+        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit);
 
         protected abstract KeysIteration withAccess(Access patterns);
-        
+
         final double expectedKeys()
         {
             return cost().expectedKeys;
@@ -612,7 +632,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             return RangeIterator.empty();
         }
@@ -657,7 +677,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             // Not supported because it doesn't make a lot of sense.
             // A direct scan of table data would be certainly faster.
@@ -763,7 +783,7 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
             return executor.getKeysFromIndex(predicate);
         }
@@ -833,11 +853,11 @@ abstract public class Plan
          */
         private List<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
-            if (selectivity() == 0.0)
+            if (isEffectivelyZero(selectivity()))
             {
-                // all subplan selectivity should also be 0
+                // all subplan selectivity should also be ~0
                 for (var subplan: subplans)
-                    assert subplan.selectivity() == 0.0;
+                    assert isEffectivelyZero(subplan.selectivity());
                 return subplans;
             }
 
@@ -913,13 +933,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             RangeIterator.Builder builder = RangeUnionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((RangeIterator) plan.execute(executor));
+                    builder.add((RangeIterator) plan.execute(executor, softLimit));
                 return builder.build();
             }
             catch (Throwable t)
@@ -960,7 +980,7 @@ abstract public class Plan
          */
         private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
-            double loops = selectivity() == 0 ? 1.0 : subplans.get(0).selectivity() / selectivity();
+            double loops = isEffectivelyZero(selectivity()) ? 1.0 : subplans.get(0).selectivity() / selectivity();
 
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
             newSubplans.add(subplans.get(0).withAccess(access.scaleDistance(loops).convolute(loops, 1.0)));
@@ -970,18 +990,11 @@ abstract public class Plan
             {
                 KeysIteration subplan = subplans.get(i);
                 double cumulativeSelectivity = subplans.get(0).selectivity() * matchProbability;
-                if (selectivity() > 0.0)
-                {
-                    double skipDistance = subplan.selectivity() / cumulativeSelectivity;
-                    Access subAccess = access.scaleDistance(subplan.selectivity() / selectivity())
-                                             .convolute(loops * matchProbability, skipDistance)
-                                             .forceSkip();
-                    newSubplans.add(subplan.withAccess(subAccess));
-                }
-                else
-                {
-                    newSubplans.add(subplan.withAccess(Access.EMPTY));
-                }
+                double skipDistance = subplan.selectivity() / boundedSelectivity(cumulativeSelectivity);
+                Access subAccess = access.scaleDistance(subplan.selectivity() / boundedSelectivity(selectivity()))
+                                         .convolute(loops * matchProbability, skipDistance)
+                                         .forceSkip();
+                newSubplans.add(subplan.withAccess(subAccess));
                 matchProbability *= subplan.selectivity();
             }
             return newSubplans;
@@ -1046,13 +1059,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected RangeIterator execute(Executor executor, int softLimit)
         {
             RangeIterator.Builder builder = RangeIntersectionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((RangeIterator) plan.execute(executor));
+                    builder.add((RangeIterator) plan.execute(executor, softLimit));
 
                 return builder.build();
             }
@@ -1123,10 +1136,11 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
-            RangeIterator sourceIterator = (RangeIterator) source.execute(executor);
-            int softLimit = Math.round((float) access.totalCount);
+            // soft limit for fetching the keys from source is MAX_VALUE because we need to know
+            // all keys from which to pick the top K.
+            RangeIterator sourceIterator = (RangeIterator) source.execute(executor, Integer.MAX_VALUE);
             return executor.getTopKRows(sourceIterator, ordering, softLimit);
         }
 
@@ -1167,13 +1181,13 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
             // Divide soft limit by 2, so we can terminate search earlier if it
             // occurs that we collected enough rows. keysCount() gives us the
             // average expected number of rows that will be needed but
             // many queries will need fewer than that.
-            return executor.getTopKRows(ordering, max(1, keysCount() / 2));
+            return executor.getTopKRows(ordering, max(1, softLimit / 2));
         }
 
         @Override
@@ -1305,14 +1319,12 @@ abstract public class Plan
         }
 
         /**
-         * Scale the access pattern of the source to reflect that we will only need
-         * to pull rows from it until the Filter's selectivity is reached.
+         * Scale the access pattern of the source to reflect that we will need
+         * to keep pulling rows from it until the Filter is satisfied.
          */
         private RowsIteration propagateAccess(RowsIteration source)
         {
-            Access scaledAccess = targetSelectivity == 0.0
-                                  ? Access.EMPTY
-                                  : access.scaleCount(source.selectivity() / targetSelectivity);
+            Access scaledAccess = access.scaleCount(source.selectivity() / boundedSelectivity(targetSelectivity));
             return source.withAccess(scaledAccess);
         }
 
@@ -1368,9 +1380,9 @@ abstract public class Plan
     static class Limit extends RowsIteration
     {
         private final LazyTransform<RowsIteration> source;
-        private final long limit;
+        final int limit;
 
-        private Limit(Factory factory, int id, RowsIteration source, long limit, Access access)
+        private Limit(Factory factory, int id, RowsIteration source, int limit, Access access)
         {
             super(factory, id, access);
             this.limit = limit;
@@ -1620,7 +1632,7 @@ abstract public class Plan
          * Constructs a plan node that fetches only a limited number of rows.
          * It is likely going to have lower fullCost than the fullCost of its input.
          */
-        public RowsIteration limit(@Nonnull RowsIteration source, long limit)
+        public RowsIteration limit(@Nonnull RowsIteration source, int limit)
         {
             return new Limit(this, nextId++, source, limit, defaultAccess);
         }
@@ -1764,7 +1776,7 @@ abstract public class Plan
         double hitRate = ChunkCache.instance == null ? 1.0 : ChunkCache.instance.metrics.hitRate();
         return 0.25 * (Double.isFinite(hitRate) ? max(0.1, hitRate) : 1.0);
     }
-    
+
     /**
      * Describes the usage pattern of the result of the plan node.
      * Modelled by the number of accesses and the distribution of skip distances.

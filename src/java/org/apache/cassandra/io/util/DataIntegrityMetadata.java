@@ -149,7 +149,9 @@ public class DataIntegrityMetadata
             long calculatedDigestValue = checkedInputStream.getChecksum().getValue();
             if (storedDigestValue != calculatedDigestValue)
             {
-                throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA));
+                throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA)
+                                      + " storedDigestValue=" + storedDigestValue
+                                      + " calculatedDigestValue=" + calculatedDigestValue);
             }
         }
 

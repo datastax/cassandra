@@ -2573,9 +2573,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                     obsoletion.commit();
 
                 // don't ideally want to dropPageCache for the file until all instances have been released
-                StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.DATA));
-                StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.ROW_INDEX));
-                StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.PARTITION_INDEX));
+                StorageProvider.instance.invalidateFileSystemCache(desc, obsoletion != null);
             }
             finally
             {

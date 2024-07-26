@@ -57,6 +57,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.File;
@@ -451,7 +452,7 @@ public class SSTableFlushObserverTest
         }
 
         @Override
-        public void complete()
+        public void complete(SSTable sstable)
         {
             isComplete = true;
             if (pendingHeader)

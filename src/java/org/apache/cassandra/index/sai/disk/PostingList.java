@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.utils.Throwables;
@@ -26,26 +27,25 @@ import org.apache.cassandra.utils.Throwables;
 /**
  * Interface for advancing on and consuming a posting list.
  */
-//TODO Need to check int and long usage throughout this post DSP-19608
 @NotThreadSafe
 public interface PostingList extends Closeable
 {
     PostingList EMPTY = new EmptyPostingList();
 
-    long OFFSET_NOT_FOUND = -1;
-    long END_OF_STREAM = Long.MAX_VALUE;
+    int OFFSET_NOT_FOUND = -1;
+    int END_OF_STREAM = Integer.MAX_VALUE;
 
     @Override
     default void close() throws IOException {}
 
     /**
-     * Retrieves the next segment row ID, not including row IDs that have been returned by {@link #advance(long)}.
+     * Retrieves the next segment row ID, not including row IDs that have been returned by {@link #advance(int)}.
      *
      * @return next segment row ID
      */
-    long nextPosting() throws IOException;
+    int nextPosting() throws IOException;
 
-    long size();
+    int size();
 
     /**
      * @return {@code true} if this posting list contains no postings
@@ -67,7 +67,7 @@ public interface PostingList extends Closeable
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
-    long advance(long targetRowID) throws IOException;
+    int advance(int targetRowID) throws IOException;
 
     /**
      * @return peekable wrapper of current posting list
@@ -77,19 +77,23 @@ public interface PostingList extends Closeable
         return new PeekablePostingList(this);
     }
 
-    class PeekablePostingList implements PostingList
+    /**
+     * Note: this class has a natural ordering that is inconsistent with equals in order to
+     * use {@link PriorityQueue}'s O(N) constructor.
+     */
+    class PeekablePostingList implements PostingList, Comparable<PeekablePostingList>
     {
         private final PostingList wrapped;
 
         private boolean peeked = false;
-        private long next;
+        private int next;
 
         public PeekablePostingList(PostingList wrapped)
         {
             this.wrapped = wrapped;
         }
 
-        public long peek()
+        public int peek()
         {
             if (peeked)
                 return next;
@@ -105,7 +109,7 @@ public interface PostingList extends Closeable
             }
         }
 
-        public long advanceWithoutConsuming(long targetRowID) throws IOException
+        public int advanceWithoutConsuming(int targetRowID) throws IOException
         {
             if (peek() == END_OF_STREAM)
                 return END_OF_STREAM;
@@ -119,7 +123,7 @@ public interface PostingList extends Closeable
         }
 
         @Override
-        public long nextPosting() throws IOException
+        public int nextPosting() throws IOException
         {
             if (peeked)
             {
@@ -130,13 +134,13 @@ public interface PostingList extends Closeable
         }
 
         @Override
-        public long size()
+        public int size()
         {
             return wrapped.size();
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public int advance(int targetRowID) throws IOException
         {
             if (peeked && next >= targetRowID)
             {
@@ -153,24 +157,33 @@ public interface PostingList extends Closeable
         {
             wrapped.close();
         }
+
+        @Override
+        public int compareTo(PeekablePostingList o)
+        {
+            // we are comparing over some mutable state: this should not generally work
+            // in this case it works because this method is used ONLY
+            // while constructing a PriorityQueue
+            return Long.compare(peek(), o.peek());
+        }
     }
 
     class EmptyPostingList implements PostingList
     {
         @Override
-        public long nextPosting() throws IOException
+        public int nextPosting() throws IOException
         {
             return END_OF_STREAM;
         }
 
         @Override
-        public long size()
+        public int size()
         {
             return 0;
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public int advance(int targetRowID) throws IOException
         {
             return END_OF_STREAM;
         }
@@ -206,19 +219,19 @@ public interface PostingList extends Closeable
         }
 
         @Override
-        public long size()
+        public int size()
         {
             return delegate.size();
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public int advance(int targetRowID) throws IOException
         {
             return delegate.advance(targetRowID);
         }
 
         @Override
-        public long nextPosting() throws IOException
+        public int nextPosting() throws IOException
         {
             return delegate.nextPosting();
         }
