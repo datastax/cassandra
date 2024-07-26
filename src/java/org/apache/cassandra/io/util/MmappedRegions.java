@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -68,9 +69,17 @@ public class MmappedRegions extends SharedCloseableImpl
 
     private final long uncompressedSliceOffset;
 
-    private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length, long uncompressedSliceOffset)
+    private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length, long uncompressedSliceOffset, boolean adviseRandom)
     {
-        this(new State(channel, metadata != null ? metadata.chunkFor(uncompressedSliceOffset).offset : uncompressedSliceOffset), metadata, length, uncompressedSliceOffset);
+        this(new State(channel, offsetFrom(metadata, uncompressedSliceOffset), adviseRandom),
+             metadata,
+             length,
+             uncompressedSliceOffset);
+    }
+
+    private static long offsetFrom(CompressionMetadata metadata, long uncompressedSliceOffset)
+    {
+        return metadata == null ? uncompressedSliceOffset : metadata.chunkFor(uncompressedSliceOffset).offset;
     }
 
     private MmappedRegions(State state, CompressionMetadata metadata, long length, long uncompressedSliceOffset)
@@ -102,7 +111,7 @@ public class MmappedRegions extends SharedCloseableImpl
 
     public static MmappedRegions empty(ChannelProxy channel)
     {
-        return new MmappedRegions(channel, null, 0, 0);
+        return new MmappedRegions(channel, null, 0, 0, false);
     }
 
     /**
@@ -113,22 +122,23 @@ public class MmappedRegions extends SharedCloseableImpl
      *                    created, so it needs to me managed by the caller.
      * @param uncompressedSliceOffset if the file represents a slice of the origial file, this is the offset of the slice in
      *                    the original file (in uncompressed data), namely the value of {@link SliceDescriptor#sliceStart}.
+     * @param adviseRandom whether to apply MADV_RANDOM to mapped regions
      * @return new instance
      */
-    public static MmappedRegions map(ChannelProxy channel, CompressionMetadata metadata, long uncompressedSliceOffset)
+    public static MmappedRegions map(ChannelProxy channel, CompressionMetadata metadata, long uncompressedSliceOffset, boolean adviseRandom)
     {
         if (metadata == null)
             throw new IllegalArgumentException("metadata cannot be null");
 
-        return new MmappedRegions(channel, metadata, 0, uncompressedSliceOffset);
+        return new MmappedRegions(channel, metadata, 0, uncompressedSliceOffset, adviseRandom);
     }
 
-    public static MmappedRegions map(ChannelProxy channel, long length, long uncompressedSliceOffset)
+    public static MmappedRegions map(ChannelProxy channel, long length, long uncompressedSliceOffset, boolean adviseRandom)
     {
         if (length <= 0)
             throw new IllegalArgumentException("Length must be positive");
 
-        return new MmappedRegions(channel, null, length, uncompressedSliceOffset);
+        return new MmappedRegions(channel, null, length, uncompressedSliceOffset, adviseRandom);
     }
 
     /**
@@ -359,9 +369,13 @@ public class MmappedRegions extends SharedCloseableImpl
           * refers to position on disk, not the uncompressed data) */
         private final long onDiskSliceOffset;
 
-        private State(ChannelProxy channel, long onDiskSliceOffset)
+        /** whether to apply fadv_random to mapped regions */
+        private boolean adviseRandom;
+
+        private State(ChannelProxy channel, long onDiskSliceOffset, boolean adviseRandom)
         {
             this.channel = channel.sharedCopy();
+            this.adviseRandom = adviseRandom;
             this.buffers = new ByteBuffer[REGION_ALLOC_SIZE];
             this.offsets = new long[REGION_ALLOC_SIZE];
             this.length = 0;
@@ -372,6 +386,7 @@ public class MmappedRegions extends SharedCloseableImpl
         private State(State original)
         {
             this.channel = original.channel;
+            this.adviseRandom = original.adviseRandom;
             this.buffers = original.buffers;
             this.offsets = original.offsets;
             this.length = original.length;
@@ -414,7 +429,9 @@ public class MmappedRegions extends SharedCloseableImpl
          */
         private void add(long pos, long size)
         {
-            ByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - onDiskSliceOffset, size);
+            var buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - onDiskSliceOffset, size);
+            if (adviseRandom)
+                INativeLibrary.instance.adviseRandom(buffer, size, channel.filePath());
 
             ++last;
 
