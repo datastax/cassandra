@@ -83,13 +83,6 @@ public class SensorsRegistry implements SchemaChangeListener
     private final Timer asyncUpdater = Timer.INSTANCE;
 
     private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
-
-    public static boolean USE_STRIPED_LOCK = true; // this will go away once we review benchmarks
-
-    private static final int LOCK_STRIPES = 1000;
-
-    private final Striped<ReadWriteLock> stripedUpdateLock = Striped.readWriteLock(LOCK_STRIPES);
-
     private final Set<String> keyspaces = Sets.newConcurrentHashSet();
     private final Set<String> tableIds = Sets.newConcurrentHashSet();
 
@@ -121,43 +114,10 @@ public class SensorsRegistry implements SchemaChangeListener
         return Optional.ofNullable(identity.get(Pair.create(context, type)));
     }
 
-    // Added to easily benchmark two different locks
-    // Will be removed
-    private Lock writeLock(String keyspace)
-    {
-        Lock writeLock;
-        if (USE_STRIPED_LOCK)
-        {
-            int stripeIdx = Math.abs(keyspace.hashCode()) % LOCK_STRIPES;
-            writeLock = stripedUpdateLock.getAt(stripeIdx).writeLock();
-        }
-        else
-            writeLock = updateLock.writeLock();
-        writeLock.lock();
-        return writeLock;
-    }
-
-
-    // Added to easily benchmark two different locks
-    // Will be removed
-    private Lock readLock(String keyspace)
-    {
-        Lock readLock;
-        if (USE_STRIPED_LOCK)
-        {
-            int stripeIdx = Math.abs(keyspace.hashCode()) % LOCK_STRIPES;
-            readLock = stripedUpdateLock.getAt(stripeIdx).readLock();
-        }
-        else
-            readLock = updateLock.readLock();
-        readLock.lock();
-        return readLock;
-    }
-
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
         return getSensor(context, type).or(() -> {
-            Lock lock = readLock(context.getKeyspace());
+            updateLock.readLock().lock();
             try
             {
                 if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
@@ -189,7 +149,7 @@ public class SensorsRegistry implements SchemaChangeListener
             }
             finally
             {
-                lock.unlock();
+                updateLock.readLock().unlock();
             }
         });
     }
@@ -236,7 +196,7 @@ public class SensorsRegistry implements SchemaChangeListener
     @Override
     public void onDropKeyspace(KeyspaceMetadata keyspace, boolean dropData)
     {
-        Lock lock = writeLock(keyspace.name);
+        updateLock.writeLock().lock();
         try
         {
             keyspaces.remove(keyspace.name);
@@ -250,14 +210,14 @@ public class SensorsRegistry implements SchemaChangeListener
         }
         finally
         {
-            lock.unlock();
+            updateLock.writeLock().unlock();
         }
     }
 
     @Override
     public void onDropTable(TableMetadata table, boolean dropData)
     {
-        Lock lock = writeLock(table.keyspace);
+        updateLock.writeLock().lock();
         try
         {
             String tableId = table.id.toString();
@@ -272,7 +232,7 @@ public class SensorsRegistry implements SchemaChangeListener
         }
         finally
         {
-            lock.unlock();
+            updateLock.writeLock().unlock();
         }
     }
 
