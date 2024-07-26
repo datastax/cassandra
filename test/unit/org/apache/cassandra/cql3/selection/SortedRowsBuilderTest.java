@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
@@ -59,56 +58,49 @@ public class SortedRowsBuilderTest
         List<Integer> limits = IntStream.range(1, values.length + 1).boxed().collect(Collectors.toList());
         limits.add(Integer.MAX_VALUE);
         limits.add(Integer.MAX_VALUE - 1);
+        limits.add(Integer.MAX_VALUE / 2);
+        limits.add(Integer.MAX_VALUE / 4);
 
         List<Integer> offsets = IntStream.range(0, values.length).boxed().collect(Collectors.toList());
         offsets.add(Integer.MAX_VALUE);
         offsets.add(Integer.MAX_VALUE - 1);
+        offsets.add(Integer.MAX_VALUE / 2);
+        offsets.add(Integer.MAX_VALUE / 4);
 
         for (int limit : limits)
         {
             for (int offset : offsets)
             {
-                boolean cannotUseHeap = limit >= SortedRowsBuilder.WithHeapSort.MAX_SIZE - offset;
-
                 // with insertion order
-                test(rows, () -> SortedRowsBuilder.create(limit, offset), null, false);
+                test(rows, SortedRowsBuilder.create(limit, offset), null);
 
                 // with comparator
-                test(rows, () -> SortedRowsBuilder.create(limit, offset, comparator), comparator, false);
-                test(rows, () -> SortedRowsBuilder.create(limit, offset, reverseComparator), reverseComparator, false);
-                test(rows, () -> SortedRowsBuilder.WithListSort.create(limit, offset, comparator), comparator, false);
-                test(rows, () -> SortedRowsBuilder.WithListSort.create(limit, offset, reverseComparator), reverseComparator, false);
-                test(rows, () -> SortedRowsBuilder.WithHeapSort.create(limit, offset, comparator), comparator, cannotUseHeap);
-                test(rows, () -> SortedRowsBuilder.WithHeapSort.create(limit, offset, reverseComparator), reverseComparator, cannotUseHeap);
-                test(rows, () -> SortedRowsBuilder.WithHybridSort.create(limit, offset, comparator), comparator, false);
-                test(rows, () -> SortedRowsBuilder.WithHybridSort.create(limit, offset, reverseComparator), reverseComparator, false);
+                test(rows, SortedRowsBuilder.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, reverseComparator), reverseComparator);
+                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, comparator), comparator);
+                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, reverseComparator), reverseComparator);
 
                 // with index scorer
-                test(rows, () -> SortedRowsBuilder.create(limit, offset, scorer(false)), comparator, false);
-                test(rows, () -> SortedRowsBuilder.create(limit, offset, scorer(true)), reverseComparator, false);
-                test(rows, () -> SortedRowsBuilder.WithListSort.create(limit, offset, scorer(false)), comparator, false);
-                test(rows, () -> SortedRowsBuilder.WithListSort.create(limit, offset, scorer(true)), reverseComparator, false);
-                test(rows, () -> SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(false)), comparator, cannotUseHeap);
-                test(rows, () -> SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(true)), reverseComparator, cannotUseHeap);
-                test(rows, () -> SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(false)), comparator, false);
-                test(rows, () -> SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(true)), reverseComparator, false);
+                test(rows, SortedRowsBuilder.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(true)), reverseComparator);
+                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(false)), comparator);
+                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(true)), reverseComparator);
             }
         }
     }
 
     private static void test(List<List<ByteBuffer>> rows,
-                             Supplier<SortedRowsBuilder> builderSupplier,
-                             @Nullable Comparator<List<ByteBuffer>> comparator,
-                             boolean shouldFail)
+                             SortedRowsBuilder builder,
+                             @Nullable Comparator<List<ByteBuffer>> comparator)
     {
-        if (shouldFail)
-        {
-            Assertions.assertThatThrownBy(builderSupplier::get)
-                      .hasMessageContaining(SortedRowsBuilder.WithHeapSort.LIMIT_REQUIRED_ERROR);
-            return;
-        }
-
-        SortedRowsBuilder builder = builderSupplier.get();
         int offset = builder.offset;
         int fetchLimit = builder.fetchLimit;
 
