@@ -307,8 +307,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                              int limit,
                                                              int rerankK) throws IOException
     {
-        var approximateScores = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size(),
-                                                                                                   (a, b) -> Float.compare(b.getApproximateScore(), a.getApproximateScore()));
+        var approximateScores = new ArrayList<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size());
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.precomputedScoreFunctionFor(queryVector, similarityFunction);
 
@@ -325,8 +324,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
+        // Leverage PQ's O(N) heapify time complexity
+        var approximateScoresQueue = new PriorityQueue<>(approximateScores);
         var reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(similarityFunction, queryVector, graph.getVectorSupplier());
-        return new BruteForceRowIdIterator(approximateScores, reranker, limit, rerankK);
+        return new BruteForceRowIdIterator(approximateScoresQueue, reranker, limit, rerankK);
     }
 
     /**
@@ -336,9 +337,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      */
     private CloseableIterator<ScoredRowId> orderByBruteForce(VectorFloat<?> queryVector, IntArrayList segmentRowIds) throws IOException
     {
-        PriorityQueue<ScoredRowId> scoredRowIds = new PriorityQueue<>(segmentRowIds.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+        var scoredRowIds = new ArrayList<ScoredRowId>(segmentRowIds.size());
         addScoredRowIdsToCollector(queryVector, segmentRowIds, 0, scoredRowIds);
-        return new PriorityQueueIterator<>(scoredRowIds);
+        return new PriorityQueueIterator<>(new PriorityQueue<>(scoredRowIds));
     }
 
     /**
