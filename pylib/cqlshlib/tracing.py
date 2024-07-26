@@ -45,9 +45,9 @@ def print_trace(shell, tracing_mode, trace):
 def format_trace(activity):
     """
     Format a trace activity, without the control-character mangling we use for other strings.
-    (Trace activity can contain newlines.)
+    (Trace activity can contain internal newlines that we want to preserve.)
     """
-    return colorme(activity, None, 'text')
+    return colorme(activity.rstrip(), None, 'text')
 
 
 def print_trace_full(shell, trace):
