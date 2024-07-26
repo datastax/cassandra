@@ -110,12 +110,12 @@ public class UserType extends TupleType implements SchemaElement
 
     public static UserType getInstance(TypeParser parser)
     {
-        Pair<Pair<String, ByteBuffer>, List<Pair<ByteBuffer, AbstractType>>> params = parser.getUserTypeParameters();
+        Pair<Pair<String, ByteBuffer>, List<Pair<ByteBuffer, AbstractType<?>>>> params = parser.getUserTypeParameters();
         String keyspace = params.left.left;
         ByteBuffer name = params.left.right;
         ImmutableList.Builder<FieldIdentifier> columnNames = ImmutableList.builderWithExpectedSize(params.right.size());
         ImmutableList.Builder<AbstractType<?>> columnTypes = ImmutableList.builderWithExpectedSize(params.right.size());
-        for (Pair<ByteBuffer, AbstractType> p : params.right)
+        for (Pair<ByteBuffer, AbstractType<?>> p : params.right)
         {
             columnNames.add(new FieldIdentifier(p.left));
             columnTypes.add(p.right);
