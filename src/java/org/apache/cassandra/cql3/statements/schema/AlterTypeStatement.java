@@ -91,7 +91,13 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
             return schema;
         }
 
-        return schema.withAddedOrUpdated(keyspace.withUpdatedUserType(apply(keyspace, type)));
+        UserType updated = apply(keyspace, type);
+        CreateTypeStatement.validate(updated);
+
+        KeyspaceMetadata newKeyspace = keyspace.withUpdatedUserType(updated);
+        newKeyspace.validate(state);
+
+        return schema.withAddedOrUpdated(newKeyspace);
     }
 
     abstract UserType apply(KeyspaceMetadata keyspace, UserType type);
