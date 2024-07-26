@@ -399,7 +399,8 @@ public class TermsReader implements Closeable
         public PostingList postings() throws IOException
         {
             assert entry != null;
-            return new ScanningPostingsReader(postingsInput, new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right));
+            var blockSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right, PostingsReader.InputCloser.NOOP);
+            return new ScanningPostingsReader(postingsInput, blockSummary);
         }
 
         @Override
@@ -459,7 +460,8 @@ public class TermsReader implements Closeable
         public PostingList postings() throws IOException
         {
             assert entry != null;
-            return new ScanningPostingsReader(postingsInput, new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right));
+            var blockSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right, PostingsReader.InputCloser.NOOP);
+            return new ScanningPostingsReader(postingsInput, blockSummary);
         }
 
         @Override
