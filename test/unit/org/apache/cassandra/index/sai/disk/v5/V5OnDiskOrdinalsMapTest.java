@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.hnsw;
+package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -37,11 +37,11 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.disk.v2.V2OnDiskOrdinalsMap;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.RamAwareVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
-import org.apache.cassandra.index.sai.disk.v3.V3VectorPostingsWriter;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -56,7 +56,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 
-public class V3OnDiskOrdinalsMapTest
+public class V5OnDiskOrdinalsMapTest
 {
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
@@ -71,7 +71,7 @@ public class V3OnDiskOrdinalsMapTest
 
     @Test
     public void testMatchRangeBits() {
-        BitSet bits = new V3OnDiskOrdinalsMap.MatchRangeBits(1, 3);
+        BitSet bits = new V2OnDiskOrdinalsMap.MatchRangeBits(1, 3);
         assertFalse(bits.get(0));
         assertTrue(bits.get(1));
         assertTrue(bits.get(2));
@@ -79,13 +79,13 @@ public class V3OnDiskOrdinalsMapTest
         assertFalse(bits.get(4));
         assertEquals(3, bits.cardinality());
 
-        bits = new V3OnDiskOrdinalsMap.MatchRangeBits(1, 1);
+        bits = new V2OnDiskOrdinalsMap.MatchRangeBits(1, 1);
         assertFalse(bits.get(0));
         assertTrue(bits.get(1));
         assertFalse(bits.get(2));
         assertEquals(1, bits.cardinality());
 
-        bits = new V3OnDiskOrdinalsMap.MatchRangeBits(3, 1);
+        bits = new V2OnDiskOrdinalsMap.MatchRangeBits(3, 1);
         assertFalse(bits.get(0));
         assertFalse(bits.get(1));
         assertFalse(bits.get(2));
@@ -140,7 +140,7 @@ public class V3OnDiskOrdinalsMapTest
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            var odom = new V3OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            var odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
 
             try (var ordinalsView = odom.getOrdinalsView();
                  var rowIdsView = odom.getRowIdsView())
@@ -178,7 +178,7 @@ public class V3OnDiskOrdinalsMapTest
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            V3OnDiskOrdinalsMap odom = new V3OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            V2OnDiskOrdinalsMap odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
 
             try (var ordinalsView = odom.getOrdinalsView())
             {
@@ -216,7 +216,7 @@ public class V3OnDiskOrdinalsMapTest
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            V3OnDiskOrdinalsMap odom = new V3OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            V2OnDiskOrdinalsMap odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
 
             try (var ordinalsView = odom.getOrdinalsView())
             {
@@ -276,7 +276,7 @@ public class V3OnDiskOrdinalsMapTest
                                                            : x -> ordinalsMap.inverse().getOrDefault(x, x);
 
         long postingsOffset = writer.position();
-        long postingsPosition = new V3VectorPostingsWriter<Integer>(ordinalsMap != null, postingsMap.size(), reverseOrdinalsMapper)
+        long postingsPosition = new V2VectorPostingsWriter<Integer>(ordinalsMap != null, postingsMap.size(), reverseOrdinalsMapper)
                                     .writePostings(writer, vectorValues, postingsMap, deletedOrdinals);
         long postingsLength = postingsPosition - postingsOffset;
 

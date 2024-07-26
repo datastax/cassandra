@@ -64,8 +64,8 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v3.V3VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -288,7 +288,7 @@ public class CompactionGraph implements Closeable, Accountable
                 var postingsFuture = es.submit(() -> {
                     try (var view = index.getView())
                     {
-                        return new V3VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
+                        return new V2VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
                                .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
                     }
                 });

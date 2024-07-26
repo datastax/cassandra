@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.format;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
-
 import javax.annotation.Nullable;
 
 import com.google.common.base.Objects;
@@ -52,10 +51,12 @@ public class Version
     // NOTE: use DB to prevent collisions with upstream file formats
     // Encode trie entries using their AbstractType to ensure trie entries are sorted for range queries and are prefix free.
     public static final Version DB = new Version("db", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g,"db"));
+    // revamps vector postings lists to cause fewer reads from disk
+    public static final Version DC = new Version("dc", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g,"dc"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;

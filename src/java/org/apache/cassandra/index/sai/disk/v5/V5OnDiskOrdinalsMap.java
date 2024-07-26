@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v3;
+package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -32,18 +32,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.util.BitSet;
+import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseBits;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
 import org.apache.cassandra.index.sai.disk.vector.BitsUtil;
+import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import io.github.jbellis.jvector.util.Bits;
 
-public class V3OnDiskOrdinalsMap
+public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 {
-    private static final Logger logger = LoggerFactory.getLogger(V3OnDiskOrdinalsMap.class);
+    private static final Logger logger = LoggerFactory.getLogger(V5OnDiskOrdinalsMap.class);
 
     private final OrdinalsView fastOrdinalsView;
     private static final OrdinalsMatchingRowIdsView ordinalsMatchingRowIdsView = new OrdinalsMatchingRowIdsView();
@@ -58,7 +59,7 @@ public class V3OnDiskOrdinalsMap
     private final boolean canFastMapOrdinalsView;
     private final boolean canFastMapRowIdsView;
 
-    public V3OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
+    public V5OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
     {
         deletedOrdinals = new HashSet<>();
 

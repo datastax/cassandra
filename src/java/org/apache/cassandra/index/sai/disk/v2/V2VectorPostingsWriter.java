@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v3;
+package org.apache.cassandra.index.sai.disk.v2;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -33,7 +33,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.Pair;
 
-public class V3VectorPostingsWriter<T>
+public class V2VectorPostingsWriter<T>
 {
     // true if vectors rows are 1:1 (all vectors are associated with exactly 1 row, and each row has a non-null vector)
     private final boolean oneToOne;
@@ -42,7 +42,7 @@ public class V3VectorPostingsWriter<T>
     // given a "new" ordinal (0..size), return the ordinal it corresponds to in the original graph and VectorValues
     private final IntUnaryOperator newToOldMapper;
 
-    public V3VectorPostingsWriter(boolean oneToOne, int graphSize, IntUnaryOperator mapper) {
+    public V2VectorPostingsWriter(boolean oneToOne, int graphSize, IntUnaryOperator mapper) {
         this.oneToOne = oneToOne;
         this.graphSize = graphSize;
         this.newToOldMapper = mapper;
