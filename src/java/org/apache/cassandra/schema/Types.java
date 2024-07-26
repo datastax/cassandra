@@ -445,7 +445,7 @@ public final class Types implements Iterable<UserType>
 
                 ImmutableList<AbstractType<?>> preparedFieldTypes =
                 fieldTypes.stream()
-                          .map(t -> t.prepareInternal(keyspace, types).getType())
+                          .map(t -> t.prepare(keyspace, types).getType())
                           .collect(toImmutableList());
 
                 return new UserType(keyspace, bytes(name), preparedFieldNames, preparedFieldTypes, true);

@@ -64,7 +64,7 @@ import static org.apache.cassandra.db.marshal.AbstractType.ComparisonType.CUSTOM
 
 /**
  * Specifies a Comparator for a specific type of ByteBuffer.
- *
+ * <p>
  * Note that empty ByteBuffer are used to represent "start at the beginning"
  * or "stop at the end" arguments to get_slice, so the Comparator
  * should always handle those values even if they normally do not
@@ -819,11 +819,54 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     {
         if (isPrimaryKeyColumn)
         {
+            if (isMultiCell())
+                throw columnException(columnName,
+                                      "non-frozen %s are not supported for PRIMARY KEY columns", category());
             if (referencesCounter())
-                throw columnException(columnName, "counters are not supported within PRIMARY KEY columns");
+                throw columnException(columnName,
+                                      "counters are not supported within PRIMARY KEY columns");
+
+            // We don't allow durations in anything sorted (primary key here, or in the "name-comparator" part of
+            // collections below). This isn't really a technical limitation, but duration sorts in a somewhat random
+            // way, so CASSANDRA-11873 decided to reject them when sorting was involved.
+            if (referencesDuration())
+                throw columnException(columnName,
+                                      "duration types are not supported within PRIMARY KEY columns");
+
+            if (comparisonType == ComparisonType.NOT_COMPARABLE)
+                throw columnException(columnName,
+                                      "type %s is not comparable and cannot be used for PRIMARY KEY columns", asCQL3Type());
         }
         else
         {
+            if (isMultiCell())
+            {
+                for (AbstractType<?> subType : subTypes())
+                {
+                    if (subType.isMultiCell())
+                    {
+                        throw columnException(columnName,
+                                              "non-frozen %s are only supported at top-level: subtype %s of %s must be frozen",
+                                              subType.category(), subType.asCQL3Type(), asCQL3Type());
+                    }
+                }
+
+                if (this instanceof MultiCellCapableType)
+                {
+                    AbstractType<?> nameComparator = ((MultiCellCapableType<?>) this).nameComparator();
+                    // As mentioned above, CASSANDRA-11873 decided to reject durations when sorting was involved.
+                    if (nameComparator.referencesDuration())
+                    {
+                        // Trying to profile a more precise error message
+                        String what = this instanceof MapType
+                                      ? "map keys"
+                                      : (this instanceof SetType ? "sets" : category());
+                        throw columnException(columnName,
+                                              "duration types are not supported within non-frozen %s", what);
+                    }
+                }
+            }
+
             // Mixing counter with non counter columns is not supported (#2614)
             if (isCounterTable)
             {
@@ -839,13 +882,13 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                     if (referencesCounter())
                         throw columnException(columnName, "counters are not allowed within %s", category());
 
-                    throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
+                    throw columnException(columnName, "Cannot mix counter and non-counter columns in the same table");
                 }
             }
             else
             {
                 if (isCounter())
-                    throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
+                    throw columnException(columnName, "Cannot mix counter and non-counter columns in the same table");
 
                 // For nested counters, we prefer complaining about the nested-ness rather than this not being a counter
                 // table, because the table won't be marked as a counter one even if it has only nested counters, and so
