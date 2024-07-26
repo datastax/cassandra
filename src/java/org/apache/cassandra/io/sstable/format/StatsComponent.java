@@ -41,10 +41,12 @@ import org.apache.cassandra.schema.TableMetadata;
 
 public class StatsComponent
 {
+    public final Descriptor descriptor;
     public final Map<MetadataType, MetadataComponent> metadata;
 
-    public StatsComponent(Map<MetadataType, MetadataComponent> metadata)
+    public StatsComponent(Descriptor descriptor, Map<MetadataType, MetadataComponent> metadata)
     {
+        this.descriptor = descriptor;
         this.metadata = ImmutableMap.copyOf(metadata);
     }
 
@@ -65,7 +67,7 @@ public class StatsComponent
             throw new CorruptSSTableException(e, descriptor.fileFor(Components.STATS));
         }
 
-        return new StatsComponent(metadata);
+        return new StatsComponent(descriptor, metadata);
     }
 
     public SerializationHeader.Component serializationHeader()
@@ -73,14 +75,14 @@ public class StatsComponent
         return (SerializationHeader.Component) metadata.get(MetadataType.HEADER);
     }
 
-    public SerializationHeader serializationHeader(TableMetadata metadata)
+    public SerializationHeader serializationHeader(Descriptor descriptor, TableMetadata metadata)
     {
         SerializationHeader.Component header = serializationHeader();
         if (header != null)
         {
             try
             {
-                return header.toHeader(metadata);
+                return header.toHeader(descriptor.toString(), metadata);
             }
             catch (UnknownColumnException ex)
             {
@@ -110,7 +112,7 @@ public class StatsComponent
     {
         Map<MetadataType, MetadataComponent> newMetadata = new EnumMap<>(metadata);
         newMetadata.put(MetadataType.VALIDATION, validationMetadata);
-        return new StatsComponent(newMetadata);
+        return new StatsComponent(descriptor, newMetadata);
     }
 
     public void save(Descriptor desc)
