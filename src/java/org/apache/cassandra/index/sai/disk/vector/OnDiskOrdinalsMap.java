@@ -24,7 +24,9 @@ public interface OnDiskOrdinalsMap extends AutoCloseable
 {
     RowIdsView getRowIdsView();
 
-    Bits ignoringDeleted(Bits acceptBits);
+    default Bits ignoringDeleted(Bits acceptBits) {
+        return acceptBits;
+    }
 
     OrdinalsView getOrdinalsView();
 

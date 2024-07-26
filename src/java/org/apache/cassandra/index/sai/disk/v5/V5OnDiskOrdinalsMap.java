@@ -20,10 +20,8 @@ package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
@@ -34,8 +32,8 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseBits;
+import org.apache.cassandra.index.sai.disk.v2.V2OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
-import org.apache.cassandra.index.sai.disk.vector.BitsUtil;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
@@ -54,27 +52,17 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     private final int size;
     // the offset where we switch from recording ordinal -> rows, to row -> ordinal
     private final long rowOrdinalOffset;
-    private final Set<Integer> deletedOrdinals;
 
     private final boolean canFastMapOrdinalsView;
     private final boolean canFastMapRowIdsView;
 
     public V5OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
     {
-        deletedOrdinals = new HashSet<>();
-
         this.segmentEnd = segmentOffset + segmentLength;
         this.fh = fh;
         try (var reader = fh.createReader())
         {
             reader.seek(segmentOffset);
-            int deletedCount = reader.readInt();
-            for (var i = 0; i < deletedCount; i++)
-            {
-                int ordinal = reader.readInt();
-                deletedOrdinals.add(ordinal);
-            }
-
             this.ordToRowOffset = reader.getFilePointer();
             this.size = reader.readInt();
             reader.seek(segmentEnd - 8);
@@ -84,9 +72,9 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
             // we use the EmptyView. That case does not get a fastRowIdsView because we only hit that code after
             // getting ordinals from the graph, and an EmptyView will not produce any ordinals to search. Importantly,
             // the file format for the RowIdsView is correct, even if there are no postings.
-            this.canFastMapRowIdsView = deletedCount == -1;
-            this.canFastMapOrdinalsView = deletedCount == -1 || rowOrdinalOffset + 8 == segmentEnd;
-            this.fastOrdinalsView = deletedCount == -1 ? new RowIdMatchingOrdinalsView(size) : new EmptyView();
+            this.canFastMapRowIdsView = true;
+            this.canFastMapOrdinalsView = rowOrdinalOffset + 8 == segmentEnd;
+            this.fastOrdinalsView = size > 0 ? new RowIdMatchingOrdinalsView(size) : new V2OnDiskOrdinalsMap.EmptyView();
             assert rowOrdinalOffset < segmentEnd : "rowOrdinalOffset " + rowOrdinalOffset + " is not less than segmentEnd " + segmentEnd;
         }
         catch (Exception e)
@@ -102,11 +90,6 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
 
         return new FileReadingRowIdsView();
-    }
-
-    public Bits ignoringDeleted(Bits acceptBits)
-    {
-        return BitsUtil.bitsIgnoringDeleted(acceptBits, deletedOrdinals);
     }
 
 
@@ -305,7 +288,7 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
 
         @Override
-        public int getOrdinalForRowId(int rowId) throws IOException
+        public int getOrdinalForRowId(int rowId)
         {
             if (rowId >= size)
                 return -1;
@@ -334,38 +317,6 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
             int end = Math.min(endRowId + 1, size);
 
             return new MatchRangeBits(start, end);
-        }
-
-        @Override
-        public void close()
-        {
-            // noop
-        }
-    }
-
-    /**
-     * An OrdinalsView that always returns -1 for all rowIds. This is used when the segment has no postings, which
-     * can happen if all the graph's ordinals are in the deletedOrdinals set.
-     */
-    private static class EmptyView implements OrdinalsView
-    {
-        @Override
-        public int getOrdinalForRowId(int rowId) throws IOException
-        {
-            return -1;
-        }
-
-        @Override
-        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
-        {
-            return false;
-        }
-
-        @Override
-        public Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
-        {
-            // Get an empty bitset
-            return bitsSupplier.get();
         }
 
         @Override

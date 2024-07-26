@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.IntUnaryOperator;
 
@@ -50,30 +49,14 @@ public class V5VectorPostingsWriter<T>
 
     public long writePostings(SequentialWriter writer,
                               RandomAccessVectorValues vectorValues,
-                              Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
-                              Set<Integer> deletedOrdinals) throws IOException
+                              Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
-        writeDeletedOrdinals(writer, deletedOrdinals);
         writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
         writeRowIdToNodeOrdinalMapping(writer, vectorValues, postingsMap);
 
         return writer.position();
     }
 
-    private void writeDeletedOrdinals(SequentialWriter writer, Set<Integer> deletedOrdinals) throws IOException
-    {
-        if (oneToOne) {
-            assert deletedOrdinals.isEmpty();
-            // -1 indicates that fast mapping of ordinal to rowId can be used
-            writer.writeInt(-1);
-            return;
-        }
-
-        writer.writeInt(deletedOrdinals.size());
-        for (var ordinal : deletedOrdinals) {
-            writer.writeInt(ordinal);
-        }
-    }
 
     public void writeNodeOrdinalToRowIdMapping(SequentialWriter writer,
                                                RandomAccessVectorValues vectorValues,

@@ -350,7 +350,7 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
      * An OrdinalsView that always returns -1 for all rowIds. This is used when the segment has no postings, which
      * can happen if all the graph's ordinals are in the deletedOrdinals set.
      */
-    private static class EmptyView implements OrdinalsView
+    public static class EmptyView implements OrdinalsView
     {
         @Override
         public int getOrdinalForRowId(int rowId) throws IOException

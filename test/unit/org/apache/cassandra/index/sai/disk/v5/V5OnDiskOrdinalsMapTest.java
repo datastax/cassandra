@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,8 +36,6 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.disk.v2.V2OnDiskOrdinalsMap;
-import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.RamAwareVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
@@ -51,7 +48,6 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -71,7 +67,7 @@ public class V5OnDiskOrdinalsMapTest
 
     @Test
     public void testMatchRangeBits() {
-        BitSet bits = new V2OnDiskOrdinalsMap.MatchRangeBits(1, 3);
+        BitSet bits = new V5OnDiskOrdinalsMap.MatchRangeBits(1, 3);
         assertFalse(bits.get(0));
         assertTrue(bits.get(1));
         assertTrue(bits.get(2));
@@ -79,13 +75,13 @@ public class V5OnDiskOrdinalsMapTest
         assertFalse(bits.get(4));
         assertEquals(3, bits.cardinality());
 
-        bits = new V2OnDiskOrdinalsMap.MatchRangeBits(1, 1);
+        bits = new V5OnDiskOrdinalsMap.MatchRangeBits(1, 1);
         assertFalse(bits.get(0));
         assertTrue(bits.get(1));
         assertFalse(bits.get(2));
         assertEquals(1, bits.cardinality());
 
-        bits = new V2OnDiskOrdinalsMap.MatchRangeBits(3, 1);
+        bits = new V5OnDiskOrdinalsMap.MatchRangeBits(3, 1);
         assertFalse(bits.get(0));
         assertFalse(bits.get(1));
         assertFalse(bits.get(2));
@@ -118,53 +114,10 @@ public class V5OnDiskOrdinalsMapTest
         testForEach(null);
     }
 
-    // This test covers a legacy case that is no longer reachable in the current codebase.
-    @Test
-    public void testGraphThatHasOrdinalsButNoMatchingRows() throws Exception
-    {
-        File tempFile = temp("testfile");
-
-        var deletedOrdinals = new HashSet<Integer>();
-        // Delete the only ordinal
-        deletedOrdinals.add(0);
-        RamAwareVectorValues vectorValues = generateVectors(1);
-
-        var postingsMap = generatePostingsMap(vectorValues);
-
-        for (var p: postingsMap.entrySet()) {
-            // Remove all row ids
-            p.getValue().computeRowIds(x -> -1);
-        }
-
-        PostingsMetadata postingsMd = writePostings(null, tempFile, vectorValues, postingsMap, deletedOrdinals);
-        try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
-             FileHandle fileHandle = builder.complete())
-        {
-            var odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
-
-            try (var ordinalsView = odom.getOrdinalsView();
-                 var rowIdsView = odom.getRowIdsView())
-            {
-                assertEquals(-1, ordinalsView.getOrdinalForRowId(0));
-                final AtomicInteger count = new AtomicInteger(0);
-                ordinalsView.forEachOrdinalInRange(-100, Integer.MAX_VALUE / 2, (rowId, ordinal) -> {
-                    count.incrementAndGet();
-                });
-                assertEquals(0, count.get());
-                assertNull(ordinalsView.buildOrdinalBits(0, 5, () -> null));
-
-                assertFalse(rowIdsView.getSegmentRowIdsMatching(0).hasNext());
-            }
-
-            odom.close();
-        }
-    }
-
     private void testForEach(HashBiMap<Integer, Integer> ordinalsMap) throws Exception
     {
         File tempFile = temp("testfile");
 
-        var deletedOrdinals = new HashSet<Integer>();
         RamAwareVectorValues vectorValues = generateVectors(10);
 
         var postingsMap = generatePostingsMap(vectorValues);
@@ -173,12 +126,12 @@ public class V5OnDiskOrdinalsMapTest
             p.getValue().computeRowIds(x -> x);
         }
 
-        PostingsMetadata postingsMd = writePostings(ordinalsMap, tempFile, vectorValues, postingsMap, deletedOrdinals);
+        PostingsMetadata postingsMd = writePostings(ordinalsMap, tempFile, vectorValues, postingsMap);
 
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            V2OnDiskOrdinalsMap odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            V5OnDiskOrdinalsMap odom = new V5OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
 
             try (var ordinalsView = odom.getOrdinalsView())
             {
@@ -199,7 +152,6 @@ public class V5OnDiskOrdinalsMapTest
     {
         File tempFile = temp("testfile");
 
-        var deletedOrdinals = new HashSet<Integer>();
         RamAwareVectorValues vectorValues = generateVectors(10);
 
         final boolean canFastFindRows = ordinalsMap != null;
@@ -211,12 +163,12 @@ public class V5OnDiskOrdinalsMapTest
             p.getValue().computeRowIds(x -> canFastFindRows ? x : (x == 5 || x == 6 ? -1 : x));
         }
 
-        PostingsMetadata postingsMd = writePostings(ordinalsMap, tempFile, vectorValues, postingsMap, deletedOrdinals);
+        PostingsMetadata postingsMd = writePostings(ordinalsMap, tempFile, vectorValues, postingsMap);
 
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            V2OnDiskOrdinalsMap odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            V5OnDiskOrdinalsMap odom = new V5OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
 
             try (var ordinalsView = odom.getOrdinalsView())
             {
@@ -265,8 +217,7 @@ public class V5OnDiskOrdinalsMapTest
     private static PostingsMetadata writePostings(HashBiMap<Integer, Integer> ordinalsMap,
                                                   File tempFile,
                                                   RamAwareVectorValues vectorValues,
-                                                  Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap,
-                                                  HashSet<Integer> deletedOrdinals) throws IOException
+                                                  Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap) throws IOException
     {
         SequentialWriter writer = new SequentialWriter(tempFile,
                                                        SequentialWriterOption.newBuilder().finishOnClose(true).build());
@@ -276,8 +227,8 @@ public class V5OnDiskOrdinalsMapTest
                                                            : x -> ordinalsMap.inverse().getOrDefault(x, x);
 
         long postingsOffset = writer.position();
-        long postingsPosition = new V2VectorPostingsWriter<Integer>(ordinalsMap != null, postingsMap.size(), reverseOrdinalsMapper)
-                                    .writePostings(writer, vectorValues, postingsMap, deletedOrdinals);
+        long postingsPosition = new V5VectorPostingsWriter<Integer>(ordinalsMap != null, postingsMap.size(), reverseOrdinalsMapper)
+                                    .writePostings(writer, vectorValues, postingsMap);
         long postingsLength = postingsPosition - postingsOffset;
 
         writer.close();
