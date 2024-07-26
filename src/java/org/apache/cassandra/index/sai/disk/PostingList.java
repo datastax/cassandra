@@ -162,6 +162,9 @@ public interface PostingList extends Closeable
         @Override
         public int compareTo(PeekablePostingList o)
         {
+            // we are comparing over some mutable state: this should not generally work
+            // in this case it works because this method is used ONLY
+            // while constructing a PriorityQueue
             return Long.compare(peek(), o.peek());
         }
     }
