@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-import java.util.Comparator;
 import java.util.PriorityQueue;
 
 import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
@@ -45,7 +44,11 @@ import org.apache.cassandra.utils.AbstractIterator;
  */
 public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
 {
-    public static class RowWithApproximateScore
+    /**
+     * Note: this class has a natural ordering that is inconsistent with equals in order to
+     * use {@link PriorityQueue}'s O(N) constructor.
+     */
+    public static class RowWithApproximateScore implements Comparable<RowWithApproximateScore>
     {
         private final int rowId;
         private final int ordinal;
@@ -58,9 +61,11 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
             this.appoximateScore = appoximateScore;
         }
 
-        public float getApproximateScore()
+        @Override
+        public int compareTo(RowWithApproximateScore o)
         {
-            return appoximateScore;
+            // Inverted comparison to sort in descending order
+            return Float.compare(o.appoximateScore, appoximateScore);
         }
     }
 
@@ -88,7 +93,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
                                    int topK)
     {
         this.approximateScoreQueue = approximateScoreQueue;
-        this.exactScoreQueue = new PriorityQueue<>(topK, Comparator.reverseOrder());
+        this.exactScoreQueue = new PriorityQueue<>(topK);
         this.reranker = reranker;
         assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
         this.limit = limit;

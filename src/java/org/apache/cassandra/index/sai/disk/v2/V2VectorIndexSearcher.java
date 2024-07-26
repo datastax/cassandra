@@ -22,7 +22,6 @@ import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
@@ -287,8 +286,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                                 int limit,
                                                                 int rerankK) throws IOException
     {
-        var approximateScores = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size(),
-                                                                                                   (a, b) -> Float.compare(b.getApproximateScore(), a.getApproximateScore()));
+        var approximateScores = new ArrayList<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size());
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.precomputedScoreFunctionFor(queryVector, similarityFunction);
 
@@ -305,8 +303,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
+        // Leverage PQ's O(N) heapify time complexity
+        var approximateScoresQueue = new PriorityQueue<>(approximateScores);
         var reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(similarityFunction, queryVector, graph.getVectorSupplier());
-        return new BruteForceRowIdIterator(approximateScores, reranker, limit, rerankK);
+        return new BruteForceRowIdIterator(approximateScoresQueue, reranker, limit, rerankK);
     }
 
     /**
@@ -316,9 +316,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      */
     private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, IntArrayList segmentRowIds) throws IOException
     {
-        var scoredRowIds = new PriorityQueue<RowIdWithScore>(segmentRowIds.size(), Comparator.reverseOrder());
+        var scoredRowIds = new ArrayList<RowIdWithScore>(segmentRowIds.size());
         addScoredRowIdsToCollector(queryVector, segmentRowIds, 0, scoredRowIds);
-        return new PriorityQueueIterator<>(scoredRowIds);
+        return new PriorityQueueIterator<>(new PriorityQueue<>(scoredRowIds));
     }
 
     /**

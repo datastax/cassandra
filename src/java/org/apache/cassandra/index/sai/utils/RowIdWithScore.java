@@ -18,11 +18,15 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.PriorityQueue;
+
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.io.sstable.SSTableId;
 
 /**
  * Represents a row id with a score.
+ * Note: this class has a natural ordering that is inconsistent with equals in order to
+ * use {@link PriorityQueue}'s O(N) constructor.
  */
 public class RowIdWithScore extends RowIdWithMeta implements Comparable<RowIdWithScore>
 {
@@ -37,7 +41,8 @@ public class RowIdWithScore extends RowIdWithMeta implements Comparable<RowIdWit
     @Override
     public int compareTo(RowIdWithScore o)
     {
-        return Float.compare(score, o.score);
+        // Inverted comparison to sort in descending order
+        return Float.compare(o.score, score);
     }
 
     @Override

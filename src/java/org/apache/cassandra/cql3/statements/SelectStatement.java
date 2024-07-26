@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
+import com.google.common.math.IntMath;
 
 import org.apache.cassandra.cql3.Ordering;
 import org.apache.cassandra.cql3.restrictions.*;
@@ -848,7 +849,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (userOffset != NO_OFFSET)
             Guardrails.offsetRows.guard(userOffset, "Select query", false, queryState);
 
-        int fetchLimit = userLimit == NO_LIMIT || userOffset == NO_OFFSET ? userLimit : userLimit + userOffset;
+        int fetchLimit = userLimit == NO_LIMIT || userOffset == NO_OFFSET ? userLimit : IntMath.saturatedAdd(userLimit, userOffset);
         int cqlRowLimit = NO_LIMIT;
         int cqlPerPartitionLimit = NO_LIMIT;
 

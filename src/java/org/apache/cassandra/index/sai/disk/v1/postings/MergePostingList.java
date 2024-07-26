@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -34,8 +33,6 @@ import static com.google.common.base.Preconditions.checkArgument;
 @NotThreadSafe
 public class MergePostingList implements PostingList
 {
-    private static final Comparator<PeekablePostingList> COMPARATOR = Comparator.comparingLong(PostingList.PeekablePostingList::peek);
-
     final ArrayList<PeekablePostingList> postingLists;
     // (Intersection code just calls advance(long), so don't create this until we need it)
     PriorityQueue<PeekablePostingList> pq;
@@ -77,8 +74,8 @@ public class MergePostingList implements PostingList
             if (postingLists.isEmpty())
                 return PostingList.END_OF_STREAM;
 
-            pq = new PriorityQueue<>(postingLists.size(), COMPARATOR);
-            pq.addAll(postingLists);
+            // Leverage PQ's O(N) heapify time complexity
+            pq = new PriorityQueue<>(postingLists);
         }
 
         while (!pq.isEmpty())
