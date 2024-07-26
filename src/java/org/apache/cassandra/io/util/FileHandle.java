@@ -25,6 +25,9 @@ import java.util.function.Supplier;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.RateLimiter;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.io.compress.BufferType;
@@ -48,6 +51,8 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
  */
 public class FileHandle extends SharedCloseableImpl
 {
+    private static final Logger logger = LoggerFactory.getLogger(FileHandle.class);
+
     public final ChannelProxy channel;
 
     public final long onDiskLength;
@@ -270,6 +275,7 @@ public class FileHandle extends SharedCloseableImpl
         private long lengthOverride = -1;
         private MmappedRegionsCache mmappedRegionsCache;
         private SliceDescriptor sliceDescriptor = SliceDescriptor.NONE;
+        private boolean adviseRandom = false;
 
         public Builder(File file)
         {
@@ -387,6 +393,12 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+        public Builder adviseRandom()
+        {
+            adviseRandom = true;
+            return this;
+        }
+
         /**
          * Complete building {@link FileHandle}.
          */
@@ -419,18 +431,21 @@ public class FileHandle extends SharedCloseableImpl
                     if (compressionMetadata != null)
                     {
                         regions = mmappedRegionsCache != null ? mmappedRegionsCache.getOrCreate(channel, compressionMetadata, sliceDescriptor.sliceStart)
-                                                              : MmappedRegions.map(channel, compressionMetadata, sliceDescriptor.sliceStart);
+                                                              : MmappedRegions.map(channel, compressionMetadata, sliceDescriptor.sliceStart, adviseRandom);
                         rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channel, compressionMetadata, regions, crcCheckChanceSupplier, sliceDescriptor.sliceStart));
                     }
                     else
                     {
                         regions = mmappedRegionsCache != null ? mmappedRegionsCache.getOrCreate(channel, sliceDescriptor.dataEndOr(length), sliceDescriptor.sliceStart)
-                                                              : MmappedRegions.map(channel, sliceDescriptor.dataEndOr(length), sliceDescriptor.sliceStart);
+                                                              : MmappedRegions.map(channel, sliceDescriptor.dataEndOr(length), sliceDescriptor.sliceStart, adviseRandom);
                         rebuffererFactory = new MmapRebufferer(channel, sliceDescriptor.dataEndOr(length), regions);
                     }
                 }
                 else
                 {
+                    if (adviseRandom)
+                        logger.warn("adviseRandom ignored for non-mmapped FileHandle {}", file);
+
                     if (compressionMetadata != null)
                     {
                         rebuffererFactory = maybeCached(new CompressedChunkReader.Standard(channel, compressionMetadata, crcCheckChanceSupplier, sliceDescriptor.sliceStart));
