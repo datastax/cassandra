@@ -20,24 +20,29 @@ package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntUnaryOperator;
+import java.util.stream.StreamSupport;
 
-import com.google.common.collect.HashBiMap;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import io.github.jbellis.jvector.util.BitSet;
+import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.SparseBits;
 import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
-import org.apache.cassandra.config.DatabaseDescriptor;
+import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.RamAwareVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
+import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -45,189 +50,205 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
-
-public class V5OnDiskOrdinalsMapTest
+public class V5OnDiskOrdinalsMapTest extends SaiRandomizedTest
 {
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
-    final private int dimension = 10;
+    private static final int DIMENSION = 2; // not relevant to postings mapping, nothing gained by using something larger
 
-    @BeforeClass
-    public static void setup()
+    @Test
+    public void testRandomPostings() throws Exception
     {
-        // otherwise "FileHandle fileHandle = builder.complete()" throws
-        DatabaseDescriptor.clientInitialization();
-    }
-
-    @Test
-    public void testMatchRangeBits() {
-        BitSet bits = new V5OnDiskOrdinalsMap.MatchRangeBits(1, 3);
-        assertFalse(bits.get(0));
-        assertTrue(bits.get(1));
-        assertTrue(bits.get(2));
-        assertTrue(bits.get(3));
-        assertFalse(bits.get(4));
-        assertEquals(3, bits.cardinality());
-
-        bits = new V5OnDiskOrdinalsMap.MatchRangeBits(1, 1);
-        assertFalse(bits.get(0));
-        assertTrue(bits.get(1));
-        assertFalse(bits.get(2));
-        assertEquals(1, bits.cardinality());
-
-        bits = new V5OnDiskOrdinalsMap.MatchRangeBits(3, 1);
-        assertFalse(bits.get(0));
-        assertFalse(bits.get(1));
-        assertFalse(bits.get(2));
-        assertFalse(bits.get(3));
-        assertFalse(bits.get(4));
-        assertEquals(0, bits.cardinality());
-    }
-
-    @Test
-    public void testOneToOneComplexity() throws Exception {
-        V5VectorPostingsWriter.Structure structure = createOdomAndGetComplexity(HashBiMap.create());
-        assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, structure);
-    }
-
-    @Test
-    public void testZeroOrOneToManyComplexity() throws Exception {
-        V5VectorPostingsWriter.Structure structure = createOdomAndGetComplexity(null);
-        assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, structure);
-    }
-
-    @Test
-    public void testForEachRowidMatching() throws Exception
-    {
-        testForEach(HashBiMap.create());
-    }
-
-    @Test
-    public void testForEachFileReading() throws Exception
-    {
-        testForEach(null);
-    }
-
-    private void testForEach(HashBiMap<Integer, Integer> ordinalsMap) throws Exception
-    {
-        File tempFile = temp("testfile");
-
-        RamAwareVectorValues vectorValues = generateVectors(10);
-
-        var postingsMap = generatePostingsMap(vectorValues);
-
-        for (var p: postingsMap.entrySet()) {
-            p.getValue().computeRowIds(x -> x);
-        }
-
-        PostingsMetadata postingsMd = writePostings(ordinalsMap, tempFile, vectorValues, postingsMap);
-
-        try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
-             FileHandle fileHandle = builder.complete())
-        {
-            V5OnDiskOrdinalsMap odom = new V5OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
-
-            try (var ordinalsView = odom.getOrdinalsView())
-            {
-                final AtomicInteger count = new AtomicInteger(0);
-                ordinalsView.forEachOrdinalInRange(-100, Integer.MAX_VALUE / 2, (rowId, ordinal) -> {
-                    assertTrue(ordinal >= 0);
-                    assertTrue(ordinal < vectorValues.size());
-                    count.incrementAndGet();
-                });
-                assertEquals(vectorValues.size(), count.get());
+        for (int i = 0; i < 10; i++) {
+            for (Structure structure: Structure.values()) {
+                testRandomPostingsOnce(structure);
             }
-
-            odom.close();
         }
     }
 
-    private V5VectorPostingsWriter.Structure createOdomAndGetComplexity(HashBiMap<Integer, Integer> ordinalsMap) throws Exception
+    @Test
+    public void testOneToOne() throws Exception
     {
-        File tempFile = temp("testfile");
+        var vv = generateVectors(4);
+        Map<VectorFloat<?>, VectorPostings<String>> postingsMap = emptyPostingsMap();
+        // 0 -> C
+        // 1 -> A
+        // 2 -> B
+        postingsMap.put(vv.getVector(0), createPostings(0, "C"));
+        postingsMap.put(vv.getVector(1), createPostings(1, "A"));
+        postingsMap.put(vv.getVector(2), createPostings(2, "B"));
+        computeRowIds(postingsMap);
+        validate(Structure.ONE_TO_ONE, postingsMap, vv);
+    }
 
-        RamAwareVectorValues vectorValues = generateVectors(10);
+    @Test
+    public void testOneToMany() throws Exception
+    {
+        var vv = generateVectors(4);
+        Map<VectorFloat<?>, VectorPostings<String>> postingsMap = emptyPostingsMap();
+        // 0 -> B
+        // 1 -> C, A
+        // 2 -> D
+        postingsMap.put(vv.getVector(0), createPostings(0, "B"));
+        postingsMap.put(vv.getVector(1), createPostings(1, "C", "A"));
+        postingsMap.put(vv.getVector(2), createPostings(2, "D"));
+        computeRowIds(postingsMap);
+        validate(Structure.ONE_TO_MANY, postingsMap, vv);
+    }
 
-        var postingsMap = generatePostingsMap(vectorValues);
+    @Test
+    public void testOneToManyLarger() throws Exception
+    {
+        var vv = generateVectors(4);
+        Map<VectorFloat<?>, VectorPostings<String>> postingsMap = emptyPostingsMap();
+        // 0 -> B
+        // 1 -> C, A, E
+        // 2 -> D, F
+        // 3 -> G
+        postingsMap.put(vv.getVector(0), createPostings(0, "B"));
+        postingsMap.put(vv.getVector(1), createPostings(1, "C", "A", "E"));
+        postingsMap.put(vv.getVector(2), createPostings(2, "D", "F"));
+        postingsMap.put(vv.getVector(3), createPostings(3, "G"));
+        computeRowIds(postingsMap);
+        validate(Structure.ONE_TO_MANY, postingsMap, vv);
+    }
 
-        // skip rows 5 and 6 if ordinalsMap is null
+    @Test
+    public void testGeneric() throws Exception
+    {
+        var vv = generateVectors(4);
+        Map<VectorFloat<?>, VectorPostings<String>> postingsMap = emptyPostingsMap();
+        // 0 -> B
+        // 1 -> C, A
+        // 2 -> E    (no D, this makes it not 1:many)
+        postingsMap.put(vv.getVector(0), createPostings(0, "B"));
+        postingsMap.put(vv.getVector(1), createPostings(1, "C", "A"));
+        postingsMap.put(vv.getVector(2), createPostings(2, "E"));
+        computeRowIds(postingsMap);
+        validate(Structure.ZERO_OR_ONE_TO_MANY, postingsMap, vv);
+    }
+
+    @Test
+    public void testEmpty() throws Exception
+    {
+        var vv = generateVectors(0);
+        Map<VectorFloat<?>, VectorPostings<String>> postingsMap = emptyPostingsMap();
+        validate(Structure.ONE_TO_ONE, postingsMap, vv);
+    }
+
+    private static void computeRowIds(Map<VectorFloat<?>, VectorPostings<String>> postingsMap)
+    {
         for (var p: postingsMap.entrySet())
         {
-            p.getValue().computeRowIds(x -> ordinalsMap != null ? x : (x == 5 || x == 6 ? -1 : x));
-        }
-
-        PostingsMetadata postingsMd = writePostings(ordinalsMap, tempFile, vectorValues, postingsMap);
-
-        try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
-             FileHandle fileHandle = builder.complete())
-        {
-            V5OnDiskOrdinalsMap odom = new V5OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
-
-            try (var ordinalsView = odom.getOrdinalsView())
-            {
-                int lastRowId = Integer.MAX_VALUE;
-                for (var p: postingsMap.entrySet())
-                {
-                    for (int rowId: p.getValue().getRowIds())
-                    {
-                        if (rowId - 1 > lastRowId)
-                        {
-                            try
-                            {
-                                ordinalsView.getOrdinalForRowId(lastRowId);
-                                fail("expected IllegalArgumentException when trying to repeat row");
-                            }
-                            catch (IllegalArgumentException e)
-                            {
-                                // expected
-                            }
-
-                            for (int r = lastRowId + 1; r < rowId; r++)
-                            {
-                                // check skipped rows
-                                int ordinal = ordinalsView.getOrdinalForRowId(r);
-                                assertEquals(-1, ordinal);
-                            }
-                        }
-
-                        int ordinal = ordinalsView.getOrdinalForRowId(rowId);
-                        assertEquals(rowId, ordinal);
-                        lastRowId = rowId;
-                    }
-                }
-                int ordinal = ordinalsView.getOrdinalForRowId(Integer.MAX_VALUE);
-                assertEquals(-1, ordinal);
-            }
-
-            V5VectorPostingsWriter.Structure structure = odom.getStructure();
-            odom.close();
-            return structure;
+            p.getValue().computeRowIds(s -> {
+                assert s.length() == 1;
+                return s.charAt(0) - 'A';
+            });
         }
     }
 
-    private static PostingsMetadata writePostings(HashBiMap<Integer, Integer> ordinalsMap,
-                                                  File tempFile,
-                                                  RamAwareVectorValues vectorValues,
-                                                  Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap) throws IOException
+    private VectorPostings<String> createPostings(int ordinal, String... postings)
+    {
+        var vp = new VectorPostings<>(List.of(postings));
+        vp.setOrdinal(ordinal);
+        return vp;
+    }
+
+    private void testRandomPostingsOnce(Structure structure) throws Exception
+    {
+        var vectorValues = generateVectors(100 + randomInt(1000));
+        var postingsMap = generatePostingsMap(vectorValues, structure);
+        // call computeRowIds because that's how VectorPostings is designed.
+        // since we're natively using ints as our rowids (not PrimaryKey objects) this can be the identity
+        for (var p: postingsMap.entrySet())
+            p.getValue().computeRowIds(x -> x);
+
+        validate(structure, postingsMap, vectorValues);
+    }
+
+    private <T> void validate(Structure structure, Map<VectorFloat<?>, VectorPostings<T>> postingsMap, RamAwareVectorValues vectorValues) throws IOException
+    {
+        // build the remapping and write the postings
+        var remapped = V5VectorPostingsWriter.remapPostings(postingsMap);
+        assert remapped.structure == structure : remapped.structure + " != " + structure;
+        File tempFile = createTempFile("testfile");
+        PostingsMetadata postingsMd = writePostings(tempFile, vectorValues, postingsMap, remapped);
+
+        // test V5OnDiskOrdinalsMap
+        try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
+             FileHandle fileHandle = builder.complete())
+        {
+            var odom = new V5OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            assertEquals(structure, odom.structure);
+
+            // check row -> ordinals
+            try (var rowIdsView = odom.getRowIdsView();
+                 var ordinalsView = odom.getOrdinalsView())
+            {
+                for (var vp : postingsMap.values())
+                {
+                    var rowIds = vp.getRowIds().toIntArray();
+                    Arrays.sort(rowIds);
+
+                    var newOrdinal = remapped.ordinalMapper.oldToNew(vp.getOrdinal());
+                    var it = rowIdsView.getSegmentRowIdsMatching(newOrdinal);
+                    int[] a = StreamSupport.intStream(Spliterators.spliteratorUnknownSize(it, Spliterator.ORDERED), false).toArray();
+                    Arrays.sort(a);
+
+                    assertArrayEquals(rowIds, a);
+
+                    for (int i = 0; i < rowIds.length; i++)
+                    {
+                        int ordinal = ordinalsView.getOrdinalForRowId(rowIds[i]);
+                        assertEquals(newOrdinal, ordinal);
+                    }
+                }
+            }
+
+            // test buildOrdinalBits
+            try (var ordinalsView = odom.getOrdinalsView())
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    // neither min nor max rowId has to actually exist in the postings
+                    int minRowId = randomInt(vectorValues.size());
+                    int maxRowId = minRowId + randomInt(vectorValues.size());
+                    var bits = ordinalsView.buildOrdinalBits(minRowId, maxRowId, SparseBits::new);
+
+                    var expectedBits = new SparseBits();
+                    for (var vp : postingsMap.values())
+                    {
+                        for (int rowId : vp.getRowIds())
+                        {
+                            if (rowId >= minRowId && rowId <= maxRowId)
+                                expectedBits.set(remapped.ordinalMapper.oldToNew(vp.getOrdinal()));
+                        }
+                    }
+
+                    assertEqualsBits(expectedBits, bits, remapped.maxRowId);
+                }
+            }
+
+            odom.close();
+        }
+    }
+
+    private void assertEqualsBits(Bits b1, Bits b2, int maxBit)
+    {
+        for (int i = 0; i <= maxBit; i++)
+            assertEquals(b1.get(i), b2.get(i));
+    }
+
+    private static <T> PostingsMetadata writePostings(File tempFile,
+                                                  RandomAccessVectorValues vectorValues,
+                                                  Map<VectorFloat<?>, VectorPostings<T>> postingsMap, V5VectorPostingsWriter.RemappedPostings remapped) throws IOException
     {
         SequentialWriter writer = new SequentialWriter(tempFile,
                                                        SequentialWriterOption.newBuilder().finishOnClose(true).build());
 
-        IntUnaryOperator reverseOrdinalsMapper = ordinalsMap == null
-                                                           ? x -> x
-                                                           : x -> ordinalsMap.inverse().getOrDefault(x, x);
-
-        V5VectorPostingsWriter.Structure structure = ordinalsMap != null ?
-                                                     V5VectorPostingsWriter.Structure.ONE_TO_ONE :
-                                                     V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY;
-
         long postingsOffset = writer.position();
-        long postingsPosition = new V5VectorPostingsWriter<Integer>(structure, postingsMap.size(), reverseOrdinalsMapper)
+        long postingsPosition = new V5VectorPostingsWriter<T>(remapped)
                                     .writePostings(writer, vectorValues, postingsMap);
         long postingsLength = postingsPosition - postingsOffset;
 
@@ -247,38 +268,79 @@ public class V5OnDiskOrdinalsMapTest
         }
     }
 
-    private Map<VectorFloat<?>, VectorPostings<Integer>> generatePostingsMap(RamAwareVectorValues vectorValues)
+    private static Map<VectorFloat<?>, VectorPostings<Integer>> generatePostingsMap(RandomAccessVectorValues vectorValues, Structure structure)
     {
-        Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap = new ConcurrentSkipListMap<>((a, b) -> {
-            return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
-        });
+        Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap = emptyPostingsMap();
 
+        var remainingRowIds = new IntArrayList(vectorValues.size(), IntArrayList.DEFAULT_NULL_VALUE);
+        IntUnaryOperator populator = structure == Structure.ZERO_OR_ONE_TO_MANY
+                                   ? i -> 2 * i
+                                   : i -> i;
+        for (int i = 0; i < vectorValues.size(); i++)
+            remainingRowIds.add(populator.applyAsInt(i));
         for (int ordinal = 0; ordinal < vectorValues.size(); ordinal++)
         {
             var vector = vectorValues.getVector(ordinal);
-            var vp = new VectorPostings<>(ordinal);
+            var rowIdIdx = randomIndex(remainingRowIds);
+            var vp = new VectorPostings<>(remainingRowIds.getInt(rowIdIdx));
+            remainingRowIds.remove(rowIdIdx);
             vp.setOrdinal(ordinal);
             postingsMap.put(vector, vp);
+        }
+
+        if (structure == Structure.ONE_TO_ONE)
+            return postingsMap;
+
+        // make some of them 1:many
+        int extraRows = 1 + randomInt(vectorValues.size());
+        for (int i = 0; i < extraRows; i++)
+        {
+            var vector = randomVector(vectorValues);
+            var vp = postingsMap.get(vector);
+            vp.add(populator.applyAsInt(i + vectorValues.size()));
         }
 
         return postingsMap;
     }
 
-    private RamAwareVectorValues generateVectors(int totalOrdinals)
+    private static <T> ConcurrentSkipListMap<VectorFloat<?>, VectorPostings<T>> emptyPostingsMap()
     {
-        var vectorValues = new ConcurrentVectorValues(dimension);
-        for (int i = 0; i < totalOrdinals; i++)
+        return new ConcurrentSkipListMap<>((a, b) -> {
+            return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
+        });
+    }
+
+    private static VectorFloat<?> randomVector(RandomAccessVectorValues ravv)
+    {
+        return ravv.getVector(randomInt(ravv.size() - 1));
+    }
+
+    private static int randomIndex(List<?> L)
+    {
+        return randomInt(L.size() - 1); // randomInt(max) is inclusive
+    }
+
+    /**
+     * Generate `count` non-random vectors
+     */
+    private ConcurrentVectorValues generateVectors(int count)
+    {
+        var vectorValues = new ConcurrentVectorValues(DIMENSION);
+        for (int i = 0; i < count; i++)
         {
-            float[] rawVector = new float[dimension];
+            float[] rawVector = new float[DIMENSION];
             Arrays.fill(rawVector, (float) i);
             vectorValues.add(i, vts.createFloatVector(rawVector));
         }
         return vectorValues;
     }
 
-    private static File temp(String id)
+    /**
+     * Create a temporary file with the given prefix.
+     */
+    private static File createTempFile(String prefix)
     {
-        File file = FileUtils.createTempFile(id, "tmp");
+        File file = FileUtils.createTempFile(prefix, "tmp");
         file.deleteOnExit();
         return file;
     }

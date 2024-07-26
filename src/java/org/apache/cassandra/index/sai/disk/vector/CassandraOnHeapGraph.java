@@ -37,8 +37,6 @@ import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.BiMap;
-import com.google.common.collect.HashBiMap;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
 import org.slf4j.Logger;
@@ -83,6 +81,9 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
@@ -321,16 +322,28 @@ public class CassandraOnHeapGraph<T> implements Accountable
                              : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, limit, rerankK, true);
     }
 
+    /**
+     * Returns a list of vector ordinals that were added to the graph but are no longer associated with a live row.
+     * <p>
+     * Side effect!  Calls computeRowIds on each vectorPostings.
+     * Side effect 2!  Removes unused vectors from postingsMap.
+     * <p>
+     * It is not safe to call this method while mutations are actively being made in other threads.
+     */
+    // FIXME can we clean up the lifecycle here?
     public Set<Integer> computeDeletedOrdinals(Function<T, Integer> postingTransformer)
     {
         var deletedOrdinals = new HashSet<Integer>();
-        postingsMap.values().stream().filter(VectorPostings::isEmpty).forEach(vectorPostings -> deletedOrdinals.add(vectorPostings.getOrdinal()));
-        // remove ordinals that don't have corresponding row ids due to partition/range deletion
-        for (VectorPostings<T> vectorPostings : postingsMap.values())
-        {
-            vectorPostings.computeRowIds(postingTransformer);
-            if (vectorPostings.shouldAppendDeletedOrdinal())
-                deletedOrdinals.add(vectorPostings.getOrdinal());
+        var it = postingsMap.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            var vp = entry.getValue();
+            vp.computeRowIds(postingTransformer);
+            if (vp.isEmpty() || vp.shouldAppendDeletedOrdinal())
+            {
+                deletedOrdinals.add(vp.getOrdinal());
+                it.remove();
+            }
         }
         return deletedOrdinals;
     }
@@ -356,26 +369,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
         builder.cleanup();
 
-        // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
-        // null if remapping is not possible because vectors:rows are not 1:1
-        final BiMap<Integer, Integer> ordinalMap = buildOrdinalMap();
-        boolean postingsOneToOne = ordinalMap != null;
-        IntUnaryOperator newToOldMapper; // new ordinal -> old ordinal
-        OrdinalMapper ordinalMapper;
-        if (postingsOneToOne)
-        {
-            // we have a 1:1 correspondence between vectors and rows, so we can simplify the question of
-            // "what rowid does this ordinal correspond to" by remapping the graph ordinals to their corresponding rowid
-            ordinalMapper = new OrdinalMapper.MapMapper(ordinalMap);
-            newToOldMapper = x -> ordinalMap.inverse().get(x);
-        }
-        else
-        {
-            // vectors:rows are not 1:1 so there is no point in renumbering the ordinals, we're going to have to
-            // write the ordinal<->rowid mapping out explicitly
-            ordinalMapper = new OrdinalMapper.MapMapper(OnDiskGraphIndexWriter.sequentialRenumbering(builder.getGraph()));
-            newToOldMapper = ordinalMapper::newToOld;
-        }
+        // compute the remapping of old ordinals to new (to fill in holes from deletion and/or to create a
+        // closer correspondance to rowids, simplifying postings lookups later)
+        var remappedPostings = V5VectorPostingsWriter.remapPostings(postingsMap);
+        IntUnaryOperator newToOldMapper = remappedPostings.ordinalMapper::newToOld;
+        OrdinalMapper ordinalMapper = remappedPostings.ordinalMapper;
 
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         var indexFile = termsDataComponent.file();
@@ -404,9 +402,17 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
-            long postingsPosition = new V2VectorPostingsWriter<T>(postingsOneToOne, builder.getGraph().size(), newToOldMapper)
-                                            .writePostings(postingsOutput.asSequentialWriter(),
-                                                           vectorValues, postingsMap, deletedOrdinals);
+            long postingsPosition;
+            if (V5OnDiskFormat.WRITE_V5_VECTOR_POSTINGS)
+            {
+                postingsPosition = new V5VectorPostingsWriter<T>(remappedPostings)
+                                   .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap);
+            }
+            else
+            {
+                postingsPosition = new V2VectorPostingsWriter<T>(remappedPostings.structure == Structure.ONE_TO_ONE, builder.getGraph().size(), newToOldMapper)
+                                   .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, deletedOrdinals);
+            }
             long postingsLength = postingsPosition - postingsOffset;
 
             // write the graph
@@ -472,37 +478,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
         }
         return cvi;
-    }
-
-    /**
-     * @return a map of vector ordinal to row id, or null if the vectors are not 1:1 with rows
-     */
-    private BiMap<Integer, Integer> buildOrdinalMap()
-    {
-        BiMap<Integer, Integer> ordinalMap = HashBiMap.create();
-        int minRow = Integer.MAX_VALUE;
-        int maxRow = Integer.MIN_VALUE;
-        for (VectorPostings<T> vectorPostings : postingsMap.values())
-        {
-            if (vectorPostings.getRowIds().size() != 1)
-            {
-                // multiple rows associated with this vector
-                return null;
-            }
-            int rowId = vectorPostings.getRowIds().getInt(0);
-            int ordinal = vectorPostings.getOrdinal();
-            minRow = Math.min(minRow, rowId);
-            maxRow = Math.max(maxRow, rowId);
-            assert !ordinalMap.containsKey(ordinal); // vector <-> ordinal should be unique
-            ordinalMap.put(ordinal, rowId);
-        }
-
-        if (minRow != 0 || maxRow != postingsMap.values().size() - 1)
-        {
-            // not every row had a vector associated with it
-            return null;
-        }
-        return ordinalMap;
     }
 
     private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, IndexContext indexContext) throws IOException

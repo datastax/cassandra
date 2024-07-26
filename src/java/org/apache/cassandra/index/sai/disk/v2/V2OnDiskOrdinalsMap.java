@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.disk.v2;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
@@ -31,7 +30,6 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseBits;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
@@ -39,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.vector.BitsUtil;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
+import org.apache.cassandra.index.sai.utils.SingletonIntIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 
@@ -47,7 +46,7 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     private static final Logger logger = LoggerFactory.getLogger(V2OnDiskOrdinalsMap.class);
 
     private final OrdinalsView fastOrdinalsView;
-    private static final OrdinalsMatchingRowIdsView ordinalsMatchingRowIdsView = new OrdinalsMatchingRowIdsView();
+    private static final OneToOneRowIdsView ONE_TO_ONE_ROW_IDS_VIEW = new OneToOneRowIdsView();
     private final FileHandle fh;
     private final long ordToRowOffset;
     private final long segmentEnd;
@@ -86,7 +85,7 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
             // the file format for the RowIdsView is correct, even if there are no postings.
             this.canFastMapRowIdsView = deletedCount == -1;
             this.canFastMapOrdinalsView = deletedCount == -1 || rowOrdinalOffset + 8 == segmentEnd;
-            this.fastOrdinalsView = deletedCount == -1 ? new RowIdMatchingOrdinalsView(size) : new EmptyView();
+            this.fastOrdinalsView = deletedCount == -1 ? new OneToOneOrdinalsView(size) : new EmptyOrdinalsView();
             assert rowOrdinalOffset < segmentEnd : "rowOrdinalOffset " + rowOrdinalOffset + " is not less than segmentEnd " + segmentEnd;
         }
         catch (Exception e)
@@ -99,7 +98,7 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     public RowIdsView getRowIdsView()
     {
         if (canFastMapRowIdsView) {
-            return ordinalsMatchingRowIdsView;
+            return ONE_TO_ONE_ROW_IDS_VIEW;
         }
 
         return new FileReadingRowIdsView();
@@ -111,50 +110,6 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         return BitsUtil.bitsIgnoringDeleted(acceptBits, deletedOrdinals);
     }
 
-
-    /**
-     * Singleton int iterator used to prevent unnecessary object creation
-     */
-    private static class SingletonIntIterator implements PrimitiveIterator.OfInt
-    {
-        private final int value;
-        private boolean hasNext = true;
-
-        public SingletonIntIterator(int value)
-        {
-            this.value = value;
-        }
-
-        @Override
-        public boolean hasNext()
-        {
-            return hasNext;
-        }
-
-        @Override
-        public int nextInt()
-        {
-            if (!hasNext)
-                throw new NoSuchElementException();
-            hasNext = false;
-            return value;
-        }
-    }
-
-    private static class OrdinalsMatchingRowIdsView implements RowIdsView {
-
-        @Override
-        public PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
-        {
-            return new SingletonIntIterator(vectorOrdinal);
-        }
-
-        @Override
-        public void close()
-        {
-            // noop
-        }
-    }
 
     private class FileReadingRowIdsView implements RowIdsView
     {
@@ -215,167 +170,6 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
 
         return new FileReadingOrdinalsView();
-    }
-
-    /** Bits matching the given range, inclusively. */
-    public static class MatchRangeBits extends BitSet
-    {
-        final int lowerBound;
-        final int upperBound;
-
-        public MatchRangeBits(int lowerBound, int upperBound) {
-            // bitset is empty if lowerBound > upperBound
-            this.lowerBound = lowerBound;
-            this.upperBound = upperBound;
-        }
-
-        @Override
-        public boolean get(int index) {
-            return lowerBound <= index && index <= upperBound;
-        }
-
-        @Override
-        public int length() {
-            if (lowerBound > upperBound)
-                return 0;
-            return upperBound - lowerBound + 1;
-        }
-
-        @Override
-        public void set(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public boolean getAndSet(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public void clear(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public void clear(int i, int i1)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public int cardinality()
-        {
-            return length();
-        }
-
-        @Override
-        public int approximateCardinality()
-        {
-            return length();
-        }
-
-        @Override
-        public int prevSetBit(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public int nextSetBit(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public long ramBytesUsed()
-        {
-            return 2 * Integer.BYTES;
-        }
-    }
-
-    private static class RowIdMatchingOrdinalsView implements OrdinalsView
-    {
-        // The number of ordinals in the segment. If we see a rowId greater than or equal to this, we know it's not in
-        // the graph.
-        private final int size;
-
-        RowIdMatchingOrdinalsView(int size)
-        {
-            this.size = size;
-        }
-
-        @Override
-        public int getOrdinalForRowId(int rowId) throws IOException
-        {
-            if (rowId >= size)
-                return -1;
-            return rowId;
-        }
-
-        @Override
-        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
-        {
-            // risk of overflow
-            assert endRowId < Integer.MAX_VALUE : "endRowId must be less than Integer.MAX_VALUE";
-            assert endRowId >= startRowId : "endRowId must be greater than or equal to startRowId";
-
-            int start = Math.max(startRowId, 0);
-            int end = Math.min(endRowId + 1, size);
-            for (int rowId = start; rowId < end; rowId++)
-                consumer.accept(rowId, rowId);
-            // Returns true if we called the consumer at least once.
-            return end > start;
-        }
-
-        @Override
-        public BitSet buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> unused) throws IOException
-        {
-            int start = Math.max(startRowId, 0);
-            int end = Math.min(endRowId + 1, size);
-
-            return new MatchRangeBits(start, end);
-        }
-
-        @Override
-        public void close()
-        {
-            // noop
-        }
-    }
-
-    /**
-     * An OrdinalsView that always returns -1 for all rowIds. This is used when the segment has no postings, which
-     * can happen if all the graph's ordinals are in the deletedOrdinals set.
-     */
-    public static class EmptyView implements OrdinalsView
-    {
-        @Override
-        public int getOrdinalForRowId(int rowId) throws IOException
-        {
-            return -1;
-        }
-
-        @Override
-        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
-        {
-            return false;
-        }
-
-        @Override
-        public Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
-        {
-            // Get an empty bitset
-            return bitsSupplier.get();
-        }
-
-        @Override
-        public void close()
-        {
-            // noop
-        }
     }
 
     /**
@@ -456,10 +250,8 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
 
         @Override
-        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
+        public void forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
         {
-            boolean called = false;
-
             long start = DiskBinarySearch.searchFloor(0, high, startRowId, i -> {
                 try
                 {
@@ -474,7 +266,7 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
             });
 
             if (start < 0 || start >= high)
-                return false;
+                return;
 
             reader.seek(rowOrdinalOffset + start * 8);
             // sequential read without seeks should be fast, we expect OS to prefetch data from the disk
@@ -487,22 +279,8 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 
                 int ordinal = reader.readInt();
                 if (rowId >= startRowId)
-                {
-                    called = true;
                     consumer.accept(rowId, ordinal);
-                }
             }
-            return called;
-        }
-
-        @Override
-        public Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
-        {
-            var bits = bitsSupplier.get();
-            this.forEachOrdinalInRange(startRowId, endRowId, (segmentRowId, ordinal) -> {
-                bits.set(ordinal);
-            });
-            return bits;
         }
 
         @Override

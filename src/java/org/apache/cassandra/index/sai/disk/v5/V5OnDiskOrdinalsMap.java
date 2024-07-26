@@ -19,38 +19,47 @@
 package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.NoSuchElementException;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.PrimitiveIterator;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.util.BitSet;
-import io.github.jbellis.jvector.util.Bits;
-import io.github.jbellis.jvector.util.SparseBits;
-import org.apache.cassandra.index.sai.disk.v2.V2OnDiskOrdinalsMap;
-import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
+import org.apache.cassandra.index.sai.utils.SingletonIntIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 
 public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 {
     private static final Logger logger = LoggerFactory.getLogger(V5OnDiskOrdinalsMap.class);
 
+    private static final OneToOneRowIdsView ONE_TO_ONE_ROW_IDS_VIEW = new OneToOneRowIdsView();
+    private static final EmptyOrdinalsView EMPTY_ORDINALS_VIEW = new EmptyOrdinalsView();
+    private static final EmptyRowIdsView EMPTY_ROW_IDS_VIEW = new EmptyRowIdsView();
+
     private final FileHandle fh;
     private final long ordToRowOffset;
     private final long segmentEnd;
-    private final int size;
+    private final int maxOrdinal;
+    private final int maxRowId;
     private final long rowOrdinalOffset;
-    private final V5VectorPostingsWriter.Structure structure;
+    private final List<ExtraRow> extraRows;
+    @VisibleForTesting
+    final V5VectorPostingsWriter.Structure structure;
 
     private final Supplier<OrdinalsView> ordinalsViewSupplier;
     private final Supplier<RowIdsView> rowIdsViewSupplier;
@@ -63,26 +72,47 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         {
             reader.seek(segmentOffset);
             int magic = reader.readInt();
-            if (magic != V5VectorPostingsWriter.MAGIC) {
+            if (magic != V5VectorPostingsWriter.MAGIC)
+            {
                 throw new RuntimeException("Invalid magic number in V5OnDiskOrdinalsMap");
             }
             this.structure = V5VectorPostingsWriter.Structure.values()[reader.readInt()];
+            this.maxOrdinal = reader.readInt();
+            this.maxRowId = reader.readInt();
             this.ordToRowOffset = reader.getFilePointer();
-            this.size = reader.readInt();
-            if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE) {
+            if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE)
+            {
                 this.rowOrdinalOffset = segmentEnd;
-            } else {
+            }
+            else
+            {
                 reader.seek(segmentEnd - 8);
                 this.rowOrdinalOffset = reader.readLong();
             }
 
-            if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE) {
-                this.ordinalsViewSupplier = () -> new RowIdMatchingOrdinalsView(size);
-                this.rowIdsViewSupplier = OrdinalsMatchingRowIdsView::new;
-            } else {
-                assert size > 0;
-                this.ordinalsViewSupplier = FileReadingOrdinalsView::new;
-                this.rowIdsViewSupplier = FileReadingRowIdsView::new;
+            if (maxOrdinal < 0)
+            {
+                extraRows = null;
+                this.rowIdsViewSupplier = () -> EMPTY_ROW_IDS_VIEW;
+                this.ordinalsViewSupplier = () -> EMPTY_ORDINALS_VIEW;
+            }
+            else if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE)
+            {
+                extraRows = null;
+                this.rowIdsViewSupplier = () -> ONE_TO_ONE_ROW_IDS_VIEW;
+                this.ordinalsViewSupplier = () -> new OneToOneOrdinalsView(maxOrdinal + 1);
+            }
+            else if (structure == V5VectorPostingsWriter.Structure.ONE_TO_MANY)
+            {
+                extraRows = cacheExtraRowOrdinals(reader);
+                this.rowIdsViewSupplier = GenericRowIdsView::new;
+                this.ordinalsViewSupplier = OneToManyOrdinalsView::new;
+            }
+            else
+            {
+                extraRows = null;
+                this.rowIdsViewSupplier = GenericRowIdsView::new;
+                this.ordinalsViewSupplier = GenericOrdinalsView::new;
             }
 
             assert rowOrdinalOffset <= segmentEnd : "rowOrdinalOffset " + rowOrdinalOffset + " is not less than or equal to segmentEnd " + segmentEnd;
@@ -93,10 +123,17 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
     }
 
-    @VisibleForTesting
-    V5VectorPostingsWriter.Structure getStructure()
+    private List<ExtraRow> cacheExtraRowOrdinals(RandomAccessReader reader) throws IOException
     {
-        return structure;
+        var extra = new ArrayList<ExtraRow>();
+        reader.seek(rowOrdinalOffset);
+        while (reader.getFilePointer() < segmentEnd - 8)
+        {
+            int rowId = reader.readInt();
+            int ordinal = reader.readInt();
+            extra.add(new ExtraRow(rowId, ordinal));
+        }
+        return extra;
     }
 
     public RowIdsView getRowIdsView()
@@ -104,64 +141,20 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         return rowIdsViewSupplier.get();
     }
 
-
-    /**
-     * Singleton int iterator used to prevent unnecessary object creation
-     */
-    private static class SingletonIntIterator implements PrimitiveIterator.OfInt
-    {
-        private final int value;
-        private boolean hasNext = true;
-
-        public SingletonIntIterator(int value)
-        {
-            this.value = value;
-        }
-
-        @Override
-        public boolean hasNext()
-        {
-            return hasNext;
-        }
-
-        @Override
-        public int nextInt()
-        {
-            if (!hasNext)
-                throw new NoSuchElementException();
-            hasNext = false;
-            return value;
-        }
-    }
-
-    private static class OrdinalsMatchingRowIdsView implements RowIdsView {
-
-        @Override
-        public PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
-        {
-            return new SingletonIntIterator(vectorOrdinal);
-        }
-
-        @Override
-        public void close()
-        {
-            // noop
-        }
-    }
-
-    private class FileReadingRowIdsView implements RowIdsView
+    // VSTODO is it worth optimizing this for one-to-many case as well?
+    private class GenericRowIdsView implements RowIdsView
     {
         RandomAccessReader reader = fh.createReader();
 
         @Override
         public PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
         {
-            Preconditions.checkArgument(vectorOrdinal < size, "vectorOrdinal %s is out of bounds %s", vectorOrdinal, size);
+            Preconditions.checkArgument(vectorOrdinal <= maxOrdinal, "vectorOrdinal %s is out of bounds %s", vectorOrdinal, maxOrdinal);
 
             // read index entry
             try
             {
-                reader.seek(ordToRowOffset + 4L + vectorOrdinal * 8L);
+                reader.seek(ordToRowOffset + vectorOrdinal * 8L);
             }
             catch (Exception e)
             {
@@ -205,260 +198,49 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         return ordinalsViewSupplier.get();
     }
 
-    /** Bits matching the given range, inclusively. */
-    public static class MatchRangeBits extends BitSet
-    {
-        final int lowerBound;
-        final int upperBound;
-
-        public MatchRangeBits(int lowerBound, int upperBound) {
-            // bitset is empty if lowerBound > upperBound
-            this.lowerBound = lowerBound;
-            this.upperBound = upperBound;
-        }
-
-        @Override
-        public boolean get(int index) {
-            return lowerBound <= index && index <= upperBound;
-        }
-
-        @Override
-        public int length() {
-            if (lowerBound > upperBound)
-                return 0;
-            return upperBound - lowerBound + 1;
-        }
-
-        @Override
-        public void set(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public boolean getAndSet(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public void clear(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public void clear(int i, int i1)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public int cardinality()
-        {
-            return length();
-        }
-
-        @Override
-        public int approximateCardinality()
-        {
-            return length();
-        }
-
-        @Override
-        public int prevSetBit(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public int nextSetBit(int i)
-        {
-            throw new UnsupportedOperationException("not supported");
-        }
-
-        @Override
-        public long ramBytesUsed()
-        {
-            return 2 * Integer.BYTES;
-        }
-    }
-
-    private static class RowIdMatchingOrdinalsView implements OrdinalsView
-    {
-        // The number of ordinals in the segment. If we see a rowId greater than or equal to this, we know it's not in
-        // the graph.
-        private final int size;
-
-        RowIdMatchingOrdinalsView(int size)
-        {
-            this.size = size;
-        }
-
-        @Override
-        public int getOrdinalForRowId(int rowId)
-        {
-            if (rowId >= size)
-                return -1;
-            return rowId;
-        }
-
-        @Override
-        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
-        {
-            // risk of overflow
-            assert endRowId < Integer.MAX_VALUE : "endRowId must be less than Integer.MAX_VALUE";
-            assert endRowId >= startRowId : "endRowId must be greater than or equal to startRowId";
-
-            int start = Math.max(startRowId, 0);
-            int end = Math.min(endRowId + 1, size);
-            for (int rowId = start; rowId < end; rowId++)
-                consumer.accept(rowId, rowId);
-            // Returns true if we called the consumer at least once.
-            return end > start;
-        }
-
-        @Override
-        public BitSet buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> unused) throws IOException
-        {
-            int start = Math.max(startRowId, 0);
-            int end = Math.min(endRowId + 1, size);
-
-            return new MatchRangeBits(start, end);
-        }
-
-        @Override
-        public void close()
-        {
-            // noop
-        }
-    }
-
-    /**
-     * not thread safe
-     */
-    private class FileReadingOrdinalsView implements OrdinalsView
+    @NotThreadSafe
+    private class GenericOrdinalsView implements OrdinalsView
     {
         RandomAccessReader reader = fh.createReader();
-        private final long high = (segmentEnd - 8 - rowOrdinalOffset) / 8;
-        private int lastFoundRowId = -1;
-        private long lastFoundRowIdIndex = -1;
-
-        private int lastRowId = -1;
 
         /**
-         * @return order if given row id is found; otherwise return -1
+         * @return ordinal if given row id is found; otherwise return -1
          * rowId must increase
          */
         @Override
         public int getOrdinalForRowId(int rowId) throws IOException
         {
-            if (rowId <= lastRowId)
-                throw new IllegalArgumentException("rowId " + rowId + " is less than or equal to lastRowId " + lastRowId);
-            lastRowId = rowId;
-
-            if (rowId < lastFoundRowId) // skipped row, no need to search
+            long offset = rowOrdinalOffset + (long) rowId * 8;
+            if (offset >= segmentEnd - 8)
                 return -1;
 
-            long low = 0;
-            if (lastFoundRowId > -1 && lastFoundRowIdIndex < high)
-            {
-                low = lastFoundRowIdIndex;
+            reader.seek(offset);
+            int foundRowId = reader.readInt();
+            assert foundRowId == rowId : "foundRowId=" + foundRowId + " instead of rowId=" + rowId;
 
-                if (lastFoundRowId == rowId) // "lastFoundRowId + 1 == rowId" case that returned -1 likely moved use here
-                {
-                    long offset = rowOrdinalOffset + lastFoundRowIdIndex * 8;
-                    reader.seek(offset);
-                    int foundRowId = reader.readInt();
-                    assert foundRowId == rowId : "expected rowId " + rowId + " but found " + foundRowId;
-                    return reader.readInt();
-                }
-                else if (lastFoundRowId + 1 == rowId) // sequential read, skip binary search
-                {
-                    long offset = rowOrdinalOffset + (lastFoundRowIdIndex + 1) * 8;
-                    reader.seek(offset);
-                    int foundRowId = reader.readInt();
-                    lastFoundRowId = foundRowId;
-                    lastFoundRowIdIndex++;
-                    if (foundRowId == rowId)
-                        return reader.readInt();
-                    else
-                        return -1;
-                }
-            }
-            final AtomicLong lastRowIdIndex = new AtomicLong(-1L);
-            // Compute the offset of the start of the rowId to vectorOrdinal mapping
-            long index = DiskBinarySearch.searchInt(low, high, rowId, i -> {
-                try
-                {
-                    lastRowIdIndex.set(i);
-                    long offset = rowOrdinalOffset + i * 8;
-                    reader.seek(offset);
-                    return reader.readInt();
-                }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
-            });
-
-            // not found
-            if (index < 0)
-                return -1;
-
-            lastFoundRowId = rowId;
-            lastFoundRowIdIndex = lastRowIdIndex.get();
             return reader.readInt();
         }
 
         @Override
-        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
+        public void forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
         {
-            boolean called = false;
+            long startOffset = max(rowOrdinalOffset, rowOrdinalOffset + (long) startRowId * 8);
+            if (startOffset >= segmentEnd - 8)
+                return;  // start rowid is larger than any rowId that has an associated vector ordinal
 
-            long start = DiskBinarySearch.searchFloor(0, high, startRowId, i -> {
-                try
-                {
-                    long offset = rowOrdinalOffset + i * 8;
-                    reader.seek(offset);
-                    return reader.readInt();
-                }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
-            });
+            reader.seek(startOffset);
 
-            if (start < 0 || start >= high)
-                return false;
-
-            reader.seek(rowOrdinalOffset + start * 8);
-            // sequential read without seeks should be fast, we expect OS to prefetch data from the disk
-            // binary search for starting offset of min rowid >= startRowId unlikely to be faster
-            for (long idx = start; idx < high; idx ++)
+            while (reader.getFilePointer() < segmentEnd - 8)
             {
                 int rowId = reader.readInt();
+                int ordinal = reader.readInt();
+
                 if (rowId > endRowId)
                     break;
 
-                int ordinal = reader.readInt();
-                if (rowId >= startRowId)
-                {
-                    called = true;
+                if (ordinal != -1)
                     consumer.accept(rowId, ordinal);
-                }
             }
-            return called;
-        }
-
-        @Override
-        public Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
-        {
-            var bits = bitsSupplier.get();
-            this.forEachOrdinalInRange(startRowId, endRowId, (segmentRowId, ordinal) -> {
-                bits.set(ordinal);
-            });
-            return bits;
         }
 
         @Override
@@ -471,5 +253,66 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     public void close()
     {
         fh.close();
+    }
+
+    private class OneToManyOrdinalsView implements OrdinalsView
+    {
+        @Override
+        public int getOrdinalForRowId(int rowId)
+        {
+            assert rowId >= 0 : rowId;
+            if (rowId > maxRowId) {
+                return -1;
+            }
+
+            // Binary search for the ExtraRow with the given rowId
+            int index = Collections.binarySearch(extraRows, new ExtraRow(rowId, 0),
+                                                 Comparator.comparingInt(er -> er.rowId));
+            if (index >= 0) {
+                // Found in extra rows
+                return extraRows.get(index).ordinal;
+            }
+
+            // if it's not an "extra" row then the ordinal is the same as the rowId
+            return rowId;
+        }
+
+        @Override
+        public void forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
+        {
+            int rawIndex = Collections.binarySearch(extraRows, new ExtraRow(startRowId, 0),
+                                                    Comparator.comparingInt(er -> er.rowId));
+            int extraIndex = rawIndex >= 0 ? rawIndex : -rawIndex - 1;
+            for (int rowId = max(0, startRowId); rowId <= min(endRowId, maxRowId); rowId++)
+            {
+                if (extraIndex < extraRows.size() && extraRows.get(extraIndex).rowId == rowId)
+                {
+                    ExtraRow extraRow = extraRows.get(extraIndex);
+                    consumer.accept(extraRow.rowId, extraRow.ordinal);
+                    extraIndex++;
+                }
+                else
+                {
+                    consumer.accept(rowId, rowId);
+                }
+            }
+        }
+
+        @Override
+        public void close() {
+            // no-op, as we no longer need to close any resources
+        }
+    }
+
+    private static class ExtraRow
+    {
+        public final int rowId;
+        public final int ordinal;
+
+        private ExtraRow(int rowId, int ordinal)
+        {
+            this.rowId = rowId;
+            this.ordinal = ordinal;
+        }
     }
 }

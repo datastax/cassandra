@@ -29,6 +29,8 @@ import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 
 public class V5OnDiskFormat extends V3OnDiskFormat
 {
+    public static final boolean WRITE_V5_VECTOR_POSTINGS = Boolean.parseBoolean(System.getProperty("cassandra.sai.write_v5_vector_postings", "true"));
+
     public static final V5OnDiskFormat instance = new V5OnDiskFormat();
 
     @Override
