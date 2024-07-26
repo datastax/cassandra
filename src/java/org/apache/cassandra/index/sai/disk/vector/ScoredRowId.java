@@ -18,7 +18,13 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-public class ScoredRowId
+import java.util.PriorityQueue;
+
+/**
+ * Note: this class has a natural ordering that is inconsistent with equals in order to
+ * use {@link PriorityQueue}'s O(N) constructor.
+ */
+public class ScoredRowId implements Comparable<ScoredRowId>
 {
     final int segmentRowId;
     final float score;
@@ -37,5 +43,12 @@ public class ScoredRowId
     public int getSegmentRowId()
     {
         return segmentRowId;
+    }
+
+    @Override
+    public int compareTo(ScoredRowId o)
+    {
+        // Inverted comparison to sort in descending order
+        return Float.compare(o.score, score);
     }
 }
