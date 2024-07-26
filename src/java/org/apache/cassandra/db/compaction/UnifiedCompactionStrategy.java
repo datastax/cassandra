@@ -481,7 +481,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        spaceAvailable,
                                                        rateLimitLog,
                                                        remainingAdaptiveCompactions);
-        logger.debug("Selecting up to {} new compactions of up to {}, concurrency limit {}{}",
+        logger.trace("Selecting up to {} new compactions of up to {}, concurrency limit {}{}",
                      Math.max(0, limits.maxCompactions - limits.runningCompactions),
                      FBUtilities.prettyPrintMemory(limits.spaceAvailable),
                      limits.maxConcurrentCompactions,
@@ -903,7 +903,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 logger.trace("Arena {} has {} levels", arena, levels.size());
         }
 
-        logger.debug("Found {} arenas with buckets for {}.{}", ret.size(), realm.getKeyspaceName(), realm.getTableName());
+        logger.trace("Found {} arenas with buckets for {}.{}", ret.size(), realm.getKeyspaceName(), realm.getTableName());
         return ret;
     }
 

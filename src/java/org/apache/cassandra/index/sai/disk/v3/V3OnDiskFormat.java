@@ -44,6 +44,7 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     public static final boolean REDUCE_TOPK_ACROSS_SSTABLES = Boolean.parseBoolean(System.getProperty("cassandra.sai.reduce_topk_across_sstables", "true"));
     public static final boolean ENABLE_RERANK_FLOOR = Boolean.parseBoolean(System.getProperty("cassandra.sai.rerank_floor", "true"));
     public static final boolean ENABLE_EDGES_CACHE = Boolean.parseBoolean(System.getProperty("cassandra.sai.enable_edges_cache", "false"));
+    public static final boolean ENABLE_JVECTOR_DELETES = Boolean.parseBoolean(System.getProperty("cassandra.sai.enable_jvector_deletes", "true"));
 
     public static volatile boolean WRITE_JVECTOR3_FORMAT = Boolean.parseBoolean(System.getProperty("cassandra.sai.write_jv3_format", "false"));
     public static final boolean ENABLE_LTM_CONSTRUCTION = Boolean.parseBoolean(System.getProperty("cassandra.sai.ltm_construction", "true"));
@@ -89,6 +90,8 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     {
         if (indexContext.isVector())
             return new V3VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
+        if (indexContext.isLiteral())
+            return new V3InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
     }
 

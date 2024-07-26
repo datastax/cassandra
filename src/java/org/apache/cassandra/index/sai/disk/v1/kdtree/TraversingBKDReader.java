@@ -25,7 +25,6 @@ import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.index.CorruptIndexException;
@@ -58,9 +57,8 @@ public class TraversingBKDReader implements Closeable
     {
         this.indexFile = indexFile;
 
-        try (final RandomAccessReader reader = indexFile.createReader())
+        try (final IndexInputReader in = IndexInputReader.create(indexFile.createReader()))
         {
-            final IndexInputReader in = IndexInputReader.create(reader);
             SAICodecUtils.validate(in);
             in.seek(root);
 

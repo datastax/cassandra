@@ -136,8 +136,8 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
 
         String indexFile = indexWriter.indexes.get(column).filename(true);
 
-        // final flush
-        indexWriter.complete();
+        // final flush (not: the `sstable` is not used by SASI, so passing `null` is fine)
+        indexWriter.complete(null);
 
         for (String segment : segments)
             Assert.assertFalse(new File(segment).exists());
@@ -234,7 +234,8 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
         for (String segment : segments)
             Assert.assertTrue(new File(segment).exists());
 
-        indexWriter.complete();
+        // The sstable argument is not used by SASI
+        indexWriter.complete(null);
 
         // make sure that individual segments have been cleaned up
         for (String segment : segments)

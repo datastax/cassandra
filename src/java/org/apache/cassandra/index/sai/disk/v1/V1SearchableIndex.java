@@ -35,7 +35,6 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
@@ -47,7 +46,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Throwables;
 
-import static java.lang.Math.max;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COLUMN_NAME;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COMPONENT_METADATA;
@@ -100,8 +98,9 @@ public class V1SearchableIndex implements SearchableIndex
             this.minKey = metadatas.get(0).minKey.partitionKey();
             this.maxKey = metadatas.get(metadatas.size() - 1).maxKey.partitionKey();
 
-            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
-            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
+            var version = perIndexComponents.version();
+            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
+            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
 
             this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
 
@@ -196,31 +195,12 @@ public class V1SearchableIndex implements SearchableIndex
         {
             if (segment.intersects(keyRange))
             {
-                var segmentLimit = getSegmentLimit(limit, totalRows, segment);
+                var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                 iterators.add(segment.orderBy(expression, keyRange, context, segmentLimit));
             }
         }
 
         return iterators;
-    }
-
-    private static int getSegmentLimit(int limit, long totalRows, Segment segment)
-    {
-        if (!V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES)
-            return limit;
-
-        // Note: it is tempting to think that we should max out results for the first segment
-        // since that's where we're establishing our rerank floor.  This *does* reduce the number
-        // of calls to resume, but it's 10-15% slower overall, so don't do it.
-        // if (context.getAnnRerankFloor() == 0 && V3OnDiskFormat.ENABLE_RERANK_FLOOR)
-        //    return limit;
-
-        // We expect the number of top results found in each segment to be proportional to its number of rows.
-        // (We don't pad this number more because resuming a search if we guess too low is very very inexpensive.)
-        long segmentRows = 1 + segment.metadata.maxSSTableRowId - segment.metadata.minSSTableRowId;
-        int proportionalLimit = (int) Math.ceil(limit * ((double) segmentRows / totalRows));
-        assert proportionalLimit >= 1 : proportionalLimit;
-        return proportionalLimit;
     }
 
     @Override
@@ -229,7 +209,7 @@ public class V1SearchableIndex implements SearchableIndex
         List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>(segments.size());
         for (Segment segment : segments)
         {
-            int segmentLimit = getSegmentLimit(limit, totalRows, segment);
+            var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
             results.add(segment.orderResultsBy(context, keys, exp, segmentLimit));
         }
 

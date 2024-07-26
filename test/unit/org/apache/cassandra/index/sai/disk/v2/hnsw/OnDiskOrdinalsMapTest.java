@@ -276,7 +276,7 @@ public class OnDiskOrdinalsMapTest
                                                            : x -> ordinalsMap.inverse().getOrDefault(x, x);
 
         long postingsOffset = writer.position();
-        long postingsPosition = new VectorPostingsWriter<Integer>(ordinalsMap != null, reverseOrdinalsMapper)
+        long postingsPosition = new VectorPostingsWriter<Integer>(ordinalsMap != null, postingsMap.size(), reverseOrdinalsMapper)
                                     .writePostings(writer, vectorValues, postingsMap, deletedOrdinals);
         long postingsLength = postingsPosition - postingsOffset;
 

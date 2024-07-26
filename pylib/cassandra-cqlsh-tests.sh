@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -23,78 +23,82 @@
 #
 ################################
 
+set -x
+
 WORKSPACE=$1
-PYTHON_VERSION=$2
 
-if [ "${WORKSPACE}" = "" ]; then
-    echo "Specify Cassandra source directory"
-    exit
-fi
+[ "x${WORKSPACE}" != "x" ] || WORKSPACE="$(readlink -f $(dirname "$0")/..)"
+[ "x${BUILD_DIR}" != "x" ] || BUILD_DIR="${WORKSPACE}/build"
+[ "x${DIST_DIR}" != "x" ] || DIST_DIR="${WORKSPACE}/build"
+[ "x${TMPDIR}" != "x" ] || TMPDIR="$(mktemp -d ${DIST_DIR}/run-python-dtest.XXXXXX)"
 
-if [ "${PYTHON_VERSION}" = "" ]; then
-    PYTHON_VERSION=python3
-fi
-
-if [ "${PYTHON_VERSION}" != "python3" -a "${PYTHON_VERSION}" != "python2" ]; then
-    echo "Specify Python version python3 or python2"
-    exit
-fi
-
+mkdir -p "${TMPDIR}"
+export TMPDIR
 export PYTHONIOENCODING="utf-8"
 export PYTHONUNBUFFERED=true
 export CASS_DRIVER_NO_EXTENSIONS=true
-export CASS_DRIVER_NO_CYTHON=true
 export CCM_MAX_HEAP_SIZE="2048M"
 export CCM_HEAP_NEWSIZE="200M"
-export CCM_CONFIG_DIR=${WORKSPACE}/.ccm
-export NUM_TOKENS="32"
+export CCM_CONFIG_DIR="${TMPDIR}/.ccm"
+export NUM_TOKENS="16"
 export CASSANDRA_DIR=${WORKSPACE}
-export TESTSUITE_NAME="cqlshlib.${PYTHON_VERSION}"
 
-if [ -z "$CASSANDRA_USE_JDK11" ]; then
-    export CASSANDRA_USE_JDK11=false
+if [[ -z "${version}" ]]; then
+  version=$(grep 'property\s*name=\"base.version\"' ${CASSANDRA_DIR}/build.xml |sed -ne 's/.*value=\"\([^"]*\)\".*/\1/p')
 fi
 
-if [ "$CASSANDRA_USE_JDK11" = true ] ; then
-    TESTSUITE_NAME="${TESTSUITE_NAME}.jdk11"
-else
-    TESTSUITE_NAME="${TESTSUITE_NAME}.jdk8"
-    unset JAVA11_HOME
+if [[ -z "${java_version}" ]]; then
+  java_version=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | sed 's/^1\.//g' | awk -F. '{print $1}')
+fi
+if [[ ${java_version} -ge 11 ]]; then
+  export CASSANDRA_USE_JDK11=true
 fi
 
-ant -buildfile ${CASSANDRA_DIR}/build.xml realclean
-# Loop to prevent failure due to maven-ant-tasks not downloading a jar..
-for x in $(seq 1 3); do
-    ant -buildfile ${CASSANDRA_DIR}/build.xml jar
-    RETURN="$?"
-    if [ "${RETURN}" -eq "0" ]; then
-        break
-    fi
-done
-# Exit, if we didn't build successfully
-if [ "${RETURN}" -ne "0" ]; then
-    echo "Build failed with exit code: ${RETURN}"
-    exit ${RETURN}
+if [[ -z "${python_version}" ]]; then
+  python_version="3.8"
+  command -v python3 >/dev/null 2>&1 && python_version="$(python3 -V | awk '{print $2}' | awk -F'.' '{print $1"."$2}')"
 fi
+
+export TESTSUITE_NAME="cqlshlib.python${python_version}.jdk${java_version}"
+
+pushd ${CASSANDRA_DIR} >/dev/null
+
+# check project is already built. no cleaning is done, so jenkins unstash works, beware.
+[[ -f "${BUILD_DIR}/dse-db-${version}.jar" ]] || [[ -f "${BUILD_DIR}/dse-db-${version}-SNAPSHOT.jar" ]] || { echo "Project must be built first. Use \`ant jar\`. Build directory is ${BUILD_DIR} with: $(ls ${BUILD_DIR})"; exit 1; }
 
 # Set up venv with dtest dependencies
 set -e # enable immediate exit if venv setup fails
-virtualenv --python=$PYTHON_VERSION venv
-source venv/bin/activate
-# 3.11 needs the newest pip
-curl -sS https://bootstrap.pypa.io/get-pip.py | $PYTHON_VERSION
 
-pip install -r ${CASSANDRA_DIR}/pylib/requirements.txt
+# fresh virtualenv and test logs results everytime
+rm -fr ${DIST_DIR}/venv ${DIST_DIR}/test/{html,output,logs}
+
+if [ "$cython" = "yes" ]; then
+  cython_suffix="cython"
+else
+  cython_suffix="no-cython"
+fi
+
+# re-use when possible the pre-installed virtualenv found in the cassandra-ubuntu2004_test docker image
+virtualenv-clone ${BUILD_HOME}/${cython_suffix}/python${python_version} ${BUILD_DIR}/venv || virtualenv --python=python${python_version} ${BUILD_DIR}/venv
+source ${BUILD_DIR}/venv/bin/activate
+
+if [ "$cython" = "yes" ]; then
+  pip install "Cython>=0.29.15,<3.0"
+  unset CASS_DRIVER_NO_CYTHON
+else
+  export CASS_DRIVER_NO_CYTHON=true
+fi
+
+pip install --exists-action s -r ${CASSANDRA_DIR}/pylib/requirements.txt
 pip freeze
 
 if [ "$cython" = "yes" ]; then
-    TESTSUITE_NAME="${TESTSUITE_NAME}.cython"
-    pip install "Cython>=0.29.15,<3.0"
-    cd pylib/; python setup.py build_ext --inplace
-    cd ${WORKSPACE}
-else
-    TESTSUITE_NAME="${TESTSUITE_NAME}.no_cython"
+    pushd pylib >/dev/null
+    python setup.py build_ext --inplace
+    popd >/dev/null
 fi
+
+TESTSUITE_NAME="${TESTSUITE_NAME}.${cython_suffix}.$(uname -m)"
 
 ################################
 #
@@ -105,38 +109,32 @@ fi
 ccm remove test || true # in case an old ccm cluster is left behind
 ccm create test -n 1 --install-dir=${CASSANDRA_DIR}
 ccm updateconf "enable_user_defined_functions: true"
-ccm updateconf "enable_scripted_user_defined_functions: true"
-
-version_from_build=$(ccm node1 versionfrombuild)
-export pre_or_post_cdc=$(python -c """from distutils.version import LooseVersion
-print (\"postcdc\" if LooseVersion(\"${version_from_build}\") >= \"3.8\" else \"precdc\")
-""")
-case "${pre_or_post_cdc}" in
-    postcdc)
-        ccm updateconf "cdc_enabled: true"
-        ;;
-    precdc)
-        :
-        ;;
-    *)
-        echo "${pre_or_post_cdc}" is an invalid value.
-        exit 1
-        ;;
-esac
-
-ccm start --wait-for-binary-proto
-
-cd ${CASSANDRA_DIR}/pylib/cqlshlib/
+ccm updateconf "cdc_enabled: true"
 
 set +e # disable immediate exit from this point
-pytest
+
+ccm start --wait-for-binary-proto --jvm-version=${java_version}
+
+pushd ${CASSANDRA_DIR}/pylib/cqlshlib/ >/dev/null
+
+pytest --junitxml=${BUILD_DIR}/test/output/cqlshlib.xml
 RETURN="$?"
 
+# don't do inline sed for linux+mac compat
+sed "s/testsuite name=\"pytest\"/testsuite name=\"${TESTSUITE_NAME}\"/g" ${BUILD_DIR}/test/output/cqlshlib.xml > /${TMPDIR}/cqlshlib.xml
+cat /${TMPDIR}/cqlshlib.xml > ${BUILD_DIR}/test/output/cqlshlib.xml
+sed "s/testcase classname=\"cqlshlib./testcase classname=\"${TESTSUITE_NAME}./g" ${BUILD_DIR}/test/output/cqlshlib.xml > /${TMPDIR}/cqlshlib.xml
+cat /${TMPDIR}/cqlshlib.xml > ${BUILD_DIR}/test/output/cqlshlib.xml
+
+# tar up any ccm logs for easy retrieval
+if ls ${TMPDIR}/.ccm/test/*/logs/* &>/dev/null ; then
+    mkdir -p ${DIST_DIR}/test/logs
+    pushd ${TMPDIR}/.ccm/test >/dev/null
+    tar -C ${TMPDIR}/.ccm/test -cJf ${DIST_DIR}/test/logs/ccm_logs.tar.xz */logs/*
+    popd >/dev/null
+fi
+
 ccm remove
-# hack around --xunit-prefix-with-testsuite-name not being available in nose 1.3.7
-sed -i "s/testsuite name=\"nosetests\"/testsuite name=\"${TESTSUITE_NAME}\"/g" nosetests.xml
-sed -i "s/testcase classname=\"cqlshlib./testcase classname=\"${TESTSUITE_NAME}./g" nosetests.xml
-mv nosetests.xml ${WORKSPACE}/cqlshlib.xml
 
 ################################
 #
@@ -144,8 +142,11 @@ mv nosetests.xml ${WORKSPACE}/cqlshlib.xml
 #
 ################################
 
-# /virtualenv
+rm -rf ${TMPDIR}
+unset TMPDIR
 deactivate
+popd >/dev/null
+popd >/dev/null
 
 # circleci needs non-zero exit on failures, jenkins need zero exit to process the test failures
 if ! command -v circleci >/dev/null 2>&1

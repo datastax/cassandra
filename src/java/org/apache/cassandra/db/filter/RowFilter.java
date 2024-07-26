@@ -1070,7 +1070,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 default:
                     break;
             }
-            return String.format("%s %s %s", column.name, operator, type.getString(value));
+            var valueString = type.getString(value);
+            if (valueString.length() > 9)
+                valueString = valueString.substring(0, 6) + "...";
+            return String.format("%s %s %s", column.name, operator, valueString);
         }
 
         @Override

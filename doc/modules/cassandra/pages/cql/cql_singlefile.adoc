@@ -1623,7 +1623,7 @@ FROM  +
 ( GROUP BY )? +
 ( ORDER BY )? +
 ( PER PARTITION LIMIT )? +
-( LIMIT )? +
+( LIMIT ( OFFSET )? )? +
 ( ALLOW FILTERING )?
 
 ::= DISTINCT?
@@ -1842,12 +1842,12 @@ with a `GROUP BY`, the first value encounter in each group will be
 returned.
 
 [[selectLimit]]
-===== `LIMIT` and `PER PARTITION LIMIT`
+===== `LIMIT`, `OFFSET` and `PER PARTITION LIMIT`
 
-The `LIMIT` option to a `SELECT` statement limits the number of rows
-returned by a query, while the `PER PARTITION LIMIT` option limits the
-number of rows returned for a given partition by the query. Note that
-both type of limit can used in the same statement.
+The `LIMIT` option in a `SELECT` statement limits the number of rows returned by a query.
+The `LIMIT` option can include an `OFFSET` option to skip the first rows of the query result.
+The `PER PARTITION LIMIT` option limits the number of rows returned for a given partition by the query.
+Note that both types of limits can used in the same statement.
 
 [[selectAllowFiltering]]
 ===== `ALLOW FILTERING`

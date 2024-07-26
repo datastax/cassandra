@@ -22,14 +22,19 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import org.junit.After;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -40,14 +45,15 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -67,6 +73,7 @@ import static org.junit.Assert.fail;
 
 //TODO This test needs rethinking because we always now end up with a single segment after a flush
 // and we are not restricted to Integer.MAX_VALUE in the segments
+@RunWith(Parameterized.class)
 public class SegmentFlushTest
 {
     private static long segmentRowIdOffset;
@@ -78,10 +85,28 @@ public class SegmentFlushTest
     private static ByteBuffer maxTerm;
     private static int numRowsPerSegment;
 
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data()
+    {
+        // Required because it configures SEGMENT_BUILD_MEMORY_LIMIT, which is needed for Version.AA
+        if (DatabaseDescriptor.getRawConfig() == null)
+            DatabaseDescriptor.setConfig(DatabaseDescriptor.loadConfig());
+        return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
+    }
+
     @BeforeClass
     public static void init()
     {
         DatabaseDescriptor.daemonInitialization();
+    }
+
+    @Before
+    public void setVersion()
+    {
+        SAIUtil.setLatestVersion(version);
     }
 
     @After
@@ -195,9 +220,10 @@ public class SegmentFlushTest
                                                   components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
                                                   postingLists,
                                                   segmentMetadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).root,
-                                                  termsFooterPointer))
+                                                  termsFooterPointer,
+                                                  version))
         {
-            TermsIterator iterator = reader.allTerms(0);
+            TermsIterator iterator = reader.allTerms();
             assertEquals(minTerm, iterator.getMinTerm());
             assertEquals(maxTerm, iterator.getMaxTerm());
 

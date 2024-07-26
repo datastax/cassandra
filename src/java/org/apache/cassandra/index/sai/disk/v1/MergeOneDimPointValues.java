@@ -93,7 +93,7 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
             while (queue.size() != 0)
             {
                 final BKDReader.IteratorState reader = queue.top();
-                final long rowID = reader.next();
+                final int rowID = reader.next();
 
                 minRowID = Math.min(minRowID, rowID);
                 maxRowID = Math.max(maxRowID, rowID);

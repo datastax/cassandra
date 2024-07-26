@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -31,21 +32,26 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.pq.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Column index writer that accumulates (on-heap) indexed data from a compacted SSTable as it's being flushed to disk.
@@ -87,6 +93,12 @@ public class SSTableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public IndexComponents.ForWrite writtenComponents()
+    {
+        return perIndexComponents;
+    }
+
+    @Override
     public void addRow(PrimaryKey key, Row row, long sstableRowId) throws IOException
     {
         if (maybeAbort())
@@ -122,7 +134,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         long elapsed;
 
         boolean emptySegment = currentBuilder == null || currentBuilder.isEmpty();
-        logger.debug(indexContext.logMessage("Completing index flush with {}buffered data..."), emptySegment ? "no " : "");
+        logger.debug("Completing index flush with {}buffered data...", emptySegment ? "no " : "");
 
         try
         {
@@ -131,7 +143,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             {
                 flushSegment();
                 elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
-                logger.debug(indexContext.logMessage("Completed flush of final segment for SSTable {}. Duration: {} ms. Total elapsed: {} ms"),
+                logger.debug("Completed flush of final segment for SSTable {}. Duration: {} ms. Total elapsed: {} ms",
                              perIndexComponents.descriptor(),
                              elapsed - start,
                              elapsed);
@@ -142,7 +154,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             {
                 long bytesAllocated = currentBuilder.totalBytesAllocated();
                 long globalBytesUsed = currentBuilder.release(indexContext);
-                logger.debug(indexContext.logMessage("Flushing final segment for SSTable {} released {}. Global segment memory usage now at {}."),
+                logger.debug("Flushing final segment for SSTable {} released {}. Global segment memory usage now at {}",
                              perIndexComponents.descriptor(), FBUtilities.prettyPrintMemory(bytesAllocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
             }
 
@@ -165,7 +177,7 @@ public class SSTableIndexWriter implements PerIndexWriter
     {
         aborted = true;
 
-        logger.warn(indexContext.logMessage("Aborting SSTable index flush for {}..."), perIndexComponents.descriptor(), cause);
+        logger.warn("Aborting SSTable index flush for {}...", perIndexComponents.descriptor(), cause);
 
         // It's possible for the current builder to be unassigned after we flush a final segment.
         if (currentBuilder != null)
@@ -174,7 +186,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             // flush, we will end up here, and we need to free up builder memory tracked by the limiter:
             long allocated = currentBuilder.totalBytesAllocated();
             long globalBytesUsed = currentBuilder.release(indexContext);
-            logger.debug(indexContext.logMessage("Aborting index writer for SSTable {} released {}. Global segment memory usage now at {}."),
+            logger.debug("Aborting index writer for SSTable {} released {}. Global segment memory usage now at {}",
                          perIndexComponents.descriptor(), FBUtilities.prettyPrintMemory(allocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
         }
 
@@ -230,8 +242,8 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         if (reachMemoryLimit)
         {
-            logger.debug(indexContext.logMessage("Global limit of {} and minimum flush size of {} exceeded. " +
-                                                 "Current builder usage is {} for {} rows. Global Usage is {}. Flushing..."),
+            logger.debug("Global limit of {} and minimum flush size of {} exceeded. " +
+                         "Current builder usage is {} for {} rows. Global Usage is {}. Flushing...",
                          FBUtilities.prettyPrintMemory(limiter.limitBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.getMinimumFlushBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.totalBytesAllocated()),
@@ -261,9 +273,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         try
         {
             long bytesAllocated = currentBuilder.totalBytesAllocated();
-
             SegmentMetadata segmentMetadata = currentBuilder.flush();
-
             long flushMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
 
             if (segmentMetadata != null)
@@ -278,7 +288,7 @@ public class SSTableIndexWriter implements PerIndexWriter
                 if (indexContext.getIndexMetrics() != null)
                     indexContext.getIndexMetrics().compactionSegmentBytesPerSecond.update((long)(segmentBytes / flushMillis * 1000.0));
 
-                logger.debug(indexContext.logMessage("Flushed segment with {} cells for a total of {} in {} ms."),
+                logger.debug("Flushed segment with {} cells for a total of {} in {} ms",
                              (long) rowCount, FBUtilities.prettyPrintMemory((long) segmentBytes), flushMillis);
             }
 
@@ -288,13 +298,13 @@ public class SSTableIndexWriter implements PerIndexWriter
             // that abort logic will release the current builder's memory against the limiter.
             long globalBytesUsed = currentBuilder.release(indexContext);
             currentBuilder = null;
-            logger.debug(indexContext.logMessage("Flushing index segment for SSTable {} released {}. Global segment memory usage now at {}."),
+            logger.debug("Flushing index segment for SSTable {} released {}. Global segment memory usage now at {}",
                          perIndexComponents.descriptor(), FBUtilities.prettyPrintMemory(bytesAllocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
 
         }
         catch (Throwable t)
         {
-            logger.error(indexContext.logMessage("Failed to build index for SSTable {}."), perIndexComponents.descriptor(), t);
+            logger.error("Failed to build index for SSTable {}", perIndexComponents.descriptor(), t);
             perIndexComponents.forceDeleteAllComponents();
 
             indexContext.getIndexMetrics().segmentFlushErrors.inc();
@@ -319,7 +329,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
     }
 
-    private SegmentBuilder newSegmentBuilder(long rowIdOffset)
+    private SegmentBuilder newSegmentBuilder(long rowIdOffset) throws IOException
     {
         SegmentBuilder builder;
 
@@ -327,12 +337,44 @@ public class SSTableIndexWriter implements PerIndexWriter
         {
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
-            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION) {
-                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
-            } else {
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter, pqi.pq, pqi.unitVectors.get());
+            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
+            if (pqi == null && segments.size() > 0)
+            {
+                // No PQ instance available in completed indexes, so check if we just wrote one
+                var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
+                assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
+                try (var fh = pqComponent.createFileHandle();
+                     var reader = fh.createReader())
+                {
+                    var sm = segments.get(segments.size() - 1);
+                    long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;
+                    // close parallel to code in CassandraDiskANN constructor, but different enough
+                    // (we only want the PQ codebook) that it's difficult to extract into a common method
+                    reader.seek(offset);
+                    boolean unitVectors;
+                    if (reader.readInt() == CassandraDiskAnn.PQ_MAGIC)
+                    {
+                        reader.readInt(); // skip over version
+                        unitVectors = reader.readBoolean();
+                    }
+                    else
+                    {
+                        unitVectors = true;
+                        reader.seek(offset);
+                    }
+                    var compressionType = CompressionType.values()[reader.readByte()];
+                    if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
+                    {
+                        var pq = ProductQuantization.load(reader);
+                        pqi = new CassandraOnHeapGraph.PqInfo(pq, Optional.of(unitVectors));
+                    }
+                }
             }
+
+            if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+            else
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter, pqi.pq, pqi.unitVectors.get());
         }
         else if (indexContext.isLiteral())
         {
@@ -344,7 +386,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
 
         long globalBytesUsed = limiter.increment(builder.totalBytesAllocated());
-        logger.debug(indexContext.logMessage("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {}."),
+        logger.debug("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {}",
                      perIndexComponents.descriptor(),
                      FBUtilities.prettyPrintMemory(globalBytesUsed));
 

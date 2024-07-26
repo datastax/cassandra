@@ -68,6 +68,7 @@ import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.ScoredRowIdPrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.LinearFit;
 import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
@@ -269,7 +270,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     protected CloseableIterator<ScoredPrimaryKey> toScoreOrderedIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, QueryContext queryContext) throws IOException
     {
         if (scoredRowIdIterator == null || !scoredRowIdIterator.hasNext())
+        {
+            FileUtils.closeQuietly(scoredRowIdIterator);
             return CloseableIterator.emptyIterator();
+        }
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
                                                                         metadata.maxKey,
@@ -303,8 +307,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                              int limit,
                                                              int rerankK) throws IOException
     {
-        var approximateScores = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size(),
-                                                                                                   (a, b) -> Float.compare(b.getApproximateScore(), a.getApproximateScore()));
+        var approximateScores = new ArrayList<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size());
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.precomputedScoreFunctionFor(queryVector, similarityFunction);
 
@@ -321,8 +324,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
+        // Leverage PQ's O(N) heapify time complexity
+        var approximateScoresQueue = new PriorityQueue<>(approximateScores);
         var reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(similarityFunction, queryVector, graph.getVectorSupplier());
-        return new BruteForceRowIdIterator(approximateScores, reranker, limit, rerankK);
+        return new BruteForceRowIdIterator(approximateScoresQueue, reranker, limit, rerankK);
     }
 
     /**
@@ -332,9 +337,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      */
     private CloseableIterator<ScoredRowId> orderByBruteForce(VectorFloat<?> queryVector, IntArrayList segmentRowIds) throws IOException
     {
-        PriorityQueue<ScoredRowId> scoredRowIds = new PriorityQueue<>(segmentRowIds.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+        var scoredRowIds = new ArrayList<ScoredRowId>(segmentRowIds.size());
         addScoredRowIdsToCollector(queryVector, segmentRowIds, 0, scoredRowIds);
-        return new PriorityQueueIterator<>(scoredRowIds);
+        return new PriorityQueueIterator<>(new PriorityQueue<>(scoredRowIds));
     }
 
     /**
@@ -432,6 +437,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             return String.format("{brute force: %d, index scan: %d}", bruteForceCost(), expectedNodesVisited);
         }
+    }
+
+    public int estimateNodesVisited(int limit, int candidates)
+    {
+        return estimateCost(limit, candidates).expectedNodesVisited;
     }
 
     private CostEstimate estimateCost(int limit, int candidates)
