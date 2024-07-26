@@ -43,6 +43,9 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
+import com.google.common.math.IntMath;
+
+import org.apache.cassandra.cql3.Ordering;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,7 +57,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
-import org.apache.cassandra.cql3.Ordering;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -1042,7 +1044,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (userOffset != NO_OFFSET)
             Guardrails.offsetRows.guard(userOffset, "Select query", false, clientState);
 
-        int fetchLimit = userLimit == NO_LIMIT || userOffset == NO_OFFSET ? userLimit : userLimit + userOffset;
+        int fetchLimit = userLimit == NO_LIMIT || userOffset == NO_OFFSET ? userLimit : IntMath.saturatedAdd(userLimit, userOffset);
         int cqlRowLimit = NO_LIMIT;
         int cqlPerPartitionLimit = NO_LIMIT;
 
