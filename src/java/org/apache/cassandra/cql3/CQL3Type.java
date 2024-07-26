@@ -807,6 +807,11 @@ public interface CQL3Type
             return new RawType(type, false);
         }
 
+        public static Raw custom(String className)
+        {
+            return new RawCustom(className, false);
+        }
+
         public static Raw userType(UTName name)
         {
             return new RawUT(name, false);
@@ -891,6 +896,58 @@ public interface CQL3Type
             public String toString()
             {
                 return type.toString();
+            }
+        }
+
+        private static class RawCustom extends Raw
+        {
+            private final String className;
+
+            private RawCustom(String className, boolean frozen)
+            {
+                super(frozen);
+                this.className = className;
+            }
+
+            @Override
+            public boolean supportsFreezing()
+            {
+                // Technically, we cannot know if the resulting type may be frozen or not, so allow the frozen keyword,
+                // but it might well basically do nothing when used.
+                return true;
+            }
+
+            @Override
+            public RawCustom freeze() throws InvalidRequestException
+            {
+                return new RawCustom(className, true);
+            }
+
+            @Override
+            public void validate(ClientState state, String name)
+            {
+                // no-op
+            }
+
+            @Override
+            public CQL3Type prepare(String keyspace, Types udts)
+            {
+                AbstractType<?> type = TypeParser.parse(className);
+                if (frozen)
+                    type = type.freeze();
+                return new Custom(type);
+            }
+
+            @Override
+            public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
+            {
+                // no-op
+            }
+
+            @Override
+            public String toString()
+            {
+                return '"' + className + '"';
             }
         }
 
