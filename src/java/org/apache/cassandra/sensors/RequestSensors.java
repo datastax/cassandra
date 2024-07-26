@@ -19,6 +19,7 @@
 package org.apache.cassandra.sensors;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -49,9 +50,8 @@ import org.apache.cassandra.utils.Pair;
 public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
-    private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
+    private final HashMap<Pair<Context, Type>, Sensor> sensors = new LinkedHashMap<>();
     private final Map<Sensor, Double> latestSyncedValuePerSensor = new HashMap<>();
-    private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
 
     public RequestSensors()
     {
@@ -63,77 +63,37 @@ public class RequestSensors
         this.sensorsRegistry = sensorsRegistry;
     }
 
-    public void registerSensor(Context context, Type type)
+    public synchronized void registerSensor(Context context, Type type)
     {
         sensors.putIfAbsent(Pair.create(context, type), new Sensor(context, type));
     }
 
-    public Optional<Sensor> getSensor(Context context, Type type)
+    public synchronized Optional<Sensor> getSensor(Context context, Type type)
     {
         return Optional.ofNullable(sensors.get(Pair.create(context, type)));
     }
 
-    public Set<Sensor> getSensors(Type type)
+    public synchronized Set<Sensor> getSensors(Type type)
     {
         return sensors.values().stream().filter(s -> s.getType() == type).collect(Collectors.toSet());
     }
 
-    public void incrementSensor(Context context, Type type, double value)
+    public synchronized void incrementSensor(Context context, Type type, double value)
     {
-        updateLock.readLock().lock();
-        try
-        {
-            Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
-        }
-        finally
-        {
-            updateLock.readLock().unlock();
-        }
+        Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
     }
 
-    public void syncAllSensors()
+    public synchronized void syncAllSensors()
     {
-        updateLock.writeLock().lock();
-        try
-        {
-            sensors.values().forEach(sensor -> {
-                double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
-                double update = sensor.getValue() - current;
-                if (update == 0d)
-                    return;
+        sensors.values().forEach(sensor -> {
+            double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
+            double update = sensor.getValue() - current;
+            if (update == 0d)
+                return;
 
-                latestSyncedValuePerSensor.put(sensor, sensor.getValue());
-                sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
-            });
-        }
-        finally
-        {
-            updateLock.writeLock().unlock();
-        }
-    }
-
-    /**
-     * Avoids using additional ConcurrentHashmap as that turns out to be
-     * a performance bottlneck (in particular hashCode operations on Sensor were taking a lots of CPU cycles)
-     */
-    public void syncAllSensorsNew()
-    {
-        updateLock.writeLock().lock();
-        try
-        {
-            sensors.values().forEach(sensor -> {
-                double cur = sensor.getValue();
-                if (cur > 0)
-                {
-                    sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), cur);
-                    sensor.reset();
-                }
-            });
-        }
-        finally
-        {
-            updateLock.writeLock().unlock();
-        }
+            latestSyncedValuePerSensor.put(sensor, sensor.getValue());
+            sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
+        });
     }
 
     @Override

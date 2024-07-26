@@ -116,28 +116,9 @@ public class RequestSensorBench
         for (int i = 0; i < UPDATES_PER_THREAD; i++)
         {
             Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
-            requestSensors.getSensor(f.context, f.type).get().increment(1);
-
+            requestSensors.incrementSensor(f.context, f.type, 1);
         }
         requestSensors.syncAllSensors();
-    }
-
-    @Benchmark
-    @Threads(THREADS)
-    public void syncAllSensorsNew(BenchState benchState)
-    {
-        RequestSensors requestSensors = benchState.requestSensors;
-        for(int i = 0; i < SENSORS_PER_THREAD; i++)
-        {
-            Fixture f = fixtures[benchState.idx][i];
-            requestSensors.registerSensor(f.context, f.type);
-        }
-        for (int i = 0; i < UPDATES_PER_THREAD; i++)
-        {
-            Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
-            requestSensors.getSensor(f.context, f.type).get().increment(1);
-        }
-        requestSensors.syncAllSensorsNew();
     }
 
     @Benchmark
