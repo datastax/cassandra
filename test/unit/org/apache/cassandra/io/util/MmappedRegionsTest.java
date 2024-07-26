@@ -201,7 +201,7 @@ public class MmappedRegionsTest
         ChannelProxy channelCopy;
 
         try (ChannelProxy channel = new ChannelProxy(writeFile("testSnapshot", buffer));
-            MmappedRegions regions = MmappedRegions.map(channel, buffer.capacity() / 4, 0))
+            MmappedRegions regions = MmappedRegions.map(channel, buffer.capacity() / 4, 0, false))
         {
             // create 3 more segments, one per quater capacity
             regions.extend(buffer.capacity() / 2);
@@ -320,7 +320,7 @@ public class MmappedRegionsTest
 
         CompressionMetadata metadata = CompressionMetadata.open(cf, f.length(), true);
         try (ChannelProxy channel = new ChannelProxy(f);
-            MmappedRegions regions = MmappedRegions.map(channel, metadata, 0))
+             MmappedRegions regions = MmappedRegions.map(channel, metadata, 0, false))
         {
 
             assertFalse(regions.isEmpty());
@@ -342,7 +342,7 @@ public class MmappedRegionsTest
     {
         ByteBuffer buffer = allocateBuffer(1024);
         try (ChannelProxy channel = new ChannelProxy(writeFile("testIllegalArgForMap1", buffer));
-            MmappedRegions regions = MmappedRegions.map(channel, 0, 0))
+             MmappedRegions regions = MmappedRegions.map(channel, 0, 0, false))
         {
             assertTrue(regions.isEmpty());
         }
@@ -353,7 +353,7 @@ public class MmappedRegionsTest
     {
         ByteBuffer buffer = allocateBuffer(1024);
         try (ChannelProxy channel = new ChannelProxy(writeFile("testIllegalArgForMap2", buffer));
-            MmappedRegions regions = MmappedRegions.map(channel, -1L, 0))
+             MmappedRegions regions = MmappedRegions.map(channel, -1L, 0, false))
         {
             assertTrue(regions.isEmpty());
         }
@@ -364,7 +364,7 @@ public class MmappedRegionsTest
     {
         ByteBuffer buffer = allocateBuffer(1024);
         try (ChannelProxy channel = new ChannelProxy(writeFile("testIllegalArgForMap3", buffer));
-            MmappedRegions regions = MmappedRegions.map(channel, null, 0))
+             MmappedRegions regions = MmappedRegions.map(channel, null, 0, false))
         {
             assertTrue(regions.isEmpty());
         }
@@ -403,7 +403,7 @@ public class MmappedRegionsTest
 
             try (ChannelProxy channel = new ChannelProxy(f);
                  CompressionMetadata metadata = writer.open(writer.getLastFlushOffset());
-                 MmappedRegions regions = MmappedRegions.map(channel, metadata, 0))
+                 MmappedRegions regions = MmappedRegions.map(channel, metadata, 0, false))
             {
                 assertFalse(regions.isEmpty());
                 int dataOffset = 0;

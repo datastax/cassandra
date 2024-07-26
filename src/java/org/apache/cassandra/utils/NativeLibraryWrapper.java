@@ -25,6 +25,12 @@ import com.sun.jna.Pointer;
  * @see INativeLibrary
  */
 @Shared
+// Implementors are advised to NOT use JNA's convenient LastErrorException because it relies
+// on checking errno(), which is not reliable.  Linux man page explains,
+//       The value in errno is significant only when the return value of
+//       the call indicated an error (i.e., -1 from most system calls; -1
+//       or NULL from most library functions); ***a function that succeeds is
+//       allowed to change errno.***
 public interface NativeLibraryWrapper
 {
     /**
@@ -33,13 +39,33 @@ public interface NativeLibraryWrapper
      */
     boolean isAvailable();
 
-    int callMlockall(int flags) throws UnsatisfiedLinkError, RuntimeException;
-    int callMunlockall() throws UnsatisfiedLinkError, RuntimeException;
-    int callFcntl(int fd, int command, long flags) throws UnsatisfiedLinkError, RuntimeException;
-    int callPosixFadvise(int fd, long offset, int len, int flag) throws UnsatisfiedLinkError, RuntimeException;
-    int callOpen(String path, int flags) throws UnsatisfiedLinkError, RuntimeException;
-    int callFsync(int fd) throws UnsatisfiedLinkError, RuntimeException;
-    int callClose(int fd) throws UnsatisfiedLinkError, RuntimeException;
-    Pointer callStrerror(int errnum) throws UnsatisfiedLinkError, RuntimeException;
-    long callGetpid() throws UnsatisfiedLinkError, RuntimeException;
+    void callMlockall(int flags) throws NativeError;
+    void callMunlockall() throws NativeError;
+    int callFcntl(int fd, int command, long flags) throws NativeError;
+    void callPosixFadvise(int fd, long offset, int len, int flag) throws NativeError;
+    void callPosixMadvise(Pointer addr, long length, int advice) throws NativeError;
+    int callOpen(String path, int flags) throws NativeError;
+    void callFsync(int fd) throws NativeError;
+    void callClose(int fd) throws NativeError;
+    long callGetpid() throws NativeError;
+
+    /**
+     * This is a checked exception because the correct handling of the error is almost
+     * always to log it and move on, not to propagate it up the stack.
+     */
+    class NativeError extends Exception
+    {
+        private final int errno;
+
+        public NativeError(String nativeMessage, int errno)
+        {
+            super(nativeMessage);
+            this.errno = errno;
+        }
+
+        public int getErrno()
+        {
+            return errno;
+        }
+    }
 }
