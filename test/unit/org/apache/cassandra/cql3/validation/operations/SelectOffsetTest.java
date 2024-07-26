@@ -16,9 +16,13 @@
 package org.apache.cassandra.cql3.validation.operations;
 
 import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.math.IntMath;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -27,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -46,6 +51,9 @@ public class SelectOffsetTest extends CQLTester
     public static void beforeClass()
     {
         requireNetwork();
+
+        // disable offset guardrails for this test
+        DatabaseDescriptor.getGuardrailsConfig().setOffsetRowsThreshold(-1, -1);
     }
 
     @Test
@@ -388,13 +396,25 @@ public class SelectOffsetTest extends CQLTester
 
     private void testLimitAndOffset(String select, boolean paging, Object[]... rows) throws Throwable
     {
-        for (int limit = 1; limit <= rows.length + 1; limit++)
+        List<Integer> limits = IntStream.range(1, rows.length + 1).boxed().collect(Collectors.toList());
+        limits.add(Integer.MAX_VALUE);
+        limits.add(Integer.MAX_VALUE - 1);
+
+        List<Integer> offsets = IntStream.range(0, rows.length).boxed().collect(Collectors.toList());
+        offsets.add(Integer.MAX_VALUE);
+        offsets.add(Integer.MAX_VALUE - 1);
+        offsets.add(null);
+
+        for (int limit : limits)
         {
-            for (int offset = 0; offset <= rows.length + 1; offset++)
+            for (Integer offset : offsets)
             {
+                // skip offset without limit, which is forbidden and tested in testParseAndValidate
+                if (limit == Integer.MAX_VALUE && offset != null)
+                    continue;
+
                 testLimitAndOffset(select, limit, offset, paging, rows);
             }
-            testLimitAndOffset(select, limit, null, paging, rows);
         }
     }
 
@@ -451,14 +471,15 @@ public class SelectOffsetTest extends CQLTester
                    rows);
     }
 
+    @SuppressWarnings("UnstableApiUsage")
     private static Object[][] trimRows(Integer limit, @Nullable Integer offset, Object[]... rows)
     {
         offset = offset == null ? 0 : offset;
-        limit = limit == null ? rows.length : limit;
-
         if (offset >= rows.length)
             return EMPTY_ROWS;
 
-        return Arrays.copyOfRange(rows, offset, Math.min(offset + limit, rows.length));
+        int fetchLimit = Math.min(IntMath.saturatedAdd(limit, offset), rows.length);
+
+        return Arrays.copyOfRange(rows, offset, fetchLimit);
     }
 }
