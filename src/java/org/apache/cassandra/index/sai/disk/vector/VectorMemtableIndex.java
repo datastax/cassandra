@@ -34,6 +34,8 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -173,11 +175,12 @@ public class VectorMemtableIndex implements MemtableIndex
         var qv = vts.createFloatVector(expr.lower.value.vector);
         float threshold = expr.getEuclideanSearchThreshold();
 
-        PriorityQueue<PrimaryKey> keyQueue = new PriorityQueue<>();
+        PriorityQueue<PrimaryKey> keyQueue;
         try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold))
         {
-            while (pkIterator.hasNext())
-                keyQueue.add(pkIterator.next());
+            // Leverage PQ's O(N) complexity for building a PQ from a list.
+            var list = Lists.newArrayList(pkIterator);
+            keyQueue = new PriorityQueue<>(list);
         }
 
         if (keyQueue.isEmpty())
