@@ -37,7 +37,6 @@ import java.util.function.Predicate;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.Striped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -240,7 +239,7 @@ public class SensorsRegistry implements SchemaChangeListener
      * Remove sensors from a collection of candidates based on the given predicate
      *
      * @param candidates the candidates to remove from
-     * @param accept     the predicate used to select the sensors to remove
+     * @param accept the predicate used to select the sensors to remove
      * @return the set of removed sensors
      */
     private Set<Sensor> removeSensor(Collection<? extends Collection<Sensor>> candidates, Predicate<Sensor> accept)
@@ -287,7 +286,7 @@ public class SensorsRegistry implements SchemaChangeListener
 
     private void tryNotifyListeners(Sensor sensor, BiConsumer<SensorsRegistryListener, Sensor> notification, String action)
     {
-        for (SensorsRegistryListener l : listeners)
+        for (SensorsRegistryListener l: listeners)
         {
             try
             {
