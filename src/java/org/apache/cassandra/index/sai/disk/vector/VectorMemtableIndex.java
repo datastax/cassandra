@@ -34,7 +34,6 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
