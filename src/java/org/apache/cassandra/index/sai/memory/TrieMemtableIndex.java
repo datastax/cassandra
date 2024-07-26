@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -46,6 +47,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.MergePrimaryWithSortKeyIterator;
+import org.apache.cassandra.index.sai.utils.LazyRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
@@ -184,10 +186,28 @@ public class TrieMemtableIndex implements MemtableIndex
 
         RangeConcatIterator.Builder builder = RangeConcatIterator.builder(endShard - startShard + 1);
 
-        for (int shard  = startShard; shard <= endShard; ++shard)
+        // We want to run the search on the first shard only to get the estimate on the number of matching keys.
+        // But we don't want to run the search on the other shards until the user polls more items from the
+        // result iterator. Therefore, the first shard search is special - we run the search eagerly,
+        // but the rest of the iterators are create lazily in the loop below.
+        assert rangeIndexes[startShard] != null;
+        RangeIterator firstIterator = rangeIndexes[startShard].search(expression, boundaries.getBounds(startShard));
+        var keyCount = firstIterator.getMaxKeys();
+        builder.add(firstIterator);
+
+        // Prepare the search on the remaining shards, but wrap them in LazyRangeIterator, so they don't run
+        // until the user exhaust the results given from the first shard.
+        for (int shard  = startShard + 1; shard <= endShard; ++shard)
         {
             assert rangeIndexes[shard] != null;
-            builder.add(rangeIndexes[shard].search(expression, keyRange));
+            var index = rangeIndexes[shard];
+            var shardRange = boundaries.getBounds(shard);
+            var minKey = index.indexContext.keyFactory().createTokenOnly(shardRange.left.getToken());
+            var maxKey = index.indexContext.keyFactory().createTokenOnly(shardRange.right.getToken());
+            // Assume all shards are the same size, but we must not pass 0 because of some checks in RangeIterator
+            // that assume 0 means empty iterator and could fail.
+            var count = Math.max(1, keyCount);
+            builder.add(new LazyRangeIterator(() -> index.search(expression, keyRange), minKey, maxKey, count));
         }
 
         return builder.build();
