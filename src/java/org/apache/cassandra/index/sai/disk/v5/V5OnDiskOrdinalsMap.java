@@ -25,6 +25,7 @@ import java.util.PrimitiveIterator;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,17 +45,15 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 {
     private static final Logger logger = LoggerFactory.getLogger(V5OnDiskOrdinalsMap.class);
 
-    private final OrdinalsView fastOrdinalsView;
-    private static final OrdinalsMatchingRowIdsView ordinalsMatchingRowIdsView = new OrdinalsMatchingRowIdsView();
     private final FileHandle fh;
     private final long ordToRowOffset;
     private final long segmentEnd;
     private final int size;
-    // the offset where we switch from recording ordinal -> rows, to row -> ordinal
     private final long rowOrdinalOffset;
+    private final V5VectorPostingsWriter.Structure structure;
 
-    private final boolean canFastMapOrdinalsView;
-    private final boolean canFastMapRowIdsView;
+    private final Supplier<OrdinalsView> ordinalsViewSupplier;
+    private final Supplier<RowIdsView> rowIdsViewSupplier;
 
     public V5OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
     {
@@ -63,19 +62,30 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         try (var reader = fh.createReader())
         {
             reader.seek(segmentOffset);
+            int magic = reader.readInt();
+            if (magic != V5VectorPostingsWriter.MAGIC) {
+                throw new RuntimeException("Invalid magic number in V5OnDiskOrdinalsMap");
+            }
+            this.structure = V5VectorPostingsWriter.Structure.values()[reader.readInt()];
             this.ordToRowOffset = reader.getFilePointer();
             this.size = reader.readInt();
-            reader.seek(segmentEnd - 8);
-            this.rowOrdinalOffset = reader.readLong();
+            if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE) {
+                this.rowOrdinalOffset = segmentEnd;
+            } else {
+                reader.seek(segmentEnd - 8);
+                this.rowOrdinalOffset = reader.readLong();
+            }
 
-            // When rowOrdinalOffset + 8 is equal to segmentEnd, the segment has no postings. Therefore,
-            // we use the EmptyView. That case does not get a fastRowIdsView because we only hit that code after
-            // getting ordinals from the graph, and an EmptyView will not produce any ordinals to search. Importantly,
-            // the file format for the RowIdsView is correct, even if there are no postings.
-            this.canFastMapRowIdsView = true;
-            this.canFastMapOrdinalsView = rowOrdinalOffset + 8 == segmentEnd;
-            this.fastOrdinalsView = size > 0 ? new RowIdMatchingOrdinalsView(size) : new V2OnDiskOrdinalsMap.EmptyView();
-            assert rowOrdinalOffset < segmentEnd : "rowOrdinalOffset " + rowOrdinalOffset + " is not less than segmentEnd " + segmentEnd;
+            if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE) {
+                this.ordinalsViewSupplier = () -> new RowIdMatchingOrdinalsView(size);
+                this.rowIdsViewSupplier = OrdinalsMatchingRowIdsView::new;
+            } else {
+                assert size > 0;
+                this.ordinalsViewSupplier = FileReadingOrdinalsView::new;
+                this.rowIdsViewSupplier = FileReadingRowIdsView::new;
+            }
+
+            assert rowOrdinalOffset <= segmentEnd : "rowOrdinalOffset " + rowOrdinalOffset + " is not less than or equal to segmentEnd " + segmentEnd;
         }
         catch (Exception e)
         {
@@ -83,13 +93,15 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
     }
 
+    @VisibleForTesting
+    V5VectorPostingsWriter.Structure getStructure()
+    {
+        return structure;
+    }
+
     public RowIdsView getRowIdsView()
     {
-        if (canFastMapRowIdsView) {
-            return ordinalsMatchingRowIdsView;
-        }
-
-        return new FileReadingRowIdsView();
+        return rowIdsViewSupplier.get();
     }
 
 
@@ -190,11 +202,7 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 
     public OrdinalsView getOrdinalsView()
     {
-        if (canFastMapOrdinalsView) {
-            return fastOrdinalsView;
-        }
-
-        return new FileReadingOrdinalsView();
+        return ordinalsViewSupplier.get();
     }
 
     /** Bits matching the given range, inclusively. */

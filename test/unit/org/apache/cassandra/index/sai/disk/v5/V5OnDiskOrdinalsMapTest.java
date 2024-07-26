@@ -26,7 +26,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntUnaryOperator;
 
 import com.google.common.collect.HashBiMap;
-import org.apache.commons.lang3.reflect.FieldUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -91,15 +90,15 @@ public class V5OnDiskOrdinalsMapTest
     }
 
     @Test
-    public void testRowIdsMatchOrdinalsSet() throws Exception {
-        boolean ordinalsMatchRowIds = createOdomAndGetRowIdsMatchOrdinals(HashBiMap.create());
-        assertTrue(ordinalsMatchRowIds);
+    public void testOneToOneComplexity() throws Exception {
+        V5VectorPostingsWriter.Structure structure = createOdomAndGetComplexity(HashBiMap.create());
+        assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, structure);
     }
 
     @Test
-    public void testRowIdsMatchOrdinalsNotSet() throws Exception {
-        boolean ordinalsMatchRowIds = createOdomAndGetRowIdsMatchOrdinals(null);
-        assertFalse(ordinalsMatchRowIds);
+    public void testZeroOrOneToManyComplexity() throws Exception {
+        V5VectorPostingsWriter.Structure structure = createOdomAndGetComplexity(null);
+        assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, structure);
     }
 
     @Test
@@ -148,19 +147,18 @@ public class V5OnDiskOrdinalsMapTest
         }
     }
 
-    private boolean createOdomAndGetRowIdsMatchOrdinals(HashBiMap<Integer, Integer> ordinalsMap) throws Exception
+    private V5VectorPostingsWriter.Structure createOdomAndGetComplexity(HashBiMap<Integer, Integer> ordinalsMap) throws Exception
     {
         File tempFile = temp("testfile");
 
         RamAwareVectorValues vectorValues = generateVectors(10);
 
-        final boolean canFastFindRows = ordinalsMap != null;
         var postingsMap = generatePostingsMap(vectorValues);
 
-        // skip rows 5 and 6 if !canFastFindRows
+        // skip rows 5 and 6 if ordinalsMap is null
         for (var p: postingsMap.entrySet())
         {
-            p.getValue().computeRowIds(x -> canFastFindRows ? x : (x == 5 || x == 6 ? -1 : x));
+            p.getValue().computeRowIds(x -> ordinalsMap != null ? x : (x == 5 || x == 6 ? -1 : x));
         }
 
         PostingsMetadata postingsMd = writePostings(ordinalsMap, tempFile, vectorValues, postingsMap);
@@ -206,11 +204,9 @@ public class V5OnDiskOrdinalsMapTest
                 assertEquals(-1, ordinal);
             }
 
-            boolean canFastMapRowIdsView = (boolean) FieldUtils.readField(odom, "canFastMapRowIdsView", true);
-            boolean canFastMapOrdinalsView = (boolean) FieldUtils.readField(odom, "canFastMapOrdinalsView", true);
+            V5VectorPostingsWriter.Structure structure = odom.getStructure();
             odom.close();
-            assertEquals(canFastMapRowIdsView, canFastMapOrdinalsView);
-            return canFastMapOrdinalsView;
+            return structure;
         }
     }
 
@@ -226,8 +222,12 @@ public class V5OnDiskOrdinalsMapTest
                                                            ? x -> x
                                                            : x -> ordinalsMap.inverse().getOrDefault(x, x);
 
+        V5VectorPostingsWriter.Structure structure = ordinalsMap != null ?
+                                                     V5VectorPostingsWriter.Structure.ONE_TO_ONE :
+                                                     V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY;
+
         long postingsOffset = writer.position();
-        long postingsPosition = new V5VectorPostingsWriter<Integer>(ordinalsMap != null, postingsMap.size(), reverseOrdinalsMapper)
+        long postingsPosition = new V5VectorPostingsWriter<Integer>(structure, postingsMap.size(), reverseOrdinalsMapper)
                                     .writePostings(writer, vectorValues, postingsMap);
         long postingsLength = postingsPosition - postingsOffset;
 

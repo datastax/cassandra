@@ -34,15 +34,20 @@ import org.apache.cassandra.utils.Pair;
 
 public class V5VectorPostingsWriter<T>
 {
-    // true if vectors rows are 1:1 (all vectors are associated with exactly 1 row, and each row has a non-null vector)
-    private final boolean oneToOne;
-    // the size of the post-cleanup graph (so NOT necessarily the same as the VectorValues size, which contains entries for obsoleted ordinals)
+    public static int MAGIC = 0x90571265; // POSTINGS
+
+    public enum Structure
+    {
+        ONE_TO_ONE,
+        ZERO_OR_ONE_TO_MANY
+    }
+
+    private final Structure structure;
     private final int graphSize;
-    // given a "new" ordinal (0..size), return the ordinal it corresponds to in the original graph and VectorValues
     private final IntUnaryOperator newToOldMapper;
 
-    public V5VectorPostingsWriter(boolean oneToOne, int graphSize, IntUnaryOperator mapper) {
-        this.oneToOne = oneToOne;
+    public V5VectorPostingsWriter(Structure structure, int graphSize, IntUnaryOperator mapper) {
+        this.structure = structure;
         this.graphSize = graphSize;
         this.newToOldMapper = mapper;
     }
@@ -51,8 +56,16 @@ public class V5VectorPostingsWriter<T>
                               RandomAccessVectorValues vectorValues,
                               Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
-        writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
-        writeRowIdToNodeOrdinalMapping(writer, vectorValues, postingsMap);
+        writer.writeInt(MAGIC);
+        writer.writeInt(structure.ordinal());
+        
+        if (structure == Structure.ONE_TO_ONE) {
+            writer.writeInt(graphSize);
+        } else {
+            assert graphSize > 0;
+            writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
+            writeRowIdToNodeOrdinalMapping(writer, vectorValues, postingsMap);
+        }
 
         return writer.position();
     }
@@ -74,35 +87,20 @@ public class V5VectorPostingsWriter<T>
             // (ordinal is implied; don't need to write it)
             writer.writeLong(nextOffset);
             int postingListSize;
-            if (oneToOne)
-            {
-                postingListSize = 1;
-            }
-            else
-            {
-                var originalOrdinal = newToOldMapper.applyAsInt(i);
-                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-                postingListSize = rowIds.size();
-            }
+            var originalOrdinal = newToOldMapper.applyAsInt(i);
+            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+            postingListSize = rowIds.size();
             nextOffset += 4 + (postingListSize * 4L); // 4 bytes for size and 4 bytes for each integer in the list
         }
         assert writer.position() == offsetsStartAt : "writer.position()=" + writer.position() + " offsetsStartAt=" + offsetsStartAt;
 
         // Write postings lists
         for (var i = 0; i < graphSize; i++) {
-            if (oneToOne)
-            {
-                writer.writeInt(1);
-                writer.writeInt(i);
-            }
-            else
-            {
-                var originalOrdinal = newToOldMapper.applyAsInt(i);
-                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-                writer.writeInt(rowIds.size());
-                for (int r = 0; r < rowIds.size(); r++)
-                    writer.writeInt(rowIds.getInt(r));
-            }
+            var originalOrdinal = newToOldMapper.applyAsInt(i);
+            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+            writer.writeInt(rowIds.size());
+            for (int r = 0; r < rowIds.size(); r++)
+                writer.writeInt(rowIds.getInt(r));
         }
         assert writer.position() == nextOffset;
     }
@@ -113,37 +111,26 @@ public class V5VectorPostingsWriter<T>
     {
         long startOffset = writer.position();
 
-        if (oneToOne)
-        {
-            for (var i = 0; i < graphSize; i++)
-            {
-                writer.writeInt(i);
-                writer.writeInt(i);
-            }
+        // Collect all (rowId, vectorOrdinal) pairs
+        List<Pair<Integer, Integer>> pairs = new ArrayList<>();
+        for (var i = 0; i < graphSize; i++) {
+            // if it's an on-disk Map then this is an expensive assert, only do it when in memory
+            if (postingsMap instanceof ConcurrentSkipListMap)
+                assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
+
+            int ord = newToOldMapper.applyAsInt(i);
+            var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
+            for (int r = 0; r < rowIds.size(); r++)
+                pairs.add(Pair.create(rowIds.getInt(r), i));
         }
-        else
-        {
-            // Collect all (rowId, vectorOrdinal) pairs
-            List<Pair<Integer, Integer>> pairs = new ArrayList<>();
-            for (var i = 0; i < graphSize; i++) {
-                // if it's an on-disk Map then this is an expensive assert, only do it when in memory
-                if (postingsMap instanceof ConcurrentSkipListMap)
-                    assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
 
-                int ord = newToOldMapper.applyAsInt(i);
-                var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
-                for (int r = 0; r < rowIds.size(); r++)
-                    pairs.add(Pair.create(rowIds.getInt(r), i));
-            }
+        // Sort the pairs by rowId
+        pairs.sort(Comparator.comparingInt(Pair::left));
 
-            // Sort the pairs by rowId
-            pairs.sort(Comparator.comparingInt(Pair::left));
-
-            // Write the pairs to the file
-            for (var pair : pairs) {
-                writer.writeInt(pair.left);
-                writer.writeInt(pair.right);
-            }
+        // Write the pairs to the file
+        for (var pair : pairs) {
+            writer.writeInt(pair.left);
+            writer.writeInt(pair.right);
         }
 
         // write the position of the beginning of rowid -> ordinals mappings to the end
