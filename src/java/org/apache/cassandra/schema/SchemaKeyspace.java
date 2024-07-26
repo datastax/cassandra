@@ -1079,10 +1079,11 @@ public final class SchemaKeyspace
         UntypedResultSet.Row row = rows.one();
 
         Set<TableMetadata.Flag> flags = TableMetadata.Flag.fromStringSet(row.getFrozenSet("flags", UTF8Type.instance));
+        boolean isCounter = flags.contains(TableMetadata.Flag.COUNTER);
         return TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(row.getUUID("id")))
                             .flags(flags)
                             .params(createTableParamsFromRow(row))
-                            .addColumns(fetchColumns(keyspaceName, tableName, types, functions))
+                            .addColumns(fetchColumns(keyspaceName, tableName, types, functions, isCounter))
                             .droppedColumns(fetchDroppedColumns(keyspaceName, tableName))
                             .indexes(fetchIndexes(keyspaceName, tableName))
                             .triggers(fetchTriggers(keyspaceName, tableName))
@@ -1126,7 +1127,7 @@ public final class SchemaKeyspace
         return builder.build();
     }
 
-    private static List<ColumnMetadata> fetchColumns(String keyspace, String table, Types types, UserFunctions functions)
+    private static List<ColumnMetadata> fetchColumns(String keyspace, String table, Types types, UserFunctions functions, boolean isCounterTable)
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS);
         UntypedResultSet columnRows = query(query, keyspace, table);
@@ -1134,7 +1135,7 @@ public final class SchemaKeyspace
             throw new MissingColumns("Columns not found in schema table for " + keyspace + '.' + table);
 
         List<ColumnMetadata> columns = new ArrayList<>();
-        columnRows.forEach(row -> columns.add(createColumnFromRow(row, types, functions)));
+        columnRows.forEach(row -> columns.add(createColumnFromRow(row, types, functions, isCounterTable)));
 
         if (columns.stream().noneMatch(ColumnMetadata::isPartitionKey))
             throw new MissingColumns("No partition key columns found in schema table for " + keyspace + "." + table);
@@ -1143,7 +1144,7 @@ public final class SchemaKeyspace
     }
 
     @VisibleForTesting
-    public static ColumnMetadata createColumnFromRow(UntypedResultSet.Row row, Types types, UserFunctions functions)
+    public static ColumnMetadata createColumnFromRow(UntypedResultSet.Row row, Types types, UserFunctions functions, boolean isCounterTable)
     {
         String keyspace = row.getString("keyspace_name");
         String table = row.getString("table_name");
@@ -1157,7 +1158,10 @@ public final class SchemaKeyspace
         if (order == ClusteringOrder.DESC)
             type = ReversedType.getInstance(type);
 
-        ColumnIdentifier name = new ColumnIdentifier(row.getBytes("column_name_bytes"), row.getString("column_name"));
+        ByteBuffer columnNameBytes = row.getBytes("column_name_bytes");
+        type.validateForColumn(columnNameBytes, kind.isPrimaryKeyKind(), isCounterTable);
+
+        ColumnIdentifier name = new ColumnIdentifier(columnNameBytes, row.getString("column_name"));
 
         ColumnMask mask = null;
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ? AND column_name = ?",
@@ -1296,7 +1300,7 @@ public final class SchemaKeyspace
         boolean includeAll = row.getBoolean("include_all_columns");
         String whereClauseString = row.getString("where_clause");
 
-        List<ColumnMetadata> columns = fetchColumns(keyspaceName, viewName, types, functions);
+        List<ColumnMetadata> columns = fetchColumns(keyspaceName, viewName, types, functions, false);
 
         TableMetadata metadata =
             TableMetadata.builder(keyspaceName, viewName, TableId.fromUUID(row.getUUID("id")))

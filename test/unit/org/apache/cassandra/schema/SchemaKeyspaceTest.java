@@ -295,7 +295,7 @@ public class SchemaKeyspaceTest
                                                                 UnfilteredRowIterators.filter(serializedCD.unfilteredIterator(), FBUtilities.nowInSeconds()));
         Set<ColumnMetadata> columns = new HashSet<>();
         for (UntypedResultSet.Row row : columnsRows)
-            columns.add(SchemaKeyspace.createColumnFromRow(row, Types.none(), UserFunctions.none()));
+            columns.add(SchemaKeyspace.createColumnFromRow(row, Types.none(), UserFunctions.none(), false));
 
         assertEquals(metadata.params, params);
         assertEquals(new HashSet<>(metadata.columns()), columns);
