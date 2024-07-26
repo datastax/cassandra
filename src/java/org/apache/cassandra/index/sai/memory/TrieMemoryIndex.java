@@ -396,7 +396,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 var entry = iterator.next();
                 primaryKeysIterator = entry.getValue().keys().iterator();
                 byteComparableTerm = entry.getKey();
-                return new PrimaryKeyWithByteComparable(indexContext, memtable, primaryKeysIterator.next(), entry.getKey());
+                return new PrimaryKeyWithByteComparable(indexContext, memtable, primaryKeysIterator.next(), byteComparableTerm);
             }
             return endOfData();
         }
