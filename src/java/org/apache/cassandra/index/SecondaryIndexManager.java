@@ -1946,6 +1946,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     private synchronized static void propagateLocalIndexStatus(String keyspace, String index, Index.Status status)
     {
+        if (!Gossiper.instance.isEnabled())
+            return;
+
         try
         {
             Map<String, Index.Status> states = peerIndexStatus.computeIfAbsent(FBUtilities.getBroadcastAddressAndPort(),
