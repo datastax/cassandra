@@ -42,7 +42,11 @@ import org.apache.cassandra.utils.AbstractIterator;
  */
 public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
 {
-    public static class RowWithApproximateScore
+    /**
+     * Note: this class has a natural ordering that is inconsistent with equals in order to
+     * use {@link PriorityQueue}'s O(N) constructor.
+     */
+    public static class RowWithApproximateScore implements Comparable<RowWithApproximateScore>
     {
         private final int rowId;
         private final int ordinal;
@@ -55,9 +59,11 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
             this.appoximateScore = appoximateScore;
         }
 
-        public float getApproximateScore()
+        @Override
+        public int compareTo(RowWithApproximateScore o)
         {
-            return appoximateScore;
+            // Inverted comparison to sort in descending order
+            return Float.compare(o.appoximateScore, appoximateScore);
         }
     }
 
