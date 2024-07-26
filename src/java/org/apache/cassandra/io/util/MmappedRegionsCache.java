@@ -48,7 +48,7 @@ public class MmappedRegionsCache implements AutoCloseable
     public MmappedRegions getOrCreate(ChannelProxy channel, long length, int bufferSize, long uncompressedSliceOffset)
     {
         Preconditions.checkState(!closed);
-        MmappedRegions regions = cache.computeIfAbsent(channel.file(), ignored -> MmappedRegions.map(channel, length, bufferSize, uncompressedSliceOffset));
+        MmappedRegions regions = cache.computeIfAbsent(channel.file(), ignored -> MmappedRegions.map(channel, length, bufferSize, uncompressedSliceOffset, false));
         Preconditions.checkArgument(regions.isValid(channel));
         regions.extend(length, bufferSize);
         return regions.sharedCopy();
@@ -65,7 +65,7 @@ public class MmappedRegionsCache implements AutoCloseable
     public MmappedRegions getOrCreate(ChannelProxy channel, CompressionMetadata metadata, int bufferSize, long uncompressedSliceOffset)
     {
         Preconditions.checkState(!closed);
-        MmappedRegions regions = cache.computeIfAbsent(channel.file(), ignored -> MmappedRegions.map(channel, metadata, uncompressedSliceOffset));
+        MmappedRegions regions = cache.computeIfAbsent(channel.file(), ignored -> MmappedRegions.map(channel, metadata, uncompressedSliceOffset, false));
         Preconditions.checkArgument(regions.isValid(channel));
         regions.extend(metadata, bufferSize);
         return regions.sharedCopy();
