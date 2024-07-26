@@ -32,6 +32,7 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
@@ -42,7 +43,7 @@ public class SchemaTestUtil
 
     public static void announceNewKeyspace(KeyspaceMetadata ksm) throws ConfigurationException
     {
-        ksm.validate();
+        ksm.validate(ClientState.forInternalCalls(ksm.name));
 
         if (Schema.instance.getKeyspaceMetadata(ksm.name) != null)
             throw new AlreadyExistsException(ksm.name);
@@ -73,7 +74,7 @@ public class SchemaTestUtil
 
     static void announceKeyspaceUpdate(KeyspaceMetadata ksm)
     {
-        ksm.validate();
+        ksm.validate(ClientState.forInternalCalls(ksm.name));
 
         KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksm.name);
         if (oldKsm == null)

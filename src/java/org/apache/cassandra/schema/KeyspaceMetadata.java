@@ -41,6 +41,7 @@ import org.apache.cassandra.schema.Tables.TablesDiff;
 import org.apache.cassandra.schema.Types.TypesDiff;
 import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.schema.Views.ViewsDiff;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
 
 import static com.google.common.collect.Iterables.any;
@@ -372,7 +373,7 @@ public final class KeyspaceMetadata implements SchemaElement
         return builder.toString();
     }
 
-    public void validate()
+    public void validate(ClientState clientState)
     {
         if (!SchemaConstants.isValidName(name))
         {
@@ -382,7 +383,7 @@ public final class KeyspaceMetadata implements SchemaElement
                                                     name));
         }
 
-        params.validate(name, null);
+        params.validate(name, clientState);
 
         tablesAndViews().forEach(TableMetadata::validate);
 
