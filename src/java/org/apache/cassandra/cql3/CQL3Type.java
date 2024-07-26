@@ -75,7 +75,7 @@ import static java.util.stream.Collectors.toList;
 
 public interface CQL3Type
 {
-    static final Logger logger = LoggerFactory.getLogger(CQL3Type.class);
+    Logger logger = LoggerFactory.getLogger(CQL3Type.class);
 
     default boolean isCollection()
     {
@@ -92,7 +92,7 @@ public interface CQL3Type
         return false;
     }
 
-    public AbstractType<?> getType();
+    AbstractType<?> getType();
 
     /**
      * Generates CQL literal from a binary value of this type.
@@ -189,6 +189,7 @@ public interface CQL3Type
             this.type = type;
         }
 
+        @Override
         public AbstractType<?> getType()
         {
             return type;
@@ -201,6 +202,7 @@ public interface CQL3Type
          * {@link org.apache.cassandra.serializers.TypeSerializer#toString(Object)}
          * {@link org.apache.cassandra.serializers.TypeSerializer#deserialize(ByteBuffer)} implementations.
          */
+        @Override
         public String toCQLLiteral(ByteBuffer buffer)
         {
             return type.getSerializer().toCQLLiteral(buffer);
@@ -219,7 +221,7 @@ public interface CQL3Type
         }
     }
 
-    public static class Custom implements CQL3Type
+    class Custom implements CQL3Type
     {
         private final AbstractType<?> type;
 
@@ -233,6 +235,7 @@ public interface CQL3Type
             this(TypeParser.parse(className));
         }
 
+        @Override
         public AbstractType<?> getType()
         {
             return type;
@@ -274,7 +277,7 @@ public interface CQL3Type
         }
     }
 
-    public static class Collection implements CQL3Type
+    class Collection implements CQL3Type
     {
         private final CollectionType<?> type;
 
@@ -283,11 +286,13 @@ public interface CQL3Type
             this.type = type;
         }
 
+        @Override
         public CollectionType<?> getType()
         {
             return type;
         }
 
+        @Override
         public boolean isCollection()
         {
             return true;
@@ -413,7 +418,7 @@ public interface CQL3Type
         }
     }
 
-    public static class UserDefined implements CQL3Type
+    class UserDefined implements CQL3Type
     {
         // Keeping this separatly from type just to simplify toString()
         private final String name;
@@ -430,11 +435,13 @@ public interface CQL3Type
             return new UserDefined(UTF8Type.instance.compose(type.name), type);
         }
 
+        @Override
         public boolean isUDT()
         {
             return true;
         }
 
+        @Override
         public AbstractType<?> getType()
         {
             return type;
@@ -516,7 +523,7 @@ public interface CQL3Type
         }
     }
 
-    public static class Tuple implements CQL3Type
+    class Tuple implements CQL3Type
     {
         private final TupleType type;
 
@@ -530,11 +537,13 @@ public interface CQL3Type
             return new Tuple(type);
         }
 
+        @Override
         public TupleType getType()
         {
             return type;
         }
 
+        @Override
         public String toCQLLiteral(ByteBuffer buffer)
         {
             if (buffer == null)
@@ -626,7 +635,7 @@ public interface CQL3Type
         }
     }
 
-    public static class Vector implements CQL3Type
+    class Vector implements CQL3Type
     {
         private final VectorType<?> type;
 
@@ -640,6 +649,7 @@ public interface CQL3Type
             this.type = VectorType.getInstance(elementType, dimensions);
         }
 
+        @Override
         public boolean isVector()
         {
             return true;
@@ -703,7 +713,7 @@ public interface CQL3Type
 
     // For UserTypes, we need to know the current keyspace to resolve the
     // actual type used, so Raw is a "not yet prepared" CQL3Type.
-    public abstract class Raw
+    abstract class Raw
     {
         protected final boolean frozen;
 
@@ -764,6 +774,12 @@ public interface CQL3Type
 
         public abstract void validate(ClientState state, String name);
 
+        /**
+         * Prepare this raw type given the current keyspace to obtain a proper {@link CQL3Type}.
+         *
+         * @param keyspace the keyspace the type is part of.
+         * @return the prepared type.
+         */
         public CQL3Type prepare(String keyspace)
         {
             KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace);
@@ -772,6 +788,14 @@ public interface CQL3Type
             return prepare(keyspace, ksm.types);
         }
 
+        /**
+         * Prepare this raw type given the current keyspace and its defined user types to obtain a proper
+         * {@link CQL3Type}.
+         *
+         * @param keyspace the keyspace the type is part of.
+         * @param udts user types defined in {@code keyspace}, which this type may rely on.
+         * @return the prepared type.
+         */
         public abstract CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException;
 
         public CQL3Type prepareInternal(String keyspace, Types udts) throws InvalidRequestException
@@ -839,21 +863,25 @@ public interface CQL3Type
                 }
             }
 
+            @Override
             public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
             {
                 return type;
             }
 
+            @Override
             public boolean supportsFreezing()
             {
                 return false;
             }
 
+            @Override
             public boolean isCounter()
             {
                 return type == Native.COUNTER;
             }
 
+            @Override
             public boolean isDuration()
             {
                 return type == Native.DURATION;
@@ -902,12 +930,8 @@ public interface CQL3Type
                 return new RawCollection(kind, frozenKeys, frozenValues, true);
             }
 
+            @Override
             public boolean supportsFreezing()
-            {
-                return true;
-            }
-
-            public boolean isCollection()
             {
                 return true;
             }
@@ -922,11 +946,13 @@ public interface CQL3Type
                     values.validate(state, name);
             }
 
+            @Override
             public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
             {
                 return prepare(keyspace, udts, false);
             }
 
+            @Override
             public CQL3Type prepareInternal(String keyspace, Types udts)
             {
                 return prepare(keyspace, udts, true);
@@ -979,6 +1005,7 @@ public interface CQL3Type
                     throw new InvalidRequestException("Non-frozen UDTs are not allowed inside collections: " + this);
             }
 
+            @Override
             public boolean referencesUserType(String name)
             {
                 return (keys != null && keys.referencesUserType(name)) || values.referencesUserType(name);
@@ -1080,6 +1107,7 @@ public interface CQL3Type
                 this.name = name;
             }
 
+            @Override
             public String keyspace()
             {
                 return name.getKeyspace();
@@ -1103,6 +1131,7 @@ public interface CQL3Type
                 // nothing to do here
             }
 
+            @Override
             public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
             {
                 if (name.hasKeyspace())
@@ -1128,16 +1157,19 @@ public interface CQL3Type
                 return new UserDefined(name.toString(), type);
             }
 
+            @Override
             public boolean referencesUserType(String name)
             {
                 return this.name.getStringTypeName().equals(name);
             }
 
+            @Override
             public boolean supportsFreezing()
             {
                 return true;
             }
 
+            @Override
             public boolean isUDT()
             {
                 return true;
@@ -1165,6 +1197,7 @@ public interface CQL3Type
                                   .collect(toList());
             }
 
+            @Override
             public boolean supportsFreezing()
             {
                 return true;
@@ -1183,6 +1216,7 @@ public interface CQL3Type
                     t.validate(state, name);
             }
 
+            @Override
             public CQL3Type prepare(String keyspace, Types udts) throws InvalidRequestException
             {
                 List<AbstractType<?>> ts = new ArrayList<>(types.size());
@@ -1196,11 +1230,13 @@ public interface CQL3Type
                 return new Tuple(new TupleType(ts));
             }
 
+            @Override
             public boolean isTuple()
             {
                 return true;
             }
 
+            @Override
             public boolean referencesUserType(String name)
             {
                 return types.stream().anyMatch(t -> t.referencesUserType(name));
