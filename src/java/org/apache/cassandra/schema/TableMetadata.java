@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -207,6 +208,12 @@ public class TableMetadata implements SchemaElement
         regularAndStaticColumns = RegularAndStaticColumns.builder().addAll(builder.regularAndStaticColumns).build();
         columns = ImmutableMap.copyOf(builder.columns);
 
+        assert columns.values().stream().noneMatch(ColumnMetadata::isDropped) :
+                "Invalid columns (contains dropped): " + columns.values()
+                                                                .stream()
+                                                                .map(ColumnMetadata::debugString)
+                                                                .collect(Collectors.joining(", "));
+
         indexes = builder.indexes;
         triggers = builder.triggers;
 
@@ -291,7 +298,7 @@ public class TableMetadata implements SchemaElement
     {
         return false;
     }
-    
+
     public boolean isIncrementalBackupsEnabled()
     {
         return params.incrementalBackups;

@@ -32,6 +32,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.MV_ALLOW_FILTERING_NONKEY_COLUMNS_UNSAFE;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /* ViewFilteringTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670, CASSANDRA-17167)
  * Any changes here check if they apply to the other classes
@@ -371,15 +372,11 @@ public class ViewFiltering1Test extends ViewAbstractParameterizedTest
 
         for (String badStatement : badStatements)
         {
-            try
+            assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() ->
             {
                 createView(badStatement);
                 Assert.fail("Create MV statement should have failed due to missing IS NOT NULL restriction: " + badStatement);
-            }
-            catch (InvalidRequestException e)
-            {
-                // expected
-            }
+            });
         }
 
         List<String> goodStatements = Arrays.asList(

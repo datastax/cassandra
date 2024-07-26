@@ -24,6 +24,7 @@ import java.util.Arrays;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.CompositeType;
@@ -32,6 +33,7 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -156,5 +158,19 @@ public class TableMetadataTest
                                              .params(cdcParams)
                                              .build();
         assertTrue(metadata.changeAffectsPreparedStatements(updated));
+    }
+
+    @Test
+    public void testDroppedColumnsAreRejected()
+    {
+        ColumnMetadata droppedColumn = ColumnMetadata.droppedColumn("ks", "tab",
+                                                                    ColumnIdentifier.getInterned("v", false),
+                                                                    UTF8Type.instance, ColumnMetadata.Kind.REGULAR, null);
+        Assertions.assertThatThrownBy(() -> TableMetadata.builder(droppedColumn.ksName, droppedColumn.ksName)
+                                                         .addPartitionKeyColumn("k", UTF8Type.instance)
+                                                         .addColumn(droppedColumn)
+                                                         .build())
+                  .isInstanceOf(AssertionError.class)
+                  .hasMessageContaining("Invalid columns (contains dropped)");
     }
 }
