@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -188,7 +189,7 @@ public class VectorMemtableIndex implements MemtableIndex
         try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold))
         {
             // Leverage PQ's O(N) complexity for building a PQ from a list.
-            List<PrimaryKeyWithScore> list = Lists.newArrayList(pkIterator);
+            var list = Lists.newArrayList(Iterators.transform(pkIterator, PrimaryKeyWithSortKey::primaryKey));
             keyQueue = new PriorityQueue<>(list);
         }
 
