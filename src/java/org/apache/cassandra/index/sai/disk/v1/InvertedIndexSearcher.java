@@ -27,8 +27,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -59,7 +57,6 @@ public class InvertedIndexSearcher extends IndexSearcher implements SegmentOrder
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final TermsReader reader;
-    private final ColumnFilter columnFilter;
     private final QueryEventListener.TrieIndexEventListener perColumnEventListener;
     private final Version version;
     private final boolean filterRangeResults;
@@ -92,7 +89,6 @@ public class InvertedIndexSearcher extends IndexSearcher implements SegmentOrder
                                  root,
                                  footerPointer,
                                  version);
-        columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition()));
     }
 
     @Override

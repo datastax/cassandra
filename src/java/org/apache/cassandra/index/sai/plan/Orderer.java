@@ -37,7 +37,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 public class Orderer
 {
     // The list of operators that are valid for order by clauses.
-    final static EnumSet<Operator> ORDER_BY_OPERATORS = EnumSet.of(Operator.ANN,
+    static final EnumSet<Operator> ORDER_BY_OPERATORS = EnumSet.of(Operator.ANN,
                                                                    Operator.ORDER_BY_ASC,
                                                                    Operator.ORDER_BY_DESC);
 

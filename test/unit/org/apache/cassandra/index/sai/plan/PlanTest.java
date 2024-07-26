@@ -47,7 +47,7 @@ import static org.junit.Assert.*;
 
 public class PlanTest
 {
-    private final static Orderer ordering = orderer();
+    private static final Orderer ordering = orderer();
 
     private static Orderer orderer()
     {
@@ -56,19 +56,19 @@ public class PlanTest
         return orderer;
     }
 
-    private final static RowFilter.Expression pred1 = filerPred("pred1", Operator.LT);
-    private final static RowFilter.Expression pred2 = filerPred("pred2", Operator.LT);
-    private final static RowFilter.Expression pred3 = filerPred("pred3", Operator.LT);
-    private final static RowFilter.Expression pred4 = filerPred("pred4", Operator.LT);
+    private static final RowFilter.Expression pred1 = filerPred("pred1", Operator.LT);
+    private static final RowFilter.Expression pred2 = filerPred("pred2", Operator.LT);
+    private static final RowFilter.Expression pred3 = filerPred("pred3", Operator.LT);
+    private static final RowFilter.Expression pred4 = filerPred("pred4", Operator.LT);
 
-    private final static Expression saiPred1 = saiPred("pred1", Expression.Op.RANGE, false);
-    private final static  Expression saiPred2 = saiPred("pred2", Expression.Op.RANGE, false);
-    private final static  Expression saiPred3 = saiPred("pred3", Expression.Op.RANGE, false);
-    private final static  Expression saiPred4 = saiPred("pred4", Expression.Op.RANGE, true);
+    private static final Expression saiPred1 = saiPred("pred1", Expression.Op.RANGE, false);
+    private static final  Expression saiPred2 = saiPred("pred2", Expression.Op.RANGE, false);
+    private static final  Expression saiPred3 = saiPred("pred3", Expression.Op.RANGE, false);
+    private static final  Expression saiPred4 = saiPred("pred4", Expression.Op.RANGE, true);
     
-    private final static RowFilter rowFilter1 = RowFilter.builder().add(pred1).build();
-    private final static RowFilter rowFilter12 = RowFilter.builder().add(pred1).add(pred2).build();
-    private final static RowFilter rowFilter123 = RowFilter.builder().add(pred1).add(pred2).add(pred3).build();
+    private static final RowFilter rowFilter1 = RowFilter.builder().add(pred1).build();
+    private static final RowFilter rowFilter12 = RowFilter.builder().add(pred1).add(pred2).build();
+    private static final RowFilter rowFilter123 = RowFilter.builder().add(pred1).add(pred2).add(pred3).build();
 
     private final Plan.TableMetrics table1M = new Plan.TableMetrics(1_000_000, 7, 128, 3);
     private final Plan.TableMetrics table10M = new Plan.TableMetrics(10_000_000, 7, 128, 8);

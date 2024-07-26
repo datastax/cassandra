@@ -25,11 +25,11 @@ import org.apache.cassandra.io.sstable.SSTableId;
 /**
  * Represents a row id with additional metadata. The metadata is not a type parameter to prevent unnecessary boxing.
  */
-abstract public class RowIdWithMeta
+public abstract class RowIdWithMeta
 {
     private final int segmentRowId;
 
-    public RowIdWithMeta(int segmentRowId)
+    protected RowIdWithMeta(int segmentRowId)
     {
         this.segmentRowId = segmentRowId;
     }
@@ -55,5 +55,5 @@ abstract public class RowIdWithMeta
      * @param primaryKey the primary key
      * @return the wrapped primary key with its associated metadata
      */
-    abstract protected PrimaryKeyWithSortKey wrapPrimaryKey(IndexContext indexContext, SSTableId<?> sstableId, PrimaryKey primaryKey);
+    protected abstract PrimaryKeyWithSortKey wrapPrimaryKey(IndexContext indexContext, SSTableId<?> sstableId, PrimaryKey primaryKey);
 }

@@ -489,7 +489,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return iterator;
     }
 
-    // This is an ANN only query
+    /**
+     * Use the configured {@link Orderer} to create an iterator that sorts the whole table by a specific column.
+     */
     @Override
     public CloseableIterator<? extends PrimaryKeyWithSortKey> getTopKRows(int softLimit)
     {
@@ -510,7 +512,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         }
     }
 
-    // This is a hybrid query. We apply all other predicates before ordering and limiting.
+    /**
+     * Use the configured {@link Orderer} to sort the rows from the given source iterator.
+     */
     public CloseableIterator<? extends PrimaryKeyWithSortKey> getTopKRows(RangeIterator source, int softLimit)
     {
         List<CloseableIterator<? extends PrimaryKeyWithSortKey>> scoredPrimaryKeyIterators = new ArrayList<>();

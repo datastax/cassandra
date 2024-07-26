@@ -41,7 +41,7 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
     // Either a Memtable reference or an SSTableId reference
     private final Object sourceTable;
 
-    public PrimaryKeyWithSortKey(IndexContext context, Object sourceTable, PrimaryKey primaryKey)
+    protected PrimaryKeyWithSortKey(IndexContext context, Object sourceTable, PrimaryKey primaryKey)
     {
         this.context = context;
         this.sourceTable = sourceTable;
