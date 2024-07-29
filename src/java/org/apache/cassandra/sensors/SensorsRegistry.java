@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -36,6 +37,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -115,7 +117,7 @@ public class SensorsRegistry implements SchemaChangeListener
 
     public Optional<Sensor> getSensor(Context context, Type type)
     {
-        return Optional.of(getSensorFast(context, type));
+        return Optional.ofNullable(getSensorFast(context, type));
     }
 
     public Sensor getSensorFast(Context context, Type type)
@@ -133,6 +135,9 @@ public class SensorsRegistry implements SchemaChangeListener
         updateLock.readLock().lock();
         try
         {
+            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
+                return null;
+
             AtomicReference<Sensor> newSensor = new AtomicReference<>();
             Sensor[] typeSensors = identity.computeIfAbsent(context, key -> {
                 Sensor[] newTypeSensors = new Sensor[Type.values().length];
@@ -160,9 +165,6 @@ public class SensorsRegistry implements SchemaChangeListener
 
     private Sensor createNewSensor(Context context, Type type)
     {
-        Preconditions.checkArgument(keyspaces.contains(context.getKeyspace()), String.format("Keyspace %s must be registered first", context.getKeyspace()));
-        Preconditions.checkArgument(tableIds.contains(context.getTableId()), String.format("Table %s must be registered first",context.getTableId()));
-
         Sensor sensor = new Sensor(context, type);
         notifyOnSensorCreated(sensor);
 
@@ -183,7 +185,7 @@ public class SensorsRegistry implements SchemaChangeListener
 
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
-        return Optional.of(getOrCreateSensorFast(context, type));
+        return Optional.ofNullable(getOrCreateSensorFast(context, type));
     }
 
     protected void incrementSensor(Context context, Type type, double value)
@@ -236,7 +238,7 @@ public class SensorsRegistry implements SchemaChangeListener
             keyspaces.remove(keyspace.name);
             byKeyspace.remove(keyspace.name);
 
-            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values().stream().flatMap(Arrays::stream).filter(Objects::nonNull).collect(Collectors.toList())), s -> s.getContext().getKeyspace().equals(keyspace.name));
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getKeyspace().equals(keyspace.name));
             removed.forEach(this::notifyOnSensorRemoved);
 
             removeSensor(byTableId.values(), s -> s.getContext().getKeyspace().equals(keyspace.name));
@@ -258,7 +260,7 @@ public class SensorsRegistry implements SchemaChangeListener
             tableIds.remove(tableId);
             byTableId.remove(tableId);
 
-            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values().stream().flatMap(Arrays::stream).filter(Objects::nonNull).collect(Collectors.toList())), s -> s.getContext().getTableId().equals(tableId));
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
             removed.forEach(this::notifyOnSensorRemoved);
 
             removeSensor(byKeyspace.values(), s -> s.getContext().getTableId().equals(tableId));
@@ -292,6 +294,31 @@ public class SensorsRegistry implements SchemaChangeListener
 
                 sensorIt.remove();
                 removed.add(sensor);
+            }
+        }
+
+        return removed;
+    }
+
+    /**
+     * Removes array of sensors if any sensor in the array matches the predicate.
+     * This function is used by `identity` map that holds an array of Sensors (each item in the array maps to Type)
+     */
+    private Set<Sensor> removeSensorArrays(Collection<? extends Collection<Sensor[]>> candidates, Predicate<Sensor> accept)
+    {
+        Set<Sensor> removed = new HashSet<>();
+
+        for (Collection<Sensor[]> sensors : candidates)
+        {
+            Iterator<Sensor[]> sensorIt = sensors.iterator();
+            while (sensorIt.hasNext())
+            {
+                List<Sensor> typeSensors = Arrays.stream(sensorIt.next()).filter(Objects::nonNull).collect(Collectors.toList());
+                if (typeSensors.size() > 0 && accept.test(typeSensors.get(0)))
+                {
+                    removed.addAll(typeSensors);
+                    sensorIt.remove();
+                }
             }
         }
 
