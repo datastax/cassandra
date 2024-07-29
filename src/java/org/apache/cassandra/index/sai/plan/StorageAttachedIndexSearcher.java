@@ -316,7 +316,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 if (!operation.hasNext())
                     return null;
-                if (!operation.peek().partitionKey().equals(partitionKey))
+                PrimaryKey minKey = operation.peek();
+                if (!minKey.token().equals(partitionKey.getToken()))
+                    return null;
+                if (minKey.partitionKey() != null && !minKey.partitionKey().equals(partitionKey))
                     return null;
 
                 key = nextKey();
