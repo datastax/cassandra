@@ -188,7 +188,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         Assert.assertEquals(9L, builder.getMaximum().token().getLongValue());
         Assert.assertEquals(9L, builder.getTokenCount());
         Assert.assertEquals(3L, builder.rangeCount());
-        Assert.assertFalse(builder.statistics.isDisjoint());
+        Assert.assertFalse(builder.statistics.isEmptyOrDisjoint());
 
         Assert.assertEquals(1L, builder.rangeIterators.get(0).getMinimum().token().getLongValue());
         Assert.assertEquals(4L, builder.rangeIterators.get(1).getMinimum().token().getLongValue());
