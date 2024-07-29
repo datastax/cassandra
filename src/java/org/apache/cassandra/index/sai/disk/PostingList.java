@@ -19,10 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
-
-import org.apache.cassandra.utils.Throwables;
 
 /**
  * Interface for advancing on and consuming a posting list.
@@ -68,105 +65,6 @@ public interface PostingList extends Closeable
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
     int advance(int targetRowID) throws IOException;
-
-    /**
-     * @return peekable wrapper of current posting list
-     */
-    default PeekablePostingList peekable()
-    {
-        return new PeekablePostingList(this);
-    }
-
-    /**
-     * Note: this class has a natural ordering that is inconsistent with equals in order to
-     * use {@link PriorityQueue}'s O(N) constructor.
-     */
-    class PeekablePostingList implements PostingList, Comparable<PeekablePostingList>
-    {
-        private final PostingList wrapped;
-
-        private boolean peeked = false;
-        private int next;
-
-        public PeekablePostingList(PostingList wrapped)
-        {
-            this.wrapped = wrapped;
-        }
-
-        public int peek()
-        {
-            if (peeked)
-                return next;
-
-            try
-            {
-                peeked = true;
-                return next = wrapped.nextPosting();
-            }
-            catch (IOException e)
-            {
-                throw Throwables.cleaned(e);
-            }
-        }
-
-        public int advanceWithoutConsuming(int targetRowID) throws IOException
-        {
-            if (peek() == END_OF_STREAM)
-                return END_OF_STREAM;
-
-            if (peek() >= targetRowID)
-                return peek();
-
-            peeked = true;
-            next = wrapped.advance(targetRowID);
-            return next;
-        }
-
-        @Override
-        public int nextPosting() throws IOException
-        {
-            if (peeked)
-            {
-                peeked = false;
-                return next;
-            }
-            return wrapped.nextPosting();
-        }
-
-        @Override
-        public int size()
-        {
-            return wrapped.size();
-        }
-
-        @Override
-        public int advance(int targetRowID) throws IOException
-        {
-            if (peeked && next >= targetRowID)
-            {
-                peeked = false;
-                return next;
-            }
-
-            peeked = false;
-            return wrapped.advance(targetRowID);
-        }
-
-        @Override
-        public void close() throws IOException
-        {
-            wrapped.close();
-        }
-
-        @Override
-        public int compareTo(PeekablePostingList o)
-        {
-            // we are comparing over some mutable state: this should not generally work
-            // in this case it works because this method is used ONLY
-            // while constructing a PriorityQueue
-            return Long.compare(peek(), o.peek());
-        }
-    }
 
     class EmptyPostingList implements PostingList
     {
