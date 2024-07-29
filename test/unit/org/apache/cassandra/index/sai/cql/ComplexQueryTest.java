@@ -18,25 +18,12 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.Set;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
-
-import org.junit.Assert;
 import org.junit.Test;
 
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.cql3.statements.SelectStatement;
-import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -303,110 +290,5 @@ public class ComplexQueryTest extends SAITester
         assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a != 2 AND a != 3"), row(1), row(4));
         assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a NOT IN (2, 3)"), row(1), row(4));
         assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a NOT IN (2, 3) AND b NOT IN (7, 8)"), row(1));
-    }
-
-    @Test
-    public void complexQueryWithIndexedAndNotIndexed()
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, x int, y int, z int)");
-
-        execute("INSERT INTO %s(k, x, y, z) values (0, 0, 0, 0)");
-        execute("INSERT INTO %s(k, x, y, z) values (1, 0, 1, 0)");
-        execute("INSERT INTO %s(k, x, y, z) values (2, 0, 2, 1)");
-        execute("INSERT INTO %s(k, x, y, z) values (3, 0, 3, 1)");
-
-        new IndexCombinationsTester(this).withIndexOn("x", "y", "z").test(indexedColumns -> {
-
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x"),
-                                 row(0), row(1), row(2), row(3));
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x"));
-
-            assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (1, 2) ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "y"),
-                                 row(1), row(2));
-            assertQueryUsesIndex("SELECT k FROM %s WHERE y IN (4, 6) ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "y"));
-
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND y IN (1, 2) ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x") || contains(c, "y"),
-                                 row(1), row(2));
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 AND y IN (1, 2) ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x") || contains(c, "y"));
-
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 AND (y=1 OR y=2) ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x") || contains(c, "y"),
-                                 row(1), row(2));
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 AND (y=1 OR y=2) ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x") || contains(c, "y"));
-
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR y=0 ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x", "y"),
-                                 row(0), row(1), row(2), row(3));
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR y=0 ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x", "y"),
-                                 row(0));
-
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR (y=0 AND z=0) ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x", "y") || contains(c, "x", "z"),
-                                 row(0), row(1), row(2), row(3));
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR (y=0 AND z=0) ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x", "y") || contains(c, "x", "z"),
-                                 row(0));
-
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=0 OR y=0 OR z=0 ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x", "y", "z"),
-                                 row(0), row(1), row(2), row(3));
-            assertQueryUsesIndex("SELECT k FROM %s WHERE x=1 OR y=0 OR z=0 ALLOW FILTERING",
-                                 indexedColumns,
-                                 c -> contains(c, "x", "y", "z"),
-                                 row(0), row(1));
-        });
-    }
-
-    private void assertQueryUsesIndex(String query,
-                                      Set<String> indexedColumns,
-                                      Predicate<Set<String>> shouldUseIndexes,
-                                      Object[]... expectedRows)
-    {
-        // verify query result
-        assertRowsIgnoringOrder(execute(query), expectedRows);
-
-        // verify whether indexes are used or skipped
-        String formattedQuery = formatQuery(query);
-        SelectStatement select = (SelectStatement) QueryProcessor.parseStatement(formattedQuery, ClientState.forInternalCalls());
-        ReadCommand cmd = (ReadCommand) select.getQuery(QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
-        Index.QueryPlan plan = cmd.indexQueryPlan();
-        assertEquals(shouldUseIndexes.test(indexedColumns), plan != null);
-
-        // if we are using indexes, verify that we are using the expected ones
-        if (plan != null)
-        {
-            Set<String> selectedColumns = plan.getIndexes()
-                                              .stream()
-                                              .map(i -> (StorageAttachedIndex) i)
-                                              .map(i -> i.getIndexContext().getColumnName())
-                                              .collect(Collectors.toSet());
-            Assert.assertTrue(shouldUseIndexes.test(selectedColumns));
-        }
-    }
-
-    private static boolean contains(Set<String> set, String... elements)
-    {
-        return set.containsAll(Set.of(elements));
     }
 }

@@ -55,12 +55,15 @@ import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -226,9 +229,49 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                 cfs.metadata().partitionKeyType,
                                 cfs.metadata().comparator,
                                 expression.column(),
-                                IndexTarget.Type.VALUES,
+                                determineIndexTargetType(expression),
                                 null,
                                 cfs);
+    }
+
+    /**
+     * Determines the {@link IndexTarget.Type} for the expression. In this case we are only interested in map types and
+     * the operator being used in the expression.
+     */
+    public static IndexTarget.Type determineIndexTargetType(RowFilter.Expression expression)
+    {
+        AbstractType<?> type  = expression.column().type;
+        IndexTarget.Type indexTargetType = IndexTarget.Type.SIMPLE;
+        if (type.isCollection() && type.isMultiCell())
+        {
+            CollectionType<?> collection = ((CollectionType<?>) type);
+            if (collection.kind == CollectionType.Kind.MAP)
+            {
+                Operator operator = expression.operator();
+                switch (operator)
+                {
+                    case EQ:
+                    case NEQ:
+                    case LT:
+                    case LTE:
+                    case GT:
+                    case GTE:
+                        indexTargetType = IndexTarget.Type.KEYS_AND_VALUES;
+                        break;
+                    case CONTAINS:
+                    case NOT_CONTAINS:
+                        indexTargetType = IndexTarget.Type.VALUES;
+                        break;
+                    case CONTAINS_KEY:
+                    case NOT_CONTAINS_KEY:
+                        indexTargetType = IndexTarget.Type.KEYS;
+                        break;
+                    default:
+                        throw new InvalidRequestException("Invalid operator " + operator + " for map type");
+                }
+            }
+        }
+        return indexTargetType;
     }
 
     public UnfilteredRowIterator getPartition(PrimaryKey key, ReadExecutionController executionController)
