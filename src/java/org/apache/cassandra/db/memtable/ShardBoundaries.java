@@ -22,8 +22,10 @@ import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 
 /**
@@ -84,6 +86,33 @@ public class ShardBoundaries
 
         assert (key.getPartitioner() == boundaries[0].getPartitioner());
         return getShardForToken(key.getToken());
+    }
+
+    public AbstractBounds<PartitionPosition> getBounds(int shard)
+    {
+        checkShardIndex(shard);
+        return AbstractBounds.bounds(getMinBound(shard), false, getMaxBound(shard), true);
+    }
+
+    private void checkShardIndex(int shard)
+    {
+        if (shard < 0 || shard > boundaries.length)
+            throw new IllegalArgumentException(String.format("Shard %d out of bounds [0, %d]", shard, boundaries.length));
+    }
+
+
+    private PartitionPosition getMinBound(int shard)
+    {
+        return (shard == 0)
+               ? DatabaseDescriptor.getPartitioner().getMinimumToken().maxKeyBound()
+               : boundaries[shard - 1].maxKeyBound();
+    }
+
+    private PartitionPosition getMaxBound(int shard)
+    {
+        return (shard == boundaries.length)
+               ? DatabaseDescriptor.getPartitioner().getMaximumToken().maxKeyBound()
+               : boundaries[shard].maxKeyBound();
     }
 
     /**
