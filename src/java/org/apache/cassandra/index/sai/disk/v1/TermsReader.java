@@ -298,7 +298,7 @@ public class TermsReader implements Closeable
         private PostingList readAndMergePostings(TrieTermsDictionaryReader reader) throws IOException
         {
             assert reader.hasNext();
-            ArrayList<PostingList.PeekablePostingList> postingLists = new ArrayList<>();
+            ArrayList<PostingList> postingLists = new ArrayList<>();
 
             // index inputs will be closed with the onClose method of the returned merged posting list
             IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
@@ -310,7 +310,7 @@ public class TermsReader implements Closeable
                 var currentReader = currentReader(postingsInput, postingsSummaryInput, postingsOffset);
 
                 if (!currentReader.isEmpty())
-                    postingLists.add(new PostingList.PeekablePostingList(currentReader));
+                    postingLists.add(currentReader);
                 else
                     FileUtils.close(currentReader);
             } while (reader.hasNext());
@@ -328,7 +328,7 @@ public class TermsReader implements Closeable
         private PostingList readFilterAndMergePosting(TrieTermsDictionaryReader reader) throws IOException
         {
             assert reader.hasNext();
-            ArrayList<PostingList.PeekablePostingList> postingLists = new ArrayList<>();
+            ArrayList<PostingList> postingLists = new ArrayList<>();
 
             // index inputs will be closed with the onClose method of the returned merged posting list
             IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
@@ -346,7 +346,7 @@ public class TermsReader implements Closeable
                     var currentReader = currentReader(postingsInput, postingsSummaryInput, postingsOffset);
 
                     if (!currentReader.isEmpty())
-                        postingLists.add(new PostingList.PeekablePostingList(currentReader));
+                        postingLists.add(currentReader);
                     else
                         FileUtils.close(currentReader);
                 }

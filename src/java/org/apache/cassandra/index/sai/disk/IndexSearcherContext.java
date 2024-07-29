@@ -26,7 +26,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 public class IndexSearcherContext
 {
     final QueryContext context;
-    final PostingList.PeekablePostingList postingList;
+    final PostingList postingList;
 
     final PrimaryKey minimumKey;
     final PrimaryKey maximumKey;
@@ -41,7 +41,7 @@ public class IndexSearcherContext
                                 long maxSSTableRowId,
                                 long segmentRowIdOffset,
                                 QueryContext context,
-                                PostingList.PeekablePostingList postingList) throws IOException
+                                PostingList postingList) throws IOException
     {
         this.context = context;
         this.postingList = postingList;
