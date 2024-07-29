@@ -29,6 +29,7 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
@@ -276,7 +277,22 @@ public interface StorageProvider
                 logger.trace(component.parent().logMessage("Opening {} file handle for {} ({})"),
                              file, FBUtilities.prettyPrintMemory(file.length()));
             }
-            return new FileHandle.Builder(file).mmapped(true);
+            var builder = new FileHandle.Builder(file);
+            // Comments on why we don't use adviseRandom for some components where you might expect it:
+            //
+            // KD_TREE: no adviseRandom because we do a large bulk read on startup, queries later may
+            //     benefit from adviseRandom but there's no way to split those apart
+            // POSTINGS_LISTS: for common terms with 1000s of rows, adviseRandom seems likely to
+            //     make it slower; no way to get cardinality at this point in the code
+            //     (and we already have shortcut code for the common 1:1 vector case)
+            //     so we leave it alone here
+            if (component.componentType() == IndexComponentType.TERMS_DATA
+                || component.componentType() == IndexComponentType.VECTOR
+                || component.componentType() == IndexComponentType.PRIMARY_KEY_TRIE)
+            {
+                builder = builder.adviseRandom();
+            }
+            return builder.mmapped(true);
         }
 
         @Override
