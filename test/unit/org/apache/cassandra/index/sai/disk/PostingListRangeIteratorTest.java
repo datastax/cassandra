@@ -51,7 +51,7 @@ public class PostingListRangeIteratorTest
                                                     3,
                                                     0,
                                                     new QueryContext(10000),
-                                                    postingList.peekable());
+                                                    postingList);
         try (var iterator = new PostingListRangeIterator(mockIndexContext, pkm, indexContext))
         {
             assertEquals(pkm.primaryKeyFromRowId(1), iterator.next());
@@ -69,9 +69,9 @@ public class PostingListRangeIteratorTest
         var postingList2 = new ArrayPostingList(new int[]{1});
         var postingList3 = new ArrayPostingList(new int[]{3});
         var mockIndexContext = mock(IndexContext.class);
-        var mpl = MergePostingList.merge(Lists.newArrayList(postingList1.peekable(), postingList2.peekable()));
-        var indexContext1 = buildIndexContext(1, 3, mpl.peekable());
-        var indexContext2 = buildIndexContext(3, 3, postingList3.peekable());
+        var mpl = MergePostingList.merge(Lists.newArrayList(postingList1, postingList2));
+        var indexContext1 = buildIndexContext(1, 3, mpl);
+        var indexContext2 = buildIndexContext(3, 3, postingList3);
         var plri1 = new PostingListRangeIterator(mockIndexContext, pkm, indexContext1);
         var plri2 = new PostingListRangeIterator(mockIndexContext, pkm, indexContext2);
         try (var union = RangeUnionIterator.builder().add(plri1).add(plri2).build();)
@@ -84,7 +84,7 @@ public class PostingListRangeIteratorTest
         }
     }
 
-    private IndexSearcherContext buildIndexContext(int minRowId, int maxRowId, PostingList.PeekablePostingList list) throws IOException
+    private IndexSearcherContext buildIndexContext(int minRowId, int maxRowId, PostingList list) throws IOException
     {
         return new IndexSearcherContext(pkm.primaryKeyFromRowId(minRowId),
                                         pkm.primaryKeyFromRowId(maxRowId),
