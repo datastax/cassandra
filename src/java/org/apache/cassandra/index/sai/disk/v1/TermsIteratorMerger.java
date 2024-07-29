@@ -79,14 +79,14 @@ public class TermsIteratorMerger implements TermsIterator
     @SuppressWarnings("resource")
     public PostingList postings() throws IOException
     {
-        var postingLists = new ArrayList<PostingList.PeekablePostingList>(100);
+        var postingLists = new ArrayList<PostingList>(100);
         for (int x = 0; x < mergedIterator.getNumTop(); x++)
         {
             final int index = mergedIterator.top[x].index;
             final TermsIterator termsIterator = iterators[index];
             final PostingList postings = termsIterator.postings();
 
-            postingLists.add(postings.peekable());
+            postingLists.add(postings);
         }
         return new MonitoringPostingList(MergePostingList.merge(postingLists));
     }
