@@ -18,12 +18,12 @@
 package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.PriorityQueue;
+import java.util.List;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.IntMerger;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
@@ -31,29 +31,24 @@ import static com.google.common.base.Preconditions.checkArgument;
  * Merges multiple {@link PostingList} which individually contain unique items into a single list.
  */
 @NotThreadSafe
-public class MergePostingList implements PostingList
+public class MergePostingList extends IntMerger<PostingList> implements PostingList
 {
-    final ArrayList<PeekablePostingList> postingLists;
-    // (Intersection code just calls advance(long), so don't create this until we need it)
-    PriorityQueue<PeekablePostingList> pq;
     final int size;
-    private int lastRowId = -1;
 
-    private MergePostingList(ArrayList<PeekablePostingList> postingLists)
+    private MergePostingList(List<? extends PostingList> postingLists)
     {
+        super(postingLists, PostingList.class);
         checkArgument(!postingLists.isEmpty());
-        this.postingLists = postingLists;
         long totalPostings = 0;
         for (PostingList postingList : postingLists)
-        {
             totalPostings += postingList.size();
-        }
+
         // We could technically "overflow" integer if enough row ids are duplicated in the source posting lists.
         // The size does not affect correctness, so just use integer max if that happens.
         this.size = (int) Math.min(totalPostings, Integer.MAX_VALUE);
     }
 
-    public static PostingList merge(ArrayList<PeekablePostingList> postings)
+    public static PostingList merge(List<PostingList> postings)
     {
         if (postings.isEmpty())
             return PostingList.EMPTY;
@@ -67,85 +62,13 @@ public class MergePostingList implements PostingList
     @Override
     public int nextPosting() throws IOException
     {
-        // lazily create PQ if we haven't already
-        if (pq == null)
-        {
-            // elements could be removed in advance() even thouh postingLists started as non-empty
-            if (postingLists.isEmpty())
-                return PostingList.END_OF_STREAM;
-
-            // Leverage PQ's O(N) heapify time complexity
-            pq = new PriorityQueue<>(postingLists);
-        }
-
-        while (!pq.isEmpty())
-        {
-            // remove the list with the next rowid, then add it back in the correct order
-            // for the one it has after that
-            PeekablePostingList head = pq.poll();
-            int next = head.nextPosting();
-
-            if (next == END_OF_STREAM)
-            {
-                // skip current posting list
-            }
-            else if (next > lastRowId)
-            {
-                // row we haven't seen before
-                lastRowId = next;
-                pq.add(head);
-                return next;
-            }
-            else if (next == lastRowId)
-            {
-                // we've already seen this one, keep going
-                pq.add(head);
-            }
-        }
-
-        return PostingList.END_OF_STREAM;
+        return advance();
     }
 
-    @SuppressWarnings("resource")
     @Override
     public int advance(int targetRowID) throws IOException
     {
-        // clean out obsolete child lists, and remember the smallest row seen in case
-        // we can use it for the fast path
-        int nextRowId = PostingList.END_OF_STREAM;
-        PostingList nextPostingList = null;
-        for (int i = postingLists.size() - 1; i >= 0; i--) // index backwards to simplify the remove() case
-        {
-            var peekable = postingLists.get(i);
-            int peeked = peekable.advanceWithoutConsuming(targetRowID);
-
-            // clean out obsolete child lists
-            if (peeked == PostingList.END_OF_STREAM)
-            {
-                postingLists.remove(i);
-                continue;
-            }
-
-            if (lastRowId <= peeked && peeked < nextRowId) {
-                nextRowId = peeked;
-                nextPostingList = peekable;
-            }
-        }
-
-        if (lastRowId == targetRowID) {
-            // we're asking for the next row, past the current row, which an arbitrary
-            // number of our child posting lists may be pointing to.  In this case we
-            // need to let the PQ do its work to figure out what the correct next row AFTER
-            // this one is.
-            return nextPosting();
-        }
-
-        // fast path -- no PQ
-        pq = null; // we're invalidating the pq's assumptions, so force a rebuild if we need it again
-        if (nextPostingList == null)
-            return PostingList.END_OF_STREAM;
-        lastRowId = nextPostingList.nextPosting();
-        return lastRowId;
+        return skipTo(targetRowID);
     }
 
     @Override
@@ -155,8 +78,20 @@ public class MergePostingList implements PostingList
     }
 
     @Override
-    public void close() throws IOException
+    public void close()
     {
-        FileUtils.close(postingLists);
+        applyToAllSources(FileUtils::closeQuietly);
+    }
+
+    @Override
+    public int advanceSource(PostingList s) throws IOException
+    {
+        return s.nextPosting();
+    }
+
+    @Override
+    protected int skipSource(PostingList s, int targetPosition) throws IOException
+    {
+        return s.advance(targetPosition);
     }
 }
