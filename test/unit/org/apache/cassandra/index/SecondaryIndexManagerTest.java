@@ -42,6 +42,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -65,9 +66,6 @@ public class SecondaryIndexManagerTest extends CQLTester
     @BeforeClass
     public static void beforeClass()
     {
-        // Needed for testIndexStatusPropagationThread because IndexStatusManager will only submit
-        // to StatusPropagationExecutor of gossip is started.
-        requireNetwork();
         backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
         DatabaseDescriptor.setIncrementalBackupsEnabled(false);
     }
@@ -106,17 +104,37 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void testIndexStatusPropagationThread()
+    public void testIndexStatusPropagation() throws Throwable
     {
-        // create index to submit index status propagation task
+        assertFalse(Gossiper.instance.isEnabled());
+
+        // create index with Gossiper not enabled: no index status propagation threads
         String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
-        String indexName = createIndex("CREATE INDEX ON %s(c)");
-        waitForIndexBuilds(KEYSPACE, indexName);
-        Thread statusPropagationThread  = Thread.getAllStackTraces().keySet()
-                                                .stream()
-                                                .filter(t -> t.getName().contains("StatusPropagationExecutor"))
-                                                .findFirst().get();
-        assertTrue(statusPropagationThread.isDaemon());
+        String indexName1 = createIndex("CREATE INDEX ON %s(b)");
+        waitForIndexBuilds(KEYSPACE, indexName1);
+
+        assertTrue(Thread.getAllStackTraces().keySet()
+                         .stream()
+                         .filter(t -> t.getName().contains("StatusPropagationExecutor"))
+                         .findFirst().isEmpty());
+
+        Gossiper.instance.start(0);
+        try
+        {
+            // create index again with Gossiper started to submit index status propagation task
+            String indexName2 = createIndex("CREATE INDEX ON %s(c)");
+            waitForIndexBuilds(KEYSPACE, indexName2);
+
+            Thread statusPropagationThread = Thread.getAllStackTraces().keySet()
+                                                   .stream()
+                                                   .filter(t -> t.getName().contains("StatusPropagationExecutor"))
+                                                   .findFirst().get();
+            assertTrue(statusPropagationThread.isDaemon());
+        }
+        finally
+        {
+            Gossiper.instance.stop();
+        }
     }
 
     @Test
