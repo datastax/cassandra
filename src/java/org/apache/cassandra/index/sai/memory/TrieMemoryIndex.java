@@ -82,6 +82,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private final PrimaryKeysReducer primaryKeysReducer;
 
     private final Memtable memtable;
+    private AbstractBounds<PartitionPosition> keyBounds;
 
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
@@ -97,12 +98,13 @@ public class TrieMemoryIndex extends MemoryIndex
     @VisibleForTesting
     public TrieMemoryIndex(IndexContext indexContext)
     {
-        this(indexContext, null);
+        this(indexContext, null, AbstractBounds.unbounded(indexContext.getPartitioner()));
     }
 
-    public TrieMemoryIndex(IndexContext indexContext, Memtable memtable)
+    public TrieMemoryIndex(IndexContext indexContext, Memtable memtable, AbstractBounds<PartitionPosition> keyBounds)
     {
         super(indexContext);
+        this.keyBounds = keyBounds;
         this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
@@ -220,7 +222,7 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             return RangeIterator.empty();
         }
-        return new FilteringKeyRangeIterator(primaryKeys.keys(), keyRange);
+        return new FilteringKeyRangeIterator(new SortedSetRangeIterator(primaryKeys.keys()), keyRange);
     }
 
     private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
@@ -250,7 +252,7 @@ public class TrieMemoryIndex extends MemoryIndex
         }
 
         var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
-        var mergingIteratorBuilder = KeyRangeMergingIterator.builder(keyRange, indexContext.keyFactory(), capacity);
+        var mergingIteratorBuilder = MergingRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
         lastQueueSize.set(mergingIteratorBuilder.size());
 
         Trie<PrimaryKeys> subtrie = data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
@@ -268,7 +270,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         return mergingIteratorBuilder.isEmpty()
                ? RangeIterator.empty()
-               : mergingIteratorBuilder.build();
+               : new FilteringKeyRangeIterator(mergingIteratorBuilder.build(), keyRange);
     }
 
     public ByteBuffer getMinTerm()
@@ -317,13 +319,14 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    static class KeyRangeMergingIterator extends RangeIterator
+    static class MergingRangeIterator extends RangeIterator
     {
         org.apache.lucene.util.PriorityQueue<Object> keySets;  // class invariant: each object placed in this queue contains at least one key
-        KeyRangeMergingIterator(Collection<Object> keySets,
-                                PrimaryKey minKey,
-                                PrimaryKey maxKey,
-                                long count)
+
+        MergingRangeIterator(Collection<Object> keySets,
+                             PrimaryKey minKey,
+                             PrimaryKey maxKey,
+                             long count)
         {
             super(minKey, maxKey, count);
 
@@ -472,9 +475,9 @@ public class TrieMemoryIndex extends MemoryIndex
                 return keySets.isEmpty();
             }
 
-            public KeyRangeMergingIterator build()
+            public MergingRangeIterator build()
             {
-                return new KeyRangeMergingIterator(keySets, min, max, count);
+                return new MergingRangeIterator(keySets, min, max, count);
             }
         }
     }
