@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -123,18 +124,7 @@ public class Segment implements Closeable
      */
     public boolean intersects(AbstractBounds<PartitionPosition> keyRange)
     {
-        if (keyRange instanceof Range && ((Range<?>)keyRange).isWrapAround())
-            return keyRange.contains(minKeyBound) || keyRange.contains(maxKeyBound);
-
-        int cmp = keyRange.right.compareTo(minKeyBound);
-        // if right is minimum, it means right is the max token and bigger than maxKey.
-        // if right bound is less than minKeyBound, no intersection
-        if (!keyRange.right.isMinimum() && (!keyRange.inclusiveRight() && cmp == 0 || cmp < 0))
-            return false;
-
-        cmp = keyRange.left.compareTo(maxKeyBound);
-        // if left bound is bigger than maxKeyBound, no intersection
-        return (keyRange.isStartInclusive() || cmp != 0) && cmp <= 0;
+        return RangeUtil.intersects(minKeyBound, maxKeyBound, keyRange);
     }
 
     public long indexFileCacheSize()

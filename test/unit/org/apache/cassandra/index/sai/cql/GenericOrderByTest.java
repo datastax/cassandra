@@ -108,6 +108,30 @@ public class GenericOrderByTest extends SAITester
     }
 
     @Test
+    public void testPrimaryKeyRestrictionToEnsureBoundsAreCorrectlyHandled() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int primary key, x int, val int, str_val ascii)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Insert many rows and then ensure we can get each of them when querying with specific bounds.
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, x, val, str_val) VALUES (?, ?, ?, ?)", i, i, i, i);
+
+        // Test caught a bug in the way we created boundaries.
+        beforeAndAfterFlush(() -> {
+            for (int i = 0; i < 100; i++)
+            {
+                assertRows(execute("SELECT pk FROM %s WHERE pk = ? ORDER BY str_val ASC LIMIT 1", i), row(i));
+                assertRows(execute("SELECT pk FROM %s WHERE pk = ? ORDER BY val ASC LIMIT 1", i), row(i));
+                assertRows(execute("SELECT pk FROM %s WHERE pk = ? ORDER BY str_val DESC LIMIT 1", i), row(i));
+                assertRows(execute("SELECT pk FROM %s WHERE pk = ? ORDER BY val DESC LIMIT 1", i), row(i));
+            }
+        });
+    }
+
+    @Test
     public void testMultiplePrimaryKeysForSameTerm() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, x int, val int, str_val ascii, PRIMARY KEY (pk, x))");

@@ -30,11 +30,14 @@ import com.googlecode.concurrenttrees.common.Iterables;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -109,8 +112,12 @@ public class QueryViewBuilder
                 // Copy the memtable indexes to avoid concurrent modification.
                 var memtableIndexes = new HashSet<>(orderer.context.getLiveMemtables().values());
 
-                // TODO live sstables or canonical?
-                var refViewFragment = cfs.selectAndReference(org.apache.cassandra.db.lifecycle.View.selectLive(range));
+                // We must use the canonical view in order for the equality check for source sstable/memtable
+                // to work correctly.
+                var filter = RangeUtil.coversFullRing(range)
+                             ? View.selectFunction(SSTableSet.CANONICAL)
+                             : View.select(SSTableSet.CANONICAL, s -> RangeUtil.intersects(s, range));
+                var refViewFragment = cfs.selectAndReference(filter);
                 var memtables = Iterables.toSet(refViewFragment.memtables);
                 // Confirm that all the memtables associated with the memtable indexes we already have are still live.
                 // There might be additional memtables that are not associated with the expression because tombstones
