@@ -127,12 +127,12 @@ public class RequestSensorBench
         for (int i = 0; i < SENSORS_PER_THREAD; i++)
         {
             Fixture f = fixtures[benchState.idx][i];
-            SensorsRegistry.instance.getOrCreateSensor(f.context, f.type).orElseThrow();
+            SensorsRegistry.instance.getOrCreateSensorFast(f.context, f.type);
         }
         for (int i = 0; i < UPDATES_PER_THREAD; i++)
         {
             Fixture f = fixtures[benchState.idx][i % SENSORS_PER_THREAD];
-            SensorsRegistry.instance.getSensor(f.context, f.type).get().increment(1);
+            SensorsRegistry.instance.getSensorFast(f.context, f.type).increment(1);
         }
     }
 

@@ -18,16 +18,13 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -50,7 +47,7 @@ import org.apache.cassandra.utils.Pair;
 public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
-    private final HashMap<Pair<Context, Type>, Sensor> sensors = new LinkedHashMap<>();
+    private final HashMap<Context, Sensor[]> sensors = new LinkedHashMap<>();
     private final Map<Sensor, Double> latestSyncedValuePerSensor = new HashMap<>();
 
     public RequestSensors()
@@ -65,27 +62,48 @@ public class RequestSensors
 
     public synchronized void registerSensor(Context context, Type type)
     {
-        sensors.putIfAbsent(Pair.create(context, type), new Sensor(context, type));
+        Sensor[] typeSensors = sensors.computeIfAbsent(context, key ->
+        {
+            Sensor[] newTypeSensors = new Sensor[Type.values().length];
+            newTypeSensors[type.ordinal()]= new Sensor(context, type);
+            return newTypeSensors;
+        });
+        if (typeSensors[type.ordinal()] == null)
+            typeSensors[type.ordinal()] = new Sensor(context, type);
+
     }
 
     public synchronized Optional<Sensor> getSensor(Context context, Type type)
     {
-        return Optional.ofNullable(sensors.get(Pair.create(context, type)));
+        Sensor[] typeSensors = sensors.get(context);
+        if (typeSensors == null)
+            return Optional.empty();
+        return Optional.ofNullable(typeSensors[type.ordinal()]);
+    }
+
+    private synchronized Sensor getSensorFast(Context context, Type type)
+    {
+        Sensor[] typeSensors = sensors.get(context);
+        if (typeSensors != null)
+            return typeSensors[type.ordinal()];
+        return null;
     }
 
     public synchronized Set<Sensor> getSensors(Type type)
     {
-        return sensors.values().stream().filter(s -> s.getType() == type).collect(Collectors.toSet());
+        return sensors.values().stream().flatMap(Arrays::stream).filter(Objects::nonNull).filter(s -> s.getType() == type).collect(Collectors.toSet());
     }
 
     public synchronized void incrementSensor(Context context, Type type, double value)
     {
-        Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
+        Sensor sensor = getSensorFast(context, type);
+        if (sensor != null)
+            sensor.increment(value);
     }
 
     public synchronized void syncAllSensors()
     {
-        sensors.values().forEach(sensor -> {
+        sensors.values().stream().flatMap(Arrays::stream).filter(Objects::nonNull).forEach(sensor -> {
             double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
             double update = sensor.getValue() - current;
             if (update == 0d)
