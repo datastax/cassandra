@@ -200,7 +200,8 @@ public class TrieMemtableIndexTest extends SAITester
             {
                 while (iterator.hasNext())
                 {
-                    int key = Int32Type.instance.compose(iterator.next().partitionKey().getKey());
+                    DecoratedKey k = iterator.next().partitionKey();
+                    int key = Int32Type.instance.compose(k.getKey());
                     assertFalse(foundKeys.contains(key));
                     foundKeys.add(key);
                 }
