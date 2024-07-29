@@ -177,7 +177,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         assertEquals(6L, builder.getMaximum().token().getLongValue());
         assertEquals(3L, builder.getTokenCount());
         assertEquals(3L, builder.rangeCount());
-        assertFalse(builder.statistics.isDisjoint());
+        assertFalse(builder.statistics.isEmptyOrDisjoint());
 
         Assert.assertEquals(1L, builder.rangeIterators.get(0).getMinimum().token().getLongValue());
         Assert.assertEquals(4L, builder.rangeIterators.get(1).getMinimum().token().getLongValue());
@@ -245,7 +245,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
 
         Assert.assertFalse(firstIteratorClosed.get());
         Assert.assertFalse(secondIteratorClosed.get());
-        Assert.assertTrue(builder.statistics.isDisjoint());
+        Assert.assertTrue(builder.statistics.isEmptyOrDisjoint());
 
         var disjointIntersection = builder.build();
         Assert.assertNotNull(disjointIntersection);
