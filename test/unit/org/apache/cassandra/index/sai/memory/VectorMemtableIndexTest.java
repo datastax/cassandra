@@ -173,7 +173,8 @@ public class VectorMemtableIndexTest extends SAITester
                         // This assertion only holds true as long as we query at most the expectedNumResults.
                         // Once we query deeper, we might get a key with a higher score than the last key.
                         // This is a direct consequence of the approximate part of ANN.
-                        assertTrue("Returned keys are not ordered by score", primaryKeyWithScore.compareTo(lastKey) <= 0);
+                        // Note that PrimaryKeyWithScore is flipped to descending order, so we use >= here.
+                        assertTrue("Returned keys are not ordered by score", primaryKeyWithScore.compareTo(lastKey) >= 0);
                     lastKey = primaryKeyWithScore;
                     int key = Int32Type.instance.compose(primaryKeyWithScore.partitionKey().getKey());
                     assertFalse(foundKeys.contains(key));

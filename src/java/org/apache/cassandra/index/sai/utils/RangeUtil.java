@@ -36,7 +36,7 @@ public class RangeUtil
 
     /**
      * Check if the provided {@link SSTableReader} intersects with the provided key range.
-     * @param ssTableReader SSTableReader
+     * @param reader SSTableReader
      * @param keyRange key range
      * @return true the key range intersects with the min/max key bounds
      */
