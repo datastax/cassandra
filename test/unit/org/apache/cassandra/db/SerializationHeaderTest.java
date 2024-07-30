@@ -55,6 +55,8 @@ import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
@@ -64,14 +66,24 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 public class SerializationHeaderTest
 {
     private static final String KEYSPACE = "SerializationHeaderTest";
 
+    private final static Version versionWithExplicitFrozenTuples;
+    private final static Version versionWithImplicitFrozenTuples;
+
     static
     {
         DatabaseDescriptor.daemonInitialization();
+
+        versionWithImplicitFrozenTuples = BtiFormat.getInstance().getVersion("cb");
+        assertThat(versionWithImplicitFrozenTuples.hasImplicitlyFrozenTuples()).isTrue();
+
+        versionWithExplicitFrozenTuples = BtiFormat.getInstance().getVersion("cc");
+        assertThat(versionWithExplicitFrozenTuples.hasImplicitlyFrozenTuples()).isFalse();
     }
     
     @Test
@@ -169,8 +181,6 @@ public class SerializationHeaderTest
     @Test
     public void testDecodeFrozenTuplesEncodedAsNonFrozen() throws UnknownColumnException
     {
-        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
-
         TupleType multicellTupleType = new TupleType(Arrays.asList(Int32Type.instance, Int32Type.instance), true);
         AbstractType<?> frozenTupleType = multicellTupleType.freeze();
 
@@ -187,18 +197,18 @@ public class SerializationHeaderTest
                                                                                                        new LinkedHashMap<>(Map.of(ByteBufferUtil.bytes("v"), multicellTupleType)),
                                                                                                        EncodingStats.NO_STATS);
 
-        SerializationHeader header = component.toHeader("asdfa", metadata, format.getLatestVersion(), false);
+        SerializationHeader header = component.toHeader("asdfa", metadata, versionWithImplicitFrozenTuples, false);
         assertThat(header.keyType().isMultiCell()).isFalse();
         assertThat(header.clusteringTypes().get(0).isMultiCell()).isFalse();
         assertThat(header.columns().statics.iterator().next().type.isMultiCell()).isFalse();
         assertThat(header.columns().regulars.iterator().next().type.isMultiCell()).isFalse();
+
+        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("asdfa", metadata, versionWithExplicitFrozenTuples, false));
     }
 
     @Test
     public void testDecodeDroppedUTDsEncodedAsNonFrozenTuples() throws UnknownColumnException
     {
-        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
-
         TupleType multicellTupleType = new TupleType(Arrays.asList(Int32Type.instance, Int32Type.instance), true);
 
         TableMetadata metadata = TableMetadata.builder("ks", "tab")
@@ -218,9 +228,11 @@ public class SerializationHeaderTest
                                                                                                                                   ByteBufferUtil.bytes("dv"), multicellTupleType)),
                                                                                                        EncodingStats.NO_STATS);
 
-        SerializationHeader header = component.toHeader("tab", metadata, format.getLatestVersion(), false);
+        SerializationHeader header = component.toHeader("tab", metadata, versionWithImplicitFrozenTuples, false);
         assertThat(Iterables.find(header.columns().regulars, md -> md.name.toString().equals("dv")).type.isMultiCell()).isTrue();
         assertThat(Iterables.find(header.columns().statics, md -> md.name.toString().equals("ds")).type.isMultiCell()).isTrue();
+
+        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("tab", metadata, versionWithExplicitFrozenTuples, false));
     }
 
 }

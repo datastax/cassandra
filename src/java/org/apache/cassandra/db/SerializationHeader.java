@@ -326,6 +326,7 @@ public class SerializationHeader
                                                                      TableMetadata metadata,
                                                                      ByteBuffer columnName,
                                                                      AbstractType<?> type,
+                                                                     boolean allowImplicitlyFrozenTuples,
                                                                      boolean isForOfflineTool)
         {
             boolean dropped = metadata.getDroppedColumn(columnName) != null;
@@ -338,7 +339,7 @@ public class SerializationHeader
             }
             catch (InvalidColumnTypeException e)
             {
-                AbstractType<?> fixed = tryFix(type, columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool);
+                AbstractType<?> fixed = allowImplicitlyFrozenTuples ? tryFix(type, columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool) : null;
                 if (fixed == null)
                 {
                     // We don't know how to fix. We throw an error here because reading such table may result in corruption
@@ -413,26 +414,28 @@ public class SerializationHeader
         private static AbstractType<?> validateAndMaybeFixPartitionKeyType(String descriptor,
                                                                            TableMetadata metadata,
                                                                            AbstractType<?> fullType,
+                                                                           boolean allowImplicitlyFrozenTuples,
                                                                            boolean isForOfflineTool)
         {
             List<ColumnMetadata> pkColumns = metadata.partitionKeyColumns();
             int pkCount = pkColumns.size();
 
             if (pkCount == 1)
-                return validateAndMaybeFixColumnType(descriptor, metadata, pkColumns.get(0).name.bytes, fullType, isForOfflineTool);
+                return validateAndMaybeFixColumnType(descriptor, metadata, pkColumns.get(0).name.bytes, fullType, allowImplicitlyFrozenTuples, isForOfflineTool);
 
             List<AbstractType<?>> subTypes = fullType.subTypes();
             assert fullType instanceof CompositeType && subTypes.size() == pkCount
             : String.format("In %s, got %s as table %s partition key type but partition key is %s",
                             descriptor, fullType, metadata, pkColumns);
 
-            return CompositeType.getInstance(validateAndMaybeFixPKTypes(descriptor, metadata, pkColumns, subTypes, isForOfflineTool));
+            return CompositeType.getInstance(validateAndMaybeFixPKTypes(descriptor, metadata, pkColumns, subTypes, allowImplicitlyFrozenTuples, isForOfflineTool));
         }
 
         private static List<AbstractType<?>> validateAndMaybeFixPKTypes(String descriptor,
                                                                         TableMetadata table,
                                                                         List<ColumnMetadata> pkColumns,
                                                                         List<AbstractType<?>> pkTypes,
+                                                                        boolean allowImplicitlyFrozenTuples,
                                                                         boolean isForOfflineTool)
         {
             int count = pkTypes.size();
@@ -443,6 +446,7 @@ public class SerializationHeader
                                                           table,
                                                           pkColumns.get(i).name.bytes,
                                                           pkTypes.get(i),
+                                                          allowImplicitlyFrozenTuples,
                                                           isForOfflineTool));
             }
             return updated;
@@ -464,7 +468,7 @@ public class SerializationHeader
                 for (Map.Entry<ByteBuffer, AbstractType<?>> e : map.entrySet())
                 {
                     ByteBuffer name = e.getKey();
-                    AbstractType<?> type = validateAndMaybeFixColumnType(descriptor, metadata, name, e.getValue(), isForOfflineTool);
+                    AbstractType<?> type = validateAndMaybeFixColumnType(descriptor, metadata, name, e.getValue(), sstableVersion.hasImplicitlyFrozenTuples(), isForOfflineTool);
                     AbstractType<?> other = typeMap.put(name, type);
                     if (other != null && !other.equals(type))
                         throw new IllegalStateException("Column " + name + " occurs as both regular and static with types " + other + "and " + e.getValue());
@@ -488,11 +492,12 @@ public class SerializationHeader
                 }
             }
 
-            AbstractType<?> keyType = validateAndMaybeFixPartitionKeyType(descriptor, metadata, this.keyType, isForOfflineTool);
+            AbstractType<?> keyType = validateAndMaybeFixPartitionKeyType(descriptor, metadata, this.keyType, sstableVersion.hasImplicitlyFrozenTuples(), isForOfflineTool);
             List<AbstractType<?>> clusteringTypes = validateAndMaybeFixPKTypes(descriptor,
                                                                                metadata,
                                                                                metadata.clusteringColumns(),
                                                                                this.clusteringTypes,
+                                                                               sstableVersion.hasImplicitlyFrozenTuples(),
                                                                                isForOfflineTool);
 
             return new SerializationHeader(true, keyType, clusteringTypes, builder.build(), stats, typeMap);
