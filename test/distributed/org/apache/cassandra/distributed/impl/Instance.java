@@ -599,6 +599,8 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             inInstancelogger = LoggerFactory.getLogger(Instance.class);
             try
             {
+                JVMStabilityInspector.replaceKiller(new InstanceKiller(Instance.this::shutdown));
+
                 // org.apache.cassandra.distributed.impl.AbstractCluster.startup sets the exception handler for the thread
                 // so extract it to populate ExecutorFactory.Global
                 ExecutorFactory.Global.tryUnsafeSet(new ExecutorFactory.Default(Thread.currentThread().getContextClassLoader(), null, Thread.getDefaultUncaughtExceptionHandler()));
@@ -713,8 +715,6 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     propagateMessagingVersions(cluster); // fake messaging needs to know messaging version for filters
 
                 internodeMessagingStarted = true;
-
-                JVMStabilityInspector.replaceKiller(new InstanceKiller(Instance.this::shutdown));
 
                 // TODO: this is more than just gossip
                 StorageService.instance.registerDaemon(CassandraDaemon.getInstanceForTesting());

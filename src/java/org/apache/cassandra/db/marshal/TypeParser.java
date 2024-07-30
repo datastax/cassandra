@@ -30,6 +30,7 @@ import java.util.Map;
 
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableMap;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.dht.IPartitioner;
@@ -64,7 +65,7 @@ public class TypeParser
     }
 
     /**
-     * Parse a string containing an type definition.
+     * Creates a new TypeParser and uses it to parse the given type definition string.
      *
      * @param str the string to parse.
      */
@@ -392,9 +393,13 @@ public class TypeParser
         throw new SyntaxException(String.format("Syntax error parsing '%s' at char %d: unexpected end of string", str, idx));
     }
 
-    private static AbstractType<?> getAbstractType(String compareWith) throws ConfigurationException
+    /**
+     * Parse a type string and return the corresponding {@link AbstractType}. It is used for the type definition which
+     * is not followed by an opening parenthesis, e.g. "org.apache.cassandra.db.marshal.UTF8Type".
+     */
+    private static AbstractType<?> getAbstractType(String typeName) throws ConfigurationException
     {
-        String className = compareWith.contains(".") ? compareWith : "org.apache.cassandra.db.marshal." + compareWith;
+        String className = typeName.contains(".") ? typeName : "org.apache.cassandra.db.marshal." + typeName;
         Class<? extends AbstractType<?>> typeClass = FBUtilities.classForName(className, "abstract-type");
         try
         {
@@ -408,10 +413,16 @@ public class TypeParser
         }
     }
 
+    /**
+     * Parse a type string and return the corresponding {@link AbstractType}. It is used for the type definition
+     * which is followed by an opening parenthesis, e.g.
+     * "org.apache.cassandra.db.marshal.ListType(org.apache.cassandra.db.marshal.UTF8Type)".
+     */
     private static AbstractType<?> getAbstractType(String compareWith, TypeParser parser) throws SyntaxException, ConfigurationException
     {
         String className = compareWith.contains(".") ? compareWith : "org.apache.cassandra.db.marshal." + compareWith;
         Class<? extends AbstractType<?>> typeClass = FBUtilities.classForName(className, "abstract-type");
+
         try
         {
             Method method = typeClass.getDeclaredMethod("getInstance", TypeParser.class);
@@ -429,6 +440,11 @@ public class TypeParser
         }
     }
 
+    /**
+     * Parse a type string and return the corresponding AbstractType. It is used for the type definition which is not
+     * followed by an opening parenthesis, e.g. "org.apache.cassandra.db.marshal.UTF8Type", but does not have static
+     * {@code instance} field.
+     */
     private static AbstractType<?> getRawAbstractType(Class<? extends AbstractType<?>> typeClass) throws ConfigurationException
     {
         try
