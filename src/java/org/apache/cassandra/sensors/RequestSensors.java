@@ -28,6 +28,8 @@ import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -47,6 +49,8 @@ import org.apache.cassandra.utils.Pair;
 public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
+    // Using Map of array values for performance reasons to avoid wrapping key into another Object (.eg. Pair(context,type)).
+    // Note that array values can contain NULL so be careful to filter NULLs when iterating over array
     private final HashMap<Context, Sensor[]> sensors = new LinkedHashMap<>();
     private final Map<Sensor, Double> latestSyncedValuePerSensor = new HashMap<>();
 
@@ -81,6 +85,10 @@ public class RequestSensors
         return Optional.ofNullable(typeSensors[type.ordinal()]);
     }
 
+    /**
+     * To get best perfromance we are not returning Optional here
+     */
+    @Nullable
     private synchronized Sensor getSensorFast(Context context, Type type)
     {
         Sensor[] typeSensors = sensors.get(context);
