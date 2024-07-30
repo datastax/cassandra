@@ -254,9 +254,9 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
      * @param file segment file that is no longer in use.
      */
     @Override
-    void handleReplayedSegment(final File file)
+    void handleReplayedSegment(final File file, boolean hasInvalidMutations)
     {
-        super.handleReplayedSegment(file);
+        super.handleReplayedSegment(file, hasInvalidMutations);
 
         // delete untracked cdc segment hard link files if their index files do not exist
         File cdcFile = new File(DatabaseDescriptor.getCDCLogLocation(), file.name());
