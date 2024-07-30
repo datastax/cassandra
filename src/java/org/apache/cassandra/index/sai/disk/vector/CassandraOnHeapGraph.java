@@ -27,7 +27,6 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -404,7 +403,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
             long postingsPosition;
-            if (V5OnDiskFormat.WRITE_V5_VECTOR_POSTINGS)
+            if (V5OnDiskFormat.writeV5VectorPostings())
             {
                 assert deletedOrdinals.isEmpty(); // V5 format does not support recording deleted ordinals
                 postingsPosition = new V5VectorPostingsWriter<T>(remappedPostings)

@@ -288,7 +288,7 @@ public class CompactionGraph implements Closeable, Accountable
                 var postingsFuture = es.submit(() -> {
                     try (var view = index.getView())
                     {
-                        if (V5OnDiskFormat.WRITE_V5_VECTOR_POSTINGS)
+                        if (V5OnDiskFormat.writeV5VectorPostings())
                         {
                             return new V5VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), postingsMap)
                                                .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);

@@ -331,7 +331,7 @@ public class V5VectorPostingsWriter<T>
 
         logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them", ordinalMap.size(), extraPostings.size());
         var structure = extraPostings.isEmpty() ? Structure.ONE_TO_ONE : Structure.ONE_TO_MANY;
-        if (structure == Structure.ONE_TO_MANY && !V5OnDiskFormat.WRITE_V5_VECTOR_POSTINGS)
+        if (structure == Structure.ONE_TO_MANY && !V5OnDiskFormat.writeV5VectorPostings())
             return createGenericMapping(ordinalMap.keySet(), maxOldOrdinal, maxRow);
 
         return new RemappedPostings(structure, maxNewOrdinal, maxRow, ordinalMap, extraPostings);

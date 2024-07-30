@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -52,7 +53,7 @@ public class Version
     // Encode trie entries using their AbstractType to ensure trie entries are sorted for range queries and are prefix free.
     public static final Version DB = new Version("db", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g,"db"));
     // revamps vector postings lists to cause fewer reads from disk
-    public static final Version DC = new Version("dc", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g,"dc"));
+    public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
@@ -63,7 +64,7 @@ public class Version
     // The latest version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
     // use reflection to change it and safely publish across threads.
-    private static volatile Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", "ca"));
+    private static volatile Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", "dc"));
 
     private static final Pattern GENERATION_PATTERN = Pattern.compile("\\d+");
 
