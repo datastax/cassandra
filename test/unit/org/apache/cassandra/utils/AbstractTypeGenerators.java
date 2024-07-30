@@ -81,6 +81,7 @@ import org.apache.cassandra.db.marshal.LineStringType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
 import org.apache.cassandra.db.marshal.PointType;
@@ -94,7 +95,6 @@ import org.apache.cassandra.db.marshal.TimeType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.db.marshal.TupleType;
-import org.apache.cassandra.db.marshal.TypeParser;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.UserType;
@@ -1386,7 +1386,10 @@ public final class AbstractTypeGenerators
         if (t.isMultiCell())
             return t;
 
-        AbstractType<?> unfrozen = TypeParser.parse(t.toString(true));
+        if (!(t instanceof MultiCellCapableType<?>))
+            return t;
+
+        AbstractType<?> unfrozen = t.with(t.subTypes(), true);
         if (unfrozen.isMultiCell())
             return unfrozen;
 
