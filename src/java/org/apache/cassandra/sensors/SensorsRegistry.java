@@ -37,12 +37,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Striped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,10 +82,10 @@ public class SensorsRegistry implements SchemaChangeListener
 {
     public static final SensorsRegistry instance = new SensorsRegistry();
     private static final Logger logger = LoggerFactory.getLogger(SensorsRegistry.class);
-
     private final Timer asyncUpdater = Timer.INSTANCE;
 
-    private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
+    private static final int LOCK_SRIPES = 1024;
+    private final Striped<ReadWriteLock> stripedUpdateLock = Striped.readWriteLock(LOCK_SRIPES); // we stripe per keyspace
     private final Set<String> keyspaces = Sets.newConcurrentHashSet();
     private final Set<String> tableIds = Sets.newConcurrentHashSet();
 
@@ -132,7 +131,7 @@ public class SensorsRegistry implements SchemaChangeListener
         if (sensor != null)
             return sensor;
 
-        updateLock.readLock().lock();
+        stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().lock();
         try
         {
             if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
@@ -159,7 +158,7 @@ public class SensorsRegistry implements SchemaChangeListener
         }
         finally
         {
-            updateLock.readLock().unlock();
+            stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().unlock();
         }
     }
 
@@ -232,7 +231,7 @@ public class SensorsRegistry implements SchemaChangeListener
     @Override
     public void onDropKeyspace(KeyspaceMetadata keyspace, boolean dropData)
     {
-        updateLock.writeLock().lock();
+        stripedUpdateLock.getAt(getLockStripe(keyspace.name.hashCode())).writeLock().lock();
         try
         {
             keyspaces.remove(keyspace.name);
@@ -246,14 +245,14 @@ public class SensorsRegistry implements SchemaChangeListener
         }
         finally
         {
-            updateLock.writeLock().unlock();
+            stripedUpdateLock.getAt(getLockStripe(keyspace.name.hashCode())).writeLock().unlock();
         }
     }
 
     @Override
     public void onDropTable(TableMetadata table, boolean dropData)
     {
-        updateLock.writeLock().lock();
+        stripedUpdateLock.getAt(getLockStripe(table.keyspace.hashCode())).writeLock().lock();
         try
         {
             String tableId = table.id.toString();
@@ -268,8 +267,13 @@ public class SensorsRegistry implements SchemaChangeListener
         }
         finally
         {
-            updateLock.writeLock().unlock();
+            stripedUpdateLock.getAt(getLockStripe(table.keyspace.hashCode())).writeLock().unlock();
         }
+    }
+
+    private static int getLockStripe(int hashCode)
+    {
+        return Math.abs(hashCode) % LOCK_SRIPES;
     }
 
     /**
