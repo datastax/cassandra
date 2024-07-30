@@ -29,7 +29,6 @@ import org.slf4j.Logger;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -40,6 +39,7 @@ import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.io.util.FileUtils;
@@ -117,18 +117,7 @@ public class Segment implements Closeable, SegmentOrdering
      */
     public boolean intersects(AbstractBounds<PartitionPosition> keyRange)
     {
-        if (keyRange instanceof Range && ((Range<?>)keyRange).isWrapAround())
-            return keyRange.contains(minKeyBound) || keyRange.contains(maxKeyBound);
-
-        int cmp = keyRange.right.compareTo(minKeyBound);
-        // if right is minimum, it means right is the max token and bigger than maxKey.
-        // if right bound is less than minKeyBound, no intersection
-        if (!keyRange.right.isMinimum() && (!keyRange.inclusiveRight() && cmp == 0 || cmp < 0))
-            return false;
-
-        cmp = keyRange.left.compareTo(maxKeyBound);
-        // if left bound is bigger than maxKeyBound, no intersection
-        return (keyRange.isStartInclusive() || cmp != 0) && cmp <= 0;
+        return RangeUtil.intersects(minKeyBound, maxKeyBound, keyRange);
     }
 
     public long indexFileCacheSize()
