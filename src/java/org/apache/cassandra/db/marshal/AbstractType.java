@@ -815,7 +815,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public void validateForColumn(ByteBuffer columnName,
                                   boolean isPrimaryKeyColumn,
-                                  boolean isCounterTable)
+                                  boolean isCounterTable,
+                                  boolean isDroppedColumn,
+                                  boolean isForOfflineTool)
     {
         if (isPrimaryKeyColumn)
         {
@@ -835,19 +837,24 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
             if (comparisonType == ComparisonType.NOT_COMPARABLE)
                 throw columnException(columnName,
-                                      "type %s is not comparable and cannot be used for PRIMARY KEY columns", asCQL3Type());
+                                      "type %s is not comparable and cannot be used for PRIMARY KEY columns", asCQL3Type().toSchemaString());
         }
         else
         {
             if (isMultiCell())
             {
+                if (isTuple() && !isDroppedColumn && !isForOfflineTool)
+                    throw columnException(columnName,
+                                          "tuple type %s is not frozen, which should not have happened",
+                                          asCQL3Type().toSchemaString());
+
                 for (AbstractType<?> subType : subTypes())
                 {
                     if (subType.isMultiCell())
                     {
                         throw columnException(columnName,
                                               "non-frozen %s are only supported at top-level: subtype %s of %s must be frozen",
-                                              subType.category(), subType.asCQL3Type(), asCQL3Type());
+                                              subType.category(), subType.asCQL3Type().toSchemaString(), asCQL3Type().toSchemaString());
                     }
                 }
 
@@ -861,8 +868,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                         String what = this instanceof MapType
                                       ? "map keys"
                                       : (this instanceof SetType ? "sets" : category());
-                        throw columnException(columnName,
-                                              "duration types are not supported within non-frozen %s", what);
+                        throw columnException(columnName, "duration types are not supported within non-frozen %s", what);
                     }
                 }
             }
@@ -882,13 +888,13 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                     if (referencesCounter())
                         throw columnException(columnName, "counters are not allowed within %s", category());
 
-                    throw columnException(columnName, "Cannot mix counter and non-counter columns in the same table");
+                    throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
                 }
             }
             else
             {
                 if (isCounter())
-                    throw columnException(columnName, "Cannot mix counter and non-counter columns in the same table");
+                    throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
 
                 // For nested counters, we prefer complaining about the nested-ness rather than this not being a counter
                 // table, because the table won't be marked as a counter one even if it has only nested counters, and so

@@ -17,6 +17,18 @@
  */
 package org.apache.cassandra.cql3.validation.operations;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
+import org.junit.Assert;
+import org.junit.Test;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
@@ -34,25 +46,25 @@ import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.MemtableParams;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspaceTables;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.triggers.ITrigger;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.junit.Assert;
-import org.junit.Test;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Map;
-import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static java.lang.String.format;
-import static org.apache.cassandra.cql3.Duration.*;
-import static org.junit.Assert.*;
+import static org.apache.cassandra.cql3.Duration.NANOS_PER_HOUR;
+import static org.apache.cassandra.cql3.Duration.NANOS_PER_MICRO;
+import static org.apache.cassandra.cql3.Duration.NANOS_PER_MILLI;
+import static org.apache.cassandra.cql3.Duration.NANOS_PER_MINUTE;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class CreateTest extends CQLTester
 {
@@ -111,13 +123,13 @@ public class CreateTest extends CQLTester
     @Test
     public void testCreateTableWithDurationColumns() throws Throwable
     {
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 'a'",
+        assertInvalidMessage("Invalid type duration for column a: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0 (a duration PRIMARY KEY, b int);");
 
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 'b'",
+        assertInvalidMessage("Invalid type duration for column b: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0 (a text, b duration, c duration, primary key (a, b));");
 
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 'b'",
+        assertInvalidMessage("Invalid type duration for column b: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0 (a text, b duration, c duration, primary key (a, b)) with clustering order by (b DESC);");
 
         createTable("CREATE TABLE %s (a int, b int, c duration, primary key (a, b));");
@@ -197,7 +209,7 @@ public class CreateTest extends CQLTester
         createTable("CREATE TABLE %s (a text PRIMARY KEY, duration duration);");
 
         // Test duration within Map
-        assertInvalidMessage("Durations are not allowed as map keys: map<duration, text>",
+        assertInvalidMessage("Invalid type map<duration, text> for column m: duration types are not supported within non-frozen map keys",
                              "CREATE TABLE cql_test_keyspace.table0(pk int PRIMARY KEY, m map<duration, text>)");
 
         createTable("CREATE TABLE %s(pk int PRIMARY KEY, m map<text, duration>)");
@@ -205,17 +217,17 @@ public class CreateTest extends CQLTester
         assertRows(execute("SELECT * FROM %s"),
                    row(1, map("one month", Duration.from("1mo"), "60 days", Duration.from("60d"))));
 
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 'm'",
-                "CREATE TABLE cql_test_keyspace.table0(m frozen<map<text, duration>> PRIMARY KEY, v int)");
+        assertInvalidMessage("Invalid type frozen<map<text, duration>> for column m: duration types are not supported within PRIMARY KEY columns",
+                             "CREATE TABLE cql_test_keyspace.table0(m frozen<map<text, duration>> PRIMARY KEY, v int)");
 
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 'm'",
+        assertInvalidMessage("Invalid type frozen<map<text, duration>> for column m: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0(pk int, m frozen<map<text, duration>>, v int, PRIMARY KEY (pk, m))");
 
         // Test duration within Set
-        assertInvalidMessage("Durations are not allowed inside sets: set<duration>",
+        assertInvalidMessage("Invalid type set<duration> for column s: duration types are not supported within non-frozen",
                              "CREATE TABLE cql_test_keyspace.table0(pk int PRIMARY KEY, s set<duration>)");
 
-        assertInvalidMessage("Durations are not allowed inside sets: frozen<set<duration>>",
+        assertInvalidMessage("Invalid type frozen<set<duration>> for column s: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0(s frozen<set<duration>> PRIMARY KEY, v int)");
 
         // Test duration within List
@@ -224,7 +236,7 @@ public class CreateTest extends CQLTester
         assertRows(execute("SELECT * FROM %s"),
                    row(1, list(Duration.from("1mo"), Duration.from("60d"))));
 
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 'l'",
+        assertInvalidMessage("Invalid type frozen<list<duration>> for column l: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0(l frozen<list<duration>> PRIMARY KEY, v int)");
 
         // Test duration within Tuple
@@ -233,23 +245,23 @@ public class CreateTest extends CQLTester
         assertRows(execute("SELECT * FROM %s"),
                    row(1, tuple(1, Duration.from("1mo"))));
 
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 't'",
+        assertInvalidMessage("Invalid type frozen<tuple<int, duration>> for column t: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0(t frozen<tuple<int, duration>> PRIMARY KEY, v int)");
 
         // Test duration within UDT
         String typename = createType("CREATE TYPE %s (a duration)");
         String myType = KEYSPACE + '.' + typename;
-        createTable("CREATE TABLE %s(pk int PRIMARY KEY, u " + myType + ")");
+        createTable("CREATE TABLE %s(pk int PRIMARY KEY, u " + myType + ')');
         execute("INSERT INTO %s (pk, u) VALUES (1, {a : 1mo})");
         assertRows(execute("SELECT * FROM %s"),
                    row(1, userType("a", Duration.from("1mo"))));
 
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 'u'",
+        assertInvalidMessage("Invalid type frozen<" + typename + "> for column u: duration types are not supported within PRIMARY KEY columns",
                              "CREATE TABLE cql_test_keyspace.table0(pk int, u frozen<" + myType + ">, v int, PRIMARY KEY(pk, u))");
 
         // Test duration with several level of depth
-        assertInvalidMessage("duration type is not supported for PRIMARY KEY column 'm'",
-                "CREATE TABLE cql_test_keyspace.table0(pk int, m frozen<map<text, list<tuple<int, duration>>>>, v int, PRIMARY KEY (pk, m))");
+        assertInvalidMessage("Invalid type frozen<map<text, frozen<list<frozen<tuple<int, duration>>>>>> for column m: duration types are not supported within PRIMARY KEY columns",
+                             "CREATE TABLE cql_test_keyspace.table0(pk int, m frozen<map<text, list<tuple<int, duration>>>>, v int, PRIMARY KEY (pk, m))");
     }
 
     private ByteBuffer duration(long months, long days, long nanoseconds) throws IOException
