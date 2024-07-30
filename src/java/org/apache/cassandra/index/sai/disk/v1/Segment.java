@@ -29,7 +29,6 @@ import org.slf4j.Logger;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -45,8 +44,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
-
-import static java.lang.Math.max;
 
 /**
  * Each segment represents an on-disk index structure (kdtree/terms/postings) flushed by memory limit or token boundaries,
