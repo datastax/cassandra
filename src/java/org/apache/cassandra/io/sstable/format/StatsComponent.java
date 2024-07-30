@@ -82,7 +82,7 @@ public class StatsComponent
         {
             try
             {
-                return header.toHeader(descriptor.toString(), metadata);
+                return header.toHeader(descriptor, metadata);
             }
             catch (UnknownColumnException ex)
             {

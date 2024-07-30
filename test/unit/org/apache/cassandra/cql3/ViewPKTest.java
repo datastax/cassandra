@@ -24,13 +24,14 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
-import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.assertj.core.api.Assertions;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.Assert.assertTrue;
 
 /*
@@ -112,23 +113,16 @@ public class ViewPKTest extends ViewAbstractTest
         catch (Exception e)
         {
             Throwable cause = e.getCause();
-            Assertions.assertThat(cause).isInstanceOf(SyntaxException.class);
-            Assertions.assertThat(cause.getMessage()).contains("mismatched input");
+            assertThat(cause).isInstanceOf(SyntaxException.class);
+            assertThat(cause.getMessage()).contains("mismatched input");
         }
 
         // Must include both when the partition key is composite
-        try
-        {
+        assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s " +
                        "WHERE bigintval IS NOT NULL AND asciival IS NOT NULL " +
                        "PRIMARY KEY (bigintval, k, asciival)");
-            Assert.fail("Should fail if compound primary is not completely filtered as NOT NULL");
-        }
-        catch (Exception e)
-        {
-            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(e.getMessage()).contains("Primary key columns k must be restricted");
-        }
+        }).withMessageContaining("Primary key columns k must be restricted");
 
         dropTable("DROP TABLE %s");
 
@@ -145,23 +139,16 @@ public class ViewPKTest extends ViewAbstractTest
         catch (Exception e)
         {
             Throwable cause = e.getCause();
-            Assertions.assertThat(cause).isInstanceOf(SyntaxException.class);
-            Assertions.assertThat(cause.getMessage()).contains("mismatched input");
+            assertThat(cause).isInstanceOf(SyntaxException.class);
+            assertThat(cause.getMessage()).contains("mismatched input");
         }
 
         // Must still include both even when the partition key is composite
-        try
-        {
+        assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s " +
                        "WHERE bigintval IS NOT NULL AND asciival IS NOT NULL " +
                        "PRIMARY KEY (bigintval, k, asciival)");
-            Assert.fail("Should fail if compound primary is not completely filtered as NOT NULL");
-        }
-        catch (Exception e)
-        {
-            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(e.getMessage()).contains("Primary key columns k must be restricted");
-        }
+        }).withMessageContaining("Primary key columns k must be restricted");
     }
 
     @Test
@@ -225,34 +212,17 @@ public class ViewPKTest extends ViewAbstractTest
                     Assert.fail("MV creation failed on " + def);
             }
 
-            try
-            {
+            assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> {
                 String query = "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE " + def.name + " IS NOT NULL AND k IS NOT NULL "
                                + asciival + "PRIMARY KEY ((" + def.name + ", k), asciival)";
                 createView("mv3_" + def.name, query);
+            });
 
-                Assert.fail("Should fail on duplicate name");
-            }
-            catch (InvalidRequestException e)
-            {
-                // expected
-            }
-            catch (Exception e)
-            {
-                Assertions.assertThat(e.getCause()).isInstanceOf(AlreadyExistsException.class);
-            }
-
-            try
-            {
+            assertThatExceptionOfType(RequestValidationException.class).isThrownBy(() -> {
                 String query = "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE " + def.name + " IS NOT NULL AND k IS NOT NULL "
                                + asciival + "PRIMARY KEY ((" + def.name + ", k), nonexistentcolumn)";
                 createView("mv4_" + def.name, query);
-                Assert.fail("Should fail with unknown base column");
-            }
-            catch (Exception e)
-            {
-                Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
-            }
+            });
         }
 
         updateView("INSERT INTO %s (k, asciival, bigintval) VALUES (?, ?, from_json(?))", 0, "ascii text", "123123123123");
@@ -428,27 +398,13 @@ public class ViewPKTest extends ViewAbstractTest
                     "e int," +
                     "PRIMARY KEY ((a, b), c))");
 
-        try
-        {
+        assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND d IS NOT NULL AND e IS NOT NULL PRIMARY KEY ((d, a), b, e, c)");
-            Assert.fail("Should have rejected a query including multiple non-primary key base columns");
-        }
-        catch (Exception e)
-        {
-            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(e.getMessage()).contains("Cannot include more than one non-primary key column");
-        }
+        }).withMessageContaining("Cannot include more than one non-primary key column");
 
-        try
-        {
+        assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND d IS NOT NULL AND e IS NOT NULL PRIMARY KEY ((a, b), c, d, e)");
-            Assert.fail("Should have rejected a query including multiple non-primary key base columns");
-        }
-        catch (Exception e)
-        {
-            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(e.getMessage()).contains("Cannot include more than one non-primary key column");
-        }
+        }).withMessageContaining("Cannot include more than one non-primary key column");
     }
 
     @Test

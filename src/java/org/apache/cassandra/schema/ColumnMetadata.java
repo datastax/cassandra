@@ -634,6 +634,6 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
      */
     public void validate(boolean isCounterTable)
     {
-        type.validateForColumn(name.bytes, isPrimaryKeyColumn(), isCounterTable);
+        type.validateForColumn(name.bytes, isPrimaryKeyColumn(), isCounterTable, isDropped, false);
     }
 }
