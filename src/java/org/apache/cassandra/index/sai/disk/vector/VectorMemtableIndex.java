@@ -28,13 +28,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.PriorityQueue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -380,9 +378,10 @@ public class VectorMemtableIndex implements MemtableIndex
         throw new UnsupportedOperationException();
     }
 
-    public Set<Integer> computeDeletedOrdinals(Function<PrimaryKey, Integer> ordinalMapper)
+    /** returns true if the index is non-empty and should be flushed */
+    public boolean preFlush(Function<PrimaryKey, Integer> ordinalMapper)
     {
-        return graph.computeDeletedOrdinals(ordinalMapper);
+        return graph.preFlush(ordinalMapper);
     }
 
     public int size()
@@ -390,9 +389,9 @@ public class VectorMemtableIndex implements MemtableIndex
         return graph.size();
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
-        return graph.flush(perIndexComponents, deletedOrdinals);
+        return graph.flush(perIndexComponents);
     }
 
     @Override

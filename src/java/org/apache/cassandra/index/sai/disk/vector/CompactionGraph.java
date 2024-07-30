@@ -248,10 +248,8 @@ public class CompactionGraph implements Closeable, Accountable
         return builder.addGraphNode(result.ordinal, result.vector);
     }
 
-    public SegmentMetadata.ComponentMetadataMap flush(Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
-        assert deletedOrdinals.isEmpty(); // this is only to provide a consistent api with CassandraOnHeapGraph
-
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
         assert nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
@@ -292,14 +290,13 @@ public class CompactionGraph implements Closeable, Accountable
                     {
                         if (V5OnDiskFormat.WRITE_V5_VECTOR_POSTINGS)
                         {
-                            assert deletedOrdinals.isEmpty();
                             return new V5VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), postingsMap)
                                                .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
                         }
                         else
                         {
                             return new V2VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
-                                   .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
+                                   .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, Set.of());
                         }
                     }
                 });

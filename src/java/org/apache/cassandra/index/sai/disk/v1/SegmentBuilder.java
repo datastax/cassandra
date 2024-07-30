@@ -305,7 +305,9 @@ public abstract class SegmentBuilder
         @Override
         protected SegmentMetadata.ComponentMetadataMap flushInternal() throws IOException
         {
-            return graphIndex.flush(Set.of());
+            if (graphIndex.isEmpty())
+                return null;
+            return graphIndex.flush();
         }
 
         @Override
@@ -393,11 +395,9 @@ public abstract class SegmentBuilder
         @Override
         protected SegmentMetadata.ComponentMetadataMap flushInternal() throws IOException
         {
-            // VSTODO this is a bit of a hack. We call computeDeletedOrdinals to call computeRowIds on each
-            // VectorPostings, which will populate the rowIds field, but if we refactor the code, we could skip that.
-            var deletedOrdinals = graphIndex.computeDeletedOrdinals(p -> p);
-            assert deletedOrdinals.isEmpty() : "Deleted ordinals should be empty when built during compaction";
-            return graphIndex.flush(components, Set.of());
+            if (!graphIndex.preFlush(p -> p))
+                return null;
+            return graphIndex.flush(components);
         }
 
         @Override
@@ -430,8 +430,9 @@ public abstract class SegmentBuilder
         }
 
         SegmentMetadata.ComponentMetadataMap indexMetas = flushInternal();
-
-        return new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
+        return indexMetas == null
+               ? null
+               : new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
     }
 
     public long addAll(ByteBuffer term, AbstractType<?> type, PrimaryKey key, long sstableRowId, AbstractAnalyzer analyzer, IndexContext indexContext)

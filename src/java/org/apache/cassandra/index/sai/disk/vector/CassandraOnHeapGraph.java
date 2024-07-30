@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -67,6 +66,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.ByteSequence;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -121,6 +121,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private final VectorSourceModel sourceModel;
     private final InvalidVectorBehavior invalidVectorBehavior;
+    private final IntHashSet deletedOrdinals;
     private volatile boolean hasDeletions;
 
     // we don't need to explicitly close these since only on-heap resources are involved
@@ -146,6 +147,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
         });
         postingsByOrdinal = new NonBlockingHashMapLong<>();
+        deletedOrdinals = new IntHashSet();
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
@@ -323,17 +325,16 @@ public class CassandraOnHeapGraph<T> implements Accountable
     }
 
     /**
-     * Returns a list of vector ordinals that were added to the graph but are no longer associated with a live row.
+     * Prepare for flushing by doing a bunch of housekeeping:
+     * 1. Compute row ids for each vector in the postings map
+     * 2. Remove any vectors that are no longer in use and populate `deletedOrdinals`, including for range deletions
+     * 3. Return true if the caller should proceed to invoke flush, or false if everything was deleted
      * <p>
-     * Side effect!  Calls computeRowIds on each vectorPostings.
-     * Side effect 2!  Removes unused vectors from postingsMap.
-     * <p>
-     * It is not safe to call this method while mutations are actively being made in other threads.
+     * This is split out from flush per se because of (3); we don't want to flush empty
+     * index segments, but until we do (1) and (2) we don't know if the segment is empty.
      */
-    // FIXME can we clean up the lifecycle here?
-    public Set<Integer> computeDeletedOrdinals(Function<T, Integer> postingTransformer)
+    public boolean preFlush(Function<T, Integer> postingTransformer)
     {
-        var deletedOrdinals = new HashSet<Integer>();
         var it = postingsMap.entrySet().iterator();
         while (it.hasNext()) {
             var entry = it.next();
@@ -345,10 +346,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 it.remove();
             }
         }
-        return deletedOrdinals;
+        return deletedOrdinals.size() < builder.getGraph().size();
     }
 
-    public SegmentMetadata.ComponentMetadataMap flush(IndexComponents.ForWrite perIndexComponents, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap flush(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -365,7 +366,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         if (V3OnDiskFormat.ENABLE_JVECTOR_DELETES)
         {
             deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
-            deletedOrdinals = Set.of();
+            deletedOrdinals.clear();
         }
         builder.cleanup();
 
@@ -405,6 +406,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             long postingsPosition;
             if (V5OnDiskFormat.WRITE_V5_VECTOR_POSTINGS)
             {
+                assert deletedOrdinals.isEmpty(); // V5 format does not support recording deleted ordinals
                 postingsPosition = new V5VectorPostingsWriter<T>(remappedPostings)
                                    .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap);
             }
