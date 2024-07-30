@@ -31,6 +31,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.assertj.core.api.Assertions;
 
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
@@ -263,17 +264,11 @@ public class ViewTimesTest extends ViewAbstractTest
                     "val int) WITH default_time_to_live = 60");
 
         // Must NOT include "default_time_to_live" for Materialized View creation
-        try
-        {
+        assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
+
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s " +
                        "WHERE k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (k,c) WITH default_time_to_live = 30");
-            fail("Should fail if TTL is provided for materialized view");
-        }
-        catch (RuntimeException e)
-        {
-            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(e.getMessage()).contains("Cannot set default_time_to_live for a materialized view");
-        }
+        }).withMessageContaining("Cannot set default_time_to_live for a materialized view");
     }
 
     @Test

@@ -92,7 +92,8 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
 
     public static TupleType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
-        return new TupleType(freeze(parser.getTypeParameters()), false);
+        List<AbstractType<?>> types = parser.getTypeParameters();
+        return new TupleType(types, true);
     }
 
     @Override

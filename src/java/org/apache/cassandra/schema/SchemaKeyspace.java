@@ -1084,7 +1084,7 @@ public final class SchemaKeyspace
                             .flags(flags)
                             .params(createTableParamsFromRow(row))
                             .addColumns(fetchColumns(keyspaceName, tableName, types, functions, isCounter))
-                            .droppedColumns(fetchDroppedColumns(keyspaceName, tableName))
+                            .droppedColumns(fetchDroppedColumns(keyspaceName, tableName, flags.contains(TableMetadata.Flag.COUNTER)))
                             .indexes(fetchIndexes(keyspaceName, tableName))
                             .triggers(fetchTriggers(keyspaceName, tableName))
                             .build();
@@ -1159,7 +1159,7 @@ public final class SchemaKeyspace
             type = ReversedType.getInstance(type);
 
         ByteBuffer columnNameBytes = row.getBytes("column_name_bytes");
-        type.validateForColumn(columnNameBytes, kind.isPrimaryKeyKind(), isCounterTable);
+        type.validateForColumn(columnNameBytes, kind.isPrimaryKeyKind(), isCounterTable, false, false);
 
         ColumnIdentifier name = new ColumnIdentifier(columnNameBytes, row.getString("column_name"));
 
@@ -1212,19 +1212,19 @@ public final class SchemaKeyspace
         return new ColumnMetadata(keyspace, table, name, type, position, kind, mask);
     }
 
-    private static Map<ByteBuffer, DroppedColumn> fetchDroppedColumns(String keyspace, String table)
+    private static Map<ByteBuffer, DroppedColumn> fetchDroppedColumns(String keyspace, String table, boolean isCounterTable)
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, DROPPED_COLUMNS);
         Map<ByteBuffer, DroppedColumn> columns = new HashMap<>();
         for (UntypedResultSet.Row row : query(query, keyspace, table))
         {
-            DroppedColumn column = createDroppedColumnFromRow(row);
+            DroppedColumn column = createDroppedColumnFromRow(row, isCounterTable);
             columns.put(column.column.name.bytes, column);
         }
         return columns;
     }
 
-    private static DroppedColumn createDroppedColumnFromRow(UntypedResultSet.Row row)
+    private static DroppedColumn createDroppedColumnFromRow(UntypedResultSet.Row row, boolean isCounterTable)
     {
         String keyspace = row.getString("keyspace_name");
         String table = row.getString("table_name");
@@ -1234,14 +1234,15 @@ public final class SchemaKeyspace
          * them anymore), so before storing dropped columns in schema we expand UDTs to tuples. See expandUserTypes method.
          * Because of that, we can safely pass Types.none() to parse()
          */
-        AbstractType<?> type = CQLTypeParser.parse(keyspace, row.getString("type"), org.apache.cassandra.schema.Types.none());
+        AbstractType<?> type = CQLTypeParser.parseDroppedType(keyspace, row.getString("type"));
         ColumnMetadata.Kind kind = row.has("kind")
                                  ? ColumnMetadata.Kind.valueOf(row.getString("kind").toUpperCase())
                                  : ColumnMetadata.Kind.REGULAR;
         assert kind == ColumnMetadata.Kind.REGULAR || kind == ColumnMetadata.Kind.STATIC
             : "Unexpected dropped column kind: " + kind;
 
-        ColumnMetadata column = new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, ColumnMetadata.NO_POSITION, kind, null);
+        type.validateForColumn(UTF8Type.instance.decompose(name), false, isCounterTable, true, false);
+        ColumnMetadata column = ColumnMetadata.droppedColumn(keyspace, table, ColumnIdentifier.getInterned(name, true), type, kind, null);
         long droppedTime = TimeUnit.MILLISECONDS.toMicros(row.getLong("dropped_time"));
         return new DroppedColumn(column, droppedTime);
     }
@@ -1306,7 +1307,7 @@ public final class SchemaKeyspace
             TableMetadata.builder(keyspaceName, viewName, TableId.fromUUID(row.getUUID("id")))
                          .kind(TableMetadata.Kind.VIEW)
                          .addColumns(columns)
-                         .droppedColumns(fetchDroppedColumns(keyspaceName, viewName))
+                         .droppedColumns(fetchDroppedColumns(keyspaceName, viewName, false))
                          .params(createTableParamsFromRow(row))
                          .build();
 

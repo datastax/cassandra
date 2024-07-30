@@ -24,6 +24,9 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
@@ -39,6 +42,8 @@ import static java.lang.String.format;
  */
 public class SSTablePartitionsTest extends OfflineToolUtils
 {
+    private final static Logger logger = LoggerFactory.getLogger(SSTablePartitionsTest.class);
+
     private static final String SSTABLE_1 = sstable("legacy_ma_simple");
     private static final String SSTABLE_2 = sstable("legacy_ma_clust");
     private static final String HEADER_1 = "\nProcessing  #1 (big-ma) (173 B uncompressed, 88 B on disk)\n";
@@ -650,6 +655,8 @@ public class SSTablePartitionsTest extends OfflineToolUtils
 
     private static ToolResult invokeTool(String... args)
     {
-        return ToolRunner.invokeClass(SSTablePartitions.class, args);
+        ToolResult result = ToolRunner.invokeClass(SSTablePartitions.class, args);
+        logger.info("Tool result: stdout = \n{}\nstderr = \n{}", result.getStdout(), result.getStderr());
+        return result;
     }
 }

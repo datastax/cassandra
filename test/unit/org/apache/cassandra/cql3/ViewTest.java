@@ -88,35 +88,17 @@ public class ViewTest extends ViewAbstractTest
                     "val text, " +
                     "PRIMARY KEY(k,c))");
 
-        try
-        {
+        Assertions.assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE sval IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (sval,k,c)");
-            Assert.fail("Use of static column in a MV primary key should fail");
-        }
-        catch (Exception e)
-        {
-            Assert.assertTrue(e instanceof InvalidRequestException);
-        }
+        });
 
-        try
-        {
+        Assertions.assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT val, sval FROM %s WHERE val IS NOT NULL AND  k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val, k, c)");
-            Assert.fail("Explicit select of static column in MV should fail");
-        }
-        catch (Exception e)
-        {
-            Assert.assertTrue(e instanceof InvalidRequestException);
-        }
+        });
 
-        try
-        {
+        Assertions.assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val,k,c)");
-            Assert.fail("Implicit select of static column in MV should fail");
-        }
-        catch (Exception e)
-        {
-            Assert.assertTrue(e instanceof InvalidRequestException);
-        }
+        });
 
         createView("CREATE MATERIALIZED VIEW %s AS SELECT val,k,c FROM %s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val,k,c)");
 
@@ -175,15 +157,9 @@ public class ViewTest extends ViewAbstractTest
                     "k int PRIMARY KEY, " +
                     "count counter)");
 
-        try
-        {
+        Assertions.assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE count IS NOT NULL AND k IS NOT NULL PRIMARY KEY (count,k)");
-            Assert.fail("MV on counter should fail");
-        }
-        catch (Exception e)
-        {
-            Assert.assertTrue(e instanceof InvalidRequestException);
-        }
+        });
     }
 
     @Test
@@ -193,15 +169,9 @@ public class ViewTest extends ViewAbstractTest
                     "k int PRIMARY KEY, " +
                     "result duration)");
 
-        try
-        {
+        Assertions.assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
             createView("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE result IS NOT NULL AND k IS NOT NULL PRIMARY KEY (result,k)");
-            Assert.fail("MV on duration should fail");
-        }
-        catch (Exception e)
-        {
-            Assert.assertEquals("duration type is not supported for PRIMARY KEY column 'result'", e.getMessage());
-        }
+        }).withMessageContaining("duration type is not supported for PRIMARY KEY column 'result'");
     }
 
     @Test
@@ -515,14 +485,10 @@ public class ViewTest extends ViewAbstractTest
         boolean enableMaterializedViews = DatabaseDescriptor.getMaterializedViewsEnabled();
         try
         {
-            DatabaseDescriptor.setMaterializedViewsEnabled(false);
-            createView("CREATE MATERIALIZED VIEW %s AS SELECT v FROM %s WHERE k IS NOT NULL AND v IS NOT NULL PRIMARY KEY (v, k)");
-            Assert.fail("Should not be able to create a materialized view if they are disabled");
-        }
-        catch (RuntimeException e)
-        {
-            Assertions.assertThat(e).isInstanceOf(InvalidRequestException.class);
-            Assertions.assertThat(e.getMessage()).contains("Materialized views are disabled");
+            Assertions.assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> {
+                DatabaseDescriptor.setMaterializedViewsEnabled(false);
+                createView("CREATE MATERIALIZED VIEW %s AS SELECT v FROM %s WHERE k IS NOT NULL AND v IS NOT NULL PRIMARY KEY (v, k)");
+            }).withMessageContaining("Materialized views are disabled");
         }
         finally
         {

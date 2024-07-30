@@ -32,13 +32,13 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.io.sstable.RangeAwareSSTableWriter;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
@@ -152,7 +152,7 @@ public class CassandraStreamReader implements IStreamReader
 
     protected SerializationHeader getHeader(TableMetadata metadata) throws UnknownColumnException
     {
-        return header != null? header.toHeader("stream from " + session.peer, metadata) : null; //pre-3.0 sstable have no SerializationHeader
+        return header != null? header.toHeader("stream from " + session.peer, metadata, inputVersion, false) : null; //pre-3.0 sstable have no SerializationHeader
     }
     protected SSTableMultiWriter createWriter(ColumnFamilyStore cfs, long totalSize, long repairedAt, TimeUUID pendingRepair, SSTableFormat<?, ?> format) throws IOException
     {
