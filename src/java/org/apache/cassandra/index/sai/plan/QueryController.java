@@ -61,8 +61,6 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
-import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -80,6 +78,7 @@ import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.MergeScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
@@ -886,15 +885,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         for (Memtable memtable : cfs.getAllMemtables())
             rows += estimateMemtableRowCount(memtable);
 
-        List<Range<Token>> tokenRanges = ranges.stream()
-                                               .map(r -> new Range<>(r.startKey().getToken(), r.stopKey().getToken()))
-                                               .collect(Collectors.toList());
-
         for (SSTableReader sstable : cfs.getLiveSSTables())
-        {
-            if (sstable.intersects(tokenRanges))
-                rows += sstable.getTotalRows();
-        }
+            for (DataRange range : ranges)
+                if (RangeUtil.intersects(sstable, range.keyRange()))
+                    rows += sstable.getTotalRows();
 
         return rows;
     }
