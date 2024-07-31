@@ -20,12 +20,14 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.PriorityQueue;
 
+import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
+import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
 
 
 /**
- * An iterator over {@link ScoredRowId} that lazily consumes from a {@link PriorityQueue} of {@link RowWithApproximateScore}.
+ * An iterator over {@link RowIdWithMeta} that lazily consumes from a {@link PriorityQueue} of {@link RowWithApproximateScore}.
  * <p>
  * The idea is that we maintain the same level of accuracy as we would get from a graph search, by re-ranking the top `k``
  * best approximate scores at a time with the full resolution vectors to return the top `limit`.
@@ -40,7 +42,7 @@ import org.apache.cassandra.utils.AbstractIterator;
  * <p>
  * As an implementation detail, we use a PriorityQueue to maintain state rather than a List and sorting.
  */
-public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
+public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
 {
     /**
      * Note: this class has a natural ordering that is inconsistent with equals in order to
@@ -73,7 +75,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
     // Priority queue with compressed vector scores
     private final PriorityQueue<RowWithApproximateScore> approximateScoreQueue;
     // Priority queue with full resolution scores
-    private final PriorityQueue<ScoredRowId> exactScoreQueue;
+    private final PriorityQueue<RowIdWithScore> exactScoreQueue;
     private final JVectorLuceneOnDiskGraph.CloseableReranker reranker;
     private final int topK;
     private final int limit;
@@ -91,7 +93,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
                                    int topK)
     {
         this.approximateScoreQueue = approximateScoreQueue;
-        this.exactScoreQueue = new PriorityQueue<>(topK, (a, b) -> Float.compare(b.score, a.score));
+        this.exactScoreQueue = new PriorityQueue<>(topK);
         this.reranker = reranker;
         assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
         this.limit = limit;
@@ -100,14 +102,14 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
     }
 
     @Override
-    protected ScoredRowId computeNext() {
+    protected RowIdWithScore computeNext() {
         int consumed = rerankedCount - exactScoreQueue.size();
         if (consumed >= limit) {
             // Refill the exactScoreQueue until it reaches topK exact scores, or the approximate score queue is empty
             while (!approximateScoreQueue.isEmpty() && exactScoreQueue.size() < topK) {
                 RowWithApproximateScore rowOrdinalScore = approximateScoreQueue.poll();
                 float score = reranker.similarityTo(rowOrdinalScore.ordinal);
-                exactScoreQueue.add(new ScoredRowId(rowOrdinalScore.rowId, score));
+                exactScoreQueue.add(new RowIdWithScore(rowOrdinalScore.rowId, score));
             }
             rerankedCount = exactScoreQueue.size();
         }

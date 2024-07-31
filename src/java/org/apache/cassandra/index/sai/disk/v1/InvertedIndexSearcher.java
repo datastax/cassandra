@@ -32,24 +32,32 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Executes {@link Expression}s against the trie-based terms dictionary for an individual index segment.
  */
-public class InvertedIndexSearcher extends IndexSearcher
+public class InvertedIndexSearcher extends IndexSearcher implements SegmentOrdering
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    protected final TermsReader reader;
-    protected final QueryEventListener.TrieIndexEventListener perColumnEventListener;
+    private final TermsReader reader;
+    private final QueryEventListener.TrieIndexEventListener perColumnEventListener;
     private final Version version;
     private final boolean filterRangeResults;
 
@@ -121,6 +129,13 @@ public class InvertedIndexSearcher extends IndexSearcher
     }
 
     @Override
+    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    {
+        var iter = new RowIdWithTermsIterator(reader.allTerms(orderer.isAscending()));
+        return toMetaSortedIterator(iter, queryContext);
+    }
+
+    @Override
     public String toString()
     {
         return MoreObjects.toStringHelper(this)
@@ -132,5 +147,51 @@ public class InvertedIndexSearcher extends IndexSearcher
     public void close()
     {
         reader.close();
+    }
+
+    /**
+     * An iterator that iterates over a source
+     */
+    private static class RowIdWithTermsIterator extends AbstractIterator<RowIdWithByteComparable>
+    {
+        private final TermsIterator source;
+        private PostingList currentPostingList = PostingList.EMPTY;
+        private ByteComparable currentTerm = null;
+
+        RowIdWithTermsIterator(TermsIterator source)
+        {
+            this.source = source;
+        }
+
+        @Override
+        protected RowIdWithByteComparable computeNext()
+        {
+            try
+            {
+                while (true)
+                {
+                    long nextPosting = currentPostingList.nextPosting();
+                    if (nextPosting != PostingList.END_OF_STREAM)
+                        return new RowIdWithByteComparable(Math.toIntExact(nextPosting), currentTerm);
+
+                    if (!source.hasNext())
+                        return endOfData();
+
+                    currentTerm = source.next();
+                    FileUtils.closeQuietly(currentPostingList);
+                    currentPostingList = source.postings();
+                }
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(source, currentPostingList);
+        }
     }
 }
