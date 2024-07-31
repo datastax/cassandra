@@ -45,6 +45,7 @@ public class SortedRowsBuilderBench extends CQLTester
     private static final int NUM_COLUMNS = 10;
     private static final int SORTED_COLUMN_CARDINALITY = 1000;
     private static final Index.Scorer SCORER = row -> Int32Type.instance.compose(row.get(0));
+
     private static final Comparator<List<ByteBuffer>> COMPARATOR = (o1, o2) -> Int32Type.instance.compare(o1.get(0), o2.get(0));
     private static final Random RANDOM = new Random();
 
