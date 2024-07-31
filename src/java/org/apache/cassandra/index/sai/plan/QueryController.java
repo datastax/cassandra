@@ -29,6 +29,7 @@ import java.util.NavigableSet;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -55,10 +56,14 @@ import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -76,8 +81,9 @@ import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.MergeScoredPrimaryKeyIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.MergePrimaryWithSortKeyIterator;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
@@ -115,6 +121,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
+    private final Orderer orderer;
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
     private final IndexFeatureSet indexFeatureSet;
@@ -148,14 +155,26 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                   QUERY_OPT_LEVEL));
     }
 
+    @VisibleForTesting
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
                            IndexFeatureSet indexFeatureSet,
                            QueryContext queryContext,
                            TableQueryMetrics tableQueryMetrics)
     {
+        this(cfs, command, null, indexFeatureSet, queryContext, tableQueryMetrics);
+    }
+
+    public QueryController(ColumnFamilyStore cfs,
+                           ReadCommand command,
+                           Orderer orderer,
+                           IndexFeatureSet indexFeatureSet,
+                           QueryContext queryContext,
+                           TableQueryMetrics tableQueryMetrics)
+    {
         this.cfs = cfs;
         this.command = command;
+        this.orderer = orderer;
         this.queryContext = queryContext;
         this.tableQueryMetrics = tableQueryMetrics;
         this.indexFeatureSet = indexFeatureSet;
@@ -191,6 +210,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     RowFilter.FilterElement filterOperation()
     {
+        // NOTE: we cannot remove the order by filter expression here yet because it is used in the FilterTree class
+        // to filter out shadowed rows.
         return this.command.rowFilter().root();
     }
 
@@ -273,13 +294,46 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return indexTargetType;
     }
 
+    /**
+     * Get an iterator over the rows for this partition key. Builds a search view that includes all memtables and all
+     * {@link SSTableSet#LIVE} sstables.
+     * @param key
+     * @param executionController
+     * @return
+     */
     public UnfilteredRowIterator getPartition(PrimaryKey key, ReadExecutionController executionController)
     {
         if (key == null)
             throw new IllegalArgumentException("At least one primary key is required!");
 
         SinglePartitionReadCommand partition = getPartitionReadCommand(key, executionController);
-        return executePartitionReadCommand(partition, executionController);
+        return partition.queryMemtableAndDisk(cfs, executionController);
+    }
+
+    /**
+     * Get an iterator over the rows for this partition key. Restrict the search to the specified view.
+     * @param key
+     * @param executionController
+     * @return
+     */
+    public UnfilteredRowIterator getPartition(PrimaryKey key, ColumnFamilyStore.ViewFragment view, ReadExecutionController executionController)
+    {
+        if (key == null)
+            throw new IllegalArgumentException("non-null key required");
+
+        SinglePartitionReadCommand partition = getPartitionReadCommand(key, executionController);
+
+        // Class to transform the row to include its source table.
+        Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer = (Object sourceTable) -> new Transformation<>()
+        {
+            @Override
+            protected Row applyToRow(Row row)
+            {
+                return new RowWithSourceTable(row, sourceTable);
+            }
+        };
+
+        return partition.queryMemtableAndDisk(cfs, view, rowTransformer, executionController);
     }
 
     public SinglePartitionReadCommand getPartitionReadCommand(PrimaryKey key, ReadExecutionController executionController)
@@ -294,11 +348,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  DataLimits.NONE,
                                                  key.partitionKey(),
                                                  makeFilter(key));
-    }
-
-    public UnfilteredRowIterator executePartitionReadCommand(SinglePartitionReadCommand command, ReadExecutionController executionController)
-    {
-        return command.queryMemtableAndDisk(cfs, executionController);
     }
 
     private Plan buildPlan()
@@ -316,9 +365,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                         ? optimizedPlan.limitIntersectedClauses(RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT)
                         : optimizedPlan;
 
-        if (optimizedPlan.contains(node -> node instanceof Plan.AnnScan))
+        if (optimizedPlan.contains(node -> node instanceof Plan.AnnIndexScan))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SORT_THEN_FILTER);
-        if (optimizedPlan.contains(node -> node instanceof Plan.AnnSort))
+        if (optimizedPlan.contains(node -> node instanceof Plan.KeysSort))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THEN_SORT);
 
         if (logger.isTraceEnabled())
@@ -340,24 +389,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private Plan.KeysIteration buildKeysIterationPlan()
     {
-        // VSTODO we can clean this up when we break ordering out
-        var filterRoot = command.rowFilter().root();
-        var nonOrderingExpressions = filterRoot.expressions().stream()
-                                               .filter(e -> e.operator() != Operator.ANN)
-                                               .collect(Collectors.toList());
-
-        Plan.KeysIteration keysIterationPlan = Operation.Node.buildTree(nonOrderingExpressions, filterRoot.children(), filterRoot.isDisjunction())
+        // Remove the ORDER BY filter expression from the filter tree, as it is added below.
+        var filterElement = filterOperation().filter(e -> !Orderer.isFilterExpressionOrderer(e));
+        Plan.KeysIteration keysIterationPlan = Operation.Node.buildTree(filterElement)
                                                              .analyzeTree(this)
                                                              .plan(this);
 
-        var orderings = filterRoot.expressions().stream()
-                                  .filter(e -> e.operator() == Operator.ANN)
-                                  .collect(Collectors.toList());
-        if (!orderings.isEmpty())
-        {
-            assert orderings.size() == 1;
-            keysIterationPlan = planFactory.annSort(keysIterationPlan, orderings.get(0));
-        }
+        // Because the orderer has a specific queue view
+        if (orderer != null)
+            keysIterationPlan = planFactory.sort(keysIterationPlan, orderer);
 
         assert keysIterationPlan != planFactory.everything; // This would mean we have no WHERE nor ANN clauses at all
         return keysIterationPlan;
@@ -441,7 +481,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root();
 
         // VSTODO move ANN out of expressions and into its own abstraction? That will help get generic ORDER BY support
-        Collection<Expression> exp = expressions.stream().filter(e -> e.operation != Expression.Op.ANN).collect(Collectors.toList());
+        Collection<Expression> exp = expressions.stream().filter(e -> e.operation != Expression.Op.ORDER_BY).collect(Collectors.toList());
 
         // we cannot use indexes with OR if we have a mix of indexed and non-indexed columns (see CNDB-10142)
         if (op == Operation.OperationType.OR && !exp.stream().allMatch(e -> e.context.isIndexed()))
@@ -452,7 +492,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         boolean defer = builder.type == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
 
-        Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, exp).entrySet();
+        Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, expressions).entrySet();
         try
         {
             var viewIterator = view.iterator();
@@ -470,9 +510,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 keyIterators.put(predicate, iterator);
 
                 long keysCount = Math.min(iterator.getMaxKeys(), planFactory.tableMetrics.rows);
-                Plan.KeysIteration plan = predicate.isLiteral()
-                                          ? planFactory.literalIndexScan(predicate, keysCount)
-                                          : planFactory.numericIndexScan(predicate, keysCount);
+                Plan.KeysIteration plan = planFactory.indexScan(predicate, keysCount);
                 builder.add(plan);
             }
         }
@@ -496,39 +534,36 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return iterator;
     }
 
-    // This is an ANN only query
+    /**
+     * Use the configured {@link Orderer} to create an iterator that sorts the whole table by a specific column.
+     */
     @Override
-    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression, int softLimit)
+    public CloseableIterator<? extends PrimaryKeyWithSortKey> getTopKRows(int softLimit)
     {
-        assert expression.operator() == Operator.ANN;
-        var planExpression = getAnnPlanExpression(expression);
-
-        // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        var memtableResults = planExpression.context.orderMemtable(queryContext, planExpression, mergeRange, softLimit);
-
-        var queryView = getQueryView(planExpression);
+        // TODO how do we reconcile new design with the argument for this method?
+        var memtableResults = queryContext.view.memtableIndexes.stream()
+                                                               .map(index -> index.orderBy(queryContext, orderer, mergeRange, softLimit))
+                                                               .collect(Collectors.toList());
         try
         {
-            var sstableResults = orderSstables(queryView, Collections.emptyList(), softLimit);
+            var sstableResults = orderSstables(queryContext.view, Collections.emptyList(), softLimit);
             sstableResults.addAll(memtableResults);
-            return new MergeScoredPrimaryKeyIterator(sstableResults, queryView.referencedIndexes);
+            return new MergePrimaryWithSortKeyIterator(sstableResults, orderer);
         }
         catch (Throwable t)
         {
-            // all sstable indexes in view have been referenced, need to clean up when exception is thrown
-            queryView.referencedIndexes.forEach(SSTableIndex::release);
             FileUtils.closeQuietly(memtableResults);
             throw t;
         }
     }
 
-    // This is a hybrid query. We apply all other predicates before ordering and limiting.
-    @Override
-    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RangeIterator source, RowFilter.Expression expression, int softLimit)
+    /**
+     * Use the configured {@link Orderer} to sort the rows from the given source iterator.
+     */
+    public CloseableIterator<? extends PrimaryKeyWithSortKey> getTopKRows(RangeIterator source, int softLimit)
     {
-        List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
-        List<SSTableIndex> indexesToRelease = new ArrayList<>();
-        OrderingFilterRangeIterator<IteratorsAndIndexes> iter = null;
+        List<CloseableIterator<? extends PrimaryKeyWithSortKey>> scoredPrimaryKeyIterators = new ArrayList<>();
+        OrderingFilterRangeIterator<List<CloseableIterator<? extends PrimaryKeyWithSortKey>>> iter = null;
         try
         {
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
@@ -537,112 +572,83 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             iter = new OrderingFilterRangeIterator<>(source,
                                                      ORDER_CHUNK_SIZE,
                                                      queryContext,
-                                                     list -> this.getTopKRows(list, expression, softLimit));
+                                                     list -> this.getTopKRows(list, softLimit));
             while (iter.hasNext())
             {
                 var next = iter.next();
-                scoredPrimaryKeyIterators.addAll(next.iterators);
-                indexesToRelease.addAll(next.referencedIndexes);
+                scoredPrimaryKeyIterators.addAll(next);
             }
-            return new MergeScoredPrimaryKeyIterator(scoredPrimaryKeyIterators, indexesToRelease, iter);
+            return new MergePrimaryWithSortKeyIterator(scoredPrimaryKeyIterators, orderer, iter);
         }
         catch (Throwable t)
         {
             FileUtils.closeQuietly(iter);
             FileUtils.closeQuietly(scoredPrimaryKeyIterators);
-            indexesToRelease.forEach(QueryController::releaseQuietly);
             throw t;
         }
     }
 
-    private IteratorsAndIndexes getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression, int softLimit)
+    private List<CloseableIterator<? extends PrimaryKeyWithSortKey>> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
-
-        // Filter out PKs now. Each PK is passed to every segment of the ANN index, so filtering shadowed keys
-        // eagerly can save some work when going from PK to row id for on disk segments.
-        // Since the result is shared with multiple streams, we use an unmodifiable list.
-        var planExpression = getAnnPlanExpression(expression);
-
-        // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        var memtableResults = planExpression.context.orderResultsBy(queryContext, sourceKeys, planExpression, softLimit);
-
-        var queryView = getQueryView(planExpression);
+        var memtableResults = queryContext.view.memtableIndexes.stream()
+                                                               .map(index -> index.orderResultsBy(queryContext, sourceKeys, orderer, softLimit))
+                                                               .collect(Collectors.toList());
         try
         {
-            var sstableScoredPrimaryKeyIterators = orderSstables(queryView, sourceKeys, softLimit);
+            var sstableScoredPrimaryKeyIterators = orderSstables(queryContext.view, sourceKeys, softLimit);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
-            if (sstableScoredPrimaryKeyIterators.isEmpty())
-            {
-                // We release here because an empty vector index will produce 0 iterators
-                // but still needs to be released.
-                // VSTODO Maybe we can remove empty indexes from the view.
-                queryView.referencedIndexes.forEach(SSTableIndex::release);
-                return new IteratorsAndIndexes(Collections.emptyList(), Collections.emptySet());
-            }
-            return new IteratorsAndIndexes(sstableScoredPrimaryKeyIterators, queryView.referencedIndexes);
+            return sstableScoredPrimaryKeyIterators;
         }
         catch (Throwable t)
         {
-            // all sstable indexes in view have been referenced, need to clean up when exception is thrown
-            queryView.referencedIndexes.forEach(SSTableIndex::release);
             FileUtils.closeQuietly(memtableResults);
             throw t;
         }
 
     }
 
-    private QueryViewBuilder.QueryView getQueryView(Expression planExpression)
-    {
-        return new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
-    }
-
-    private Expression getAnnPlanExpression(RowFilter.Expression expression)
-    {
-        var planExpression = new Expression(this.getContext(expression));
-        planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
-        return planExpression;
-    }
-
     /**
-     * Create the list of iterators over {@link ScoredPrimaryKey} from the given {@link QueryViewBuilder.QueryView}.
+     * Create the list of iterators over {@link PrimaryKeyWithSortKey} from the given {@link QueryViewBuilder.QueryView}.
      * @param queryView The view to use to create the iterators.
      * @param sourceKeys The source keys to use to create the iterators. Use an empty list to search all keys.
-     * @return The list of iterators over {@link ScoredPrimaryKey}.
+     * @return The list of iterators over {@link PrimaryKeyWithSortKey}.
      */
-    private List<CloseableIterator<ScoredPrimaryKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys, int softLimit)
+    private List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys, int softLimit)
     {
-        List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>();
-        long totalRows = queryView.view.keySet().stream().mapToLong(sstable -> sstable.getTotalRows()).sum();
-        queryView.view.forEach((sstable, expressions) ->
+        List<CloseableIterator<? extends PrimaryKeyWithSortKey>> results = new ArrayList<>();
+        long totalRows = queryView.view.sstables.stream().mapToLong(SSTableReader::getTotalRows).sum();
+        for (var index : queryView.referencedIndexes)
         {
-            QueryViewBuilder.IndexExpression annIndexExpression = null;
             try
             {
-                assert expressions.size() == 1 : "only one index is expected in ANN expression, found " + expressions.size() + " in " + expressions;
-                annIndexExpression = expressions.get(0);
-                var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, softLimit, totalRows)
-                                                     : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, softLimit, totalRows);
+                var iterators = sourceKeys.isEmpty() ? index.orderBy(orderer, mergeRange, queryContext, softLimit, totalRows)
+                                                     : index.orderResultsBy(queryContext, sourceKeys, orderer, softLimit, totalRows);
                 results.addAll(iterators);
             }
             catch (Throwable ex)
             {
                 // Close any iterators that were successfully opened before the exception
                 FileUtils.closeQuietly(results);
-                if (logger.isDebugEnabled() && !(ex instanceof AbortedOperationException) && annIndexExpression != null)
+                if (logger.isDebugEnabled() && !(ex instanceof AbortedOperationException))
                 {
-                    var msg = String.format("Failed search on index %s, aborting query.", annIndexExpression.index.getSSTable());
-                    logger.debug(annIndexExpression.index.getIndexContext().logMessage(msg), ex);
+                    var msg = String.format("Failed search on index %s, aborting query.", index.getSSTable());
+                    logger.debug(index.getIndexContext().logMessage(msg), ex);
                 }
                 throw Throwables.cleaned(ex);
             }
-        });
+        }
         return results;
     }
 
     public IndexFeatureSet indexFeatureSet()
     {
         return indexFeatureSet;
+    }
+
+    public Orderer getOrderer()
+    {
+        return orderer;
     }
 
     /**
@@ -904,22 +910,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return rowSize > 0 ? memtable.getLiveDataSize() / rowSize : 0;
     }
 
-    private static class IteratorsAndIndexes
-    {
-        final List<CloseableIterator<ScoredPrimaryKey>> iterators;
-        final Set<SSTableIndex> referencedIndexes;
-
-        IteratorsAndIndexes(List<CloseableIterator<ScoredPrimaryKey>> iterators, Set<SSTableIndex> indexes)
-        {
-            this.iterators = iterators;
-            this.referencedIndexes = indexes;
-        }
-    }
-
     @Override
-    public int estimateAnnNodesVisited(RowFilter.Expression ordering, int limit, long candidates)
+    public int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates)
     {
-        IndexContext context = getContext(ordering);
+        IndexContext context = ordering.context;
         Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
         View queryView = context.getView();
 
