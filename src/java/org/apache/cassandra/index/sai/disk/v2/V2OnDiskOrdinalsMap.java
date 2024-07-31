@@ -24,14 +24,12 @@ import java.util.HashSet;
 import java.util.PrimitiveIterator;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Supplier;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.util.Bits;
-import io.github.jbellis.jvector.util.SparseBits;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
 import org.apache.cassandra.index.sai.disk.vector.BitsUtil;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;

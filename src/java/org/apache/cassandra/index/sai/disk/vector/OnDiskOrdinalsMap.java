@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.PrimitiveIterator;
 import java.util.function.Supplier;
 

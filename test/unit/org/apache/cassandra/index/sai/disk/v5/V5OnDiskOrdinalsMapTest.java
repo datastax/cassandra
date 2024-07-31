@@ -182,7 +182,7 @@ public class V5OnDiskOrdinalsMapTest extends SaiRandomizedTest
             var odom = new V5OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
             assertEquals(structure, odom.structure);
 
-            // check row -> ordinals
+            // check row -> ordinal and ordinal -> rows
             try (var rowIdsView = odom.getRowIdsView();
                  var ordinalsView = odom.getOrdinalsView())
             {
