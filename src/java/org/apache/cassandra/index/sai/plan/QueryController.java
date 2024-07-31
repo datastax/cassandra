@@ -81,7 +81,6 @@ import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.MergePrimaryWithSortKeyIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -95,7 +94,9 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -538,17 +539,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Use the configured {@link Orderer} to create an iterator that sorts the whole table by a specific column.
      */
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> getTopKRows(int softLimit)
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(int softLimit)
     {
-        // TODO how do we reconcile new design with the argument for this method?
-        var memtableResults = queryContext.view.memtableIndexes.stream()
-                                                               .map(index -> index.orderBy(queryContext, orderer, mergeRange, softLimit))
-                                                               .collect(Collectors.toList());
+        List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
         try
         {
+            for (MemtableIndex index : queryContext.view.memtableIndexes)
+                memtableResults.addAll(index.orderBy(queryContext, orderer, mergeRange, softLimit));
+
             var sstableResults = orderSstables(queryContext.view, Collections.emptyList(), softLimit);
             sstableResults.addAll(memtableResults);
-            return new MergePrimaryWithSortKeyIterator(sstableResults, orderer);
+            return MergeIterator.getCloseable(sstableResults, orderer.getComparator(), Reducer.getIdentity());
         }
         catch (Throwable t)
         {
@@ -560,10 +561,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Use the configured {@link Orderer} to sort the rows from the given source iterator.
      */
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> getTopKRows(RangeIterator source, int softLimit)
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(RangeIterator source, int softLimit)
     {
-        List<CloseableIterator<? extends PrimaryKeyWithSortKey>> scoredPrimaryKeyIterators = new ArrayList<>();
-        OrderingFilterRangeIterator<List<CloseableIterator<? extends PrimaryKeyWithSortKey>>> iter = null;
+        List<CloseableIterator<PrimaryKeyWithSortKey>> scoredPrimaryKeyIterators = new ArrayList<>();
+        OrderingFilterRangeIterator<List<CloseableIterator<PrimaryKeyWithSortKey>>> iter = null;
         try
         {
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
@@ -578,7 +579,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 var next = iter.next();
                 scoredPrimaryKeyIterators.addAll(next);
             }
-            return new MergePrimaryWithSortKeyIterator(scoredPrimaryKeyIterators, orderer, iter);
+            var merged = MergeIterator.getCloseable(scoredPrimaryKeyIterators, orderer.getComparator(), Reducer.getIdentity());
+            return CloseableIterator.withOnClose(merged, iter::close);
         }
         catch (Throwable t)
         {
@@ -588,7 +590,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         }
     }
 
-    private List<CloseableIterator<? extends PrimaryKeyWithSortKey>> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
+    private List<CloseableIterator<PrimaryKeyWithSortKey>> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
         var memtableResults = queryContext.view.memtableIndexes.stream()
@@ -614,9 +616,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * @param sourceKeys The source keys to use to create the iterators. Use an empty list to search all keys.
      * @return The list of iterators over {@link PrimaryKeyWithSortKey}.
      */
-    private List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys, int softLimit)
+    private List<CloseableIterator<PrimaryKeyWithSortKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys, int softLimit)
     {
-        List<CloseableIterator<? extends PrimaryKeyWithSortKey>> results = new ArrayList<>();
+        List<CloseableIterator<PrimaryKeyWithSortKey>> results = new ArrayList<>();
         long totalRows = queryView.view.sstables.stream().mapToLong(SSTableReader::getTotalRows).sum();
         for (var index : queryView.referencedIndexes)
         {
