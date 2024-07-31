@@ -135,8 +135,7 @@ public interface OnDiskFormat
     public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
                                             IndexDescriptor indexDescriptor,
                                             LifecycleNewTracker tracker,
-                                            RowMapping rowMapping,
-                                            long keyCount);
+                                            RowMapping rowMapping, long keyCount);
 
     /**
      * Validate the provided on-disk components (that must be for this version).

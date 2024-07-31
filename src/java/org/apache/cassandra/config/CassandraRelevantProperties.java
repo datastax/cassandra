@@ -564,6 +564,7 @@ public enum CassandraRelevantProperties
     // SAI specific properties
 
     SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
+    SAI_ENABLE_GENERAL_ORDER_BY("cassandra.sai.general_order_by", "true"),
     SAI_ENABLE_JVECTOR_DELETES("cassandra.sai.enable_jvector_deletes", "true"),
     SAI_ENABLE_LTM_CONSTRUCTION("cassandra.sai.ltm_construction", "true"),
     SAI_ENABLE_RERANK_FLOOR("cassandra.sai.rerank_floor", "true"),

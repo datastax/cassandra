@@ -18,51 +18,52 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
-import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
- * An iterator over {@link ScoredPrimaryKey} that merges multiple iterators into a single iterator by taking the
- * scores of the top element of each iterator and returning the {@link ScoredPrimaryKey} with the
+ * An iterator over {@link PrimaryKeyWithSortKey} that merges multiple iterators into a single iterator by taking the
+ * scores of the top element of each iterator and returning the {@link PrimaryKeyWithSortKey} with the
  * highest score.
  */
-public class MergeScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimaryKey>
+public class MergePrimaryWithSortKeyIterator extends AbstractIterator<PrimaryKeyWithSortKey>
 {
-    private final PriorityQueue<PeekingIterator<ScoredPrimaryKey>> pq;
-    private final List<CloseableIterator<ScoredPrimaryKey>> iteratorsToBeClosed;
-    private final Collection<SSTableIndex> indexesToBeClosed;
+    private final PriorityQueue<PeekingIterator<PrimaryKeyWithSortKey>> pq;
+    private final List<CloseableIterator<? extends PrimaryKeyWithSortKey>> iteratorsToBeClosed;
     private final AutoCloseable onClose;
 
-    public MergeScoredPrimaryKeyIterator(List<CloseableIterator<ScoredPrimaryKey>> iterators, Collection<SSTableIndex> referencedIndexes)
+    public MergePrimaryWithSortKeyIterator(List<CloseableIterator<? extends PrimaryKeyWithSortKey>> iterators,
+                                           Orderer orderer)
     {
-        this(iterators, referencedIndexes, () -> {});
+        this(iterators, orderer, () -> {});
     }
 
-    public MergeScoredPrimaryKeyIterator(List<CloseableIterator<ScoredPrimaryKey>> iterators,
-                                         Collection<SSTableIndex> referencedIndexes,
-                                         AutoCloseable onClose)
+    public MergePrimaryWithSortKeyIterator(List<CloseableIterator<? extends PrimaryKeyWithSortKey>> iterators,
+                                           Orderer orderer,
+                                           AutoCloseable onClose)
     {
         int size = !iterators.isEmpty() ? iterators.size() : 1;
-        this.pq = new PriorityQueue<>(size, (o1, o2) -> Float.compare(o2.peek().score, o1.peek().score));
-        for (CloseableIterator<ScoredPrimaryKey> iterator : iterators)
+        Comparator<PeekingIterator<? extends PrimaryKeyWithSortKey>> comparator = Comparator.comparing(PeekingIterator::peek);
+        // ANN's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
+        this.pq = new PriorityQueue<>(size, orderer.isAscending() || orderer.isANN() ? comparator : comparator.reversed());
+        for (CloseableIterator<? extends PrimaryKeyWithSortKey> iterator : iterators)
             if (iterator.hasNext())
                 pq.add(Iterators.peekingIterator(iterator));
         iteratorsToBeClosed = iterators;
-        indexesToBeClosed = referencedIndexes;
         this.onClose = onClose;
     }
 
     @Override
-    protected ScoredPrimaryKey computeNext()
+    protected PrimaryKeyWithSortKey computeNext()
     {
         if (pq.isEmpty())
             return endOfData();
@@ -81,10 +82,7 @@ public class MergeScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimar
     @Override
     public void close()
     {
-        for (CloseableIterator<ScoredPrimaryKey> iterator : iteratorsToBeClosed)
-            FileUtils.closeQuietly(iterator);
-        for (SSTableIndex index : indexesToBeClosed)
-            index.release();
+        FileUtils.closeQuietly(iteratorsToBeClosed);
         FileUtils.closeQuietly(onClose);
     }
 }
