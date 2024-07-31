@@ -31,7 +31,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArraySet;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -366,10 +365,7 @@ public abstract class SSTable
      */
     private static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
-        File tocFile = descriptor.fileFor(Component.TOC);
-        if (!tocFile.tryDelete())
-            logger.error("Failed to delete TOC component for " + descriptor);
-        appendTOC(descriptor, components);
+        SSTableWatcher.instance.rewriteTOC(descriptor, components);
     }
 
     /**
@@ -378,19 +374,7 @@ public abstract class SSTable
     @SuppressWarnings("resource")
     protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
     {
-        File tocFile = descriptor.fileFor(Component.TOC);
-        FileOutputStreamPlus fos = null;
-        try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(APPEND))))
-        {
-            for (Component component : components)
-                w.println(component.name);
-            w.flush();
-            fos.sync();
-        }
-        catch (IOException e)
-        {
-            throw new FSWriteError(e, tocFile);
-        }
+        SSTableWatcher.instance.appendTOC(descriptor, components);
     }
 
     /**
