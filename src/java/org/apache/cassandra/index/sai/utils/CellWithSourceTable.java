@@ -20,47 +20,35 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.db.CellSourceIdentifier;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.marshal.ValueAccessor;
-import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.ComplexColumnData;
-import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.ByteBufferCloner;
 
 /**
- * A wrapped {@link Cell} that includes a reference to the cell's source table via {@link CellSourceIdentifier}
+ * A wrapped {@link Cell} that includes a reference to the cell's source table.
  * @param <T> the type of the cell's value
  */
-public class CellWithSource<T> extends Cell<T>
+public class CellWithSourceTable<T> extends Cell<T>
 {
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new CellWithSource<>(null, null, null));
-
     private final Cell<T> cell;
-    private final CellSourceIdentifier source;
+    private final Object sourceTable;
 
-    public CellWithSource(Cell<T> cell, CellSourceIdentifier source)
+    public CellWithSourceTable(Cell<T> cell, Object sourceTable)
     {
-        this(cell.column(), cell, source);
-        assert source instanceof Memtable || source instanceof SSTableId : "Source has unexpected type: " + (source == null ? "null" : source.getClass());
-    }
-
-    private CellWithSource(ColumnMetadata column, Cell<T> cell, CellSourceIdentifier source)
-    {
-        super(column);
+        super(cell.column());
         this.cell = cell;
-        this.source = source;
+        this.sourceTable = sourceTable;
     }
 
-    public CellSourceIdentifier sourceTable()
+    public Object sourceTable()
     {
-        return source;
+        return sourceTable;
     }
 
     @Override
@@ -168,7 +156,7 @@ public class CellWithSource<T> extends Cell<T>
     @Override
     public long unsharedHeapSize()
     {
-        return cell.unsharedHeapSize() + EMPTY_SIZE;
+        return cell.unsharedHeapSize();
     }
 
     @Override
@@ -192,7 +180,7 @@ public class CellWithSource<T> extends Cell<T>
     @Override
     public ColumnData updateAllTimestamp(long newTimestamp)
     {
-        ColumnData maybeNewCell = cell.updateAllTimestamp(newTimestamp);
+        var maybeNewCell = cell.updateAllTimestamp(newTimestamp);
         if (maybeNewCell instanceof Cell)
             return wrapIfNew((Cell<?>) maybeNewCell);
         if (maybeNewCell instanceof ComplexColumnData)
@@ -223,8 +211,7 @@ public class CellWithSource<T> extends Cell<T>
     @Override
     public int localDeletionTimeAsUnsignedInt()
     {
-        // Cannot call cell's localDeletionTimeAsUnsignedInt() because it's protected.
-        throw new UnsupportedOperationException();
+        return cell.localDeletionTimeAsUnsignedInt();
     }
 
     @Override
@@ -247,6 +234,6 @@ public class CellWithSource<T> extends Cell<T>
         // we can skip creating a new wrapper.
         if (maybeNewCell == this.cell)
             return this;
-        return new CellWithSource<>(maybeNewCell, source);
+        return new CellWithSourceTable<>(maybeNewCell, sourceTable);
     }
 }
