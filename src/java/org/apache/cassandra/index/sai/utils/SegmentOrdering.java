@@ -56,5 +56,5 @@ public interface SegmentOrdering
      * results the query requested. The keys passed to the method will already be limited to keys in the segment's
      * Primary Key range.
      */
-    CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException;
+    CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException;
 }
