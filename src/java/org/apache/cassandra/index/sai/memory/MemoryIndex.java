@@ -28,13 +28,15 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.MemtableOrdering;
+import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-public abstract class MemoryIndex implements MemtableOrdering
+public abstract class MemoryIndex
 {
     protected final IndexContext indexContext;
 
@@ -48,6 +50,8 @@ public abstract class MemoryIndex implements MemtableOrdering
                              ByteBuffer value,
                              LongConsumer onHeapAllocationsTracker,
                              LongConsumer offHeapAllocationsTracker);
+
+    public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer);
 
     public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
