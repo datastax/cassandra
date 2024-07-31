@@ -148,27 +148,17 @@ public class V5VectorPostingsWriter<T>
         for (var i = 0; i < ordinalCount; i++) {
             // (ordinal is implied; don't need to write it)
             writer.writeLong(nextOffset);
-            int originalOrdinal;
-            try
-            {
-                originalOrdinal = newToOldMapper.applyAsInt(i);
-            }
-            catch (NullPointerException e)
-            {
-                // no vector assigned to this ordinal (hole in one-to-many mapping from multiple rows assigned to one vector somewhere)
-                // VSTODO can we avoid using exceptions for control flow here?
-                assert remappedPostings.structure == Structure.ONE_TO_MANY;
-                originalOrdinal = -1;
-            }
+            int originalOrdinal = newToOldMapper.applyAsInt(i);
             int postingListSize;
-            if (originalOrdinal >= 0)
+            if (originalOrdinal == OrdinalMapper.OMITTED)
             {
-                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-                postingListSize = rowIds.size();
+                assert remappedPostings.structure == Structure.ONE_TO_MANY;
+                postingListSize = 0;
             }
             else
             {
-                postingListSize = 0;
+                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+                postingListSize = rowIds.size();
             }
             nextOffset += 4 + (postingListSize * 4L); // 4 bytes for size and 4 bytes for each integer in the list
         }
@@ -176,12 +166,8 @@ public class V5VectorPostingsWriter<T>
 
         // Write postings lists
         for (var i = 0; i < ordinalCount; i++) {
-            int originalOrdinal;
-            try
-            {
-                originalOrdinal = newToOldMapper.applyAsInt(i);
-            }
-            catch (NullPointerException e)
+            int originalOrdinal = newToOldMapper.applyAsInt(i);
+            if (originalOrdinal == OrdinalMapper.OMITTED)
             {
                 assert remappedPostings.structure == Structure.ONE_TO_MANY;
                 writer.writeInt(0);
@@ -266,6 +252,12 @@ public class V5VectorPostingsWriter<T>
             ordinalMapper = new OrdinalMapper()
             {
                 @Override
+                public int maxOrdinal()
+                {
+                    return maxNewOrdinal;
+                }
+
+                @Override
                 public int oldToNew(int i)
                 {
                     return ordinalMap.get(i);
@@ -274,7 +266,7 @@ public class V5VectorPostingsWriter<T>
                 @Override
                 public int newToOld(int i)
                 {
-                    return ordinalMap.inverse().get(i);
+                    return ordinalMap.inverse().getOrDefault(i, OMITTED);
                 }
             };
         }

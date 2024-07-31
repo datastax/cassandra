@@ -356,8 +356,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                                                               nextOrdinal.get(), builder.getGraph().size());
         assert vectorValues.size() == builder.getGraph().size() : String.format("vector count %d != graph size %d",
                                                                                 vectorValues.size(), builder.getGraph().size());
-        assert postingsMap.keySet().size() == vectorValues.size() : String.format("postings map entry count %d != vector count %d",
-                                                                                  postingsMap.keySet().size(), vectorValues.size());
+        assert postingsMap.keySet().size() + deletedOrdinals.size() == vectorValues.size()
+        : String.format("postings map entry count %d + deleted count %d != vector count %d",
+                        postingsMap.keySet().size(), deletedOrdinals.size(), vectorValues.size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
         // remove deleted ordinals from the graph.  this is not done at remove() time, because the same vector
