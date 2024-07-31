@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.cql;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -31,6 +32,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class VectorUpdateDeleteTest extends VectorTester
 {
+
+    @Before
+    public void setup() throws Throwable
+    {
+        super.setup();
+        // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
+        QueryController.QUERY_OPT_LEVEL = 1;
+    }
 
     // partition delete won't trigger UpdateTransaction#onUpdated
     @Test
@@ -280,10 +289,8 @@ public class VectorUpdateDeleteTest extends VectorTester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
 
         // should only see two results
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-        assertContainsInt(result, "pk", 0);
-        assertContainsInt(result, "pk", 1);
+        UntypedResultSet result = execute("SELECT pk FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        assertRows(result, row(0), row(1));
 
         // flush, then insert A redundantly some more
         flush();
@@ -294,17 +301,13 @@ public class VectorUpdateDeleteTest extends VectorTester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
 
         // should still only see two results
-        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-        assertContainsInt(result, "pk", 0);
-        assertContainsInt(result, "pk", 1);
+        result = execute("SELECT pk FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        assertRows(result, row(0), row(1));
 
         // and again after flushing
         flush();
-        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-        assertContainsInt(result, "pk", 0);
-        assertContainsInt(result, "pk", 1);
+        result = execute("SELECT pk FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        assertRows(result, row(0), row(1));
     }
 
     @Test
@@ -726,8 +729,8 @@ public class VectorUpdateDeleteTest extends VectorTester
         flush();
 
         // the shadow vector has the highest score
-        var result = execute("SELECT * FROM %s ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 4");
-        assertThat(result).hasSize(4);
+        var result = execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 4");
+        assertRows(result, row(1), row(3), row(0), row(4));
     }
 
     @Test
@@ -735,6 +738,7 @@ public class VectorUpdateDeleteTest extends VectorTester
     {
         // When adding the chunk size feature, there were issues related to leaked files.
         // This setting only matters for hybrid queries
+        QueryController.QUERY_OPT_LEVEL = 0;
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, vec vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");

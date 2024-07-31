@@ -21,7 +21,7 @@ package org.apache.cassandra.index.sai.disk.v1.postings;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
+import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.LongHeap;
 
@@ -33,7 +33,7 @@ public class VectorPostingList implements PostingList
     private final LongHeap segmentRowIds;
     private final int size;
 
-    public VectorPostingList(CloseableIterator<ScoredRowId> source)
+    public VectorPostingList(CloseableIterator<? extends RowIdWithMeta> source)
     {
         // TODO find int specific data structure?
         segmentRowIds = new LongHeap(32);
