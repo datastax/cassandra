@@ -159,7 +159,7 @@ public class BufferCell extends AbstractCell<ByteBuffer>
     }
 
     @Override
-    protected int localDeletionTimeAsUnsignedInt()
+    public int localDeletionTimeAsUnsignedInt()
     {
         return localDeletionTimeUnsignedInteger;
     }

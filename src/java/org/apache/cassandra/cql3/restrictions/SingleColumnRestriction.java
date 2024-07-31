@@ -1005,14 +1005,114 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
     }
 
+    /**
+     * For now, index based ordering is represented as a restriction.
+     */
+    public static final class OrderRestriction extends SingleColumnRestriction
+    {
+        private final SingleColumnRestriction otherRestriction;
+        private final Operator direction;
+
+        public OrderRestriction(ColumnMetadata columnDef, Operator direction)
+        {
+            this(columnDef, null, direction);
+        }
+
+        private OrderRestriction(ColumnMetadata columnDef, SingleColumnRestriction otherRestriction, Operator direction)
+        {
+            super(columnDef);
+            this.otherRestriction = otherRestriction;
+            this.direction = direction;
+
+            if (direction != Operator.ORDER_BY_ASC && direction != Operator.ORDER_BY_DESC)
+                throw new IllegalArgumentException("Ordering restriction must be ASC or DESC");
+        }
+
+        public Operator getDirection()
+        {
+            return direction;
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            if (otherRestriction != null)
+                otherRestriction.addFunctionsTo(functions);
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options)
+        {
+            filter.add(columnDef, direction, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+            if (otherRestriction != null)
+                otherRestriction.addToRowFilter(filter, indexRegistry, options);
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("ORDER BY %s %s", columnDef.name, direction);
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            if (!(otherRestriction instanceof SingleColumnRestriction))
+                throw invalidRequest("%s cannot be restricted by both ORDER BY and %s",
+                                     columnDef.name,
+                                     otherRestriction.toString());
+            var otherSingleColumnRestriction = (SingleColumnRestriction) otherRestriction;
+            if (this.otherRestriction == null)
+                return new OrderRestriction(columnDef, otherSingleColumnRestriction, direction);
+            var mergedOtherRestriction = this.otherRestriction.doMergeWith(otherSingleColumnRestriction);
+            return new OrderRestriction(columnDef, (SingleColumnRestriction) mergedOtherRestriction, direction);
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return index.supportsExpression(columnDef, direction)
+                   && (otherRestriction == null || otherRestriction.isSupportedBy(index));
+        }
+
+        @Override
+        public boolean isIndexBasedOrdering()
+        {
+            return true;
+        }
+    }
+
     public static final class AnnRestriction extends SingleColumnRestriction
     {
         private final Term value;
+        // This is the only kind of restriction that can be merged into an AnnRestriction because all Ann
+        // are on vector columns, and the only other valid restriction on vector columns is BOUNDED_ANN.
+        private final BoundedAnnRestriction boundedAnnRestriction;
 
         public AnnRestriction(ColumnMetadata columnDef, Term value)
         {
+            this(columnDef, value, null);
+        }
+
+        private AnnRestriction(ColumnMetadata columnDef, Term value, BoundedAnnRestriction boundedAnnRestriction)
+        {
             super(columnDef);
             this.value = value;
+            this.boundedAnnRestriction = boundedAnnRestriction;
         }
 
         public ByteBuffer value(QueryOptions options)
@@ -1024,6 +1124,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addFunctionsTo(List<Function> functions)
         {
             value.addFunctionsTo(functions);
+            if (boundedAnnRestriction != null)
+                boundedAnnRestriction.addFunctionsTo(functions);
         }
 
         @Override
@@ -1038,6 +1140,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                                    QueryOptions options)
         {
             filter.add(columnDef, Operator.ANN, value.bindAndGet(options));
+            if (boundedAnnRestriction != null)
+                boundedAnnRestriction.addToRowFilter(filter, indexRegistry, options);
         }
 
         @Override
@@ -1055,21 +1159,35 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            if (otherRestriction.isAnn())
+            if (otherRestriction.isIndexBasedOrdering())
                 throw invalidRequest("%s cannot be restricted by multiple ANN restrictions", columnDef.name);
-            throw invalidRequest("%s cannot be restricted by both ANN and %s", columnDef.name, otherRestriction.toString());
+
+            if (!otherRestriction.isBoundedAnn())
+                throw invalidRequest("%s cannot be restricted by both BOUNDED_ANN and %s", columnDef.name, otherRestriction.toString());
+
+            if (boundedAnnRestriction == null)
+                return new AnnRestriction(columnDef, value, (BoundedAnnRestriction) otherRestriction);
+
+            var mergedAnnRestriction = boundedAnnRestriction.doMergeWith(otherRestriction);
+            return new AnnRestriction(columnDef, value, (BoundedAnnRestriction) mergedAnnRestriction);
         }
 
         @Override
         protected boolean isSupportedBy(Index index)
         {
-            return index.supportsExpression(columnDef, Operator.ANN);
+            return index.supportsExpression(columnDef, Operator.ANN) && (boundedAnnRestriction == null || boundedAnnRestriction.isSupportedBy(index));
         }
 
         @Override
-        public boolean isAnn()
+        public boolean isIndexBasedOrdering()
         {
             return true;
+        }
+
+        @Override
+        public boolean isBoundedAnn()
+        {
+            return boundedAnnRestriction != null;
         }
     }
 
@@ -1082,25 +1200,13 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         private final Term value;
         private final Term distance;
         private final boolean isInclusive;
-        private final AnnRestriction annRestriction;
 
         public BoundedAnnRestriction(ColumnMetadata columnDef, Term value, Term distance, boolean isInclusive)
-        {
-            this(columnDef, value, distance, isInclusive, null);
-        }
-
-        private BoundedAnnRestriction(ColumnMetadata columnDef, Term value, Term distance, boolean isInclusive, AnnRestriction annRestriction)
         {
             super(columnDef);
             this.value = value;
             this.distance = distance;
             this.isInclusive = isInclusive;
-            this.annRestriction = annRestriction;
-        }
-
-        public ByteBuffer value(QueryOptions options)
-        {
-            return value.bindAndGet(options);
         }
 
         @Override
@@ -1123,8 +1229,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                                    QueryOptions options)
         {
             filter.addGeoDistanceExpression(columnDef, value.bindAndGet(options), isInclusive ? Operator.LTE : Operator.LT, distance.bindAndGet(options));
-            if (annRestriction != null)
-                annRestriction.addToRowFilter(filter, indexRegistry, options);
         }
 
         @Override
@@ -1142,32 +1246,21 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            if (!otherRestriction.isAnn())
+            if (!otherRestriction.isBoundedAnn())
                 throw invalidRequest("%s cannot be restricted by both BOUNDED_ANN and %s", columnDef.name, otherRestriction.toString());
-
-            if (annRestriction == null)
-                return new BoundedAnnRestriction(columnDef, value, distance, isInclusive, (AnnRestriction) otherRestriction);
-
-            var mergedAnnRestriction = annRestriction.doMergeWith(otherRestriction);
-            return new BoundedAnnRestriction(columnDef, value, distance, isInclusive, (AnnRestriction) mergedAnnRestriction);
+            throw invalidRequest("%s cannot be restricted by multiple BOUNDED_ANN restrictions", columnDef.name, otherRestriction.toString());
         }
 
         @Override
         protected boolean isSupportedBy(Index index)
         {
-            return index.supportsExpression(columnDef, Operator.BOUNDED_ANN) && (annRestriction == null || annRestriction.isSupportedBy(index));
+            return index.supportsExpression(columnDef, Operator.BOUNDED_ANN);
         }
 
         @Override
         public boolean isBoundedAnn()
         {
             return true;
-        }
-
-        @Override
-        public boolean isAnn()
-        {
-            return annRestriction != null;
         }
     }
 

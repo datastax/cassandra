@@ -61,6 +61,8 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
@@ -69,6 +71,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_GENERAL_ORDER_BY;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
@@ -78,6 +81,8 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  */
 public class StatementRestrictions
 {
+    public static final boolean ENABLE_SAI_GENERAL_ORDER_BY = SAI_ENABLE_GENERAL_ORDER_BY.getBoolean();
+
     private static final String ALLOW_FILTERING_MESSAGE =
             "Cannot execute this query as it might involve data filtering and thus may have unpredictable performance. ";
 
@@ -107,9 +112,9 @@ public class StatementRestrictions
     "Restriction on partition key column %s must not be nested under OR operator";
 
     public static final String GEO_DISTANCE_REQUIRES_INDEX_MESSAGE = "GEO_DISTANCE requires the vector column to be indexed";
-    public static final String ANN_REQUIRES_INDEX_MESSAGE = "ANN ordering by vector requires the column to be indexed";
-    public static final String ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
-    "ANN ordering by vector requires each restricted column to be indexed except for fully-specified partition keys";
+    public static final String NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE = "Ordering on non-clustering column %s requires the column to be indexed";
+    public static final String NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
+    "Ordering on non-clustering column requires each restricted column to be indexed except for fully-specified partition keys";
 
     public static final String VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE =
     "Vector index present, but configuration does not support GEO_DISTANCE queries. GEO_DISTANCE requires similarity_function 'euclidean'";
@@ -385,6 +390,13 @@ public class StatementRestrictions
             RestrictionSet.Builder nonPrimaryKeyRestrictionSet = RestrictionSet.builder();
             ImmutableSet.Builder<ColumnMetadata> notNullColumnsBuilder = ImmutableSet.builder();
 
+
+            // ORDER BY clause. We add it first because orderings are not really restrictions
+            // and by adding first, we ensure that merging restrictions works as expected.
+            // The long term solution will break ordering out into its own abstraction.
+            if (nestingLevel == 0)
+                addOrderingRestrictions(orderings, indexRegistry, nonPrimaryKeyRestrictionSet);
+
             /*
              * WHERE clause. For a given entity, rules are:
              *   - EQ relation conflicts with anything else (including a 2nd EQ)
@@ -475,11 +487,6 @@ public class StatementRestrictions
                     }
                 }
             }
-
-            // ORDER BY clause.
-            // Some indexes can be used for ordering.
-            if (nestingLevel == 0)
-                addOrderingRestrictions(orderings, nonPrimaryKeyRestrictionSet);
 
             PartitionKeyRestrictions partitionKeyRestrictions = partitionKeyRestrictionSet.build();
             ClusteringColumnRestrictions clusteringColumnsRestrictions = clusteringColumnsRestrictionSet.build();
@@ -626,7 +633,7 @@ public class StatementRestrictions
 
             // Because an ANN queries limit the result set based within the SAI, clustering column restrictions
             // must be added to the filter restrictions.
-            if (nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isAnn))
+            if (orderings.stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
                 usesSecondaryIndexing = true;
 
             if (usesSecondaryIndexing || clusteringColumnsRestrictions.needFiltering())
@@ -656,20 +663,21 @@ public class StatementRestrictions
                         var vc = vectorColumn.get();
                         var hasIndex = indexRegistry.listIndexes().stream().anyMatch(i -> i.dependsOn(vc));
                         var isBoundedANN = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isBoundedAnn);
-                        var isANN = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isAnn);
+                        var isIndexBasedOrdering = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isIndexBasedOrdering);
                         if (hasIndex)
                         {
                             if (isBoundedANN)
                                 throw invalidRequest(StatementRestrictions.VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE);
-                            else if (isANN)
+                            else if (isIndexBasedOrdering)
                                 throw invalidRequest(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE, vc);
                         }
                         else
                         {
+                            // We check if ANN vector column has index earlier, so we only need to for bounded ann here
                             if (isBoundedANN)
                                 throw invalidRequest(StatementRestrictions.GEO_DISTANCE_REQUIRES_INDEX_MESSAGE);
-                            else if (isANN)
-                                throw invalidRequest(StatementRestrictions.ANN_REQUIRES_INDEX_MESSAGE);
+                            else if (isIndexBasedOrdering)
+                                throw invalidRequest(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE);
                         }
                     }
 
@@ -707,22 +715,36 @@ public class StatementRestrictions
          * so they end up in the row filter.
          *
          * @param orderings orderings from the select statement
+         * @param indexRegistry used to check if the ordering is supported by an index
          * @param receiver target restriction builder to receive the additional restrictions
          */
-        private void addOrderingRestrictions(List<Ordering> orderings, RestrictionSet.Builder receiver)
+        private void addOrderingRestrictions(List<Ordering> orderings, IndexRegistry indexRegistry, RestrictionSet.Builder receiver)
         {
-            List<Ordering> annOrderings = orderings.stream().filter(o -> o.expression.hasNonClusteredOrdering()).collect(Collectors.toList());
+            List<Ordering> indexOrderings = orderings.stream().filter(o -> o.expression.hasNonClusteredOrdering()).collect(Collectors.toList());
 
-            if (annOrderings.size() > 1)
-                throw new InvalidRequestException("Cannot specify more than one ANN ordering");
-            else if (annOrderings.size() == 1)
+            if (indexOrderings.size() > 1)
+                throw new InvalidRequestException("Cannot specify more than one ordering column when using SAI indexes");
+            else if (indexOrderings.size() == 1)
             {
                 if (orderings.size() > 1)
-                    throw new InvalidRequestException("ANN ordering does not support secondary ordering");
-                Ordering annOrdering = annOrderings.get(0);
-                if (annOrdering.direction != Ordering.Direction.ASC)
+                    throw new InvalidRequestException("Cannot combine clustering column ordering with non-clustering column ordering");
+                Ordering ordering = indexOrderings.get(0);
+                if (ordering.direction != Ordering.Direction.ASC && ordering.expression instanceof Ordering.Ann)
                     throw new InvalidRequestException("Descending ANN ordering is not supported");
-                SingleRestriction restriction = annOrdering.expression.toRestriction();
+                if (!ENABLE_SAI_GENERAL_ORDER_BY && ordering.expression instanceof Ordering.SingleColumn)
+                    throw new InvalidRequestException("SAI based ORDER BY on non-vector column is not supported");
+                SingleRestriction restriction = ordering.expression.toRestriction();
+                if (!restriction.hasSupportingIndex(indexRegistry))
+                {
+                    var type = restriction.getFirstColumn().type.asCQL3Type().getType();
+                    // This is a slight hack, but once we support a way to order these types, we can remove it.
+                    if (type instanceof IntegerType || type instanceof DecimalType)
+                        throw new InvalidRequestException(String.format("SAI based ordering on column %s of type %s is not supported",
+                                                          restriction.getFirstColumn(),
+                                                          restriction.getFirstColumn().type.asCQL3Type()));
+                    throw new InvalidRequestException(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE,
+                                                                    restriction.getFirstColumn()));
+                }
                 receiver.addRestriction(restriction, false);
             }
         }
@@ -799,15 +821,15 @@ public class StatementRestrictions
         return !tableNullable.allowFilteringImplicitly();
     }
 
-    public boolean hasAnnRestriction()
+    public boolean hasIndxBasedOrdering()
     {
-        return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isAnn);
+        return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isIndexBasedOrdering);
     }
 
     public void throwRequiresAllowFilteringError(TableMetadata table, ClientState state)
     {
-        if (hasAnnRestriction())
-            throw invalidRequest(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+        if (hasIndxBasedOrdering())
+            throw invalidRequest(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
         throwRequiresAllowFilteringError(table, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions), state);
     }

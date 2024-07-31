@@ -19,8 +19,17 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Comparator;
+import java.util.List;
+import java.util.PriorityQueue;
 
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.Slice;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -29,10 +38,21 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
+import org.apache.cassandra.index.sai.utils.RowIdToPrimaryKeyWithSortKeyIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Abstract reader for individual segments of an on-disk index.
@@ -47,6 +67,10 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     protected final SegmentMetadata metadata;
     protected final IndexContext indexContext;
 
+    private static final SSTableReadsListener NOOP_LISTENER = new SSTableReadsListener() {};
+
+    private final ColumnFilter columnFilter;
+
     protected IndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                             PerIndexFiles perIndexFiles,
                             SegmentMetadata segmentMetadata,
@@ -56,6 +80,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
         this.indexFiles = perIndexFiles;
         this.metadata = segmentMetadata;
         this.indexContext = indexContext;
+        columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition()));
     }
 
     /**
@@ -78,15 +103,49 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     /**
      * Order the on-disk index synchronously and produce an iterator in score order
      *
-     * @param expression   to filter on disk index
+     * @param orderer      the object containing the ordering logic
      * @param keyRange     key range specific in read command, used by ANN index
      * @param queryContext to track per sstable cache and per query metrics
      * @param limit        the num of rows to returned, used by ANN index
-     * @return an iterator of {@link ScoredPrimaryKey} in score order
+     * @return an iterator of {@link PrimaryKeyWithSortKey} in score order
      */
-    public CloseableIterator<ScoredPrimaryKey> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    public abstract CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException;
+
+
+    @Override
+    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
     {
-        throw new UnsupportedOperationException();
+        // ANN's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
+        Comparator<PrimaryKeyWithSortKey> comparator = orderer.isAscending() || orderer.isANN()
+                                                       ? Comparator.naturalOrder()
+                                                       : Comparator.reverseOrder();
+        var pq = new PriorityQueue<>(comparator);
+        for (var key : keys)
+        {
+            var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
+            // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
+            try (var iter = reader.rowIterator(key.partitionKey(), slices, columnFilter, false, NOOP_LISTENER))
+            {
+                if (iter.hasNext())
+                {
+                    var row = (Row) iter.next();
+                    assert !iter.hasNext();
+                    var cell = row.getCell(indexContext.getDefinition());
+                    if (cell == null)
+                        continue;
+                    // We encode the bytes to make sure they compare correctly.
+                    var byteComparable = encode(cell.buffer());
+                    pq.add(new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable));
+                }
+            }
+        }
+        return new PriorityQueueIterator<>(pq);
+    }
+
+    private ByteComparable encode(ByteBuffer input)
+    {
+        return indexContext.isLiteral() ? ByteComparable.fixedLength(input)
+                                        : v -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), v);
     }
 
     protected RangeIterator toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
@@ -102,5 +161,28 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
                                                                         queryContext,
                                                                         postingList.peekable());
         return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
+    }
+
+    protected CloseableIterator<? extends PrimaryKeyWithSortKey> toMetaSortedIterator(CloseableIterator<? extends RowIdWithMeta> rowIdIterator, QueryContext queryContext) throws IOException
+    {
+        if (rowIdIterator == null || !rowIdIterator.hasNext())
+        {
+            FileUtils.closeQuietly(rowIdIterator);
+            return CloseableIterator.emptyIterator();
+        }
+
+        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
+                                                                        metadata.maxKey,
+                                                                        metadata.minSSTableRowId,
+                                                                        metadata.maxSSTableRowId,
+                                                                        metadata.segmentRowIdOffset,
+                                                                        queryContext,
+                                                                        null);
+        var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+        return new RowIdToPrimaryKeyWithSortKeyIterator(indexContext,
+                                                        pkm.getSSTableId(),
+                                                        rowIdIterator,
+                                                        pkm,
+                                                        searcherContext);
     }
 }

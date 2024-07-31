@@ -127,7 +127,7 @@ public class ArrayCell extends AbstractCell<byte[]>
     }
 
     @Override
-    protected int localDeletionTimeAsUnsignedInt()
+    public int localDeletionTimeAsUnsignedInt()
     {
         return localDeletionTimeUnsignedInteger;
     }

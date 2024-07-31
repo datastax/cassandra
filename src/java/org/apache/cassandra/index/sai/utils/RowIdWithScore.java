@@ -16,39 +16,38 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.vector;
+package org.apache.cassandra.index.sai.utils;
 
 import java.util.PriorityQueue;
 
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.io.sstable.SSTableId;
+
 /**
+ * Represents a row id with a score.
  * Note: this class has a natural ordering that is inconsistent with equals in order to
  * use {@link PriorityQueue}'s O(N) constructor.
  */
-public class ScoredRowId implements Comparable<ScoredRowId>
+public class RowIdWithScore extends RowIdWithMeta implements Comparable<RowIdWithScore>
 {
-    final int segmentRowId;
-    final float score;
+    private final float score;
 
-    public ScoredRowId(int segmentRowId, float score)
+    public RowIdWithScore(int segmentRowId, float score)
     {
-        this.segmentRowId = segmentRowId;
+        super(segmentRowId);
         this.score = score;
     }
 
-    public float getScore()
-    {
-        return score;
-    }
-
-    public int getSegmentRowId()
-    {
-        return segmentRowId;
-    }
-
     @Override
-    public int compareTo(ScoredRowId o)
+    public int compareTo(RowIdWithScore o)
     {
         // Inverted comparison to sort in descending order
         return Float.compare(o.score, score);
+    }
+
+    @Override
+    protected PrimaryKeyWithSortKey wrapPrimaryKey(IndexContext indexContext, SSTableId<?> sstableId, PrimaryKey primaryKey)
+    {
+        return new PrimaryKeyWithScore(indexContext, sstableId, primaryKey, score);
     }
 }

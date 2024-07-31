@@ -26,7 +26,6 @@ import javax.annotation.Nullable;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
@@ -54,8 +53,8 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
      */
     private final RowFilter postIndexFilter;
     private final Set<Index> indexes;
-    private final boolean isTopK;
     private final IndexFeatureSet indexFeatureSet;
+    private final Orderer orderer;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
@@ -68,7 +67,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         this.postIndexFilter = filter.restrict(RowFilter.Expression::isUserDefined);
         this.indexes = indexes;
         this.indexFeatureSet = indexFeatureSet;
-        this.isTopK = filter.root().expressions().stream().anyMatch(p -> p.operator() == Operator.ANN);
+        this.orderer = Orderer.from(cfs.getIndexManager(), filter);
     }
 
     @Nullable
@@ -205,6 +204,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         return new StorageAttachedIndexSearcher(cfs,
                                                 queryMetrics,
                                                 command,
+                                                orderer,
                                                 indexFeatureSet,
                                                 DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
     }
@@ -219,7 +219,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
             return partitions -> partitions;
 
         // in case of top-k query, filter out rows that are not actually global top-K
-        return partitions -> (PartitionIterator) new VectorTopKProcessor(command).filter(partitions);
+        return partitions -> (PartitionIterator) new TopKProcessor(command).filter(partitions);
     }
 
     /**
@@ -240,6 +240,6 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     @Override
     public boolean isTopK()
     {
-        return isTopK;
+        return orderer != null;
     }
 }

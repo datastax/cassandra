@@ -653,10 +653,10 @@ public class SelectOrderByTest extends CQLTester
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 1, 4);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 2, 5);
 
-        assertInvalidMessage("Order by is currently only supported on the clustered columns of the PRIMARY KEY, got d",
+        assertInvalidMessage("Ordering on non-clustering column d requires the column to be indexed",
                              "SELECT * FROM %s WHERE a=? ORDER BY d DESC", 0);
 
-        assertInvalidMessage("Order by is currently only supported on the clustered columns of the PRIMARY KEY, got d",
+        assertInvalidMessage("Cannot combine clustering column ordering with non-clustering column ordering",
                              "SELECT * FROM %s WHERE a=? ORDER BY b ASC, c ASC, d ASC", 0);
 
         String errorMsg = "Order by currently only supports the ordering of columns following their declared order in the PRIMARY KEY";
