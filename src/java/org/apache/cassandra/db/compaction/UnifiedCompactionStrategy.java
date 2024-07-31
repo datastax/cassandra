@@ -55,6 +55,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.TimeUUID;
@@ -280,7 +281,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         // TODO - we should perhaps consider executing this code less frequently than legacy strategies
         // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
 
-        return getNextBackgroundTasks(getNextCompactionAggregates(gcBefore), gcBefore);
+        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables. 
+        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction 
+        // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
+        Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
+                                                                     .instance()
+                                                                     .consistent
+                                                                     .local
+                                                                     .getZombieRepairFinalizationTasks(realm, realm.getLiveSSTables());
+        if (!repairFinalizationTasks.isEmpty())
+            return repairFinalizationTasks;
+        else
+            return getNextBackgroundTasks(getNextCompactionAggregates(gcBefore), gcBefore);
     }
 
     /**
