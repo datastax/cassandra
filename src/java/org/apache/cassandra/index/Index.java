@@ -24,8 +24,9 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Objects;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -500,6 +501,20 @@ public interface Index
      *         the index was used to narrow the initial result set
      */
     public RowFilter getPostIndexQueryFilter(RowFilter filter);
+
+    /**
+     * Returns a {@link Comparator} of CQL result rows, so they can be ordered by the
+     * coordinator before sending them to client.
+     *
+     * @param restriction restriction that requires current index
+     * @param columnIndex idx of the indexed column in returned row
+     * @param options     query options
+     * @return a comparator of rows
+     */
+    default Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
+    {
+        throw new NotImplementedException();
+    }
 
     /**
      * Returns a {@link Scorer} to give a similarity/proximity score to CQL result rows, so they can be ordered by the

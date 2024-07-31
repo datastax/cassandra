@@ -674,19 +674,27 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
     public UnfilteredRowIterator queryMemtableAndDisk(ColumnFamilyStore cfs,
                                                       ColumnFamilyStore.ViewFragment view,
-                                                      Function<CellSourceIdentifier, Transformation<BaseRowIterator<?>>> rowTransformer,
+                                                      Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer,
                                                       ReadExecutionController executionController)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
-        Tracing.trace("Executing single-partition query on {}", cfs.name);
+        if (Tracing.traceSinglePartitions())
+            Tracing.trace("Executing single-partition query on {}", cfs.name);
 
         return queryMemtableAndDiskInternal(cfs, view, rowTransformer, executionController, Clock.Global.nanoTime());
     }
 
+    private UnfilteredRowIterator queryMemtableAndDiskInternal(ColumnFamilyStore cfs, ReadExecutionController controller, long startTimeNanos)
+    {
+        var view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
+        return queryMemtableAndDiskInternal(cfs, view, null, controller, startTimeNanos);
+    }
+
     private UnfilteredRowIterator queryMemtableAndDiskInternal(ColumnFamilyStore cfs,
                                                                ColumnFamilyStore.ViewFragment view,
-                                                               Function<CellSourceIdentifier, Transformation<BaseRowIterator<?>>> rowTransformer,
-                                                               ReadExecutionController controller, long startTimeNanos)
+                                                               Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer,
+                                                               ReadExecutionController controller,
+                                                               long startTimeNanos)
     {
         /*
          * We have 2 main strategies:
@@ -971,8 +979,11 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
-    private UnfilteredRowIterator queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ColumnFamilyStore.ViewFragment view, Function<CellSourceIdentifier, Transformation<BaseRowIterator<?>>> rowTransformer, ClusteringIndexNamesFilter filter, ReadExecutionController controller, long startTimeNanos)
+    private UnfilteredRowIterator queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ColumnFamilyStore.ViewFragment view, Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer, ClusteringIndexNamesFilter filter, ReadExecutionController controller, long startTimeNanos)
     {
+        if (Tracing.traceSinglePartitions())
+            Tracing.trace("Acquiring sstable references");
+
         ImmutableBTreePartition result = null;
         SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
 
@@ -1064,10 +1075,10 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                 UnfilteredRowIterator wrapped = rowTransformer != null ? Transformation.apply(iter, rowTransformer.apply(sstable.getId()))
                                                                        : iter;
                 result = add(RTBoundValidator.validate(wrapped, RTBoundValidator.Stage.SSTABLE, false),
-                             result,
-                             filter,
-                             sstable.isRepaired(),
-                             controller);
+                     result,
+                     filter,
+                     sstable.isRepaired(),
+                     controller);
             }
         }
 
