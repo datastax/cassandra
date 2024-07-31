@@ -153,7 +153,7 @@ public class Segment implements Closeable
      * @param limit      the num of rows to returned, used by ANN index
      * @return an iterator of {@link PrimaryKeyWithSortKey} in score order
      */
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         return index.orderBy(orderer, keyRange, context, limit);
     }
@@ -178,7 +178,7 @@ public class Segment implements Closeable
         return Objects.hashCode(metadata);
     }
 
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
     {
         return index.orderResultsBy(sstableContext.sstable, context, keys, orderer, limit);
     }
