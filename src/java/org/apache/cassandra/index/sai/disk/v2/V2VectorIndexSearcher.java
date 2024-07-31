@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,11 +87,18 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
-    public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
+
+    /**
+     * Only allow brute force if fewer than this many rows are involved.
+     * Not final so test can inject its own setting.
+     */
+    @VisibleForTesting
+    public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE;
     /**
      * How much more expensive is brute forcing the comparisons than going through the index?
      * (brute force needs to go through the full read path to pull out the vectors from the row)
      */
+    @VisibleForTesting
     public static double BRUTE_FORCE_EXPENSE_FACTOR = DatabaseDescriptor.getAnnBruteForceExpenseFactor();
 
     protected final JVectorLuceneOnDiskGraph graph;

@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import org.slf4j.Logger;
@@ -42,6 +43,16 @@ import static java.lang.Math.min;
 public class V5VectorPostingsWriter<T>
 {
     private static final Logger logger = LoggerFactory.getLogger(V5VectorPostingsWriter.class);
+
+    /**
+     * Write a one-to-many mapping if the number of "holes" in the resulting ordinal sequence
+     * is less than this fraction of the total rows.  Holes have two effects that make us not
+     * want to overuse them:
+     * (1) We read the list of rowids associated with the holes into memory
+     * (2) The holes make the terms component (the vector index) less cache-efficient
+     */
+    @VisibleForTesting
+    public static double GLOBAL_HOLES_ALLOWED = 0.01;
 
     public static int MAGIC = 0x90571265; // POSTINGS
 
@@ -92,8 +103,6 @@ public class V5VectorPostingsWriter<T>
         }
         else if (structure == Structure.ONE_TO_MANY)
         {
-            // FIXME add size restriction to this branch
-            // remappedPostings.extraPostings.size() <= 0.01 * remappedPostings.maxRowId
             writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
             writeOneToManyRowIdMapping(writer);
         }
@@ -189,7 +198,7 @@ public class V5VectorPostingsWriter<T>
 
         // Create a Map of rowId -> ordinal
         int maxRowId = -1;
-        var rowIdToOrdinalMap = new Int2IntHashMap(remappedPostings.maxNewOrdinal, 0.65f, Integer.MIN_VALUE);
+        var rowIdToOrdinalMap = new Int2IntHashMap(remappedPostings.maxNewOrdinal, 0.65f, OrdinalMapper.OMITTED);
         for (int i = 0; i <= remappedPostings.maxNewOrdinal; i++) {
             int ord = remappedPostings.ordinalMapper.newToOld(i);
             var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
@@ -314,18 +323,27 @@ public class V5VectorPostingsWriter<T>
             }
         }
 
+        // derive the correct structure
+        Structure structure;
         if (totalRowsAssigned > 0 && (minRow != 0 || totalRowsAssigned != maxRow + 1))
         {
-            // not every row had a vector associated with it
-            logger.debug("Postings are not one:many");
-            return createGenericMapping(ordinalMap.keySet(), maxOldOrdinal, maxRow);
+            logger.debug("Not all rows are assigned vectors, cannot remap");
+            structure = Structure.ZERO_OR_ONE_TO_MANY;
+        }
+        else
+        {
+            logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them", ordinalMap.size(), extraPostings.size());
+            structure = extraPostings.isEmpty()
+                      ? Structure.ONE_TO_ONE
+                      : Structure.ONE_TO_MANY;
+            // override one-to-many to generic if there are too many holes or we are in backwards compatibility mode
+            if (structure == Structure.ONE_TO_MANY && (!V5OnDiskFormat.writeV5VectorPostings() || extraPostings.size() > max(1, GLOBAL_HOLES_ALLOWED * maxRow)))
+                structure = Structure.ZERO_OR_ONE_TO_MANY;
         }
 
-        logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them", ordinalMap.size(), extraPostings.size());
-        var structure = extraPostings.isEmpty() ? Structure.ONE_TO_ONE : Structure.ONE_TO_MANY;
-        if (structure == Structure.ONE_TO_MANY && !V5OnDiskFormat.writeV5VectorPostings())
+        // create the mapping
+        if (structure == Structure.ZERO_OR_ONE_TO_MANY)
             return createGenericMapping(ordinalMap.keySet(), maxOldOrdinal, maxRow);
-
         return new RemappedPostings(structure, maxNewOrdinal, maxRow, ordinalMap, extraPostings);
     }
 
