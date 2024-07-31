@@ -547,7 +547,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
             var sstableResults = orderSstables(queryContext.view, Collections.emptyList(), softLimit);
             sstableResults.addAll(memtableResults);
-            return MergeIterator.getCloseable(sstableResults, orderer.getComparator(), Reducer.getIdentity());
+            return MergeIterator.getNonReducingCloseable(sstableResults, orderer.getComparator());
         }
         catch (Throwable t)
         {
@@ -577,7 +577,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 var next = iter.next();
                 scoredPrimaryKeyIterators.addAll(next);
             }
-            var merged = MergeIterator.getCloseable(scoredPrimaryKeyIterators, orderer.getComparator(), Reducer.getIdentity());
+            var merged = MergeIterator.getNonReducingCloseable(scoredPrimaryKeyIterators, orderer.getComparator());
             return CloseableIterator.withOnClose(merged, iter::close);
         }
         catch (Throwable t)
