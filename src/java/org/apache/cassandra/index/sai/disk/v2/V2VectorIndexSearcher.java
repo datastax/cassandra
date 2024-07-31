@@ -161,7 +161,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), orderer);
@@ -452,7 +452,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader,
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader,
                                                                              QueryContext context,
                                                                              List<PrimaryKey> keys,
                                                                              Orderer orderer,

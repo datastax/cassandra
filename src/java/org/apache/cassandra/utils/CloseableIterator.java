@@ -17,8 +17,11 @@
  */
 package org.apache.cassandra.utils;
 
+import java.io.Closeable;
 import java.util.Collections;
 import java.util.Iterator;
+
+import org.apache.cassandra.io.util.FileUtils;
 
 
 // so we can instantiate anonymous classes implementing both interfaces
@@ -61,6 +64,37 @@ public interface CloseableIterator<T> extends Iterator<T>, AutoCloseable
 
             public void close()
             {
+            }
+        };
+    }
+
+    /**
+     * Pairs a {@link CloseableIterator} and an {@link AutoCloseable} so that the latter is closed when the former is
+     * closed.
+     */
+    static <T> CloseableIterator<T> withOnClose(CloseableIterator<T> iterator, Closeable onClose)
+    {
+        return new CloseableIterator<>()
+        {
+            public boolean hasNext()
+            {
+                return iterator.hasNext();
+            }
+
+            public T next()
+            {
+                return iterator.next();
+            }
+
+            public void remove()
+            {
+                iterator.remove();
+            }
+
+            public void close()
+            {
+                iterator.close();
+                FileUtils.closeQuietly(onClose);
             }
         };
     }

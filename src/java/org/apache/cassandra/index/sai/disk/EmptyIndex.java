@@ -97,7 +97,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit, long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit, long totalRows) throws IOException
     {
         return List.of();
     }
@@ -125,7 +125,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
     {
         return List.of();
     }
