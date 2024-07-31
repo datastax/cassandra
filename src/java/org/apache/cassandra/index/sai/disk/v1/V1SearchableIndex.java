@@ -186,13 +186,13 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
-                                                                            AbstractBounds<PartitionPosition> keyRange,
-                                                                            QueryContext context,
-                                                                            int limit,
-                                                                            long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                  AbstractBounds<PartitionPosition> keyRange,
+                                                                  QueryContext context,
+                                                                  int limit,
+                                                                  long totalRows) throws IOException
     {
-        var iterators = new ArrayList<CloseableIterator<? extends PrimaryKeyWithSortKey>>(segments.size());
+        var iterators = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(segments.size());
         for (Segment segment : segments)
         {
             if (segment.intersects(keyRange))
@@ -206,9 +206,9 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
     {
-        var results = new ArrayList<CloseableIterator<? extends PrimaryKeyWithSortKey>>(segments.size());
+        var results = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(segments.size());
         for (Segment segment : segments)
         {
             // Only pass the primary keys in a segment's range to the segment index.

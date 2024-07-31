@@ -63,6 +63,8 @@ public class PrimaryKeyWithByteComparable extends PrimaryKeyWithSortKey
         if (!(o instanceof PrimaryKeyWithByteComparable))
             throw new IllegalArgumentException("Cannot compare PrimaryKeyWithByteComparable with " + o.getClass().getSimpleName());
 
-        return ByteComparable.compare(byteComparable, ((PrimaryKeyWithByteComparable) o).byteComparable, ByteComparable.Version.OSS50);
+        var other = (PrimaryKeyWithByteComparable) o;
+        var cmp = ByteComparable.compare(byteComparable, other.byteComparable, ByteComparable.Version.OSS50);
+        return cmp != 0 ? cmp : super.breakTie(other);
     }
 }
