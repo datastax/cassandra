@@ -24,7 +24,7 @@ import java.util.Iterator;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
+import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.utils.CloseableIterator;
 
 import static org.junit.Assert.assertEquals;
@@ -48,11 +48,11 @@ public class VectorPostingListTest
     @Test
     public void ensureIteratorIsConsumedClosedAndReordered() throws Throwable
     {
-        var source = new TestIterator(Arrays.stream(new ScoredRowId[] {
-                new ScoredRowId(3, 3),
-                new ScoredRowId(2, 2),
-                new ScoredRowId(1, 1),
-                new ScoredRowId(4, 4),
+        var source = new TestIterator(Arrays.stream(new RowIdWithScore[] {
+                new RowIdWithScore(3, 3),
+                new RowIdWithScore(2, 2),
+                new RowIdWithScore(1, 1),
+                new RowIdWithScore(4, 4),
         }).iterator());
 
         try (var postingList = new VectorPostingList(source))
@@ -74,10 +74,10 @@ public class VectorPostingListTest
     @Test
     public void ensureAdvanceWorksCorrectly() throws Throwable
     {
-        var source = new TestIterator(Arrays.stream(new ScoredRowId[] {
-        new ScoredRowId(3, 3),
-        new ScoredRowId(1, 1),
-        new ScoredRowId(2, 2),
+        var source = new TestIterator(Arrays.stream(new RowIdWithScore[] {
+        new RowIdWithScore(3, 3),
+        new RowIdWithScore(1, 1),
+        new RowIdWithScore(2, 2),
         }).iterator());
 
         try (var postingList = new VectorPostingList(source))
@@ -90,11 +90,11 @@ public class VectorPostingListTest
     /**
      * A basic iterator that tracks whether it has been closed for better testing.
      */
-    private static class TestIterator implements CloseableIterator<ScoredRowId>
+    private static class TestIterator implements CloseableIterator<RowIdWithScore>
     {
-        private final Iterator<ScoredRowId> iterator;
+        private final Iterator<RowIdWithScore> iterator;
         boolean isClosed = false;
-        TestIterator(Iterator<ScoredRowId> iter)
+        TestIterator(Iterator<RowIdWithScore> iter)
         {
             iterator = iter;
         }
@@ -106,7 +106,7 @@ public class VectorPostingListTest
         }
 
         @Override
-        public ScoredRowId next()
+        public RowIdWithScore next()
         {
             return iterator.next();
         }

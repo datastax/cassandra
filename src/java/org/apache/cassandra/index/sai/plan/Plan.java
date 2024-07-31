@@ -142,6 +142,11 @@ abstract public class Plan
         this.access = access;
     }
 
+    /**
+     * Returns the order of the keys / rows returned by this plan.
+     */
+    protected abstract @Nullable Orderer ordering();
+
     /** selectivity comparisons to 0 will probably cause bugs, use this instead */
     protected static boolean isEffectivelyZero(double a) {
         assert a >= 0;
@@ -581,6 +586,7 @@ abstract public class Plan
         {
             return cost().costPerKey();
         }
+
     }
 
     /**
@@ -623,6 +629,13 @@ abstract public class Plan
         protected KeysIterationCost estimateCost()
         {
             return new KeysIterationCost(0, 0.0, 0.0);
+        }
+
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return null;
         }
 
         @Override
@@ -670,6 +683,13 @@ abstract public class Plan
                                          Double.POSITIVE_INFINITY);
         }
 
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return null;
+        }
+
         @Override
         protected double estimateSelectivity()
         {
@@ -697,20 +717,37 @@ abstract public class Plan
 
     abstract static class IndexScan extends Leaf
     {
+        @Nullable
         protected final Expression predicate;
+        @Nullable
+        protected final Orderer ordering;
+
         protected final long matchingKeysCount;
 
-        public IndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access)
+        public IndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
             super(factory, id, access);
+            // TODO: we don't support both ordering and filtering on the same index yet.
+            Preconditions.checkArgument(predicate != null ^ ordering != null,
+                                        "Either predicate or ordering must be set, but not both");
             this.predicate = predicate;
+            this.ordering = ordering;
             this.matchingKeysCount = matchingKeysCount;
         }
 
         @Override
         protected final String description()
         {
-            return String.format("of %s using %s (sel: %.9f, step: %.1f)", predicate.getIndexName(), predicate, selectivity(), access.meanDistance());
+            var indexName = predicate != null ? predicate.getIndexName() : ordering.getIndexName();
+            var using = predicate != null ? predicate : ordering;
+            return String.format("of %s using %s (sel: %.9f, step: %.1f)", indexName, using, selectivity(), access.meanDistance());
+        }
+
+        @Nullable
+        @Override
+        protected final Orderer ordering()
+        {
+            return ordering;
         }
 
         @Override
@@ -751,7 +788,7 @@ abstract public class Plan
             double postingsCountExponent;
             double skipDistanceFactor;
             double skipDistanceExponent;
-            if (predicate.getOp() == Expression.Op.RANGE)
+            if (predicate == null || predicate.getOp() == Expression.Op.RANGE)
             {
                 skipCostFactor = RANGE_SCAN_SKIP_COST;
                 postingsCountFactor = RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_FACTOR;
@@ -785,7 +822,10 @@ abstract public class Plan
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
-            return executor.getKeysFromIndex(predicate);
+            assert predicate != null ^ ordering != null;
+            return (ordering != null)
+                ? executor.getTopKRows(softLimit)
+                : executor.getKeysFromIndex(predicate);
         }
     }
     /**
@@ -793,9 +833,9 @@ abstract public class Plan
      */
     static class NumericIndexScan extends IndexScan
     {
-        public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access)
+        public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
-            super(factory, id, predicate, matchingKeysCount, access);
+            super(factory, id, predicate, matchingKeysCount, access, ordering);
         }
 
         @Override
@@ -803,7 +843,7 @@ abstract public class Plan
         {
             return Objects.equals(this.access, access)
                    ? this
-                   : new NumericIndexScan(factory, id, predicate, matchingKeysCount, access);
+                   : new NumericIndexScan(factory, id, predicate, matchingKeysCount, access, ordering);
         }
     }
 
@@ -812,9 +852,9 @@ abstract public class Plan
      */
     static class LiteralIndexScan extends IndexScan
     {
-        public LiteralIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access)
+        public LiteralIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
-            super(factory, id, predicate, matchingKeysCount, access);
+            super(factory, id, predicate, matchingKeysCount, access, ordering);
         }
 
         @Override
@@ -822,7 +862,7 @@ abstract public class Plan
         {
             return Objects.equals(this.access, access)
                    ? this
-                   : new LiteralIndexScan(factory, id, predicate, matchingKeysCount, this.access);
+                   : new LiteralIndexScan(factory, id, predicate, matchingKeysCount, this.access, ordering);
         }
     }
 
@@ -883,6 +923,7 @@ abstract public class Plan
             return 1.0 - inverseSelectivity;
         }
 
+
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
         {
@@ -930,6 +971,13 @@ abstract public class Plan
             }
             double expectedKeys = access.totalCount(factory.tableMetrics.rows * selectivity());
             return new KeysIterationCost(expectedKeys, initCost, iterCost);
+        }
+
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return subplansSupplier.get().get(0).ordering();
         }
 
         @Override
@@ -1041,6 +1089,13 @@ abstract public class Plan
                 : new Intersection(factory, id, subplansSupplier.orig, access);
         }
 
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return subplansSupplier.get().get(0).ordering();
+        }
+
         @Override
         protected KeysIterationCost estimateCost()
         {
@@ -1092,13 +1147,12 @@ abstract public class Plan
      * Sorts keys in ANN order.
      * Must fetch all keys from the source before sorting, so it has a high initial cost.
      */
-    static class AnnSort extends KeysIteration
+    static final class KeysSort extends KeysIteration
     {
         private final KeysIteration source;
-        final RowFilter.Expression ordering;
+        final Orderer ordering;
 
-
-        protected AnnSort(Factory factory, int id, KeysIteration source, RowFilter.Expression ordering, Access access)
+        protected KeysSort(Factory factory, int id, KeysIteration source, Access access, Orderer ordering)
         {
             super(factory, id, access);
             this.source = source;
@@ -1114,7 +1168,7 @@ abstract public class Plan
         @Override
         protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
         {
-            return factory.annSort((KeysIteration) updater.apply(source), ordering, id).withAccess(access);
+            return factory.sort((KeysIteration) updater.apply(source), ordering, id).withAccess(access);
         }
 
         @Override
@@ -1126,6 +1180,14 @@ abstract public class Plan
         @Override
         protected KeysIterationCost estimateCost()
         {
+            return ordering.isANN()
+                ? estimateAnnSortCost()
+                : estimateGlobalSortCost();
+
+        }
+
+        private KeysIterationCost estimateAnnSortCost()
+        {
             double expectedKeys = access.totalCount(source.expectedKeys());
             double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables
                               + source.fullCost()
@@ -1135,33 +1197,48 @@ abstract public class Plan
                                           expectedKeys * CostCoefficients.ANN_SCORED_KEY_COST);
         }
 
+        private KeysIterationCost estimateGlobalSortCost()
+        {
+            return new KeysIterationCost(source.expectedKeys(),
+                                         source.fullCost() + source.expectedKeys() * ROW_COST,
+                                         source.expectedKeys() * SAI_KEY_COST);
+
+        }
+
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return ordering;
+        }
+
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
             // soft limit for fetching the keys from source is MAX_VALUE because we need to know
             // all keys from which to pick the top K.
             RangeIterator sourceIterator = (RangeIterator) source.execute(executor, Integer.MAX_VALUE);
-            return executor.getTopKRows(sourceIterator, ordering, softLimit);
+            return executor.getTopKRows(sourceIterator, softLimit);
         }
 
         @Override
-        protected AnnSort withAccess(Access access)
+        protected KeysSort withAccess(Access access)
         {
             return Objects.equals(access, this.access)
                 ? this
-                : new AnnSort(factory, id, source, ordering, access);
+                : new KeysSort(factory, id, source, access, ordering);
         }
     }
 
     /**
      * Returns all keys in ANN order.
-     * Contrary to {@link AnnSort}, there is no input node here and the output is generated lazily.
+     * Contrary to {@link KeysSort}, there is no input node here and the output is generated lazily.
      */
-    static class AnnScan extends Leaf
+    final static class AnnIndexScan extends Leaf
     {
-        final RowFilter.Expression ordering;
+        final Orderer ordering;
 
-        protected AnnScan(Factory factory, int id, RowFilter.Expression ordering, Access access)
+        protected AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access);
             this.ordering = ordering;
@@ -1180,6 +1257,13 @@ abstract public class Plan
                                          keysCount * CostCoefficients.ANN_SCORED_KEY_COST);
         }
 
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return ordering;
+        }
+
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
@@ -1187,7 +1271,7 @@ abstract public class Plan
             // occurs that we collected enough rows. keysCount() gives us the
             // average expected number of rows that will be needed but
             // many queries will need fewer than that.
-            return executor.getTopKRows(ordering, max(1, softLimit / 2));
+            return executor.getTopKRows(max(1, softLimit / 2));
         }
 
         @Override
@@ -1195,7 +1279,7 @@ abstract public class Plan
         {
             return Objects.equals(access, this.access)
                    ? this
-                   : new AnnScan(factory, id, ordering, access);
+                   : new AnnIndexScan(factory, id, access, ordering);
         }
 
         @Override
@@ -1256,6 +1340,12 @@ abstract public class Plan
             this.source = new LazyTransform<>(keysIteration, k -> k.withAccess(access));
         }
 
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return source.get().ordering();
+        }
 
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
@@ -1316,6 +1406,13 @@ abstract public class Plan
             this.filter = filter;
             this.source = new LazyTransform<>(source, this::propagateAccess);
             this.targetSelectivity = targetSelectivity;
+        }
+
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return source.get().ordering();
         }
 
         /**
@@ -1387,6 +1484,13 @@ abstract public class Plan
             super(factory, id, access);
             this.limit = limit;
             this.source = new LazyTransform<>(source, s -> s.withAccess(access.limit(limit)));
+        }
+
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return source.get().ordering();
         }
 
         @Override
@@ -1475,34 +1579,42 @@ abstract public class Plan
         }
 
         /**
-         * Constructs a plan node representing a direct scan of a numeric index.
-         * @param predicate the expression matching the rows that we want to search in the index;
-         *                  this is needed for identifying this node, it doesn't affect the cost
+         * Constructs a plan node representing a direct scan of an index.
+         *
+         * @param predicate         the expression matching the rows that we want to search in the index;
+         *                          this is needed for identifying this node, it doesn't affect the cost
          * @param matchingKeysCount the number of row keys expected to be returned by the index scan,
-         *                        i.e. keys of rows that match the search predicate
+         *                          i.e. keys of rows that match the search predicate
          */
-        public KeysIteration numericIndexScan(Expression predicate, long matchingKeysCount)
+        public KeysIteration indexScan(@Nullable Expression predicate, long matchingKeysCount)
         {
-            Preconditions.checkNotNull(predicate, "predicate must not be null");
             Preconditions.checkArgument(matchingKeysCount >= 0, "matchingKeyCount must not be negative");
             Preconditions.checkArgument(matchingKeysCount <= tableMetrics.rows, "matchingKeyCount must not exceed totalKeyCount");
-            return new NumericIndexScan(this, nextId++, predicate, matchingKeysCount, defaultAccess);
+            return indexScan(predicate, matchingKeysCount, null, nextId++);
         }
 
-        /**
-         * Constructs a plan node representing a direct scan of a literal index.
-         *
-         * @param predicate the expression matching the rows that we want to search in the index;
-         *                  this is needed for identifying this node, it doesn't affect the cost
-         * @param matchingKeysCount the number of row keys expected to be returned by the index scan,
-         *                        i.e. keys of rows that match the search predicate - this affects the cost estimates
-         */
-        public KeysIteration literalIndexScan(Expression predicate, long matchingKeysCount)
+        private KeysIteration indexScan(Expression predicate, long matchingKeysCount, Orderer ordering, int id)
         {
+            if (predicate == null && ordering == null)
+            {
+                assert matchingKeysCount == tableMetrics.rows;
+                return everything;
+            }
+
+            if (ordering != null)
+                if (ordering.isANN())
+                    return new AnnIndexScan(this, id, defaultAccess, ordering);
+                else if (ordering.isLiteral())
+                    return new LiteralIndexScan(this, id, predicate, matchingKeysCount, defaultAccess, ordering);
+                else
+                    return new NumericIndexScan(this, id, predicate, matchingKeysCount, defaultAccess, ordering);
+
             Preconditions.checkNotNull(predicate, "predicate must not be null");
             Preconditions.checkArgument(matchingKeysCount >= 0, "matchingKeyCount must not be negative");
             Preconditions.checkArgument(matchingKeysCount <= tableMetrics.rows, "matchingKeyCount must not exceed totalKeyCount");
-            return new LiteralIndexScan(this, nextId++, predicate, matchingKeysCount, defaultAccess);
+            return predicate.isLiteral()
+                   ? new LiteralIndexScan(this, id, predicate, matchingKeysCount, defaultAccess, null)
+                   : new NumericIndexScan(this, id, predicate, matchingKeysCount, defaultAccess, null);
         }
 
         /**
@@ -1563,26 +1675,18 @@ abstract public class Plan
         }
 
         /**
-         * Constructs a node that sorts keys using DiskANN index
+         * Constructs a node that sorts keys using an index
          */
-        public KeysIteration annSort(KeysIteration source, RowFilter.Expression ordering)
+        public KeysIteration sort(@Nonnull KeysIteration source, @Nonnull Orderer ordering)
         {
-            return annSort(source, ordering, nextId++);
+            return sort(source, ordering, nextId++);
         }
 
-        private KeysIteration annSort(@Nonnull KeysIteration source, @Nonnull RowFilter.Expression ordering, int id)
+        private KeysIteration sort(@Nonnull KeysIteration source, @Nonnull Orderer ordering, int id)
         {
             return (source instanceof Everything)
-                ? new AnnScan(this, id, ordering, defaultAccess)
-                : new AnnSort(this, id, source, ordering, defaultAccess);
-        }
-
-        /**
-         * Constructs a node that scans the DiskANN index and returns key in ANN order
-         */
-        public KeysIteration annScan(@Nonnull RowFilter.Expression ordering)
-        {
-            return new AnnScan(this, nextId++, ordering, defaultAccess);
+                   ? indexScan(null, tableMetrics.rows, ordering, id)
+                   : new KeysSort(this, id, source, defaultAccess, ordering);
         }
 
         /**
@@ -1660,8 +1764,8 @@ abstract public class Plan
     public interface Executor
     {
         Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
-        Iterator<? extends PrimaryKey> getTopKRows(RowFilter.Expression ordering, int softLimit);
-        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, RowFilter.Expression ordering, int softLimit);
+        Iterator<? extends PrimaryKey> getTopKRows(int softLimit);
+        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, int softLimit);
     }
 
     /**
@@ -1678,7 +1782,7 @@ abstract public class Plan
          * @param limit      number of rows to fetch
          * @param candidates number of candidate rows that satisfy the expression predicates
          */
-        int estimateAnnNodesVisited(RowFilter.Expression ordering, int limit, long candidates);
+        int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates);
     }
 
     /**

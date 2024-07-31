@@ -240,7 +240,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         // If we've hit the minimum flush size and we've breached the global limit, flush a new segment:
         boolean reachMemoryLimit = limiter.usageExceedsLimit() && currentBuilder.hasReachedMinimumFlushSize();
 
-        if (reachMemoryLimit)
+        if (currentBuilder.requiresFlush() || reachMemoryLimit)
         {
             logger.debug("Global limit of {} and minimum flush size of {} exceeded. " +
                          "Current builder usage is {} for {} rows. Global Usage is {}. Flushing...",
