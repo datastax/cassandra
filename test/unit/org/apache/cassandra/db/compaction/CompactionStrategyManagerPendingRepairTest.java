@@ -33,6 +33,7 @@ import org.apache.cassandra.repair.consistent.LocalSession;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
@@ -45,6 +46,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 /**
  * Tests CompactionStrategyContainer's handling of pending repair sstables
@@ -359,7 +361,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
      * compaction task is issued for that repair session.
      */
     @Test
-    public void testFinalizedAndCompactionRace() throws NoSuchRepairSessionException
+    public void testFinalizedAndCompactionRace() throws IOException, NoSuchRepairSessionException
     {
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -375,22 +377,22 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         }
 
         // change to pending repair
-        mutateRepaired(sstables, repairID, false);
+        cfs.mutateRepaired(sstables, 0, repairID, false);
         compactionStrategyContainer.handleNotification(new SSTableAddedNotification(sstables, null), cfs.getTracker());
         for (SSTableReader sstable : sstables)
         {
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertTrue(sstable.isPendingRepair());
-            Assert.assertEquals(repairID, sstable.getPendingRepair());
+            assertEquals(repairID, sstable.getPendingRepair());
         }
 
         // Get a compaction taks based on the sstables marked as pending repair
-        cfs.getCompactionStrategyContainer().enable();
-        for (SSTableReader sstable : sstables)
-            pendingContains(sstable);
+        compactionStrategyContainer.enable();
+        assertEquals(numberOfSStables, cfs.getPendingRepairSSTables(repairID).size());
         Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
         assertEquals(1, compactionTasks.size());
         AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
+        assertNotNull(compactionTask);
 
         // Finalize the repair session
         LocalSessionAccessor.finalizeUnsafe(repairID);
@@ -399,31 +401,30 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertTrue(hasPendingStrategiesFor(repairID));
 
         // run the compaction
-        if (compactionTask != null)
-        {
-            compactionTask.execute();
-            Assert.assertEquals(1, cfs.getLiveSSTables().size());
-        }
+        compactionTask.execute();
 
-        // The repair session is finalized but there could be an sstable left behind pending repair!
-        SSTableReader compactedSSTable = cfs.getLiveSSTables().iterator().next();
-        Assert.assertEquals(repairID, compactedSSTable.getPendingRepair());
+        // The repair session is finalized but there is an sstable left behind pending repair!
+        SSTableReader compactedSSTable = cfs.getPendingRepairSSTables(repairID).iterator().next();
+        assertEquals(repairID, compactedSSTable.getPendingRepair());
+        assertEquals(1, cfs.getLiveSSTables().size());
+        assertEquals(1, cfs.getPendingRepairSSTables(repairID).size());
 
         System.out.println("*********************************************************************************************");
         System.out.println(compactedSSTable);
         System.out.println("Pending repair UUID: " + compactedSSTable.getPendingRepair());
         System.out.println("Repaired at: " + compactedSSTable.getRepairedAt());
-        System.out.println("Creation time: " + compactedSSTable.getDataCreationTime());
+        System.out.println("Creation time: " + compactedSSTable.getCreationTimeFor(SSTableFormat.Components.DATA));
         System.out.println("Live sstables: " + cfs.getLiveSSTables().size());
+        System.out.println("Pending repair sstables: " + cfs.getPendingRepairSSTables(repairID).size());
         System.out.println("*********************************************************************************************");
 
-        
         // Run compaction again. It should pick up the pending repair sstable
-        compactionTasks = compactionStrategyContainer.getMaximalTasks(FBUtilities.nowInSeconds(), false);
-        assertEquals(1, compactionTasks.size());
-        compactionTask = compactionTasks.iterator().next();
-        if (compactionTask != null)
+        compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        if (!compactionTasks.isEmpty())
         {
+            assertEquals(1, compactionTasks.size());
+            compactionTask = compactionTasks.iterator().next();
+            assertNotNull(compactionTask);
             Assert.assertSame(RepairFinishedCompactionTask.class, compactionTask.getClass());
             compactionTask.execute();
         }
@@ -432,10 +433,13 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         System.out.println(compactedSSTable);
         System.out.println("Pending repair UUID: " + compactedSSTable.getPendingRepair());
         System.out.println("Repaired at: " + compactedSSTable.getRepairedAt());
-        System.out.println("Creation time: " + compactedSSTable.getDataCreationTime());
+        System.out.println("Creation time: " + compactedSSTable.getCreationTimeFor(SSTableFormat.Components.DATA));
         System.out.println("Live sstables: " + cfs.getLiveSSTables().size());
+        System.out.println("Pending repair sstables: " + cfs.getPendingRepairSSTables(repairID).size());
         System.out.println("*********************************************************************************************");
 
+        assertEquals(0, cfs.getPendingRepairSSTables(repairID).size());
+        assertEquals(1, cfs.getLiveSSTables().size());
         Assert.assertFalse(hasPendingStrategiesFor(repairID));
         Assert.assertFalse(hasTransientStrategiesFor(repairID));
         Assert.assertTrue(repairedContains(compactedSSTable));
@@ -445,7 +449,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         long expectedRepairedAt = ActiveRepairService.instance().getParentRepairSession(repairID).repairedAt;
         Assert.assertFalse(compactedSSTable.isPendingRepair());
         Assert.assertTrue(compactedSSTable.isRepaired());
-        Assert.assertEquals(expectedRepairedAt, compactedSSTable.getSSTableMetadata().repairedAt);
+        assertEquals(expectedRepairedAt, compactedSSTable.getSSTableMetadata().repairedAt);
     }
 
     @Override
