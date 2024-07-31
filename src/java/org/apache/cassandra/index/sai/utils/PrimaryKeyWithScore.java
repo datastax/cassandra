@@ -50,7 +50,9 @@ public class PrimaryKeyWithScore extends PrimaryKeyWithSortKey
         if (!(o instanceof PrimaryKeyWithScore))
             throw new IllegalArgumentException("Cannot compare PrimaryKeyWithScore with " + o.getClass().getSimpleName());
 
+        var other = (PrimaryKeyWithScore) o;
         // Descending order
-        return Float.compare(((PrimaryKeyWithScore) o).indexScore, indexScore);
+        var cmp = Float.compare(other.indexScore, indexScore);
+        return cmp != 0 ? cmp : super.breakTie(other);
     }
 }

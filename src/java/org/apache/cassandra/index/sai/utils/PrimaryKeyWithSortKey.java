@@ -70,6 +70,17 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
      */
     abstract protected boolean isIndexDataEqualToLiveData(ByteBuffer value);
 
+    protected final int breakTie(PrimaryKeyWithSortKey o)
+    {
+        // We use the natural order when comparing primary keys to breaking a tie. This method is necessary when
+        // working with the MergeIterator to prevent incorrect deduplication of results.
+        var cmp = primaryKey.compareTo(o.primaryKey());
+        // If it is the same primary key, but comes from different sources, we need to differentiate them, but it
+        // doesn't matter which one comes first because in order to reach this code path, they had the same score
+        // and the same primary key.
+        return cmp != 0 ? cmp : sourceTable.equals(o.sourceTable) ? 0 : 1;
+    }
+
     @Override
     public final int hashCode()
     {
