@@ -20,6 +20,8 @@ import java.io.IOException;
 
 import org.junit.Ignore;
 
+import org.apache.cassandra.repair.NoSuchRepairSessionException;
+
 @Ignore
 public interface CompactionStrategyContainerPendingRepairTest
 {
@@ -45,6 +47,11 @@ public interface CompactionStrategyContainerPendingRepairTest
      * which reclassify the sstables as repaired
      */
     void testCleanupCompactionFinalized() throws Exception;
+
+    /**
+     * Tests that finalized repairs racing with compactions on the same set of sstables don't leave unrepaired sstables behind
+     */
+    void testFinalizedAndCompactionRace() throws IOException, NoSuchRepairSessionException;
 
     void testFinalizedSessionTransientCleanup() throws IOException;
 
