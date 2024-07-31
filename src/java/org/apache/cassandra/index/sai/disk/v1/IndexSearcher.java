@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 
@@ -109,17 +108,13 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @param limit        the num of rows to returned, used by ANN index
      * @return an iterator of {@link PrimaryKeyWithSortKey} in score order
      */
-    public abstract CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException;
+    public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException;
 
 
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
     {
-        // ANN's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
-        Comparator<PrimaryKeyWithSortKey> comparator = orderer.isAscending() || orderer.isANN()
-                                                       ? Comparator.naturalOrder()
-                                                       : Comparator.reverseOrder();
-        var pq = new PriorityQueue<>(comparator);
+        var pq = new PriorityQueue<PrimaryKeyWithSortKey>(orderer.getComparator());
         for (var key : keys)
         {
             var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
@@ -163,7 +158,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
         return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
     }
 
-    protected CloseableIterator<? extends PrimaryKeyWithSortKey> toMetaSortedIterator(CloseableIterator<? extends RowIdWithMeta> rowIdIterator, QueryContext queryContext) throws IOException
+    protected CloseableIterator<PrimaryKeyWithSortKey> toMetaSortedIterator(CloseableIterator<? extends RowIdWithMeta> rowIdIterator, QueryContext queryContext) throws IOException
     {
         if (rowIdIterator == null || !rowIdIterator.hasNext())
         {

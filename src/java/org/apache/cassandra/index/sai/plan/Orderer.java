@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.stream.Collectors;
 
@@ -29,6 +30,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
 /**
@@ -68,6 +70,12 @@ public class Orderer
     {
         // Note: ANN is always descending.
         return operator == Operator.ORDER_BY_ASC;
+    }
+
+    public Comparator<? super PrimaryKeyWithSortKey> getComparator()
+    {
+        // ANN's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
+        return isAscending() || isANN() ? Comparator.naturalOrder() : Comparator.reverseOrder();
     }
 
     public boolean isLiteral()
