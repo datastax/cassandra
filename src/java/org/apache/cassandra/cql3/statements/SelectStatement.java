@@ -1112,7 +1112,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
     private boolean needsToSkipUserLimit()
     {
-        // if post query ordering is required, and it's not ANN
+        // if post query ordering is required, and it's not ordered by an index
         return needsPostQueryOrdering() && !needIndexOrdering();
     }
 
@@ -1147,6 +1147,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
             assert index != null;
+
+            if (restriction instanceof SingleColumnRestriction.OrderRestriction)
+            {
+                var comparator = index.postQueryComparator(restriction, columnIndex, options);
+                return SortedRowsBuilder.create(limit, offset, comparator);
+            }
 
             Index.Scorer scorer = index.postQueryScorer(restriction, columnIndex, options);
             return SortedRowsBuilder.create(limit, offset, scorer);
@@ -1493,7 +1499,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         private boolean isReversed(TableMetadata table, Map<ColumnMetadata, Ordering> orderingColumns, StatementRestrictions restrictions) throws InvalidRequestException
         {
-            // FIXME exception for ANN until we properly support general ORDER BY
+            // Nonclustered ordering handles descending logic in a different way
             if (orderingColumns.values().stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
                 return false;
 
@@ -1550,12 +1556,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
         private void checkNeedsFiltering(TableMetadata table, StatementRestrictions restrictions) throws InvalidRequestException
         {
-            if (parameters.allowFiltering && restrictions.hasAnnRestriction())
+            if (parameters.allowFiltering && restrictions.hasIndxBasedOrdering())
             {
                 // ANN queries do not currently work correctly when filtering is required, so
                 // we fail even though ALLOW FILTERING was passed
                 if (restrictions.needFiltering(table))
-                    throw invalidRequest(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+                    throw invalidRequest(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
             }
             // non-key-range non-indexed queries cannot involve filtering underneath
             if (!parameters.allowFiltering && (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing()))
@@ -1567,7 +1573,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                     restrictions.throwRequiresAllowFilteringError(table);
                 }
                 if (restrictions.hasClusteringColumnsRestrictions()
-                    && restrictions.hasAnnRestriction()
+                    && restrictions.hasIndxBasedOrdering()
                     && restrictions.hasClusterColumnRestrictionWithoutSupportingIndex(table))
                         restrictions.throwRequiresAllowFilteringError(table);
             }
