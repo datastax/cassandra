@@ -82,21 +82,26 @@ import org.apache.cassandra.utils.concurrent.Timer;
  */
 public class SensorsRegistry implements SchemaChangeListener
 {
+    private static final int LOCK_SRIPES = 1024;
+
     public static final SensorsRegistry instance = new SensorsRegistry();
     private static final Logger logger = LoggerFactory.getLogger(SensorsRegistry.class);
+
     private final Timer asyncUpdater = Timer.INSTANCE;
 
-    private static final int LOCK_SRIPES = 1024;
     private final Striped<ReadWriteLock> stripedUpdateLock = Striped.readWriteLock(LOCK_SRIPES); // we stripe per keyspace
+
     private final Set<String> keyspaces = Sets.newConcurrentHashSet();
     private final Set<String> tableIds = Sets.newConcurrentHashSet();
 
     // Using Map of array values for performance reasons to avoid wrapping key into another Object, e.g. Pair(context,type)).
     // Note that array values can contain NULL so be careful to filter NULLs when iterating over array
     private final ConcurrentMap<Context, Sensor[]> identity = new ConcurrentHashMap<>();
+
     private final ConcurrentMap<String, Set<Sensor>> byKeyspace = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Set<Sensor>> byTableId = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Set<Sensor>> byType = new ConcurrentHashMap<>();
+
     private final CopyOnWriteArrayList<SensorsRegistryListener> listeners = new CopyOnWriteArrayList<>();
 
     private final Object typeSensorsLock = new Object();
@@ -121,77 +126,6 @@ public class SensorsRegistry implements SchemaChangeListener
     public Optional<Sensor> getSensor(Context context, Type type)
     {
         return Optional.ofNullable(getSensorFast(context, type));
-    }
-
-    /**
-     * To get best perfromance we are not returning Optional here
-     */
-    @Nullable
-    public Sensor getSensorFast(Context context, Type type)
-    {
-        Sensor[] typeSensors = identity.get(context);
-        return  typeSensors != null ? typeSensors[type.ordinal()] : null;
-    }
-
-    /**
-     * To get best perfromance we are not returning Optional here
-     */
-    @Nullable
-    public Sensor getOrCreateSensorFast(Context context, Type type)
-    {
-        Sensor sensor = getSensorFast(context, type);
-        if (sensor != null)
-            return sensor;
-
-        stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().lock();
-        try
-        {
-            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
-                return null;
-
-            AtomicReference<Sensor> newSensor = new AtomicReference<>();
-            Sensor[] typeSensors = identity.computeIfAbsent(context, key -> {
-                Sensor[] newTypeSensors = new Sensor[Type.values().length];
-                newTypeSensors[type.ordinal()] = createNewSensor(context, type);
-                newSensor.set(newTypeSensors[type.ordinal()]);
-                return newTypeSensors;
-            });
-            if (typeSensors == null)
-                return newSensor.get();
-
-            synchronized (typeSensorsLock)
-            {
-                typeSensors = identity.get(context);
-                if (typeSensors[type.ordinal()] != null)
-                    return typeSensors[type.ordinal()];
-                typeSensors[type.ordinal()] = createNewSensor(context, type);
-                return typeSensors[type.ordinal()];
-            }
-        }
-        finally
-        {
-            stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().unlock();
-        }
-    }
-
-    private Sensor createNewSensor(Context context, Type type)
-    {
-        Sensor sensor = new Sensor(context, type);
-        notifyOnSensorCreated(sensor);
-
-        Set<Sensor> keyspaceSet = byKeyspace.get(sensor.getContext().getKeyspace());
-        keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
-        keyspaceSet.add(sensor);
-
-        Set<Sensor> tableSet = byTableId.get(sensor.getContext().getTableId());
-        tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
-        tableSet.add(sensor);
-
-        Set<Sensor> opSet = byType.get(sensor.getType().name());
-        opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
-        opSet.add(sensor);
-
-        return sensor;
     }
 
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
@@ -314,6 +248,63 @@ public class SensorsRegistry implements SchemaChangeListener
         }
 
         return removed;
+    }
+
+    /**
+     * To get best perfromance we are not returning Optional here
+     */
+    @Nullable
+    private Sensor getSensorFast(Context context, Type type)
+    {
+        Sensor[] typeSensors = identity.get(context);
+        return  typeSensors != null ? typeSensors[type.ordinal()] : null;
+    }
+
+    /**
+     * To get best perfromance we are not returning Optional here
+     */
+    @Nullable
+    private Sensor getOrCreateSensorFast(Context context, Type type)
+    {
+        Sensor sensor = getSensorFast(context, type);
+        if (sensor != null)
+            return sensor;
+
+        stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().lock();
+        try
+        {
+            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
+                return null;
+
+            Sensor[] typeSensors = identity.compute(context, (key, types) -> {
+                Sensor[] computed = types != null ? types : new Sensor[Type.values().length];
+                if (computed[type.ordinal()] == null)
+                {
+                    computed[type.ordinal()] = new Sensor(context, type);
+                    notifyOnSensorCreated(computed[type.ordinal()]);
+                }
+                return computed;
+            });
+            sensor = typeSensors[type.ordinal()];
+
+            Set<Sensor> keyspaceSet = byKeyspace.get(sensor.getContext().getKeyspace());
+            keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
+            keyspaceSet.add(sensor);
+
+            Set<Sensor> tableSet = byTableId.get(sensor.getContext().getTableId());
+            tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
+            tableSet.add(sensor);
+
+            Set<Sensor> opSet = byType.get(sensor.getType().name());
+            opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
+            opSet.add(sensor);
+
+            return sensor;
+        }
+        finally
+        {
+            stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().unlock();
+        }
     }
 
     /**

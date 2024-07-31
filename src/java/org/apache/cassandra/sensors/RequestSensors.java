@@ -27,10 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
 import javax.annotation.Nullable;
-
-import org.apache.cassandra.utils.Pair;
 
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
@@ -49,9 +46,11 @@ import org.apache.cassandra.utils.Pair;
 public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
+
     // Using Map of array values for performance reasons to avoid wrapping key into another Object (.eg. Pair(context,type)).
     // Note that array values can contain NULL so be careful to filter NULLs when iterating over array
     private final HashMap<Context, Sensor[]> sensors = new LinkedHashMap<>();
+
     private final Map<Sensor, Double> latestSyncedValuePerSensor = new HashMap<>();
 
     public RequestSensors()
@@ -69,32 +68,16 @@ public class RequestSensors
         Sensor[] typeSensors = sensors.computeIfAbsent(context, key ->
         {
             Sensor[] newTypeSensors = new Sensor[Type.values().length];
-            newTypeSensors[type.ordinal()]= new Sensor(context, type);
+            newTypeSensors[type.ordinal()] = new Sensor(context, type);
             return newTypeSensors;
         });
         if (typeSensors[type.ordinal()] == null)
             typeSensors[type.ordinal()] = new Sensor(context, type);
-
     }
 
     public synchronized Optional<Sensor> getSensor(Context context, Type type)
     {
-        Sensor[] typeSensors = sensors.get(context);
-        if (typeSensors == null)
-            return Optional.empty();
-        return Optional.ofNullable(typeSensors[type.ordinal()]);
-    }
-
-    /**
-     * To get best perfromance we are not returning Optional here
-     */
-    @Nullable
-    private synchronized Sensor getSensorFast(Context context, Type type)
-    {
-        Sensor[] typeSensors = sensors.get(context);
-        if (typeSensors != null)
-            return typeSensors[type.ordinal()];
-        return null;
+        return Optional.ofNullable(getSensorFast(context, type));
     }
 
     public synchronized Set<Sensor> getSensors(Type type)
@@ -111,15 +94,34 @@ public class RequestSensors
 
     public synchronized void syncAllSensors()
     {
-        sensors.values().stream().flatMap(Arrays::stream).filter(Objects::nonNull).forEach(sensor -> {
-            double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
-            double update = sensor.getValue() - current;
-            if (update == 0d)
-                return;
+        sensors.values().forEach(types -> {
+            for (int i = 0; i < types.length; i++)
+            {
+                if (types[i] != null)
+                {
+                    Sensor sensor = types[i];
+                    double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
+                    double update = sensor.getValue() - current;
+                    if (update == 0d)
+                        return;
 
-            latestSyncedValuePerSensor.put(sensor, sensor.getValue());
-            sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
+                    latestSyncedValuePerSensor.put(sensor, sensor.getValue());
+                    sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
+                }
+            }
         });
+    }
+
+    /**
+     * To get best perfromance we are not returning Optional here
+     */
+    @Nullable
+    private Sensor getSensorFast(Context context, Type type)
+    {
+        Sensor[] typeSensors = sensors.get(context);
+        if (typeSensors != null)
+            return typeSensors[type.ordinal()];
+        return null;
     }
 
     @Override
