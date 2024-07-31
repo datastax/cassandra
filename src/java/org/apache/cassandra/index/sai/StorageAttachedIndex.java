@@ -646,6 +646,18 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
+    {
+        assert restriction instanceof SingleColumnRestriction.OrderRestriction;
+
+        SingleColumnRestriction.OrderRestriction orderRestriction = (SingleColumnRestriction.OrderRestriction) restriction;
+        var typeComparator = orderRestriction.getDirection() == Operator.ORDER_BY_DESC
+                             ? indexContext.getValidator().reversed()
+                             : indexContext.getValidator();
+        return (a, b) -> typeComparator.compare(a.get(columnIndex), b.get(columnIndex));
+    }
+
+    @Override
     public Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
     {
         // For now, only support ANN
@@ -685,7 +697,7 @@ public class StorageAttachedIndex implements Index
 
         // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k
         if (command.limits().isUnlimited() || command.limits().count() > MAX_TOP_K)
-            throw new InvalidRequestException(String.format("Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
+            throw new InvalidRequestException(String.format("SAI based ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
 
         indexContext.validate(command.rowFilter());

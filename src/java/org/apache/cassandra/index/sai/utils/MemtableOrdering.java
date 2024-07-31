@@ -20,8 +20,10 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.List;
 
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /***
@@ -29,14 +31,22 @@ import org.apache.cassandra.utils.CloseableIterator;
  */
 public interface MemtableOrdering
 {
+
+    /**
+     * Order the index based on the given expression.
+     * @param queryContext - the query context
+     * @param orderer - the expression to order by
+     * @param keyRange - the key range to search
+     * @param limit - can be used to inform the search, but should not be used to prematurely limit the iterator
+     * @return an iterator over the results in score order.
+     */
+    CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(QueryContext queryContext, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit);
+
     /**
      * Order the given list of {@link PrimaryKey} results corresponding to the given expression.
-     * Returns an iterator over the results in score order (currently only descending).
+     * Returns an iterator over the results in score order.
      *
      * Assumes that the given  spans the same rows as the implementing index's segment.
      */
-    default CloseableIterator<ScoredPrimaryKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
-    {
-        throw new UnsupportedOperationException();
-    }
+    CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit);
 }

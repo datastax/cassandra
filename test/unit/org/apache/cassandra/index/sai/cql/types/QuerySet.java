@@ -20,12 +20,15 @@ package org.apache.cassandra.index.sai.cql.types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 import static org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport.NUMBER_OF_VALUES;
 import static org.junit.Assert.assertEquals;
@@ -41,16 +44,33 @@ public abstract class QuerySet extends CQLTester
 
     public abstract void runQueries(SAITester tester, Object[][] allRows) throws Throwable;
 
+    protected static boolean isOrderBySupported()
+    {
+        return Version.latest().onOrAfter(Version.BA);
+    }
+
     public static class NumericQuerySet extends QuerySet
     {
+        private final boolean testOrderBy;
+        private final Comparator<Object[]> comparator;
+
         NumericQuerySet(DataSet<?> dataset)
         {
+            this(dataset, isOrderBySupported());
+        }
+
+        NumericQuerySet(DataSet<?> dataset, boolean testOrderBy)
+        {
             super(dataset);
+            assert !testOrderBy || isOrderBySupported() : "ORDER BY not supported";
+            this.testOrderBy = testOrderBy;
+            this.comparator = Comparator.comparing(o -> (Comparable) o[2]);
         }
 
         @Override
         public void runQueries(SAITester tester, Object[][] allRows) throws Throwable
         {
+
             // Query each value for all operators
             for (int index = 0; index < allRows.length; index++)
             {
@@ -89,6 +109,20 @@ public abstract class QuerySet extends CQLTester
                 assertRowsIgnoringOrder(tester.execute("SELECT * FROM %s WHERE value > ? AND value < ?", allRows[min][2], allRows[max][2]),
                         Arrays.copyOfRange(allRows, min + 1, max));
 
+                var result = Arrays.copyOfRange(allRows, min + 1, max);
+                if (result.length > 0 && testOrderBy)
+                {
+                    Arrays.sort(result, comparator);
+                    assertRows(tester.execute("SELECT * FROM %s WHERE value > ? AND value < ? ORDER BY value ASC LIMIT ?",
+                                              allRows[min][2], allRows[max][2], result.length), result);
+                    // reverse it
+                    var list = Arrays.asList(result);
+                    Collections.reverse(list);
+                    var reversed = list.toArray(new Object[][]{});
+                    assertRows(tester.execute("SELECT * FROM %s WHERE value > ? AND value < ? ORDER BY value DESC LIMIT ?",
+                                              allRows[min][2], allRows[max][2], reversed.length), reversed);
+                }
+
                 // lower inclusive -> upper exclusive
                 assertRowsIgnoringOrder(tester.execute("SELECT * FROM %s WHERE value >= ? AND value < ?", allRows[min][2], allRows[max][2]),
                         Arrays.copyOfRange(allRows, min, max));
@@ -101,6 +135,28 @@ public abstract class QuerySet extends CQLTester
                 assertRowsIgnoringOrder(tester.execute("SELECT * FROM %s WHERE value >= ? AND value <= ?", allRows[min][2], allRows[max][2]),
                         Arrays.copyOfRange(allRows, min, max + 1));
             }
+
+            if (!testOrderBy)
+                return;
+
+            // Sort allRows by value
+            var copyOfAllRows = Arrays.copyOf(allRows, allRows.length);
+            Arrays.sort(copyOfAllRows, comparator);
+
+            assertRows(tester.execute("SELECT * FROM %s ORDER BY value ASC limit 10"),
+                       Arrays.stream(copyOfAllRows).limit(10).toArray(Object[][]::new));
+            assertRows(tester.execute("SELECT * FROM %s ORDER BY value ASC limit 100"),
+                       Arrays.stream(copyOfAllRows).limit(100).toArray(Object[][]::new));
+
+            // reverse again
+            var list = Arrays.asList(copyOfAllRows);
+            Collections.reverse(list);
+            copyOfAllRows = list.toArray(new Object[][]{});
+            // Sort only
+            assertRows(tester.execute("SELECT * FROM %s ORDER BY value DESC limit 10"),
+                       Arrays.stream(copyOfAllRows).limit(10).toArray(Object[][]::new));
+            assertRows(tester.execute("SELECT * FROM %s ORDER BY value DESC limit 100"),
+                       Arrays.stream(copyOfAllRows).limit(100).toArray(Object[][]::new));
         }
     }
 
@@ -135,9 +191,28 @@ public abstract class QuerySet extends CQLTester
 
     public static class LiteralQuerySet extends QuerySet
     {
-        LiteralQuerySet(DataSet<?> dataSet)
+        private final boolean testOrderBy;
+        private final Comparator<Object[]> comparator;
+
+        // For UTF8, the ordering is different from the natural ordering, so we allow a custom comparator
+        LiteralQuerySet(DataSet<?> dataSet, Comparator<Object[]> comparator)
         {
             super(dataSet);
+            this.testOrderBy = isOrderBySupported();
+            this.comparator = comparator;
+        }
+
+        LiteralQuerySet(DataSet<?> dataSet)
+        {
+            this(dataSet, isOrderBySupported());
+        }
+
+        LiteralQuerySet(DataSet<?> dataSet, boolean testOrderBy)
+        {
+            super(dataSet);
+            assert !testOrderBy || isOrderBySupported() : "ORDER BY not supported by AA (V1) indexes";
+            this.testOrderBy = testOrderBy;
+            this.comparator = Comparator.comparing(o -> (Comparable) o[2]);
         }
 
         @Override
@@ -148,6 +223,28 @@ public abstract class QuerySet extends CQLTester
             {
                 assertRows(tester.execute("SELECT * FROM %s WHERE value = ?", allRows[index][2]), new Object[][] { allRows[index] });
             }
+
+            // Some literal types do not support ORDER BY yet, so we skip those
+            if (!testOrderBy)
+                return;
+
+            var copyOfAllRows = Arrays.copyOf(allRows, allRows.length);
+            // Sort allRows by value
+            Arrays.sort(copyOfAllRows, comparator);
+            assertRows(tester.execute("SELECT * FROM %s ORDER BY value ASC limit 10"),
+                       Arrays.stream(copyOfAllRows).limit(10).toArray(Object[][]::new));
+            assertRows(tester.execute("SELECT * FROM %s ORDER BY value ASC limit 100"),
+                       Arrays.stream(copyOfAllRows).limit(100).toArray(Object[][]::new));
+
+            // reverse copyOfAllRows
+            var list = Arrays.asList(copyOfAllRows);
+            Collections.reverse(list);
+            copyOfAllRows = list.toArray(new Object[][]{});
+
+            assertRows(tester.execute("SELECT * FROM %s ORDER BY value DESC limit 10"),
+                       Arrays.stream(copyOfAllRows).limit(10).toArray(Object[][]::new));
+            assertRows(tester.execute("SELECT * FROM %s ORDER BY value DESC limit 100"),
+                       Arrays.stream(copyOfAllRows).limit(100).toArray(Object[][]::new));
         }
     }
 
