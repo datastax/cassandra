@@ -142,6 +142,13 @@ public class Merger<In, Source, Out> implements AutoCloseable
         return consume();
     }
 
+    public In nonReducingNext()
+    {
+        advance();  // no-op if already advanced (e.g. hasNext() called)
+        assert size > 0;
+        return consumeOne();
+    }
+
     public void close()
     {
         if (onClose == null)
@@ -220,6 +227,16 @@ public class Merger<In, Source, Out> implements AutoCloseable
         }
         needingAdvance = i;
         return reducer.getReduced();
+    }
+
+    /**
+     * Consume only the top item, regardless if there are others that sort like it on the heap.
+     * No reducer is required for this.
+     */
+    private In consumeOne()
+    {
+        needingAdvance = 1;
+        return heap[0].consumeItem();
     }
 
     /**
@@ -426,8 +443,14 @@ public class Merger<In, Source, Out> implements AutoCloseable
 
         public void consume(Reducer reducer)
         {
-            reducer.reduce(idx, item);
+            reducer.reduce(idx, consumeItem());
+        }
+
+        public In consumeItem()
+        {
+            In v = item;
             item = null;
+            return v;
         }
 
         public boolean needsAdvance()
