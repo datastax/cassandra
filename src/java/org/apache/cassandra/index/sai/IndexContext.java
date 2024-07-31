@@ -456,14 +456,14 @@ public class IndexContext
     }
 
     // Search all memtables for all PrimaryKeys in list.
-    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Orderer orderer, int limit)
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Orderer orderer, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
             return List.of();
 
-        List<CloseableIterator<? extends PrimaryKeyWithSortKey>> result = new ArrayList<>(memtables.size());
+        List<CloseableIterator<PrimaryKeyWithSortKey>> result = new ArrayList<>(memtables.size());
         for (MemtableIndex index : memtables)
             result.add(index.orderResultsBy(context, source, orderer, limit));
 

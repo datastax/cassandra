@@ -179,19 +179,12 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(QueryContext queryContext, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer)
     {
         if (data.isEmpty())
             return CloseableIterator.emptyIterator();
         var iter = data.entrySet(orderer.isAscending() ? Direction.FORWARD : Direction.REVERSE).iterator();
         return new AllTermsIterator(iter);
-    }
-
-    @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
-    {
-        // The current implementation is one level higher in the TrieMemtableIndex.
-        throw new UnsupportedOperationException("Not supported");
     }
 
     @Override
@@ -373,7 +366,7 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    private class AllTermsIterator extends AbstractIterator<PrimaryKeyWithByteComparable>
+    private class AllTermsIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
         private final Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator;
         private Iterator<PrimaryKey> primaryKeysIterator = CloseableIterator.emptyIterator();
@@ -385,7 +378,7 @@ public class TrieMemoryIndex extends MemoryIndex
         }
 
         @Override
-        protected PrimaryKeyWithByteComparable computeNext()
+        protected PrimaryKeyWithSortKey computeNext()
         {
             assert memtable != null;
             if (primaryKeysIterator.hasNext())

@@ -194,11 +194,11 @@ public class SSTableIndex
         return searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
-    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
-                                                                            AbstractBounds<PartitionPosition> keyRange,
-                                                                            QueryContext context,
-                                                                            int limit,
-                                                                            long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                  AbstractBounds<PartitionPosition> keyRange,
+                                                                  QueryContext context,
+                                                                  int limit,
+                                                                  long totalRows) throws IOException
     {
         return searchableIndex.orderBy(orderer, keyRange, context, limit, totalRows);
     }
@@ -288,7 +288,7 @@ public class SSTableIndex
         return Objects.hashCode(sstableContext, indexContext);
     }
 
-    public List<CloseableIterator<? extends PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
     {
         return searchableIndex.orderResultsBy(context, keys, orderer, limit, totalRows);
     }
