@@ -458,7 +458,7 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<? extends PrimaryKeyWithSortKey> getTopKRows(RangeIterator keys, int softLimit)
+            public Iterator<PrimaryKeyWithSortKey> getTopKRows(RangeIterator keys, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
