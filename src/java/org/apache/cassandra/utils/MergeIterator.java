@@ -40,7 +40,7 @@ public abstract class MergeIterator
         return new ManyToOneCloseable<>(sources, comparator, reducer);
     }
 
-    public static <In, Out> Iterator<Out> get(List<Iterator<In>> sources,
+    public static <In, Out> Iterator<Out> get(List<? extends Iterator<In>> sources,
                                               Comparator<? super In> comparator,
                                               Reducer<In, Out> reducer)
     {
@@ -51,6 +51,24 @@ public abstract class MergeIterator
                    : new OneToOne<>(sources.get(0), reducer);
         }
         return new ManyToOne<>(sources, comparator, reducer);
+    }
+
+    public static <In> Iterator<In> getNonReducing(List<? extends Iterator<In>> sources,
+                                                   Comparator<? super In> comparator)
+    {
+        if (sources.size() == 1)
+            return sources.get(0);
+        else
+            return new NonReducing<>(sources, comparator);
+    }
+
+    public static <In> CloseableIterator<In> getNonReducingCloseable(List<? extends CloseableIterator<In>> sources,
+                                                                     Comparator<? super In> comparator)
+    {
+        if (sources.size() == 1)
+            return sources.get(0);
+        else
+            return new NonReducingCloseable<>(sources, comparator);
     }
 
     private static class ManyToOne<In, V extends Iterator<In>, Out> extends Merger<In, V, Out> implements Iterator<Out>
@@ -71,6 +89,33 @@ public abstract class MergeIterator
         public ManyToOneCloseable(List<V> iters, Comparator<? super In> comp, Reducer<In, Out> reducer)
         {
             super(iters, CloseableIterator::close, comp, reducer);
+        }
+    }
+
+    private static class NonReducing<In, V extends Iterator<In>> extends Merger<In, V, In> implements Iterator<In>
+    {
+        public NonReducing(List<V> iters, Comparator<? super In> comp)
+        {
+            this(iters, null, comp);
+        }
+
+        NonReducing(List<V> iters, Consumer<V> onClose, Comparator<? super In> comp)
+        {
+            super(iters, it -> it.hasNext() ? Preconditions.checkNotNull(it.next()) : null, onClose, comp, null);
+        }
+
+        @Override
+        public In next()
+        {
+            return super.nonReducingNext();
+        }
+    }
+
+    private static class NonReducingCloseable<In, V extends CloseableIterator<In>> extends NonReducing<In, V> implements CloseableIterator<In>
+    {
+        public NonReducingCloseable(List<V> iters, Comparator<? super In> comp)
+        {
+            super(iters, CloseableIterator::close, comp);
         }
     }
 
