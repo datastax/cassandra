@@ -60,7 +60,7 @@ public class Expression
         EQ, MATCH, PREFIX, NOT_EQ, RANGE,
         CONTAINS_KEY, CONTAINS_VALUE,
         NOT_CONTAINS_VALUE, NOT_CONTAINS_KEY,
-        IN, ANN, BOUNDED_ANN;
+        IN, ORDER_BY, BOUNDED_ANN;
 
         public static Op valueOf(Operator operator)
         {
@@ -101,7 +101,9 @@ public class Expression
                     return IN;
 
                 case ANN:
-                    return ANN;
+                case ORDER_BY_ASC:
+                case ORDER_BY_DESC:
+                    return ORDER_BY;
 
                 case BOUNDED_ANN:
                     return BOUNDED_ANN;
@@ -238,11 +240,6 @@ public class Expression
                 else
                     lower = new Bound(value, validator, lowerInclusive);
                 break;
-            case ANN:
-                operation = Op.ANN;
-                lower = new Bound(value, validator, true);
-                upper = lower;
-                break;
             case BOUNDED_ANN:
                 operation = Op.BOUNDED_ANN;
                 lower = new Bound(value, validator, true);
@@ -250,6 +247,16 @@ public class Expression
                 searchRadiusMeters = FloatType.instance.compose(upper.value.raw);
                 boundedAnnEuclideanDistanceThreshold = GeoUtil.amplifiedEuclideanSimilarityThreshold(lower.value.vector, searchRadiusMeters);
                 break;
+            case ANN:
+            case ORDER_BY_ASC:
+            case ORDER_BY_DESC:
+                // If we alread have an operation on the column, we don't need to set the ORDER_BY op because
+                // it is only used to force validation on a column, and the presence of another operation will do that.
+                if (operation == null)
+                    operation = Op.ORDER_BY;
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported operator: " + op);
         }
 
         assert operation != null;
@@ -263,8 +270,8 @@ public class Expression
         if (columnValue == null)
             return false;
 
-        // ANN accepts all results
-        if (operation == Op.ANN)
+        // ORDER_BY is not indepently verifiable, so we always return true
+        if (operation == Op.ORDER_BY)
             return true;
 
         if (!TypeUtil.isValid(columnValue, validator))
