@@ -59,11 +59,12 @@ import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.FBUtilities;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
@@ -77,13 +78,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
                                         ReadCommand command,
+                                        Orderer orderer,
                                         IndexFeatureSet indexFeatureSet,
                                         long executionQuotaMs)
     {
         this.command = command;
         this.cfs = cfs;
         this.queryContext = new QueryContext(executionQuotaMs);
-        this.controller = new QueryController(cfs, command, indexFeatureSet, queryContext, tableQueryMetrics);
+        this.controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext, tableQueryMetrics);
     }
 
     @Override
@@ -118,18 +120,26 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
         FilterTree filterTree = analyzeFilter();
-        Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator();
-
         if (command.isTopK())
         {
-            assert !(keysIterator instanceof RangeIterator);
-            var scoredKeysIterator = (CloseableIterator<ScoredPrimaryKey>) keysIterator;
-            var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
-                                                         executionController, queryContext);
-            return (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
+            // TopK queries require a consistent view of the sstables and memtables in order to validate overwritten
+            // rows. Acquire the view before building any of the iterators.
+            try (var queryView = new QueryViewBuilder(cfs, controller.getOrderer(), controller.mergeRange(), queryContext).build())
+            {
+                // TODO this is a bit of a hack, but we need to get the view from the queryView. Find better way to
+                // thread this through.
+                queryContext.view = queryView;
+                Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator();
+                assert !(keysIterator instanceof RangeIterator);
+                var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
+                var result = new ScoreOrderedResultRetriever(queryView.view, scoredKeysIterator, filterTree, controller,
+                                                             executionController, queryContext);
+                return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
+            }
         }
         else
         {
+            Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator();
             assert keysIterator instanceof RangeIterator;
             return new ResultRetriever((RangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
         }
@@ -434,9 +444,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
     public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
+        private final ColumnFamilyStore.RefViewFragment view;
         private final List<AbstractBounds<PartitionPosition>> keyRanges;
         private final boolean coversFullRing;
-        private final CloseableIterator<ScoredPrimaryKey> scoredPrimaryKeyIterator;
+        private final CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
@@ -445,12 +456,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private HashSet<PrimaryKey> keysSeen;
         private HashSet<PrimaryKey> updatedKeys;
 
-        private ScoreOrderedResultRetriever(CloseableIterator<ScoredPrimaryKey> scoredPrimaryKeyIterator,
+        private ScoreOrderedResultRetriever(ColumnFamilyStore.RefViewFragment view,
+                                            CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
                                             QueryController controller,
                                             ReadExecutionController executionController,
                                             QueryContext queryContext)
         {
+            this.view = view;
             this.keyRanges = controller.dataRanges().stream().map(DataRange::keyRange).collect(Collectors.toList());
             this.coversFullRing = keyRanges.size() == 1 && RangeUtil.coversFullRing(keyRanges.get(0));
 
@@ -481,12 +494,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          *
          * @return an iterator or null if all keys were tried with no success
          */
-        private @Nullable UnfilteredRowIterator nextRowIterator(@Nonnull Supplier<ScoredPrimaryKey> keySupplier)
+        private @Nullable UnfilteredRowIterator nextRowIterator(@Nonnull Supplier<PrimaryKeyWithSortKey> keySupplier)
         {
             UnfilteredRowIterator iterator = null;
             while (iterator == null)
             {
-                ScoredPrimaryKey key = keySupplier.get();
+                var key = keySupplier.get();
                 if (key == null)
                     return null;
                 iterator = apply(key);
@@ -516,18 +529,18 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          * If the next key falls out of the current key range, it skips to the next key range, and so on.
          * If no more keys acceptd by the controller are available, returns null.
          */
-        private @Nullable ScoredPrimaryKey nextSelectedKeyInRange()
+        private @Nullable PrimaryKeyWithSortKey nextSelectedKeyInRange()
         {
             while (scoredPrimaryKeyIterator.hasNext())
             {
-                ScoredPrimaryKey key = scoredPrimaryKeyIterator.next();
+                var key = scoredPrimaryKeyIterator.next();
                 if (isInRange(key.partitionKey()) && controller.selects(key))
                     return key;
             }
             return null;
         }
 
-        public UnfilteredRowIterator apply(ScoredPrimaryKey key)
+        public UnfilteredRowIterator apply(PrimaryKeyWithSortKey key)
         {
             // If we've seen the key already, we can skip it. However, we cannot skip keys that were updated to a
             // worse score because the key's updated value could still be in the topk--we just didn't know when we
@@ -535,7 +548,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             if (!keysSeen.add(key) && !updatedKeys.contains(key))
                 return null;
 
-            try (UnfilteredRowIterator partition = controller.getPartition(key, executionController))
+            try (UnfilteredRowIterator partition = controller.getPartition(key, view, executionController))
             {
                 queryContext.addPartitionsRead(1);
                 queryContext.checkpoint();
@@ -550,12 +563,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         /**
          * Returns true if the key should be included in the global top k. Otherwise, skip the key for now.
          */
-        public boolean shouldInclude(ScoredPrimaryKey key, float rowScore)
+        public boolean shouldInclude(PrimaryKeyWithSortKey key, Row row)
         {
-            // Accept the Primary Key if its score, which comes from its source vector index, is greater than the score
-            // of the row read from storage. If the score is less than the score of the row read from storage,
-            // then it might not be in the global top k.
-            if (key.score > rowScore + 0.0001f)
+            // Accept the Primary Key only if the index's view of the column and the real view column are
+            // consistent.
+            if (!key.isIndexDataValid(row, FBUtilities.nowInSeconds()))
             {
                 updatedKeys.add(key);
                 return false;
@@ -572,9 +584,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             private boolean consumed = false;
             private final Unfiltered row;
-            public final ScoredPrimaryKey scoredPrimaryKey;
+            public final PrimaryKeyWithSortKey primaryKeyWithSortKey;
 
-            public PrimaryKeyIterator(ScoredPrimaryKey key, UnfilteredRowIterator partition, Row staticRow, Unfiltered content)
+            public PrimaryKeyIterator(PrimaryKeyWithSortKey key, UnfilteredRowIterator partition, Row staticRow, Unfiltered content)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -585,7 +597,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                       partition.stats());
 
                 row = content;
-                scoredPrimaryKey = key;
+                primaryKeyWithSortKey = key;
             }
 
             @Override

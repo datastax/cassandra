@@ -212,8 +212,8 @@ public abstract class Cell<V> extends ColumnData
     @Override
     // Overrides super type to provide a more precise return type.
     public abstract Cell<?> purgeDataOlderThan(long timestamp);
-    
-    protected abstract int localDeletionTimeAsUnsignedInt();
+
+    public abstract int localDeletionTimeAsUnsignedInt();
 
     /**
      * Handle unsigned encoding and potentially invalid localDeletionTime.

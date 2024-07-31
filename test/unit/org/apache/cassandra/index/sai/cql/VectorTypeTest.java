@@ -1131,6 +1131,28 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
+    public void insertstuff() throws Throwable
+    {
+        // This test requires the non-bruteforce route
+        setMaxBruteForceRows(0);
+        createTable("CREATE TABLE %s (pk int, val text, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+
+        // Insert data
+        execute("INSERT INTO %s (pk, val) VALUES (1, 'A')");
+        execute("INSERT INTO %s (pk, val) VALUES (2, 'B')");
+        execute("INSERT INTO %s (pk, val) VALUES (3, 'C')");
+
+        // no solution yet, so flush()
+        flush();
+
+        // query with order
+        assertRows(execute("SELECT pk FROM %s ORDER BY val limit 3"), row(1), row(2), row(3));
+        assertRows(execute("SELECT pk FROM %s ORDER BY val limit 1"), row(1));
+    }
+
+    @Test
     public void testQueryOnEmptyTable() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
