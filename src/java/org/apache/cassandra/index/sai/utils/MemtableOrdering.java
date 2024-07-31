@@ -40,7 +40,7 @@ public interface MemtableOrdering
      * @param limit - can be used to inform the search, but should not be used to prematurely limit the iterator
      * @return an iterator over the results in score order.
      */
-    CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(QueryContext queryContext, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit);
+    List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext queryContext, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit);
 
     /**
      * Order the given list of {@link PrimaryKey} results corresponding to the given expression.
@@ -48,5 +48,5 @@ public interface MemtableOrdering
      *
      * Assumes that the given  spans the same rows as the implementing index's segment.
      */
-    CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit);
+    CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit);
 }
