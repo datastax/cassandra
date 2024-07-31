@@ -71,6 +71,8 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
 
     public abstract void close() throws IOException;
 
+    public abstract boolean containsUnitVectors();
+
     public static interface VectorSupplier extends AutoCloseable
     {
         /**

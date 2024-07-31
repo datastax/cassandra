@@ -28,13 +28,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.PriorityQueue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -199,16 +197,16 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(QueryContext context, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext context, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
         var qv = vts.createFloatVector(orderer.vector);
 
-        return searchInternal(context, qv, keyRange, limit, 0);
+        return List.of(searchInternal(context, qv, keyRange, limit, 0));
     }
 
-    private CloseableIterator<PrimaryKeyWithScore> searchInternal(QueryContext context,
+    private CloseableIterator<PrimaryKeyWithSortKey> searchInternal(QueryContext context,
                                                                   VectorFloat<?> queryVector,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   int limit,
@@ -259,7 +257,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
 
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
     {
         if (minimumKey == null)
             // This case implies maximumKey is empty too.
@@ -309,18 +307,18 @@ public class VectorMemtableIndex implements MemtableIndex
      * @param keys the keys to filter
      * @return an iterator over the keys that pass the filter in PK order
      */
-    private CloseableIterator<PrimaryKeyWithScore> filterByBruteForce(VectorFloat<?> queryVector, float threshold, NavigableSet<PrimaryKey> keys)
+    private CloseableIterator<PrimaryKeyWithSortKey> filterByBruteForce(VectorFloat<?> queryVector, float threshold, NavigableSet<PrimaryKey> keys)
     {
         // Keys are already ordered in ascending PK order, so just use an ArrayList to collect the results.
-        var results = new ArrayList<PrimaryKeyWithScore>(keys.size());
+        var results = new ArrayList<PrimaryKeyWithSortKey>(keys.size());
         scoreKeysAndAddToCollector(queryVector, keys, threshold, results);
         return CloseableIterator.wrap(results.iterator());
     }
 
-    private CloseableIterator<PrimaryKeyWithScore> orderByBruteForce(VectorFloat<?> queryVector, Collection<PrimaryKey> keys)
+    private CloseableIterator<PrimaryKeyWithSortKey> orderByBruteForce(VectorFloat<?> queryVector, Collection<PrimaryKey> keys)
     {
         // Use a priority queue because we often don't need to consume the entire iterator
-        var scoredPrimaryKeys = new PriorityQueue<PrimaryKeyWithScore>(keys.size());
+        var scoredPrimaryKeys = new PriorityQueue<PrimaryKeyWithSortKey>(keys.size());
         scoreKeysAndAddToCollector(queryVector, keys, 0, scoredPrimaryKeys);
         return new PriorityQueueIterator<>(scoredPrimaryKeys);
     }
@@ -328,7 +326,7 @@ public class VectorMemtableIndex implements MemtableIndex
     private void scoreKeysAndAddToCollector(VectorFloat<?> queryVector,
                                             Collection<PrimaryKey> keys,
                                             float threshold,
-                                            Collection<PrimaryKeyWithScore> collector)
+                                            Collection<PrimaryKeyWithSortKey> collector)
     {
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         for (var key : keys)
@@ -391,9 +389,10 @@ public class VectorMemtableIndex implements MemtableIndex
         throw new UnsupportedOperationException();
     }
 
-    public Set<Integer> computeDeletedOrdinals(Function<PrimaryKey, Integer> ordinalMapper)
+    /** returns true if the index is non-empty and should be flushed */
+    public boolean preFlush(Function<PrimaryKey, Integer> ordinalMapper)
     {
-        return graph.computeDeletedOrdinals(ordinalMapper);
+        return graph.preFlush(ordinalMapper);
     }
 
     public int size()
@@ -401,9 +400,9 @@ public class VectorMemtableIndex implements MemtableIndex
         return graph.size();
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
-        return graph.flush(perIndexComponents, deletedOrdinals);
+        return graph.flush(perIndexComponents);
     }
 
     @Override
@@ -498,7 +497,7 @@ public class VectorMemtableIndex implements MemtableIndex
      * An iterator over {@link PrimaryKeyWithSortKey} sorted by score descending. The iterator converts ordinals (node ids)
      * to {@link PrimaryKey}s and pairs them with the score given by the index.
      */
-    private class NodeScoreToScoredPrimaryKeyIterator extends AbstractIterator<PrimaryKeyWithScore>
+    private class NodeScoreToScoredPrimaryKeyIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
         private final Iterator<SearchResult.NodeScore> nodeScores;
         private Iterator<PrimaryKeyWithScore> primaryKeysForNode = Collections.emptyIterator();
@@ -509,7 +508,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         @Override
-        protected PrimaryKeyWithScore computeNext()
+        protected PrimaryKeyWithSortKey computeNext()
         {
             if (primaryKeysForNode.hasNext())
                 return primaryKeysForNode.next();

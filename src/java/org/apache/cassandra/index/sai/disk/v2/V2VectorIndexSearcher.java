@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,8 +53,8 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
-import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
+import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
@@ -85,11 +86,18 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
-    public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
+
+    /**
+     * Only allow brute force if fewer than this many rows are involved.
+     * Not final so test can inject its own setting.
+     */
+    @VisibleForTesting
+    public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE;
     /**
      * How much more expensive is brute forcing the comparisons than going through the index?
      * (brute force needs to go through the full read path to pull out the vectors from the row)
      */
+    @VisibleForTesting
     public static double BRUTE_FORCE_EXPENSE_FACTOR = DatabaseDescriptor.getAnnBruteForceExpenseFactor();
 
     protected final JVectorLuceneOnDiskGraph graph;
@@ -160,7 +168,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), orderer);
@@ -451,7 +459,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public CloseableIterator<? extends PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader,
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader,
                                                                              QueryContext context,
                                                                              List<PrimaryKey> keys,
                                                                              Orderer orderer,

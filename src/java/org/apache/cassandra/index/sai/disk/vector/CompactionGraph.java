@@ -64,7 +64,10 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -99,10 +102,12 @@ public class CompactionGraph implements Closeable, Accountable
     private final boolean unitVectors;
     private final int postingsEntriesAllocated;
     private final File postingsFile;
+    private final File termsFile;
+    private final int dimension;
     private boolean postingsOneToOne;
     private int nextOrdinal = 0;
     private final ProductQuantization compressor;
-    private final OnDiskGraphIndexWriter writer;
+    private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
 
     public CompactionGraph(IndexComponents.ForWrite perIndexComponents, ProductQuantization compressor, boolean unitVectors, long keyCount) throws IOException
@@ -112,7 +117,7 @@ public class CompactionGraph implements Closeable, Accountable
         this.unitVectors = unitVectors;
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
-        int dimension = ((VectorType<?>) termComparator).dimension;
+        dimension = ((VectorType<?>) termComparator).dimension;
 
         // We need to tell Chronicle Map (CM) how many entries to expect.  it's critical not to undercount,
         // or CM will crash.  However, we don't want to just pass in a max entries count of 2B, since it eagerly
@@ -154,13 +159,21 @@ public class CompactionGraph implements Closeable, Accountable
                                         dimension > 3 ? 1.2f : 1.4f,
                                         compactionFjp, compactionFjp);
 
-        var indexFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
-        termsOffset = (indexFile.exists() ? indexFile.length() : 0)
+        termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
+        termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
-        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
-                            .withStartOffset(termsOffset)
-                            .with(new InlineVectors(dimension))
-                            .withMapper(new OrdinalMapper.IdentityMapper());
+        writer = createTermsWriter(maxRowsInGraph);
+        writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
+        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
+    }
+
+    private OnDiskGraphIndexWriter createTermsWriter(int maxVectorOrdinal) throws IOException
+    {
+        var indexConfig = context.getIndexWriterConfig();
+        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
+                      .withStartOffset(termsOffset)
+                      .with(new InlineVectors(dimension))
+                      .withMapper(new OrdinalMapper.IdentityMapper(maxVectorOrdinal));
         if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
         {
             writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getMaximumNodeConnections(), compressor));
@@ -169,9 +182,7 @@ public class CompactionGraph implements Closeable, Accountable
         {
             writerBuilder = writerBuilder.withVersion(JVECTOR_2_VERSION);
         }
-        writer = writerBuilder.build();
-        writer.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
-        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
+        return writerBuilder.build();
     }
 
     @Override
@@ -245,9 +256,11 @@ public class CompactionGraph implements Closeable, Accountable
         return builder.addGraphNode(result.ordinal, result.vector);
     }
 
-    public SegmentMetadata.ComponentMetadataMap flush(Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
-        assert deletedOrdinals.isEmpty(); // this is only to provide a consistent api with CassandraOnHeapGraph
+        // recreate the writer now that we know how many vectors there are
+        writer.close();
+        writer = createTermsWriter(builder.getGraph().size() - 1);
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -287,8 +300,16 @@ public class CompactionGraph implements Closeable, Accountable
                 var postingsFuture = es.submit(() -> {
                     try (var view = index.getView())
                     {
-                        return new VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
-                               .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
+                        if (V5OnDiskFormat.writeV5VectorPostings())
+                        {
+                            return new V5VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), postingsMap)
+                                               .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
+                        }
+                        else
+                        {
+                            return new V2VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
+                                   .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, Set.of());
+                        }
                     }
                 });
 
