@@ -207,7 +207,7 @@ public class NativeCell extends AbstractCell<ByteBuffer>
     }
 
     @Override
-    protected int localDeletionTimeAsUnsignedInt()
+    public int localDeletionTimeAsUnsignedInt()
     {
         return NativeEndianMemoryUtil.getInt(peer + DELETION);
     }

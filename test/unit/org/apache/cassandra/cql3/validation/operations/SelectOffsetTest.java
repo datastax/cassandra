@@ -378,12 +378,6 @@ public class SelectOffsetTest extends CQLTester
         }
     }
 
-    @SafeVarargs
-    protected static <T> Vector<T> vector(T... values)
-    {
-        return new Vector<>(values);
-    }
-
     private void testLimitAndOffset(String select, Object[]... rows) throws Throwable
     {
         testLimitAndOffset(select, true, rows);
