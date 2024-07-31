@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -50,7 +51,12 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.FutureCallback;
+
+import org.apache.cassandra.cql3.PageSize;
+import org.apache.cassandra.db.compaction.AbstractCompactionTask;
 import org.apache.cassandra.db.compaction.CleanupTask;
+import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.RepairFinishedCompactionTask;
 import org.apache.cassandra.db.compaction.TableOperation;
@@ -72,7 +78,6 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -97,6 +102,7 @@ import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.StatusRequest;
 import org.apache.cassandra.repair.messages.StatusResponse;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Throwables;
@@ -374,10 +380,40 @@ public class LocalSessions
         if (sstables.isEmpty())
             return null;
 
+        return getRepairFinishedCompactionTask(cfs, session, sstables);
+    }
+
+    private RepairFinishedCompactionTask getRepairFinishedCompactionTask(CompactionRealm realm,
+                                                                         TimeUUID session,
+                                                                         Collection<? extends CompactionSSTable> sstables)
+    {
         long repairedAt = getFinalSessionRepairedAt(session);
         boolean isTransient = sstables.iterator().next().isTransient();
-        LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
-        return txn == null ? null : new RepairFinishedCompactionTask(cfs, txn, session, repairedAt, isTransient);
+        LifecycleTransaction txn = realm.tryModify(sstables, OperationType.COMPACTION);
+        return txn == null ? null : new RepairFinishedCompactionTask(realm, txn, session, repairedAt, isTransient);
+    }
+
+    /**
+     * Some finalized repairs leave sstables behind that need cleaning. This generates the tasks to clean them up.
+     */
+    public Collection<AbstractCompactionTask> getZombieRepairFinalizationTasks(CompactionRealm realm, Collection<? extends CompactionSSTable> sstables)
+    {
+        Map<TimeUUID, Collection<CompactionSSTable>> finalizations = new HashMap<>();
+        for (CompactionSSTable sstable : sstables)
+        {
+            TableMetadata tableMetadata = Schema.instance.getTableMetadata(sstable.getKeyspaceName(), sstable.getColumnFamilyName());
+            if (tableMetadata != null && sstable.isPendingRepair() && canCleanup(sstable.getPendingRepair()))
+            {
+                logger.debug("Going to cleanup sstable {} for already finalized repair {}", sstable.getPendingRepair(), tableMetadata.toDebugString());
+                finalizations.computeIfAbsent(sstable.getPendingRepair(), pr -> new ArrayList<>()).add(sstable);
+            }
+        }
+
+        return finalizations.entrySet()
+                            .stream()
+                            .map(entry -> getRepairFinishedCompactionTask(realm, entry.getKey(), entry.getValue()))
+                            .filter(Predicates.notNull())
+                            .collect(Collectors.toList());
     }
 
     public boolean canCleanup(TimeUUID sessionID)
@@ -538,6 +574,8 @@ public class LocalSessions
                     }
                     else
                     {
+                        // If this happens too often or for a long time check sstables pending repair are not being
+                        // left behind
                         logger.warn("Skipping delete of LocalSession {} because it still contains sstables", session.sessionID);
                     }
                 }
