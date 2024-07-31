@@ -19,7 +19,7 @@
 
 -e git+https://github.com/datastax/python-driver.git@3.29.0#egg=cassandra-driver
 # Used ccm version is tracked by cassandra-test branch in ccm repo. Please create a PR there for fixes or upgrades to new releases.
--e git+https://github.com/riptano/ccm.git@cassandra-test#egg=ccm
+-e git+https://github.com/riptano/ccm.git@converged-cassandra#egg=ccm
 coverage
 pytest
 wcwidth
