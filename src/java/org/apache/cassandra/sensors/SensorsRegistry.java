@@ -252,7 +252,7 @@ public class SensorsRegistry implements SchemaChangeListener
      * To get best perfromance we are not returning Optional here
      */
     @Nullable
-    public Sensor getSensorFast(Context context, Type type)
+    private Sensor getSensorFast(Context context, Type type)
     {
         Sensor[] typeSensors = identity.get(context);
         return  typeSensors != null ? typeSensors[type.ordinal()] : null;
@@ -262,7 +262,7 @@ public class SensorsRegistry implements SchemaChangeListener
      * To get best perfromance we are not returning Optional here
      */
     @Nullable
-    public Sensor getOrCreateSensorFast(Context context, Type type)
+    private Sensor getOrCreateSensorFast(Context context, Type type)
     {
         Sensor sensor = getSensorFast(context, type);
         if (sensor != null)

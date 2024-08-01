@@ -181,6 +181,30 @@ public class RequestSensorsTest
     }
 
     @Test
+    public void testSyncAllWithOneSensorIncrementing()
+    {
+        sensors.registerSensor(context1, type1);
+        sensors.registerSensor(context1, type2);
+
+        sensors.incrementSensor(context1, type1, 1.0);
+        sensors.incrementSensor(context1, type2, 1.0);
+
+        sensors.syncAllSensors();
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type2), eq(1.0));
+
+        sensors.syncAllSensors();
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type2), eq(1.0));
+
+        // only increment one sensor
+        sensors.incrementSensor(context1, type2, 1.0);
+        sensors.syncAllSensors();
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
+        verify(sensorsRegistry, times(2)).incrementSensor(eq(context1), eq(type2), eq(1.0));
+    }
+
+    @Test
     public void testGetSensors()
     {
         sensors.registerSensor(context1, type1);
