@@ -256,7 +256,7 @@ public class CommitLog implements CommitLogMBean
     @VisibleForTesting
     public Map<Keyspace, Integer> recoverFiles(ColumnFamilyStore.FlushReason flushReason, File... clogs) throws IOException
     {
-        CommitLogReplayer replayer = CommitLogReplayer.construct(this, getLocalHostId());
+        CommitLogReplayer replayer = CommitLogReplayerFactory.create(this, getLocalHostId());
         replayer.replayFiles(clogs);
 
         // fetch clogs with invalid mutations
@@ -266,7 +266,7 @@ public class CommitLog implements CommitLogMBean
 
     public void recoverPath(String path, boolean tolerateTruncation) throws IOException
     {
-        CommitLogReplayer replayer = CommitLogReplayer.construct(this, getLocalHostId());
+        CommitLogReplayer replayer = CommitLogReplayerFactory.create(this, getLocalHostId());
         replayer.replayPath(new File(PathUtils.getPath(path)), tolerateTruncation);
         replayer.blockForWrites(STARTUP);
     }

@@ -87,16 +87,16 @@ public class CommitLogReplayer implements CommitLogReadHandler
     public static MutationInitiator mutationInitiator = new MutationInitiator();
     static final String IGNORE_REPLAY_ERRORS_PROPERTY = Config.PROPERTY_PREFIX + "commitlog.ignorereplayerrors";
     private static final Logger logger = LoggerFactory.getLogger(CommitLogReplayer.class);
-    private static final int MAX_OUTSTANDING_REPLAY_COUNT = Integer.getInteger(Config.PROPERTY_PREFIX + "commitlog_max_outstanding_replay_count", 1024);
+    protected static final int MAX_OUTSTANDING_REPLAY_COUNT = Integer.getInteger(Config.PROPERTY_PREFIX + "commitlog_max_outstanding_replay_count", 1024);
 
-    private final Map<Keyspace, AtomicInteger> keyspacesReplayed;
+    protected final Map<Keyspace, AtomicInteger> keyspacesReplayed;
     private final Queue<Future<Integer>> futures;
 
     private final Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted;
     private final CommitLogPosition globalPosition;
 
     // Used to throttle speed of replay of mutations if we pass the max outstanding count
-    private long pendingMutationBytes = 0;
+    protected long pendingMutationBytes = 0;
 
     private final ReplayFilter replayFilter;
     private final CommitLogArchiver archiver;
@@ -109,7 +109,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
     private volatile boolean replayed = false;
 
-    CommitLogReplayer(CommitLog commitLog,
+    protected CommitLogReplayer(CommitLog commitLog,
                       CommitLogPosition globalPosition,
                       Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted,
                       ReplayFilter replayFilter)
@@ -121,57 +121,6 @@ public class CommitLogReplayer implements CommitLogReadHandler
         this.replayFilter = replayFilter;
         this.archiver = commitLog.archiver;
         this.commitLogReader = new CommitLogReader();
-    }
-
-    public static CommitLogReplayer construct(CommitLog commitLog, UUID localHostId)
-    {
-        // make sure the truncation records are available, even though the CL has not been replayed
-        Map<UUID, LocalInfo.TruncationRecord> truncationRecords = Nodes.local().get().getTruncationRecords();
-
-        // compute per-CF and global replay intervals
-        Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted = new HashMap<>();
-        ReplayFilter replayFilter = ReplayFilter.create();
-
-        for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
-        {
-            LocalInfo.TruncationRecord truncationRecord = truncationRecords.get(cfs.metadata.id.asUUID());
-            // but, if we've truncated the cf in question, then we need to need to start replay after the truncation
-            CommitLogPosition truncatedAt = truncationRecord == null ? null : truncationRecord.position;
-            if (truncatedAt != null)
-            {
-                // Point in time restore is taken to mean that the tables need to be replayed even if they were
-                // deleted at a later point in time. Any truncation record after that point must thus be cleared prior
-                // to replay (CASSANDRA-9195).
-                long restoreTime = commitLog.archiver.restorePointInTime;
-                long truncatedTime = truncationRecord.truncatedAt;
-                if (truncatedTime > restoreTime)
-                {
-                    if (replayFilter.includes(cfs.metadata))
-                    {
-                        logger.info("Restore point in time is before latest truncation of table {}.{}. Clearing truncation record.",
-                                    cfs.metadata.keyspace,
-                                    cfs.metadata.name);
-                        Nodes.local().removeTruncationRecord(cfs.metadata.id);
-                        truncatedAt = null;
-                    }
-                }
-            }
-
-            IntervalSet<CommitLogPosition> filter;
-            if (!cfs.memtableWritesAreDurable())
-            {
-                filter = persistedIntervals(cfs.getLiveSSTables(), truncatedAt, localHostId);
-            }
-            else
-            {
-                // everything is persisted and restored by the memtable itself
-                filter = new IntervalSet<>(CommitLogPosition.NONE, CommitLog.instance.getCurrentPosition());
-            }
-            cfPersisted.put(cfs.metadata.id, filter);
-        }
-        CommitLogPosition globalPosition = firstNotCovered(cfPersisted.values());
-        logger.debug("Global replay position is {} from columnfamilies {}", globalPosition, FBUtilities.toString(cfPersisted));
-        return new CommitLogReplayer(commitLog, globalPosition, cfPersisted, replayFilter);
     }
 
     public void replayPath(File file, boolean tolerateTruncation) throws IOException
