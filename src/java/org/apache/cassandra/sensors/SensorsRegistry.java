@@ -18,9 +18,12 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,13 +32,16 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Striped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,7 +49,6 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Timer;
 
 /**
@@ -75,21 +80,26 @@ import org.apache.cassandra.utils.concurrent.Timer;
  */
 public class SensorsRegistry implements SchemaChangeListener
 {
-    public static final SensorsRegistry instance = new SensorsRegistry();
+    private static final int LOCK_SRIPES = 1024;
 
+    public static final SensorsRegistry instance = new SensorsRegistry();
     private static final Logger logger = LoggerFactory.getLogger(SensorsRegistry.class);
 
     private final Timer asyncUpdater = Timer.INSTANCE;
 
-    private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
+    private final Striped<ReadWriteLock> stripedUpdateLock = Striped.readWriteLock(LOCK_SRIPES); // we stripe per keyspace
 
     private final Set<String> keyspaces = Sets.newConcurrentHashSet();
     private final Set<String> tableIds = Sets.newConcurrentHashSet();
 
-    private final ConcurrentMap<Pair<Context, Type>, Sensor> identity = new ConcurrentHashMap<>();
+    // Using Map of array values for performance reasons to avoid wrapping key into another Object, e.g. Pair(context,type)).
+    // Note that array values can contain NULL so be careful to filter NULLs when iterating over array
+    private final ConcurrentMap<Context, Sensor[]> identity = new ConcurrentHashMap<>();
+
     private final ConcurrentMap<String, Set<Sensor>> byKeyspace = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Set<Sensor>> byTableId = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Set<Sensor>> byType = new ConcurrentHashMap<>();
+
     private final CopyOnWriteArrayList<SensorsRegistryListener> listeners = new CopyOnWriteArrayList<>();
 
     private SensorsRegistry()
@@ -111,43 +121,19 @@ public class SensorsRegistry implements SchemaChangeListener
 
     public Optional<Sensor> getSensor(Context context, Type type)
     {
-        return Optional.ofNullable(identity.get(Pair.create(context, type)));
+        return Optional.ofNullable(getSensorFast(context, type));
     }
 
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
-        updateLock.readLock().lock();
-        try
-        {
-            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
-                return Optional.empty();
-
-            // Create a candidate sensor and try inserting in the identity map: this is to make sure concurrent calls will
-            // use the same sensor below
-            Sensor sensor = identity.computeIfAbsent(Pair.create(context, type), (ignored) -> {
-                Sensor created = new Sensor(context, type);
-                notifyOnSensorCreated(created);
-                return created;
-            });
-
-            Set<Sensor> keyspaceSet = byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
-            keyspaceSet.add(sensor);
-            Set<Sensor> tableSet = byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
-            tableSet.add(sensor);
-            Set<Sensor> opSet = byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
-            opSet.add(sensor);
-
-            return Optional.of(sensor);
-        }
-        finally
-        {
-            updateLock.readLock().unlock();
-        }
+        return Optional.ofNullable(getOrCreateSensorFast(context, type));
     }
 
     protected void incrementSensor(Context context, Type type, double value)
     {
-        getOrCreateSensor(context, type).ifPresent(s -> s.increment(value));
+        Sensor sensor = getOrCreateSensorFast(context, type);
+        if (sensor != null)
+            sensor.increment(value);
     }
 
     protected Future<Void> incrementSensorAsync(Context context, Type type, double value, long delay, TimeUnit unit)
@@ -187,13 +173,13 @@ public class SensorsRegistry implements SchemaChangeListener
     @Override
     public void onDropKeyspace(KeyspaceMetadata keyspace, boolean dropData)
     {
-        updateLock.writeLock().lock();
+        stripedUpdateLock.getAt(getLockStripe(keyspace.name.hashCode())).writeLock().lock();
         try
         {
             keyspaces.remove(keyspace.name);
             byKeyspace.remove(keyspace.name);
 
-            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getKeyspace().equals(keyspace.name));
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getKeyspace().equals(keyspace.name));
             removed.forEach(this::notifyOnSensorRemoved);
 
             removeSensor(byTableId.values(), s -> s.getContext().getKeyspace().equals(keyspace.name));
@@ -201,21 +187,21 @@ public class SensorsRegistry implements SchemaChangeListener
         }
         finally
         {
-            updateLock.writeLock().unlock();
+            stripedUpdateLock.getAt(getLockStripe(keyspace.name.hashCode())).writeLock().unlock();
         }
     }
 
     @Override
     public void onDropTable(TableMetadata table, boolean dropData)
     {
-        updateLock.writeLock().lock();
+        stripedUpdateLock.getAt(getLockStripe(table.keyspace.hashCode())).writeLock().lock();
         try
         {
             String tableId = table.id.toString();
             tableIds.remove(tableId);
             byTableId.remove(tableId);
 
-            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
             removed.forEach(this::notifyOnSensorRemoved);
 
             removeSensor(byKeyspace.values(), s -> s.getContext().getTableId().equals(tableId));
@@ -223,8 +209,13 @@ public class SensorsRegistry implements SchemaChangeListener
         }
         finally
         {
-            updateLock.writeLock().unlock();
+            stripedUpdateLock.getAt(getLockStripe(table.keyspace.hashCode())).writeLock().unlock();
         }
+    }
+
+    private static int getLockStripe(int hashCode)
+    {
+        return Math.abs(hashCode) % LOCK_SRIPES;
     }
 
     /**
@@ -249,6 +240,88 @@ public class SensorsRegistry implements SchemaChangeListener
 
                 sensorIt.remove();
                 removed.add(sensor);
+            }
+        }
+
+        return removed;
+    }
+
+    /**
+     * To get best perfromance we are not returning Optional here
+     */
+    @Nullable
+    private Sensor getSensorFast(Context context, Type type)
+    {
+        Sensor[] typeSensors = identity.get(context);
+        return  typeSensors != null ? typeSensors[type.ordinal()] : null;
+    }
+
+    /**
+     * To get best perfromance we are not returning Optional here
+     */
+    @Nullable
+    private Sensor getOrCreateSensorFast(Context context, Type type)
+    {
+        Sensor sensor = getSensorFast(context, type);
+        if (sensor != null)
+            return sensor;
+
+        stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().lock();
+        try
+        {
+            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
+                return null;
+
+            Sensor[] typeSensors = identity.compute(context, (key, types) -> {
+                Sensor[] computed = types != null ? types : new Sensor[Type.values().length];
+                if (computed[type.ordinal()] == null)
+                {
+                    computed[type.ordinal()] = new Sensor(context, type);
+                    notifyOnSensorCreated(computed[type.ordinal()]);
+                }
+                return computed;
+            });
+            sensor = typeSensors[type.ordinal()];
+
+            Set<Sensor> keyspaceSet = byKeyspace.get(sensor.getContext().getKeyspace());
+            keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
+            keyspaceSet.add(sensor);
+
+            Set<Sensor> tableSet = byTableId.get(sensor.getContext().getTableId());
+            tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
+            tableSet.add(sensor);
+
+            Set<Sensor> opSet = byType.get(sensor.getType().name());
+            opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
+            opSet.add(sensor);
+
+            return sensor;
+        }
+        finally
+        {
+            stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().unlock();
+        }
+    }
+
+    /**
+     * Removes array of sensors if any sensor in the array matches the predicate.
+     * This function is used by `identity` map that holds an array of Sensors (each item in the array maps to Type)
+     */
+    private Set<Sensor> removeSensorArrays(Collection<? extends Collection<Sensor[]>> candidates, Predicate<Sensor> accept)
+    {
+        Set<Sensor> removed = new HashSet<>();
+
+        for (Collection<Sensor[]> sensors : candidates)
+        {
+            Iterator<Sensor[]> sensorIt = sensors.iterator();
+            while (sensorIt.hasNext())
+            {
+                List<Sensor> typeSensors = Arrays.stream(sensorIt.next()).filter(Objects::nonNull).collect(Collectors.toList());
+                if (typeSensors.size() > 0 && accept.test(typeSensors.get(0)))
+                {
+                    removed.addAll(typeSensors);
+                    sensorIt.remove();
+                }
             }
         }
 
