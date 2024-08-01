@@ -25,7 +25,8 @@ calculate_heap_sizes()
             system_memory_in_bytes=`sysctl hw.physmem | awk '{print $2}'`
             system_memory_in_mb=`expr $system_memory_in_bytes / 1024 / 1024`
             system_cpu_cores=`sysctl hw.ncpu | awk '{print $2}'`
-	;; SunOS)
+        ;;
+        SunOS)
             system_memory_in_mb=`prtconf | awk '/Memory size:/ {print $3}'`
             system_cpu_cores=`psrinfo | wc -l`
         ;;
@@ -90,25 +91,25 @@ if [ "x$CASSANDRA_LOG_DIR" = "x" ] ; then
     CASSANDRA_LOG_DIR="$CASSANDRA_HOME/logs"
 fi
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#GC log path has to be defined here because it needs to access CASSANDRA_HOME
+if [ $JAVA_VERSION -ge 11 ] ; then
+    # See description of https://bugs.openjdk.java.net/browse/JDK-8046148 for details about the syntax
+    # The following is the equivalent to -XX:+PrintGCDetails -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=10 -XX:GCLogFileSize=10M
+    echo "$JVM_OPTS" | grep -qe "-[X]log:gc"
+    if [ "$?" = "1" ] ; then # [X] to prevent ccm from replacing this line
+        # only add -Xlog:gc if it's not mentioned in jvm-server.options file
+        mkdir -p ${CASSANDRA_LOG_DIR}
+        JVM_OPTS="$JVM_OPTS -Xlog:gc=info,heap*=debug,age*=debug,safepoint=info,promotion*=debug:file=${CASSANDRA_LOG_DIR}/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10485760"
+    fi
+else
+    # Java 8
+    echo "$JVM_OPTS" | grep -qe "-[X]loggc"
+    if [ "$?" = "1" ] ; then # [X] to prevent ccm from replacing this line
+        # only add -Xlog:gc if it's not mentioned in jvm-server.options file
+        mkdir -p ${CASSANDRA_LOG_DIR}
+        JVM_OPTS="$JVM_OPTS -Xloggc:${CASSANDRA_LOG_DIR}/gc.log"
+    fi
+fi
 
 # Check what parameters were defined on jvm-server.options file to avoid conflicts
 echo $JVM_OPTS | grep -q Xmn
@@ -219,9 +220,9 @@ JVM_ON_OUT_OF_MEMORY_ERROR_OPT="-XX:OnOutOfMemoryError=kill -9 %p"
 # for more on configuring JMX through firewalls, etc. (Short version:
 # get it working with no firewall first.)
 #
-# Cassandra ships with JMX accessible *only* from localhost.  
+# Cassandra ships with JMX accessible *only* from localhost.
 # To enable remote JMX connections, uncomment lines below
-# with authentication and/or ssl enabled. See https://wiki.apache.org/cassandra/JmxSecurity 
+# with authentication and/or ssl enabled. See https://wiki.apache.org/cassandra/JmxSecurity
 #
 if [ "x$LOCAL_JMX" = "x" ]; then
     LOCAL_JMX=yes
@@ -303,4 +304,3 @@ if [ "x$MX4J_PORT" != "x" ]; then
 fi
 
 JVM_OPTS="$JVM_OPTS $JVM_EXTRA_OPTS"
-

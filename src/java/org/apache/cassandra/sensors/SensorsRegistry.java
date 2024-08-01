@@ -104,8 +104,6 @@ public class SensorsRegistry implements SchemaChangeListener
 
     private final CopyOnWriteArrayList<SensorsRegistryListener> listeners = new CopyOnWriteArrayList<>();
 
-    private final Object typeSensorsLock = new Object();
-
     private SensorsRegistry()
     {
         Schema.instance.registerListener(this);
@@ -254,7 +252,7 @@ public class SensorsRegistry implements SchemaChangeListener
      * To get best perfromance we are not returning Optional here
      */
     @Nullable
-    private Sensor getSensorFast(Context context, Type type)
+    public Sensor getSensorFast(Context context, Type type)
     {
         Sensor[] typeSensors = identity.get(context);
         return  typeSensors != null ? typeSensors[type.ordinal()] : null;
@@ -264,7 +262,7 @@ public class SensorsRegistry implements SchemaChangeListener
      * To get best perfromance we are not returning Optional here
      */
     @Nullable
-    private Sensor getOrCreateSensorFast(Context context, Type type)
+    public Sensor getOrCreateSensorFast(Context context, Type type)
     {
         Sensor sensor = getSensorFast(context, type);
         if (sensor != null)
