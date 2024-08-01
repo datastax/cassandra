@@ -616,27 +616,28 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         }
 
         // Schedule all index building tasks with callbacks to handle success and failure
-        List<Future<?>> futures = new ArrayList<>(byType.size());
+        List<ListenableFuture<?>> futures = new ArrayList<>(byType.size());
         byType.forEach((buildingSupport, groupedIndexes) ->
         {
-            SecondaryIndexBuilder builder = buildingSupport.getIndexBuildTask(baseCfs, groupedIndexes, sstables, false);
-            AsyncPromise<Object> build = new AsyncPromise<>();
-            CompactionManager.instance.submitIndexBuild(builder).addCallback(new FutureCallback<Object>()
+            List<SecondaryIndexBuilder> builders = buildingSupport.getParallelIndexBuildTasks(baseCfs, groupedIndexes, sstables, false);
+            List<ListenableFuture<?>> builderFutures = builders.stream().map(CompactionManager.instance::submitIndexBuild).collect(Collectors.toList());
+            final SettableFuture<Object> build = SettableFuture.create();
+            Futures.addCallback(Futures.allAsList(builderFutures), new FutureCallback<Object>()
             {
                 @Override
                 public void onFailure(Throwable t)
                 {
                     logger.warn("Failed to incrementally build indexes {}", getIndexNames(groupedIndexes));
-                    build.tryFailure(t);
+                    build.setException(t);
                 }
 
                 @Override
                 public void onSuccess(Object o)
                 {
                     logger.info("Incremental index build of {} completed", getIndexNames(groupedIndexes));
-                    build.trySuccess(o);
+                    build.set(o);
                 }
-            });
+            }, ImmediateExecutor.INSTANCE);
             futures.add(build);
         });
 
