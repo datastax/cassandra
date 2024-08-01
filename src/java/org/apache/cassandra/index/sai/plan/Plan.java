@@ -1894,7 +1894,7 @@ abstract public class Plan
     }
 
     /** hit-rate-scale the raw cost */
-    private static double hrs(double raw)
+    public static double hrs(double raw)
     {
         return raw / clampedCacheHitRate();
     }
