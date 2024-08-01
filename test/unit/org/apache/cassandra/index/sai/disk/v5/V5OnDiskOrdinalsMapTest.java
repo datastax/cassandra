@@ -38,11 +38,11 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.RamAwareVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -50,8 +50,11 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 
-public class V5OnDiskOrdinalsMapTest extends SaiRandomizedTest
+
+public class V5OnDiskOrdinalsMapTest extends VectorTester
 {
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
@@ -165,6 +168,11 @@ public class V5OnDiskOrdinalsMapTest extends SaiRandomizedTest
             p.getValue().computeRowIds(x -> x);
 
         validate(structure, postingsMap, vectorValues);
+    }
+
+    private static int randomInt(int maxValueInclusive)
+    {
+        return getRandom().nextIntBetween(0, maxValueInclusive + 1);
     }
 
     private <T> void validate(Structure structure, Map<VectorFloat<?>, VectorPostings<T>> postingsMap, RamAwareVectorValues vectorValues) throws IOException
