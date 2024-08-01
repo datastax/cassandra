@@ -141,7 +141,6 @@ class ProcRunner:
             self.read = self.read_tty
         else:
             stdin = stdout = subprocess.PIPE
-            stderr = subprocess.STDOUT
             self.proc = subprocess.Popen((self.exe_path,) + tuple(self.args),
                                          env=self.env, stdin=stdin, stdout=stdout,
                                          stderr=stderr, bufsize=0, close_fds=False)
