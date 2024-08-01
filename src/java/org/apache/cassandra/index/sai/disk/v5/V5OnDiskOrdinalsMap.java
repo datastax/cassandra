@@ -19,11 +19,7 @@
 package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
 import java.util.PrimitiveIterator;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
@@ -35,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.agrona.collections.Int2ObjectHashMap;
+import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
@@ -59,13 +56,17 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     private final int maxOrdinal;
     private final int maxRowId;
     private final long rowToOrdinalOffset;
-    private final List<ExtraRow> extraRows;
     @VisibleForTesting
     final V5VectorPostingsWriter.Structure structure;
 
     private final Supplier<OrdinalsView> ordinalsViewSupplier;
     private final Supplier<RowIdsView> rowIdsViewSupplier;
-    private final Int2ObjectHashMap<int[]> extraRowsByOrdinal;
+
+    // cached values for OneToMany structure
+    private Int2ObjectHashMap<int[]> extraRowsByOrdinal = null;
+    private int[] extraRowIds = null;
+    private int[] extraOrdinals = null;
+
 
     public V5OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
     {
@@ -95,29 +96,23 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 
             if (maxOrdinal < 0)
             {
-                extraRowsByOrdinal = null;
-                extraRows = null;
                 this.rowIdsViewSupplier = () -> EMPTY_ROW_IDS_VIEW;
                 this.ordinalsViewSupplier = () -> EMPTY_ORDINALS_VIEW;
             }
             else if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE)
             {
-                extraRowsByOrdinal = null;
-                extraRows = null;
                 this.rowIdsViewSupplier = () -> ONE_TO_ONE_ROW_IDS_VIEW;
                 this.ordinalsViewSupplier = () -> new OneToOneOrdinalsView(maxOrdinal + 1);
             }
             else if (structure == V5VectorPostingsWriter.Structure.ONE_TO_MANY)
             {
-                extraRowsByOrdinal = cacheExtraRowIds(reader);
-                extraRows = cacheExtraRowOrdinals(reader);
+                cacheExtraRowIds(reader);
+                cacheExtraRowOrdinals(reader);
                 this.rowIdsViewSupplier = OneToManyRowIdsView::new;
                 this.ordinalsViewSupplier = OneToManyOrdinalsView::new;
             }
             else
             {
-                extraRowsByOrdinal = null;
-                extraRows = null;
                 this.rowIdsViewSupplier = GenericRowIdsView::new;
                 this.ordinalsViewSupplier = GenericOrdinalsView::new;
             }
@@ -136,9 +131,9 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         return structure;
     }
 
-    private Int2ObjectHashMap<int[]> cacheExtraRowIds(RandomAccessReader reader) throws IOException
+    private void cacheExtraRowIds(RandomAccessReader reader) throws IOException
     {
-        var ordinalToRowIds = new Int2ObjectHashMap<int[]>();
+        extraRowsByOrdinal = new Int2ObjectHashMap<>();
         reader.seek(ordToRowOffset);
         int entryCount = reader.readInt();
         for (int i = 0; i < entryCount; i++)
@@ -154,22 +149,23 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
                 for (int j = 1; j < postingsSize; j++)
                     rowIds[j] = reader.readInt();
             }
-            ordinalToRowIds.put(ordinal, rowIds);
+            extraRowsByOrdinal.put(ordinal, rowIds);
         }
-        return ordinalToRowIds;
     }
 
-    private List<ExtraRow> cacheExtraRowOrdinals(RandomAccessReader reader) throws IOException
+    private void cacheExtraRowOrdinals(RandomAccessReader reader) throws IOException
     {
-        var extra = new ArrayList<ExtraRow>();
+        var extraRowIdsList = new IntArrayList();
+        var extraOrdinalsList = new IntArrayList();
         reader.seek(rowToOrdinalOffset);
         while (reader.getFilePointer() < segmentEnd - 8)
         {
-            int rowId = reader.readInt();
-            int ordinal = reader.readInt();
-            extra.add(new ExtraRow(rowId, ordinal));
+            extraRowIdsList.add(reader.readInt());
+            extraOrdinalsList.add(reader.readInt());
         }
-        return extra;
+
+        extraRowIds = extraRowIdsList.toIntArray();
+        extraOrdinals = extraOrdinalsList.toIntArray();
     }
 
     public RowIdsView getRowIdsView()
@@ -315,8 +311,7 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
     }
 
-    private class OneToManyOrdinalsView implements OrdinalsView
-    {
+    private class OneToManyOrdinalsView implements OrdinalsView {
         @Override
         public int getOrdinalForRowId(int rowId)
         {
@@ -325,30 +320,26 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
                 return -1;
             }
 
-            // Binary search for the ExtraRow with the given rowId
-            int index = Collections.binarySearch(extraRows, new ExtraRow(rowId, 0),
-                                                 Comparator.comparingInt(er -> er.rowId));
+            int index = Arrays.binarySearch(extraRowIds, rowId);
             if (index >= 0) {
                 // Found in extra rows
-                return extraRows.get(index).ordinal;
+                return extraOrdinals[index];
             }
 
-            // if it's not an "extra" row then the ordinal is the same as the rowId
+            // If it's not an "extra" row then the ordinal is the same as the rowId
             return rowId;
         }
 
         @Override
         public void forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
         {
-            int rawIndex = Collections.binarySearch(extraRows, new ExtraRow(startRowId, 0),
-                                                    Comparator.comparingInt(er -> er.rowId));
+            int rawIndex = Arrays.binarySearch(extraRowIds, startRowId);
             int extraIndex = rawIndex >= 0 ? rawIndex : -rawIndex - 1;
             for (int rowId = max(0, startRowId); rowId <= min(endRowId, maxRowId); rowId++)
             {
-                if (extraIndex < extraRows.size() && extraRows.get(extraIndex).rowId == rowId)
+                if (extraIndex < extraRowIds.length && extraRowIds[extraIndex] == rowId)
                 {
-                    ExtraRow extraRow = extraRows.get(extraIndex);
-                    consumer.accept(extraRow.rowId, extraRow.ordinal);
+                    consumer.accept(extraRowIds[extraIndex], extraOrdinals[extraIndex]);
                     extraIndex++;
                 }
                 else
@@ -361,18 +352,6 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         @Override
         public void close() {
             // no-op
-        }
-    }
-
-    private static class ExtraRow
-    {
-        public final int rowId;
-        public final int ordinal;
-
-        private ExtraRow(int rowId, int ordinal)
-        {
-            this.rowId = rowId;
-            this.ordinal = ordinal;
         }
     }
 }
