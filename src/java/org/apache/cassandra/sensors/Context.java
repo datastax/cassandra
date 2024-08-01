@@ -38,11 +38,14 @@ public class Context
     private final String table;
     private final String tableId;
 
+    private final int hashCode;
+
     public Context(String keyspace, String table, String tableId)
     {
         this.keyspace = keyspace;
         this.table = table;
         this.tableId = tableId;
+        this.hashCode = Objects.hash(keyspace, table, tableId);
     }
 
     public String getKeyspace()
@@ -72,7 +75,7 @@ public class Context
     @Override
     public int hashCode()
     {
-        return Objects.hash(keyspace, table, tableId);
+        return hashCode;
     }
 
     @Override
