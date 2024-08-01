@@ -25,6 +25,7 @@ import java.util.function.Supplier;
 import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseBits;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.utils.SingletonIntIterator;
 
 public interface OnDiskOrdinalsMap extends AutoCloseable
@@ -40,6 +41,8 @@ public interface OnDiskOrdinalsMap extends AutoCloseable
     OrdinalsView getOrdinalsView();
 
     void close();
+
+    V5VectorPostingsWriter.Structure getStructure();
 
     class OneToOneRowIdsView implements RowIdsView {
 

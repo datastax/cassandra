@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.BitsUtil;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
@@ -93,6 +94,12 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     }
 
     @Override
+    public Structure getStructure()
+    {
+        return canFastMapOrdinalsView ? Structure.ONE_TO_ONE : Structure.ZERO_OR_ONE_TO_MANY;
+    }
+
+    @Override
     public RowIdsView getRowIdsView()
     {
         if (canFastMapRowIdsView) {
@@ -107,7 +114,6 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     {
         return BitsUtil.bitsIgnoringDeleted(acceptBits, deletedOrdinals);
     }
-
 
     private class FileReadingRowIdsView implements RowIdsView
     {

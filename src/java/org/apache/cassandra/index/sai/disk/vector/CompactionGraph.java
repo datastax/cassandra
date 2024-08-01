@@ -68,6 +68,7 @@ import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -104,13 +105,16 @@ public class CompactionGraph implements Closeable, Accountable
     private final File postingsFile;
     private final File termsFile;
     private final int dimension;
-    private boolean postingsOneToOne;
+    private Structure postingsStructure;
     private int nextOrdinal = 0;
     private final ProductQuantization compressor;
     private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
+    private final boolean supportsOneToMany;
+    private int lastRowId = -1;
+    private final ByteSequence<?> encodedOmittedVector;
 
-    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, ProductQuantization compressor, boolean unitVectors, long keyCount) throws IOException
+    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, ProductQuantization compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
     {
         this.perIndexComponents = perIndexComponents;
         this.context = perIndexComponents.context();
@@ -134,8 +138,10 @@ public class CompactionGraph implements Closeable, Accountable
 
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
-        postingsOneToOne = true;
+        postingsStructure = Structure.ONE_TO_ONE; // until proven otherwise
         this.compressor = compressor;
+        this.encodedOmittedVector = vts.createByteSequence(compressor.compressedVectorSize());
+        this.supportsOneToMany = allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         Component tmpComponent = new Component(Component.Type.CUSTOM, "chronicle" + Descriptor.TMP_EXT);
@@ -207,7 +213,7 @@ public class CompactionGraph implements Closeable, Accountable
     /**
      * @return the result of adding the given (vector) term; see {@link InsertionResult}
      */
-    public InsertionResult maybeAddVector(ByteBuffer term, Integer key) throws IOException
+    public InsertionResult maybeAddVector(ByteBuffer term, int segmentRowId) throws IOException
     {
         assert term != null && term.remaining() != 0;
 
@@ -226,17 +232,24 @@ public class CompactionGraph implements Closeable, Accountable
             return new InsertionResult(0);
         }
 
+        // if we don't see sequential rowids, it means the skipped row(s) have null vectors
+        if (segmentRowId != lastRowId + 1)
+            postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
+        lastRowId = segmentRowId;
+
         var bytesUsed = 0L;
         var postings = postingsMap.get(vector);
         if (postings == null)
         {
             // add a new entry
             // this all runs on the same compaction thread, so we don't need to worry about concurrency
-            int ordinal = nextOrdinal++;
-            postings = new CompactionVectorPostings(ordinal, key);
+            int ordinal = supportsOneToMany ? segmentRowId : nextOrdinal++;
+            postings = new CompactionVectorPostings(ordinal, segmentRowId);
             postingsMap.put(vector, postings);
             writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
             var encoded = (ArrayByteSequence) compressor.encode(vector);
+            while (pqVectorsList.size() < ordinal)
+                pqVectorsList.add(encodedOmittedVector);
             pqVectorsList.add(encoded);
 
             bytesUsed += encoded.ramBytesUsed();
@@ -245,8 +258,9 @@ public class CompactionGraph implements Closeable, Accountable
         }
 
         // postings list already exists, just add the new key (if it's not already in the list)
-        postingsOneToOne = false;
-        if (postings.add(key))
+        if (postingsStructure == Structure.ONE_TO_ONE)
+            postingsStructure = Structure.ONE_TO_MANY;
+        if (postings.add(segmentRowId))
             bytesUsed += postings.bytesPerPosting();
         return new InsertionResult(bytesUsed);
     }
@@ -260,7 +274,7 @@ public class CompactionGraph implements Closeable, Accountable
     {
         // recreate the writer now that we know how many vectors there are
         writer.close();
-        writer = createTermsWriter(builder.getGraph().size() - 1);
+        writer = createTermsWriter(builder.getGraph().getIdUpperBound() - 1);
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -302,12 +316,12 @@ public class CompactionGraph implements Closeable, Accountable
                     {
                         if (V5OnDiskFormat.writeV5VectorPostings())
                         {
-                            return new V5VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), postingsMap)
+                            return new V5VectorPostingsWriter<Integer>(postingsStructure, builder.getGraph().size(), postingsMap)
                                                .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
                         }
                         else
                         {
-                            return new V2VectorPostingsWriter<Integer>(postingsOneToOne, builder.getGraph().size(), i -> i)
+                            return new V2VectorPostingsWriter<Integer>(postingsStructure == Structure.ONE_TO_ONE, builder.getGraph().size(), i -> i)
                                    .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, Set.of());
                         }
                     }

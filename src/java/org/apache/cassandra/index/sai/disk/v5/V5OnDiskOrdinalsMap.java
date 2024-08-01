@@ -130,6 +130,12 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
     }
 
+    @Override
+    public V5VectorPostingsWriter.Structure getStructure()
+    {
+        return structure;
+    }
+
     private Int2ObjectHashMap<int[]> cacheExtraRowIds(RandomAccessReader reader) throws IOException
     {
         var ordinalToRowIds = new Int2ObjectHashMap<int[]>();
