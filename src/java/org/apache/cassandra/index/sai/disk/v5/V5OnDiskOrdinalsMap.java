@@ -26,6 +26,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.PrimitiveIterator;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -33,6 +34,7 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
@@ -56,13 +58,14 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     private final long segmentEnd;
     private final int maxOrdinal;
     private final int maxRowId;
-    private final long rowOrdinalOffset;
+    private final long rowToOrdinalOffset;
     private final List<ExtraRow> extraRows;
     @VisibleForTesting
     final V5VectorPostingsWriter.Structure structure;
 
     private final Supplier<OrdinalsView> ordinalsViewSupplier;
     private final Supplier<RowIdsView> rowIdsViewSupplier;
+    private final Int2ObjectHashMap<int[]> extraRowsByOrdinal;
 
     public V5OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
     {
@@ -82,40 +85,44 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
             this.ordToRowOffset = reader.getFilePointer();
             if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE)
             {
-                this.rowOrdinalOffset = segmentEnd;
+                this.rowToOrdinalOffset = segmentEnd;
             }
             else
             {
                 reader.seek(segmentEnd - 8);
-                this.rowOrdinalOffset = reader.readLong();
+                this.rowToOrdinalOffset = reader.readLong();
             }
 
             if (maxOrdinal < 0)
             {
+                extraRowsByOrdinal = null;
                 extraRows = null;
                 this.rowIdsViewSupplier = () -> EMPTY_ROW_IDS_VIEW;
                 this.ordinalsViewSupplier = () -> EMPTY_ORDINALS_VIEW;
             }
             else if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE)
             {
+                extraRowsByOrdinal = null;
                 extraRows = null;
                 this.rowIdsViewSupplier = () -> ONE_TO_ONE_ROW_IDS_VIEW;
                 this.ordinalsViewSupplier = () -> new OneToOneOrdinalsView(maxOrdinal + 1);
             }
             else if (structure == V5VectorPostingsWriter.Structure.ONE_TO_MANY)
             {
+                extraRowsByOrdinal = cacheExtraRowIds(reader);
                 extraRows = cacheExtraRowOrdinals(reader);
-                this.rowIdsViewSupplier = GenericRowIdsView::new;
+                this.rowIdsViewSupplier = OneToManyRowIdsView::new;
                 this.ordinalsViewSupplier = OneToManyOrdinalsView::new;
             }
             else
             {
+                extraRowsByOrdinal = null;
                 extraRows = null;
                 this.rowIdsViewSupplier = GenericRowIdsView::new;
                 this.ordinalsViewSupplier = GenericOrdinalsView::new;
             }
 
-            assert rowOrdinalOffset <= segmentEnd : "rowOrdinalOffset " + rowOrdinalOffset + " is not less than or equal to segmentEnd " + segmentEnd;
+            assert rowToOrdinalOffset <= segmentEnd : "rowOrdinalOffset " + rowToOrdinalOffset + " is not less than or equal to segmentEnd " + segmentEnd;
         }
         catch (Exception e)
         {
@@ -123,10 +130,33 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
     }
 
+    private Int2ObjectHashMap<int[]> cacheExtraRowIds(RandomAccessReader reader) throws IOException
+    {
+        var ordinalToRowIds = new Int2ObjectHashMap<int[]>();
+        reader.seek(ordToRowOffset);
+        int entryCount = reader.readInt();
+        for (int i = 0; i < entryCount; i++)
+        {
+            int ordinal = reader.readInt();
+            int postingsSize = reader.readInt();
+            if (postingsSize > 0)
+                postingsSize++; // add the ordinal itself
+            int[] rowIds = new int[postingsSize];
+            if (postingsSize > 0)
+            {
+                rowIds[0] = ordinal;
+                for (int j = 1; j < postingsSize; j++)
+                    rowIds[j] = reader.readInt();
+            }
+            ordinalToRowIds.put(ordinal, rowIds);
+        }
+        return ordinalToRowIds;
+    }
+
     private List<ExtraRow> cacheExtraRowOrdinals(RandomAccessReader reader) throws IOException
     {
         var extra = new ArrayList<ExtraRow>();
-        reader.seek(rowOrdinalOffset);
+        reader.seek(rowToOrdinalOffset);
         while (reader.getFilePointer() < segmentEnd - 8)
         {
             int rowId = reader.readInt();
@@ -141,7 +171,6 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         return rowIdsViewSupplier.get();
     }
 
-    // VSTODO is it worth optimizing this for one-to-many case as well?
     private class GenericRowIdsView implements RowIdsView
     {
         RandomAccessReader reader = fh.createReader();
@@ -210,7 +239,7 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         @Override
         public int getOrdinalForRowId(int rowId) throws IOException
         {
-            long offset = rowOrdinalOffset + (long) rowId * 8;
+            long offset = rowToOrdinalOffset + (long) rowId * 8;
             if (offset >= segmentEnd - 8)
                 return -1;
 
@@ -224,7 +253,7 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         @Override
         public void forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
         {
-            long startOffset = max(rowOrdinalOffset, rowOrdinalOffset + (long) startRowId * 8);
+            long startOffset = max(rowToOrdinalOffset, rowToOrdinalOffset + (long) startRowId * 8);
             if (startOffset >= segmentEnd - 8)
                 return;  // start rowid is larger than any rowId that has an associated vector ordinal
 
@@ -253,6 +282,31 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     public void close()
     {
         fh.close();
+    }
+
+    private class OneToManyRowIdsView implements RowIdsView
+    {
+        @Override
+        public PrimitiveIterator.OfInt getSegmentRowIdsMatching(int ordinal)
+        {
+            Preconditions.checkArgument(ordinal <= maxOrdinal, "vectorOrdinal %s is out of bounds %s", ordinal, maxOrdinal);
+
+            int[] rowIds = extraRowsByOrdinal.get(ordinal);
+            // no entry means there is just one rowid matching the ordinal
+            if (rowIds == null)
+                return new SingletonIntIterator(ordinal);
+            // zero-length entry means it's a hole
+            if (rowIds.length == 0)
+                return IntStream.empty().iterator();
+            // otherwise return the rowIds
+            return Arrays.stream(rowIds).iterator();
+        }
+
+        @Override
+        public void close()
+        {
+            // no-op
+        }
     }
 
     private class OneToManyOrdinalsView implements OrdinalsView
@@ -300,7 +354,7 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 
         @Override
         public void close() {
-            // no-op, as we no longer need to close any resources
+            // no-op
         }
     }
 

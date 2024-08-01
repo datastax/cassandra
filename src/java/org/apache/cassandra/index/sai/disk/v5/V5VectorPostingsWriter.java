@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
+import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
@@ -34,8 +35,11 @@ import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.agrona.collections.Int2IntHashMap;
+import org.agrona.collections.Int2ObjectHashMap;
+import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
+import org.apache.lucene.document.IntRange;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -103,17 +107,66 @@ public class V5VectorPostingsWriter<T>
         }
         else if (structure == Structure.ONE_TO_MANY)
         {
-            writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
+            writeOneToManyOrdinalMapping(writer);
             writeOneToManyRowIdMapping(writer);
         }
         else
         {
             assert structure == Structure.ZERO_OR_ONE_TO_MANY;
-            writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
+            writeGenericOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
             writeGenericRowIdMapping(writer, vectorValues, postingsMap);
         }
 
         return writer.position();
+    }
+
+    private void writeOneToManyOrdinalMapping(SequentialWriter writer) throws IOException
+    {
+        long startOffset = writer.position();
+
+        // make sure we're in the right branch
+        assert !remappedPostings.extraPostings.isEmpty();
+
+        // Create a map of (original) ordinals to their extra rowids
+        var ordinalToExtraRowIds = new Int2ObjectHashMap<IntArrayList>();
+        for (var entry : remappedPostings.extraPostings.entrySet()) {
+            int rowId = entry.getKey();
+            int ordinal = entry.getValue();
+            ordinalToExtraRowIds.computeIfAbsent(ordinal, k -> new IntArrayList()).add(rowId);
+        }
+
+        // Write the ordinals and their extra rowids
+        int holeCount = (int) IntStream.range(0, remappedPostings.maxNewOrdinal + 1)
+                                       .map(remappedPostings.ordinalMapper::newToOld)
+                                       .filter(i -> i == OrdinalMapper.OMITTED)
+                                       .count();
+        writer.writeInt(holeCount + ordinalToExtraRowIds.size());
+        int entries = 0;
+        for (int newOrdinal = 0; newOrdinal <= remappedPostings.maxNewOrdinal; newOrdinal++) {
+            // write the "holes"
+            int oldOrdinal = remappedPostings.ordinalMapper.newToOld(newOrdinal);
+            if (oldOrdinal == OrdinalMapper.OMITTED)
+            {
+                writer.writeInt(newOrdinal);
+                writer.writeInt(0);
+                entries++;
+                assert !ordinalToExtraRowIds.containsKey(oldOrdinal);
+                continue;
+            }
+
+            // write the ordinals with multiple rows
+            var extraRowIds = ordinalToExtraRowIds.get(oldOrdinal);
+            if (extraRowIds != null)
+            {
+                writer.writeInt(newOrdinal);
+                writer.writeInt(extraRowIds.size());
+                for (int rowId : extraRowIds) {
+                    writer.writeInt(rowId);
+                }
+                entries++;
+            }
+        }
+        assert entries == holeCount + ordinalToExtraRowIds.size();
     }
 
     private void writeOneToManyRowIdMapping(SequentialWriter writer) throws IOException
@@ -143,9 +196,10 @@ public class V5VectorPostingsWriter<T>
         writer.writeLong(startOffset);
     }
 
-    public void writeNodeOrdinalToRowIdMapping(SequentialWriter writer,
-                                               RandomAccessVectorValues vectorValues,
-                                               Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
+    // VSTODO add missing row information to remapping so we don't have to go through the vectorValues again
+    public void writeGenericOrdinalToRowIdMapping(SequentialWriter writer,
+                                                  RandomAccessVectorValues vectorValues,
+                                                  Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
         long ordToRowOffset = writer.getOnDiskFilePointer();
 
