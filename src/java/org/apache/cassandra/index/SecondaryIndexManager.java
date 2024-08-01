@@ -754,11 +754,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             }
 
             // Flush all built indexes with an aynchronous callback to log the success or failure of the flush
-            flushIndexesBlocking(builtIndexes, new FutureCallback()
+            flushIndexesBlocking(builtIndexes, new FutureCallback<>()
             {
-                String indexNames = StringUtils.join(builtIndexes.stream()
-                                                                 .map(i -> i.getIndexMetadata().name)
-                                                                 .collect(Collectors.toList()), ',');
+                final String indexNames = StringUtils.join(builtIndexes.stream()
+                                                                       .map(i -> i.getIndexMetadata().name)
+                                                                       .collect(Collectors.toList()), ',');
 
                 @Override
                 public void onFailure(Throwable ignored)
@@ -1844,7 +1844,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             if (notice.memtable().isEmpty())
             {
                 IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableAdded(notice);
-                build(decision, notice.added, false);
+                build(decision, notice.added);
             }
         }
         else if (notification instanceof SSTableListChangedNotification)
@@ -1852,11 +1852,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             SSTableListChangedNotification notice = (SSTableListChangedNotification) notification;
 
             IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableListChanged(notice);
-            build(decision, notice.added, false);
+            build(decision, notice.added);
         }
     }
 
-    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables, boolean onlyIndexWithComponents)
+    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables)
     {
         if (decision == IndexBuildDecider.Decision.ASYNC)
         {
@@ -1864,7 +1864,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                               indexes.values()
                                      .stream()
                                      .filter(Index::shouldBuildBlocking)
-                                     .filter(i -> !onlyIndexWithComponents || !i.getComponents().isEmpty())
+                                     .filter(i -> !i.isSSTableAttached())
                                      .collect(Collectors.toSet()),
                               false);
         }
@@ -1874,7 +1874,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                  indexes.values()
                                         .stream()
                                         .filter(Index::shouldBuildBlocking)
-                                        .filter(i -> !onlyIndexWithComponents || !i.getComponents().isEmpty())
+                                        .filter(i -> !i.isSSTableAttached())
                                         .collect(Collectors.toSet()),
                                  false);
         }

@@ -121,7 +121,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public boolean validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum)
+    public void validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum)
     {
         for (IndexComponent indexComponent : perSSTableComponents())
         {
@@ -136,19 +136,15 @@ public class V2OnDiskFormat extends V1OnDiskFormat
                 else
                     SAICodecUtils.validate(input, earliest);
             }
-            catch (Throwable e)
+            catch (Exception e)
             {
-                if (logger.isDebugEnabled())
-                {
-                    logger.debug(indexDescriptor.logMessage("{} failed for index component {} on SSTable {}"),
-                                 (checksum ? "Checksum validation" : "Validation"),
-                                 indexComponent,
-                                 indexDescriptor.descriptor);
-                }
-                return false;
+                logger.warn(indexDescriptor.logMessage("{} failed for index component {} on SSTable {}"),
+                            (checksum ? "Checksum validation" : "Validation"),
+                            indexComponent,
+                            indexDescriptor.descriptor);
+                rethrowIOException(e);
             }
         }
-        return true;
     }
 
     @Override

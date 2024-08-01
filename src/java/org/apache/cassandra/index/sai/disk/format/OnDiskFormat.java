@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteOrder;
 import java.util.Set;
 
@@ -139,9 +140,9 @@ public interface OnDiskFormat
      * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
      * @param checksum {@code true} if the checksum should be tested as part of the validation
      *
-     * @return true if all the per-SSTable components are valid
+     * @throws UncheckedIOException if there is a problem validating any on-disk component
      */
-    public boolean validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum);
+    void validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum);
 
     /**
      * Validate all the per-index on-disk components and throw if a component is not valid
@@ -150,21 +151,19 @@ public interface OnDiskFormat
      * @param context The {@link IndexContext} holding the per-index information for the index
      * @param checksum {@code true} if the checksum should be tested as part of the validation
      *
-     * @return true if all the per-index components are valid
+     * @throws UncheckedIOException if there is a problem validating any on-disk component
      */
-    default boolean validatePerIndexComponents(IndexDescriptor descriptor, IndexContext context, boolean checksum)
+    default void validatePerIndexComponents(IndexDescriptor descriptor, IndexContext context, boolean checksum)
     {
         for (IndexComponent component : perIndexComponents(context))
         {
             if (descriptor.isIndexEmpty(context))
                 continue;
-            if (!validateOneIndexComponent(component, descriptor, context, checksum))
-                return false;
+            validateOneIndexComponent(component, descriptor, context, checksum);
         }
-        return true;
     }
 
-    boolean validateOneIndexComponent(IndexComponent component, IndexDescriptor descriptor, IndexContext context, boolean checksum);
+    void validateOneIndexComponent(IndexComponent component, IndexDescriptor descriptor, IndexContext context, boolean checksum);
 
     /**
      * Returns the set of {@link IndexComponent} for the per-SSTable part of an index.

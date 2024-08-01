@@ -345,7 +345,8 @@ public class SAITester extends CQLTester
             IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
             if (indexDescriptor.isIndexEmpty(context))
                 continue;
-            if (!indexDescriptor.validatePerSSTableComponentsChecksum() || !indexDescriptor.validatePerIndexComponentsChecksum(context))
+            if (!indexDescriptor.validatePerSSTableComponents(true, false)
+                || !indexDescriptor.validatePerIndexComponents(context, true, false))
                 return false;
         }
         return true;
