@@ -345,8 +345,7 @@ public class VectorMemtableIndex implements MemtableIndex
     private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)
     {
         int expectedNodesVisited = expectedNodesVisited(limit, nPermittedOrdinals, graphSize);
-        int expectedComparisons = indexContext.getIndexWriterConfig().getAnnMaxDegree() * expectedNodesVisited;
-        return (int) min(max(limit, Plan.memoryToDiskFactor() * expectedComparisons), GLOBAL_BRUTE_FORCE_ROWS);
+        return min(max(limit, expectedNodesVisited), GLOBAL_BRUTE_FORCE_ROWS);
     }
 
     public int estimateAnnNodesVisited(int limit, int nPermittedOrdinals)
@@ -356,6 +355,12 @@ public class VectorMemtableIndex implements MemtableIndex
 
     /**
      * All parameters must be greater than zero.  nPermittedOrdinals may be larger than graphSize.
+     * <p>
+     * Returns the expected number of nodes visited by an ANN search.
+     * !!!
+     * !!! "Visted" means we compute the coarse similarity with the query vector.  This is
+     * !!! roughly `degree` times larger than the number of nodes whose edge lists we load!
+     * !!!
      */
     public static int expectedNodesVisited(int limit, int nPermittedOrdinals, int graphSize)
     {

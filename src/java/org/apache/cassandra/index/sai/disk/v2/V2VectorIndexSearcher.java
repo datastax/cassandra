@@ -79,6 +79,7 @@ import org.apache.cassandra.utils.Pair;
 
 import static java.lang.Math.ceil;
 import static java.lang.Math.min;
+import static org.apache.cassandra.index.sai.plan.Plan.hrs;
 
 /**
  * Executes ann search against the graph for an individual index segment.
@@ -279,7 +280,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     {
         // If we use compressed vectors, we still have to order rerankK results using full resolution similarity
         // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
-        if (graph.getCompressedVectors() != null && segmentRowIds.size() - rerankK > Plan.memoryToDiskFactor() * segmentRowIds.size())
+        double twoPassCost = segmentRowIds.size() * Plan.CostCoefficients.ANN_SIMILARITY_COST
+                             + rerankK * hrs(Plan.CostCoefficients.ANN_SCORED_KEY_COST);
+        double onePassCost = segmentRowIds.size() * hrs(Plan.CostCoefficients.ANN_SCORED_KEY_COST);
+        if (graph.getCompressedVectors() != null && twoPassCost < onePassCost)
             return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentRowIds, limit, rerankK);
         return orderByBruteForce(queryVector, segmentRowIds);
     }

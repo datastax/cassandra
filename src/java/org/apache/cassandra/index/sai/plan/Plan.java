@@ -1872,16 +1872,6 @@ abstract public class Plan
         }
     }
 
-    /**
-     * how much cheaper is it to perform an in-memory approximate similarity
-     * compared to loading the full resolution vector from disk
-     * @return 0..1, lower is cheaper
-     */
-    public static double memoryToDiskFactor()
-    {
-        return 0.25 * clampedCacheHitRate();
-    }
-
     /** cache hit rate that doesn't go below 0.01 to avoid absurdly high cost estimates when we divide something by it */
     private static double clampedCacheHitRate()
     {
@@ -1890,7 +1880,7 @@ abstract public class Plan
     }
 
     /** hit-rate-scale the raw cost */
-    private static double hrs(double raw)
+    public static double hrs(double raw)
     {
         return raw / clampedCacheHitRate();
     }
