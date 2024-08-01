@@ -372,7 +372,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // compute the remapping of old ordinals to new (to fill in holes from deletion and/or to create a
         // closer correspondance to rowids, simplifying postings lookups later)
         var remappedPostings = V5VectorPostingsWriter.remapPostings(postingsMap);
-        IntUnaryOperator newToOldMapper = remappedPostings.ordinalMapper::newToOld;
         OrdinalMapper ordinalMapper = remappedPostings.ordinalMapper;
 
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
@@ -397,7 +396,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            long pqPosition = writePQ(pqOutput.asSequentialWriter(), newToOldMapper, perIndexComponents.context());
+            long pqPosition = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context());
             long pqLength = pqPosition - pqOffset;
 
             // write postings
@@ -411,6 +410,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             else
             {
+                IntUnaryOperator newToOldMapper = remappedPostings.ordinalMapper::newToOld;
                 postingsPosition = new V2VectorPostingsWriter<T>(remappedPostings.structure == Structure.ONE_TO_ONE, builder.getGraph().size(), newToOldMapper)
                                    .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, deletedOrdinals);
             }
@@ -481,7 +481,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return cvi;
     }
 
-    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, IndexContext indexContext) throws IOException
+    private long writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext) throws IOException
     {
         var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
 
@@ -508,7 +508,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             assert !vectorValues.isValueShared();
             // encode (compress) the vectors to save
             if (compressor != null)
-                encoded = compressVectors(reverseOrdinalMapper, compressor);
+                encoded = compressVectors(remapped, compressor);
 
             containsUnitVectors = IntStream.range(0, vectorValues.size())
                                            .parallel()
@@ -567,19 +567,25 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return compressor;
     }
 
-    private Object compressVectors(IntUnaryOperator reverseOrdinalMapper, VectorCompressor<?> compressor)
+    private Object compressVectors(V5VectorPostingsWriter.RemappedPostings remapped, VectorCompressor<?> compressor)
     {
         if (compressor instanceof ProductQuantization)
-            return IntStream.range(0, vectorValues.size()).parallel()
-                       .mapToObj(i -> {
-                           var v = vectorValues.getVector(reverseOrdinalMapper.applyAsInt(i));
-                           return ((ProductQuantization) compressor).encode(v);
-                       })
-                       .toArray(ByteSequence<?>[]::new);
-        else if (compressor instanceof BinaryQuantization)
-            return IntStream.range(0, vectorValues.size()).parallel()
+            return IntStream.range(0, remapped.maxNewOrdinal + 1).parallel()
                             .mapToObj(i -> {
-                                var v = vectorValues.getVector(reverseOrdinalMapper.applyAsInt(i));
+                                var oldOrdinal = remapped.ordinalMapper.newToOld(i);
+                                if (oldOrdinal == OrdinalMapper.OMITTED)
+                                    return vts.createByteSequence(compressor.compressedVectorSize());
+                                var v = vectorValues.getVector(oldOrdinal);
+                                return ((ProductQuantization) compressor).encode(v);
+                            })
+                            .toArray(ByteSequence<?>[]::new);
+        else if (compressor instanceof BinaryQuantization)
+            return IntStream.range(0, remapped.maxNewOrdinal + 1).parallel()
+                            .mapToObj(i -> {
+                                var oldOrdinal = remapped.ordinalMapper.newToOld(i);
+                                if (oldOrdinal == OrdinalMapper.OMITTED)
+                                    return new long[compressor.compressedVectorSize() / Long.BYTES];
+                                var v = vectorValues.getVector(remapped.ordinalMapper.newToOld(i));
                                 return ((BinaryQuantization) compressor).encode(v);
                             })
                             .toArray(long[][]::new);
