@@ -323,7 +323,7 @@ public class WriteResponseHandlerTest
     {
         Dispatcher.RequestTime requestTime = Dispatcher.RequestTime.forImmediateExecution();
         AbstractWriteResponseHandler<?> awr = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM, requestTime);
-        assertThat(awr.replicaPlan().blockFor()).isEqualTo(2);
+        assertThat(awr.replicaPlan().writeQuorum()).isEqualTo(2);
         assertThat(awr.writeType()).isEqualTo(WriteType.SIMPLE);
         assertThat(awr.requestTime()).isEqualTo(requestTime);
 
@@ -347,7 +347,7 @@ public class WriteResponseHandlerTest
     {
         Dispatcher.RequestTime requestTime = Dispatcher.RequestTime.forImmediateExecution();
         AbstractWriteResponseHandler<?> awr = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM, requestTime);
-        assertThat(awr.replicaPlan().blockFor()).isEqualTo(2);
+        assertThat(awr.replicaPlan().writeQuorum()).isEqualTo(2);
         assertThat(awr.writeType()).isEqualTo(WriteType.SIMPLE);
         assertThat(awr.requestTime()).isEqualTo(requestTime);
 
