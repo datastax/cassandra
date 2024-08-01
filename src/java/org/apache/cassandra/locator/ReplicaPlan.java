@@ -83,7 +83,6 @@ public interface ReplicaPlan<E extends Endpoints<E>, P extends ReplicaPlan<E, P>
         public Keyspace keyspace() { return keyspace; }
         public AbstractReplicationStrategy replicationStrategy() { return replicationStrategy; }
         public ConsistencyLevel consistencyLevel() { return consistencyLevel; }
-        public int blockFor() { return consistencyLevel.blockFor(replicationStrategy); }
     }
 
     public static abstract class AbstractForRead<E extends Endpoints<E>, P extends ForRead<E, P>> extends AbstractReplicaPlan<E, P> implements ForRead<E, P>
@@ -180,7 +179,7 @@ public interface ReplicaPlan<E extends Endpoints<E>, P extends ReplicaPlan<E, P>
         }
 
         @Override
-        public int blockFor()
+        public int readQuorum()
         {
             return candidates.size();
         }
