@@ -32,6 +32,7 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -57,6 +58,8 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
     public abstract int size();
 
     public abstract OrdinalsView getOrdinalsView() throws IOException;
+    public abstract V5VectorPostingsWriter.Structure getPostingsStructure();
+
     public abstract VectorSupplier getVectorSupplier() throws IOException;
 
     public abstract VectorCompression getCompression();

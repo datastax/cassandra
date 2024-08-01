@@ -39,7 +39,6 @@ import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
-import org.apache.lucene.document.IntRange;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -78,16 +77,12 @@ public class V5VectorPostingsWriter<T>
         this.remappedPostings = remappedPostings;
     }
 
-    public V5VectorPostingsWriter(boolean postingsOneToOne, int graphSize, Map<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
+    public V5VectorPostingsWriter(Structure structure, int graphSize, Map<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
     {
-        if (postingsOneToOne)
-        {
+        if (structure == Structure.ONE_TO_ONE)
             remappedPostings = new RemappedPostings(Structure.ONE_TO_ONE, graphSize - 1, graphSize - 1, null, null);
-        }
         else
-        {
             remappedPostings = remapPostings(postingsMap);
-        }
     }
 
     public long writePostings(SequentialWriter writer,

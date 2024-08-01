@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -229,12 +228,12 @@ public abstract class SegmentBuilder
     {
         private final CompactionGraph graphIndex;
 
-        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter, ProductQuantization pq, boolean unitVectors)
+        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, ProductQuantization pq, boolean unitVectors, boolean allRowsHaveVectors, NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             try
             {
-                graphIndex = new CompactionGraph(components, pq, unitVectors, keyCount);
+                graphIndex = new CompactionGraph(components, pq, unitVectors, keyCount, allRowsHaveVectors);
             }
             catch (IOException e)
             {

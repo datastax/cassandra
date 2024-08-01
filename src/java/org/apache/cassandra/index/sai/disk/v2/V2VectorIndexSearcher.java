@@ -53,6 +53,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
@@ -379,6 +380,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (max < 0)
             return metadata.maxSSTableRowId;
         return max;
+    }
+
+    public V5VectorPostingsWriter.Structure getPostingsStructure()
+    {
+        return graph.getPostingsStructure();
     }
 
     private class CostEstimate
