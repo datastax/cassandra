@@ -304,10 +304,12 @@ public class DatabaseDescriptor
         daemonInitialized = true;
 
         setConfig(config.get());
+        // SnapshotLoader requires created directories
+        // GuardrailsOptions.validateDataDiskUsageMaxDiskSize requires created directories
+        createAllDirectories();
         applyAll();
 
-        createAllDirectories();
-        applyGuardrails(); // requires created directories
+        applyGuardrails(); // GuardrailsOptions.validateDataDiskUsageMaxDiskSize requires created directories
 
         AuthConfig.applyAuth();
     }
@@ -2728,6 +2730,20 @@ public class DatabaseDescriptor
 
         return ArrayUtils.addFirst(dataDirectories, localSystemDataFileDirectory);
     }
+
+    /**
+     * Returns the list of all the configured directories where the data files can be stored (for local system and non local system keyspaces).
+     * <p> Note: This method may be called before {@link #createAllDirectories()}</p>
+     *
+     * @return the list of all the configured directories where the data files can be stored.
+     */
+//    public static String[] getAllConfiguredDataFileLocations()
+//    {
+//        if (conf.local_system_data_file_directory == null)
+//            return conf.data_file_directories;
+//
+//        return ArrayUtils.addFirst(conf.data_file_directories, conf.local_system_data_file_directory);
+//    }
 
     @VisibleForTesting
     public static void setDataDirectories(File[] newDataDirectories)
