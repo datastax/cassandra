@@ -54,6 +54,7 @@ import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
@@ -184,31 +185,39 @@ public class TrieMemtableIndex implements MemtableIndex
 
         RangeConcatIterator.Builder builder = RangeConcatIterator.builder(endShard - startShard + 1);
 
-        // We want to run the search on the first shard only to get the estimate on the number of matching keys.
-        // But we don't want to run the search on the other shards until the user polls more items from the
-        // result iterator. Therefore, the first shard search is special - we run the search eagerly,
-        // but the rest of the iterators are create lazily in the loop below.
-        assert rangeIndexes[startShard] != null;
-        RangeIterator firstIterator = rangeIndexes[startShard].search(expression, keyRange);
-        var keyCount = firstIterator.getMaxKeys();
-        builder.add(firstIterator);
-
-        // Prepare the search on the remaining shards, but wrap them in LazyRangeIterator, so they don't run
-        // until the user exhaust the results given from the first shard.
-        for (int shard  = startShard + 1; shard <= endShard; ++shard)
+        try
         {
-            assert rangeIndexes[shard] != null;
-            var index = rangeIndexes[shard];
-            var shardRange = boundaries.getBounds(shard);
-            var minKey = index.indexContext.keyFactory().createTokenOnly(shardRange.left.getToken());
-            var maxKey = index.indexContext.keyFactory().createTokenOnly(shardRange.right.getToken());
-            // Assume all shards are the same size, but we must not pass 0 because of some checks in RangeIterator
-            // that assume 0 means empty iterator and could fail.
-            var count = Math.max(1, keyCount);
-            builder.add(new LazyRangeIterator(() -> index.search(expression, keyRange), minKey, maxKey, count));
-        }
+            // We want to run the search on the first shard only to get the estimate on the number of matching keys.
+            // But we don't want to run the search on the other shards until the user polls more items from the
+            // result iterator. Therefore, the first shard search is special - we run the search eagerly,
+            // but the rest of the iterators are create lazily in the loop below.
+            assert rangeIndexes[startShard] != null;
+            RangeIterator firstIterator = rangeIndexes[startShard].search(expression, keyRange);
+            var keyCount = firstIterator.getMaxKeys();
+            builder.add(firstIterator);
 
-        return builder.build();
+            // Prepare the search on the remaining shards, but wrap them in LazyRangeIterator, so they don't run
+            // until the user exhaust the results given from the first shard.
+            for (int shard = startShard + 1; shard <= endShard; ++shard)
+            {
+                assert rangeIndexes[shard] != null;
+                var index = rangeIndexes[shard];
+                var shardRange = boundaries.getBounds(shard);
+                var minKey = index.indexContext.keyFactory().createTokenOnly(shardRange.left.getToken());
+                var maxKey = index.indexContext.keyFactory().createTokenOnly(shardRange.right.getToken());
+                // Assume all shards are the same size, but we must not pass 0 because of some checks in RangeIterator
+                // that assume 0 means empty iterator and could fail.
+                var count = Math.max(1, keyCount);
+                builder.add(new LazyRangeIterator(() -> index.search(expression, keyRange), minKey, maxKey, count));
+            }
+
+            return builder.build();
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(builder.ranges());
+            throw t;
+        }
     }
 
     @Override

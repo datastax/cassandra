@@ -401,7 +401,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         {
             try
             {
-                var postingLists = new ArrayList<PostingList.PeekablePostingList>(100);
+                var postingLists = new ArrayList<PostingList>(100);
                 executeInternal(postingLists);
 
                 FileUtils.closeQuietly(bkdInput);
@@ -418,7 +418,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
         }
 
-        protected void executeInternal(final Collection<PostingList.PeekablePostingList> postingLists) throws IOException
+        protected void executeInternal(final Collection<PostingList> postingLists) throws IOException
         {
             collectPostingLists(postingLists);
         }
@@ -428,7 +428,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             FileUtils.closeQuietly(bkdInput, postingsInput, postingsSummaryInput);
         }
 
-        protected PostingList mergePostings(ArrayList<PostingList.PeekablePostingList> postingLists) throws IOException
+        protected PostingList mergePostings(ArrayList<PostingList> postingLists) throws IOException
         {
             final long elapsedMicros = queryExecutionTimer.stop().elapsed(TimeUnit.MICROSECONDS);
 
@@ -443,7 +443,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                                    .onClose(() -> FileUtils.close(postingsInput, postingsSummaryInput));
         }
 
-        public void collectPostingLists(Collection<PostingList.PeekablePostingList> postingLists) throws IOException
+        public void collectPostingLists(Collection<PostingList> postingLists) throws IOException
         {
             context.checkpoint();
 
@@ -452,7 +452,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             // if there is pre-built posting for entire subtree
             if (postingsIndex.exists(nodeID))
             {
-                postingLists.add(initPostingReader(postingsIndex.getPostingsFilePointer(nodeID)).peekable());
+                postingLists.add(initPostingReader(postingsIndex.getPostingsFilePointer(nodeID)));
                 return;
             }
 
@@ -659,12 +659,12 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
 
         @Override
-        public void executeInternal(final Collection<PostingList.PeekablePostingList> postingLists) throws IOException
+        public void executeInternal(final Collection<PostingList> postingLists) throws IOException
         {
             collectPostingLists(postingLists, minPackedValue, maxPackedValue);
         }
 
-        public void collectPostingLists(Collection<PostingList.PeekablePostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
+        public void collectPostingLists(Collection<PostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
         {
             context.checkpoint();
 
@@ -694,7 +694,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
 
         @SuppressWarnings("resource")
-        void filterLeaf(Collection<PostingList.PeekablePostingList> postingLists) throws IOException
+        void filterLeaf(Collection<PostingList> postingLists) throws IOException
         {
             bkdInput.seek(index.getLeafBlockFP());
 
@@ -734,11 +734,11 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             if (postingsIndex.exists(nodeID) && holder[0].cardinality() > 0)
             {
                 final long pointer = postingsIndex.getPostingsFilePointer(nodeID);
-                postingLists.add(initFilteringPostingReader(pointer, holder[0]).peekable());
+                postingLists.add(initFilteringPostingReader(pointer, holder[0]));
             }
         }
 
-        void visitNode(Collection<PostingList.PeekablePostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
+        void visitNode(Collection<PostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
         {
             int splitDim = index.getSplitDim();
             assert splitDim >= 0 : "splitDim=" + splitDim;

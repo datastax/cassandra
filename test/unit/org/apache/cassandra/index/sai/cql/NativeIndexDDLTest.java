@@ -896,6 +896,9 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
     }
 
+    /**
+     * Simulate SAI build error during index rebuild: index rebuild task should fail
+     */
     @Test
     public void testIndexRebuildAborted() throws Throwable
     {
@@ -923,11 +926,59 @@ public class NativeIndexDDLTest extends SAITester
 
         // rebuild should fail
         assertThatThrownBy(() -> sim.buildIndexesBlocking(cfs.getLiveSSTables(), new HashSet<>(sim.listIndexes()), true))
-                          .isInstanceOf(RuntimeException.class).hasMessageContaining("is aborted");
+                          .isInstanceOf(RuntimeException.class).hasMessageContaining("Injected failure");
 
         // index is no longer queryable
         assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0"))
         .isInstanceOf(ReadFailureException.class);
+    }
+
+    /**
+     * Simulate SAI build error during compaction: compaction task should abort
+     */
+    @Test
+    public void testIndexCompactionAborted() throws Throwable
+    {
+        // prepare schema and data
+        createTable(CREATE_TABLE_TEMPLATE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+        flush();
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('3', 1, '0');");
+        flush();
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+        assertEquals(4, rows.all().size());
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        assertThat(cfs.getLiveSSTables()).hasSize(2);
+
+        SecondaryIndexManager sim = cfs.getIndexManager();
+        StorageAttachedIndex sai = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        assertThat(sai.getIndexContext().getView().getIndexes()).hasSize(2);
+
+        StorageAttachedIndexGroup saiGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        assertThat(saiGroup.sstableContextManager().size()).isEqualTo(2);
+
+        // rebuild index with byteman error
+        Injections.inject(failNumericIndexBuild);
+
+        // compaction task should fail
+        assertThatThrownBy(cfs::forceMajorCompaction)
+        .isInstanceOf(RuntimeException.class).hasMessageContaining("Injected failure");
+
+        // verify sstables and indexes are the same
+        assertThat(cfs.getLiveSSTables()).hasSize(2);
+        assertThat(saiGroup.sstableContextManager().size()).isEqualTo(2);
+        assertThat(sai.getIndexContext().getView().getIndexes()).hasSize(2);
+
+        // index is still queryable
+        rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+        assertEquals(4, rows.all().size());
     }
 
     @Test

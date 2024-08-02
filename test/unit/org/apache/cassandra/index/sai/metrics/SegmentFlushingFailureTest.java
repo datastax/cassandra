@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.metrics;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collection;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -31,15 +32,16 @@ import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.config.StorageAttachedIndexOptions;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.SSTableComponentsWriter;
 import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 import static org.apache.cassandra.inject.Injections.newCounter;
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -175,13 +177,16 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         flush();
         execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '1')");
         flush();
+        Collection<SSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
 
         // Verify that we abort exactly once and zero the memory tracker:
         verifyCompactionIndexBuilds(1, failure, currentTable());
 
         String select = String.format("SELECT * FROM %%s WHERE %s = %s", column, column.equals("v1") ? "0" : "'0'");
 
-        assertThatThrownBy(() -> executeNet(select)).isInstanceOf(ReadFailureException.class);
+        // compaction is aborted, index is still queryable
+        executeNet(select);
+        assertThat(getColumnFamilyStore(KEYSPACE, currentTable()).getLiveSSTables()).isEqualTo(sstables);
     }
 
     @Test
@@ -199,12 +204,14 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         flush();
         execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '1')");
         flush();
+        Collection<SSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
 
         // Verify that we abort both indices and zero the memory tracker:
         verifyCompactionIndexBuilds(2, kdTreeSegmentFlushFailure, currentTable());
 
-        assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE V1 = 0"))
-                .isInstanceOf(ReadFailureException.class);
+        // compaction is aborted, index is still queryable
+        executeNet("SELECT * FROM %s WHERE V1 = 0");
+        assertThat(getColumnFamilyStore(KEYSPACE, currentTable()).getLiveSSTables()).isEqualTo(sstables);
     }
 
     @Test
@@ -223,20 +230,22 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         flush(KEYSPACE, table1);
         execute("INSERT INTO " + KEYSPACE + "." + table1 + "(id1, v1, v2) VALUES ('1', 1, '1')");
         flush(KEYSPACE, table1);
+        Collection<SSTableReader> sstablesTable1 = getColumnFamilyStore(KEYSPACE, table1).getLiveSSTables();
 
         execute("INSERT INTO " + KEYSPACE + "." + table2 + "(id1, v1, v2) VALUES ('0', 0, '0')");
         flush(KEYSPACE, table2);
         execute("INSERT INTO " + KEYSPACE + "." + table2 + "(id1, v1, v2) VALUES ('1', 1, '1')");
         flush(KEYSPACE, table2);
+        Collection<SSTableReader> sstablesTable2 = getColumnFamilyStore(KEYSPACE, table2).getLiveSSTables();
 
         // Start compaction against both tables/indexes and verify that they are aborted safely:
         verifyCompactionIndexBuilds(2, segmentFlushFailure, table1, table2);
 
-        assertThatThrownBy(() -> executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1)))
-                .isInstanceOf(ReadFailureException.class);
+        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1));
+        assertThat(getColumnFamilyStore(KEYSPACE, table1).getLiveSSTables()).isEqualTo(sstablesTable1);
 
-        assertThatThrownBy(() -> executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table2)))
-                .isInstanceOf(ReadFailureException.class);
+        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table2));
+        assertThat(getColumnFamilyStore(KEYSPACE, table2).getLiveSSTables()).isEqualTo(sstablesTable2);
     }
 
     @Test
@@ -255,6 +264,7 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         flush(KEYSPACE, table1);
         execute("INSERT INTO " + KEYSPACE + "." + table1 + "(id1, v1, v2) VALUES ('1', 1, '1')");
         flush(KEYSPACE, table1);
+        Collection<SSTableReader> sstablesTable1 = getColumnFamilyStore(KEYSPACE, table1).getLiveSSTables();
 
         execute("INSERT INTO " + KEYSPACE + "." + table2 + "(id1, v1, v2) VALUES ('0', 0, '0')");
         flush(KEYSPACE, table2);
@@ -264,11 +274,15 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         // Start compaction against both tables/indexes, and verify only the numeric index is aborted:
         verifyCompactionIndexBuilds(1, kdTreeSegmentFlushFailure, table1, table2);
 
-        assertThatThrownBy(() -> executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1)))
-                .isInstanceOf(ReadFailureException.class);
+        // index is still queryable and sstables remain the same
+        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1));
+        assertThat(getColumnFamilyStore(KEYSPACE, table1).getLiveSSTables()).isEqualTo(sstablesTable1);
 
         ResultSet rows = executeNet(String.format("SELECT * FROM %s WHERE v2 = '0'", KEYSPACE + "." + table2));
         assertEquals(1, rows.all().size());
+
+        // table2 succeeded compaction
+        assertThat(getColumnFamilyStore(KEYSPACE, table2).getLiveSSTables()).hasSize(1);
     }
 
     private void verifyCompactionIndexBuilds(int aborts, Injection failure, String... tables) throws Throwable
@@ -278,7 +292,16 @@ public abstract class SegmentFlushingFailureTest extends SAITester
 
         try
         {
-            Arrays.stream(tables).forEach(table -> compact(KEYSPACE, table));
+            Arrays.stream(tables).forEach(table -> {
+                try
+                {
+                    compact(KEYSPACE, table);
+                }
+                catch (RuntimeException e)
+                {
+                    // injected failure
+                }
+            });
 
             Assert.assertEquals(aborts, writerAbortCounter.get());
 

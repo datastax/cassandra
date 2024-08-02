@@ -149,9 +149,9 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
                 numNonLeafPostings++;
             }
 
-            var postingLists = new ArrayList<PostingList.PeekablePostingList>(leaves.size());
+            var postingLists = new ArrayList<PostingList>(leaves.size());
             for (Integer leaf : leaves)
-                postingLists.add(new PackedLongsPostingList(leafToPostings.get(leaf)).peekable());
+                postingLists.add(new PackedLongsPostingList(leafToPostings.get(leaf)));
 
             final PostingList mergedPostingList = MergePostingList.merge(postingLists);
             final long postingFilePosition = postingsWriter.write(mergedPostingList);

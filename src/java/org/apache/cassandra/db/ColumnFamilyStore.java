@@ -2394,18 +2394,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         invalidateCachedPartition(new RowCacheKey(metadata(), key));
     }
 
-    public ClockAndCount getCachedCounter(ByteBuffer partitionKey, Clustering<?> clustering, ColumnMetadata column, CellPath path)
+    public ClockAndCount getCachedCounter(CounterCacheKey key)
     {
         if (CacheService.instance.counterCache.getCapacity() == 0L) // counter cache disabled.
             return null;
-        return CacheService.instance.counterCache.get(CounterCacheKey.create(metadata(), partitionKey, clustering, column, path));
+        return CacheService.instance.counterCache.get(key);
     }
 
-    public void putCachedCounter(ByteBuffer partitionKey, Clustering<?> clustering, ColumnMetadata column, CellPath path, ClockAndCount clockAndCount)
+    public void putCachedCounter(CounterCacheKey key, ClockAndCount clockAndCount)
     {
         if (CacheService.instance.counterCache.getCapacity() == 0L) // counter cache disabled.
             return;
-        CacheService.instance.counterCache.put(CounterCacheKey.create(metadata(), partitionKey, clustering, column, path), clockAndCount);
+        CacheService.instance.counterCache.put(key, clockAndCount);
     }
 
     public void forceMajorCompaction()

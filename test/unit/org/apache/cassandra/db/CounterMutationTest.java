@@ -17,10 +17,14 @@
  */
 package org.apache.cassandra.db;
 
+import java.nio.ByteBuffer;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.cache.CounterCacheKey;
+import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.rows.Row;
@@ -151,11 +155,11 @@ public class CounterMutationTest
         ClusteringBuilder cb = ClusteringBuilder.create(cfsOne.metadata().comparator);
         cb.add("cc");
 
-        assertEquals(1L, cfsOne.getCachedCounter(Util.dk("key1").getKey(), cb.build(), c1cfs1, null).count);
-        assertEquals(-1L, cfsOne.getCachedCounter(Util.dk("key1").getKey(), cb.build(), c2cfs1, null).count);
+        assertEquals(1L, cfsOne.getCachedCounter(key(cfsOne, Util.dk("key1").getKey(), cb.build(), c1cfs1, null)).count);
+        assertEquals(-1L, cfsOne.getCachedCounter(key(cfsOne, Util.dk("key1").getKey(), cb.build(), c2cfs1, null)).count);
 
-        assertEquals(2L, cfsTwo.getCachedCounter(Util.dk("key1").getKey(), cb.build(), c1cfs2, null).count);
-        assertEquals(-2L, cfsTwo.getCachedCounter(Util.dk("key1").getKey(), cb.build(), c2cfs2, null).count);
+        assertEquals(2L, cfsTwo.getCachedCounter(key(cfsTwo, Util.dk("key1").getKey(), cb.build(), c1cfs2, null)).count);
+        assertEquals(-2L, cfsTwo.getCachedCounter(key(cfsTwo, Util.dk("key1").getKey(), cb.build(), c2cfs2, null)).count);
     }
 
     @Test
@@ -231,5 +235,10 @@ public class CounterMutationTest
 
         Row row = Util.getOnlyRow(Util.cmd(cfs).includeRow("cc").columns("val").build());
         assertEquals(toAdd, CounterContext.instance().total(row.getCell(cDef)));
+    }
+
+    private CounterCacheKey key(ColumnFamilyStore cfs, ByteBuffer bytes, Clustering<?> c1, ColumnMetadata cd, CellPath path)
+    {
+        return CounterCacheKey.create(cfs.metadata(), bytes, c1, cd, path);
     }
 }

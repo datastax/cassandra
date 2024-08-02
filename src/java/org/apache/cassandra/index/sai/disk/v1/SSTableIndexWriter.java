@@ -36,7 +36,6 @@ import io.github.jbellis.jvector.pq.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
@@ -49,7 +48,6 @@ import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionT
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
@@ -175,6 +173,9 @@ public class SSTableIndexWriter implements PerIndexWriter
     @Override
     public void abort(Throwable cause)
     {
+        if (aborted)
+            return;
+
         aborted = true;
 
         logger.warn("Aborting SSTable index flush for {}...", perIndexComponents.descriptor(), cause);
