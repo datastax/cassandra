@@ -199,8 +199,13 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext context, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext context,
+                                                                  Orderer orderer,
+                                                                  Expression slice,
+                                                                  AbstractBounds<PartitionPosition> keyRange,
+                                                                  int limit)
     {
+        assert slice == null : "ANN does not support index slicing";
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
         var qv = vts.createFloatVector(orderer.vector);
