@@ -34,6 +34,7 @@ import java.util.stream.LongStream;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
@@ -125,6 +126,11 @@ public class NativeIndexDDLTest extends SAITester
                                                                                                 .onMethod("<init>"))
                                                                          .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                          .build();
+    @BeforeClass
+    public static void init()
+    {
+        System.setProperty("cassandra.sai.validate_max_term_size_at_coordinator", Boolean.TRUE.toString());
+    }
 
     @Before
     public void setup() throws Throwable
