@@ -120,7 +120,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
         FilterTree filterTree = analyzeFilter();
-        if (command.isTopK())
+        Plan plan = controller.buildPlan();
+
+        // Can't check for `command.isTopK()` because the planner could optimize sorting out
+        if (plan.ordering() != null)
         {
             // TopK queries require a consistent view of the sstables and memtables in order to validate overwritten
             // rows. Acquire the view before building any of the iterators.
@@ -129,7 +132,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // TODO this is a bit of a hack, but we need to get the view from the queryView. Find better way to
                 // thread this through.
                 queryContext.view = queryView;
-                Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator();
+                Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
                 assert !(keysIterator instanceof RangeIterator);
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
                 var result = new ScoreOrderedResultRetriever(queryView.view, scoredKeysIterator, filterTree, controller,
@@ -139,7 +142,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
         else
         {
-            Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator();
+            Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
             assert keysIterator instanceof RangeIterator;
             return new ResultRetriever((RangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
         }
