@@ -19,13 +19,9 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.Closeable;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import org.apache.cassandra.io.util.FileUtils;
 
 /**
  * Range iterators contain primary keys, in sorted order, with no duplicates.  They also
@@ -188,9 +184,6 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             // iterator with the most number of items
             protected RangeIterator maxRange;
 
-            // tracks if all of the added ranges overlap, which is useful in case of intersection,
-            // as it gives direct answer as to such iterator is going to produce any results.
-            private boolean isOverlapping = true;
 
             private boolean hasRange = false;
 
@@ -244,15 +237,12 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                             tokenCount = Math.min(tokenCount, range.getMaxKeys());
                         else
                             tokenCount = range.getMaxKeys();
+
                         break;
 
                     default:
                         throw new IllegalStateException("Unknown iterator type: " + iteratorType);
                 }
-
-                // check if new range is disjoint with already added ranges, which means that this intersection
-                // is not going to produce any results, so we can cleanup range storage and never added anything to it.
-                isOverlapping &= isOverlapping(min, max, range);
 
                 minRange = minRange == null ? range : min(minRange, range);
                 maxRange = maxRange == null ? range : max(maxRange, range);
@@ -270,9 +260,16 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                 return a.getMaxKeys() > b.getMaxKeys() ? a : b;
             }
 
-            public boolean isDisjoint()
+            /**
+             * Returns true if the final range is not going to produce any results,
+             * so we can cleanup range storage and never added anything to it.
+             * Uses the min/max values to prevent unnecessary computation to calculate
+             * the next primary key.
+             */
+            public boolean isEmptyOrDisjoint()
             {
-                return !isOverlapping;
+                // max < min if intersected ranges are disjoint
+                return tokenCount == 0 || min.compareTo(max) > 0;
             }
 
             public double sizeRatio()
@@ -280,36 +277,6 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                 return minRange.getMaxKeys() * 1d / maxRange.getMaxKeys();
             }
         }
-    }
-
-    @VisibleForTesting
-    protected static <U extends Comparable<U>> boolean isOverlapping(RangeIterator a, RangeIterator b)
-    {
-        return isOverlapping(a.peek(), a.getMaximum(), b);
-    }
-
-    /**
-     * Ranges are overlapping the following cases:
-     *
-     *   * When they have a common subrange:
-     *
-     *   min       b.current      max          b.max
-     *   +---------|--------------+------------|
-     *
-     *   b.current      min       max          b.max
-     *   |--------------+---------+------------|
-     *
-     *   min        b.current     b.max        max
-     *   +----------|-------------|------------+
-     *
-     *
-     *  If either range is empty, they're disjoint.
-     */
-    @VisibleForTesting
-    protected static boolean isOverlapping(PrimaryKey min, PrimaryKey max, RangeIterator b)
-    {
-        return (min != null && max != null) &&
-               b.hasNext() && min.compareTo(b.getMaximum()) <= 0 && b.peek().compareTo(max) <= 0;
     }
 
     @SuppressWarnings("unchecked")
