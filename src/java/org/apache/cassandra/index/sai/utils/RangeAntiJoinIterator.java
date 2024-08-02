@@ -49,7 +49,9 @@ public class RangeAntiJoinIterator extends RangeIterator
     protected void performSkipTo(PrimaryKey nextKey)
     {
         left.skipTo(nextKey);
-        right.skipTo(nextKey);
+
+        if (nextKeyToSkip == null || nextKeyToSkip.compareTo(nextKey) < 0)
+            right.skipTo(nextKey);
     }
 
     public void close() throws IOException
