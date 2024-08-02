@@ -175,6 +175,9 @@ public class SSTableIndexWriter implements PerIndexWriter
     @Override
     public void abort(Throwable cause)
     {
+        if (aborted)
+            return;
+
         aborted = true;
 
         logger.warn("Aborting SSTable index flush for {}...", perIndexComponents.descriptor(), cause);
