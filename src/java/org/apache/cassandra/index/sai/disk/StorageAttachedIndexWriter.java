@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Writes all on-disk index structures attached to a given SSTable.
@@ -128,6 +129,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         {
             logger.error(indexDescriptor.logMessage("Failed to record a partition start during an index build"), t);
             abort(t, true);
+            // fail compaction task or index build task if SAI failed
+            throw Throwables.unchecked(t);
         }
     }
 
@@ -148,6 +151,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         {
             logger.error(indexDescriptor.logMessage("Failed to record a row during an index build"), t);
             abort(t, true);
+            // fail compaction task or index build task if SAI failed
+            throw Throwables.unchecked(t);
         }
     }
 
@@ -167,6 +172,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         {
             logger.error(indexDescriptor.logMessage("Failed to record a static row during an index build"), t);
             abort(t, true);
+            // fail compaction task or index build task if SAI failed
+            throw Throwables.unchecked(t);
         }
     }
 
@@ -243,6 +250,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         {
             logger.error(indexDescriptor.logMessage("Failed to complete an index build"), t);
             abort(t, true);
+            // fail compaction task or index build task if SAI failed
+            throw Throwables.unchecked(t);
         }
     }
 
@@ -264,11 +273,15 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
      */
     public void abort(Throwable accumulator, boolean fromIndex)
     {
+        if (aborted)
+            return;
+
         // Mark the write aborted, so we can short-circuit any further operations on the component writers.
         aborted = true;
         
-        // Make any indexes involved in this transaction non-queryable, as they will likely not match the backing table.
-        if (fromIndex)
+        // For non-compaction, make any indexes involved in this transaction non-queryable, as they will likely not match the backing table.
+        // For compaction: the compaction task should be aborted and new sstables will not be added to tracker
+        if (fromIndex && opType != OperationType.COMPACTION)
             indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
         
         for (PerIndexWriter perIndexWriter : perIndexWriters)
@@ -304,10 +317,5 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             w.addRow(primaryKey, row, sstableRowId);
         }
         sstableRowId++;
-    }
-
-    public boolean isAborted()
-    {
-        return aborted;
     }
 }
