@@ -90,6 +90,14 @@ public class QueryViewBuilder
             view.release();
             referencedIndexes.forEach(SSTableIndex::release);
         }
+
+        /**
+         * Returns the total count of rows in all sstables in this view
+         */
+        public long getTotalSStableRows()
+        {
+            return view.sstables.stream().mapToLong(SSTableReader::getTotalRows).sum();
+        }
     }
 
     /**

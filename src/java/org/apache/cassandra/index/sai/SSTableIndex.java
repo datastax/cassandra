@@ -195,12 +195,13 @@ public class SSTableIndex
     }
 
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                  Expression predicate,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   QueryContext context,
                                                                   int limit,
                                                                   long totalRows) throws IOException
     {
-        return searchableIndex.orderBy(orderer, keyRange, context, limit, totalRows);
+        return searchableIndex.orderBy(orderer, predicate, keyRange, context, limit, totalRows);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)
