@@ -28,7 +28,6 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.config.StorageAttachedIndexOptions;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -42,7 +41,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import static org.apache.cassandra.inject.Injections.newCounter;
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
