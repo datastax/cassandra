@@ -24,17 +24,20 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -104,6 +107,13 @@ import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
 abstract public class Plan
 {
     private static final Logger logger = LoggerFactory.getLogger(Plan.class);
+
+    @VisibleForTesting
+    static DoubleSupplier hitRateSupplier = () -> {
+        // cache hit rate with reasonable defaults if we have no data
+        double hitRate = ChunkCache.instance == null ? 1.0 : ChunkCache.instance.metrics.hitRate();
+        return Double.isFinite(hitRate) ? hitRate : 1.0;
+    };
 
     /**
      * Identifier of the plan tree node.
@@ -414,9 +424,20 @@ abstract public class Plan
 
     protected interface Cost
     {
+        /**
+         * Initialization cost: cannot be reduced later.
+         */
         double initCost();
+
+        /**
+         * Cost to iterate over all the expected keys or rows.  May be reduced by LIMIT.
+         */
         double iterCost();
-        double fullCost();
+
+        default double fullCost()
+        {
+            return initCost() + iterCost();
+        }
     }
 
     protected static final class KeysIterationCost implements Cost
@@ -442,12 +463,6 @@ abstract public class Plan
         public double iterCost()
         {
             return iterCost;
-        }
-
-        @Override
-        public double fullCost()
-        {
-            return initCost + iterCost;
         }
 
         public double costPerKey()
@@ -502,12 +517,6 @@ abstract public class Plan
         public double iterCost()
         {
             return iterCost;
-        }
-
-        @Override
-        public double fullCost()
-        {
-            return initCost + iterCost;
         }
 
         public double costPerRow()
@@ -1194,13 +1203,13 @@ abstract public class Plan
                               + source.expectedKeys() * CostCoefficients.ANN_INPUT_KEY_COST;
             return new KeysIterationCost(expectedKeys,
                                          initCost,
-                                          expectedKeys * CostCoefficients.ANN_SCORED_KEY_COST);
+                                         expectedKeys * hrs(CostCoefficients.ANN_SCORED_KEY_COST));
         }
 
         private KeysIterationCost estimateGlobalSortCost()
         {
             return new KeysIterationCost(source.expectedKeys(),
-                                         source.fullCost() + source.expectedKeys() * ROW_COST,
+                                         source.fullCost() + source.expectedKeys() * hrs(ROW_COST),
                                          source.expectedKeys() * SAI_KEY_COST);
 
         }
@@ -1251,10 +1260,10 @@ abstract public class Plan
             int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering,
                                                                                keysCount,
                                                                                factory.tableMetrics.rows);
-            double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables + initNodesCount * ANN_NODE_COST;
+            double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables + initNodesCount * (ANN_SIMILARITY_COST + hrs(ANN_EDGELIST_COST) / ANN_DEGREE);
             return new KeysIterationCost(keysCount,
                                          initCost,
-                                         keysCount * CostCoefficients.ANN_SCORED_KEY_COST);
+                                         keysCount * hrs(CostCoefficients.ANN_SCORED_KEY_COST));
         }
 
         @Nullable
@@ -1369,7 +1378,7 @@ abstract public class Plan
         @Override
         protected RowsIterationCost estimateCost()
         {
-            double rowFetchCost = CostCoefficients.ROW_COST
+            double rowFetchCost = hrs(CostCoefficients.ROW_COST)
                                   + CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow
                                   + CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow;
 
@@ -1816,19 +1825,25 @@ abstract public class Plan
         public final static double SAI_KEY_COST = 1.0;
 
         /** Cost to open the vector index and get ready for the search */
-        public final static double ANN_OPEN_COST = 10.0;
+        public final static double ANN_OPEN_COST = 1.0;
 
         /** Additional overhead needed by processing each input key fed to the ANN index searcher */
-        public final static double ANN_INPUT_KEY_COST = 3.0;
+        public final static double ANN_INPUT_KEY_COST = 0.5;
 
-        /** Cost to get a scored key from DiskANN */
-        public final static double ANN_SCORED_KEY_COST = 10.0;
+        /** Cost to get a scored key from DiskANN (~rerank cost). Affected by cache hit rate */
+        public final static double ANN_SCORED_KEY_COST = 50.0;
 
-        /** Cost to visit a DiskANN index node */
-        public final static double ANN_NODE_COST = 20.0;
+        /** Cost to perform a coarse (PQ or BQ) in-memory similarity computation */
+        public final static double ANN_SIMILARITY_COST = 4.0;
 
-        /** Cost to fetch one row from storage */
-        public final static double ROW_COST = 80.0;
+        /** Cost to load the neighbor list for a DiskANN node. Affected by cache hit rate */
+        public final static double ANN_EDGELIST_COST = 10.0;
+
+        /** assume all graphs have this degree, for now */
+        public final static int ANN_DEGREE = 2 * IndexWriterConfig.DEFAULT_MAXIMUM_NODE_CONNECTIONS;
+
+        /** Cost to fetch one row from storage. Affected by cache hit rate */
+        public final static double ROW_COST = 200.0;
 
         /** Additional cost added to row fetch cost per each row cell */
         public final static double ROW_CELL_COST = 0.4;
@@ -1836,6 +1851,8 @@ abstract public class Plan
         /** Additional cost added to row fetch cost per each serialized byte of the row */
         public final static double ROW_BYTE_COST = 0.005;
 
+        /** Cost to hit disk instead of cache */
+        public final static double DISK_ACCESS_COST = 1000.0;
     }
 
     /** Convenience builder for building intersection and union nodes */
@@ -1870,15 +1887,10 @@ abstract public class Plan
         }
     }
 
-    /**
-     * how much cheaper is it to perform an in-memory approximate similarity
-     * compared to loading the full resolution vector from disk
-     * @return 0..1, lower is cheaper
-     */
-    public static double memoryToDiskFactor()
+    /** hit-rate-scale the raw cost */
+    public static double hrs(double raw)
     {
-        double hitRate = ChunkCache.instance == null ? 1.0 : ChunkCache.instance.metrics.hitRate();
-        return 0.25 * (Double.isFinite(hitRate) ? max(0.1, hitRate) : 1.0);
+        return raw + DISK_ACCESS_COST * (1 - hitRateSupplier.getAsDouble());
     }
 
     /**
