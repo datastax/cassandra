@@ -223,7 +223,7 @@ public class SegmentFlushTest
                                                   termsFooterPointer,
                                                   version))
         {
-            TermsIterator iterator = reader.allTerms(0);
+            TermsIterator iterator = reader.allTerms();
             assertEquals(minTerm, iterator.getMinTerm());
             assertEquals(maxTerm, iterator.getMaxTerm());
 

@@ -59,7 +59,7 @@ public class ImmutableOneDimPointValues extends MutableOneDimPointValues
             ByteBufferUtil.toBytes(termEnum.next().asComparableBytes(ByteComparable.Version.OSS41), scratch);
             try (final PostingList postings = termEnum.postings())
             {
-                long segmentRowId;
+                int segmentRowId;
                 while ((segmentRowId = postings.nextPosting()) != PostingList.END_OF_STREAM)
                 {
                     visitor.visit(segmentRowId, scratch);

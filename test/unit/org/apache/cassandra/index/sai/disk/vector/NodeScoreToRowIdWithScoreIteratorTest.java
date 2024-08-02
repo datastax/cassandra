@@ -32,13 +32,13 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-public class NodeScoreToScoredRowIdIteratorTest
+public class NodeScoreToRowIdWithScoreIteratorTest
 {
     @Test
     public void testEmptyIterator()
     {
         var rowIdsView = new CustomRowIdsView();
-        var iter = new NodeScoreToScoredRowIdIterator(CloseableIterator.emptyIterator(), rowIdsView);
+        var iter = new NodeScoreToRowIdWithScoreIterator(CloseableIterator.emptyIterator(), rowIdsView);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
         assertFalse(rowIdsView.isClosed);
@@ -52,13 +52,13 @@ public class NodeScoreToScoredRowIdIteratorTest
         var rowIdsView = new CustomRowIdsView();
         // Note that the score is ignored at this stage because NodeScores are assumed to be in order
         var nodeScores = IntStream.range(0, 3).mapToObj(i -> new SearchResult.NodeScore(i, 1f)).iterator();
-        var iter = new NodeScoreToScoredRowIdIterator(CloseableIterator.wrap(nodeScores), rowIdsView);
+        var iter = new NodeScoreToRowIdWithScoreIterator(CloseableIterator.wrap(nodeScores), rowIdsView);
 
         assertTrue(iter.hasNext());
         // See CustomRowIdsView for the mapping
-        assertEquals(1, iter.next().segmentRowId);
-        assertEquals(3, iter.next().segmentRowId);
-        assertEquals(4, iter.next().segmentRowId);
+        assertEquals(1, iter.next().getSegmentRowId());
+        assertEquals(3, iter.next().getSegmentRowId());
+        assertEquals(4, iter.next().getSegmentRowId());
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
         assertFalse(rowIdsView.isClosed);

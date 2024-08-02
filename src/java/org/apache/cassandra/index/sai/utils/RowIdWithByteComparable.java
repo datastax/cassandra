@@ -16,26 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.vector;
+package org.apache.cassandra.index.sai.utils;
 
-public class ScoredRowId
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+
+public class RowIdWithByteComparable extends RowIdWithMeta
 {
-    final int segmentRowId;
-    final float score;
+    private final ByteComparable byteComparable;
 
-    public ScoredRowId(int segmentRowId, float score)
+    public RowIdWithByteComparable(int segmentRowId, ByteComparable byteComparable)
     {
-        this.segmentRowId = segmentRowId;
-        this.score = score;
+        super(segmentRowId);
+        this.byteComparable = byteComparable;
     }
 
-    public float getScore()
+    @Override
+    protected PrimaryKeyWithSortKey wrapPrimaryKey(IndexContext context, SSTableId<?> sstableId, PrimaryKey primaryKey)
     {
-        return score;
-    }
-
-    public int getSegmentRowId()
-    {
-        return segmentRowId;
+        return new PrimaryKeyWithByteComparable(context, sstableId, primaryKey, byteComparable);
     }
 }

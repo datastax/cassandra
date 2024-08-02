@@ -46,6 +46,11 @@ public interface CompactionStrategyContainerPendingRepairTest
      */
     void testCleanupCompactionFinalized() throws IOException;
 
+    /**
+     * Tests that finalized repairs racing with compactions on the same set of sstables don't leave unrepaired sstables behind
+     */
+    void testFinalizedAndCompactionRace() throws IOException;
+
     void testFinalizedSessionTransientCleanup() throws IOException;
 
     void testFailedSessionTransientCleanup() throws IOException;

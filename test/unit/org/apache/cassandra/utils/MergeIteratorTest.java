@@ -71,6 +71,17 @@ public class MergeIteratorTest
         assert a.closed && b.closed && c.closed && d.closed;
     }
 
+    /** Test non-reducing version that should produce each repeating value separately. */
+    @Test
+    public void testNonReducing() throws Exception
+    {
+        CloseableIterator<String> smi = MergeIterator.getNonReducingCloseable(Arrays.asList(a, b, c, d),
+                                                                              Ordering.<String>natural());
+        assert Iterators.elementsEqual(all, smi);
+        smi.close();
+        assert a.closed && b.closed && c.closed && d.closed;
+    }
+
     // closeable list iterator
     public static class CLI<E> extends AbstractIterator<E> implements CloseableIterator<E>
     {
