@@ -92,7 +92,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             response.withCustomParam(requestBytesParam, requestBytes);
 
             // for each table in the mutation, send the global per table write/index bytes as observed by the registry
-            Optional<Sensor> registrySensor = SensorsRegistry.instance.getOrCreateSensor(requestSensor.getContext(), requestSensor.getType());
+            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), requestSensor.getType());
             registrySensor.ifPresent(sensor -> {
                 String tableBytesParam = tableParamSupplier.apply(sensor.getContext().getTable());
                 byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
