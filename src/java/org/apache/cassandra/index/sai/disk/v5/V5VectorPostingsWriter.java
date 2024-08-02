@@ -386,6 +386,7 @@ public class V5VectorPostingsWriter<T>
                       ? Structure.ONE_TO_ONE
                       : Structure.ONE_TO_MANY;
             // override one-to-many to generic if there are too many holes or we are in backwards compatibility mode
+            // (this method is used by V2 writers as well as V5)
             if (structure == Structure.ONE_TO_MANY && (!V5OnDiskFormat.writeV5VectorPostings() || extraPostings.size() > max(1, GLOBAL_HOLES_ALLOWED * maxRow)))
                 structure = Structure.ZERO_OR_ONE_TO_MANY;
         }

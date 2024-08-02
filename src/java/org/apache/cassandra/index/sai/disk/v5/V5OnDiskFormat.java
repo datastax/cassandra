@@ -32,20 +32,11 @@ import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 
 public class V5OnDiskFormat extends V3OnDiskFormat
 {
-    private static final Logger logger = org.slf4j.LoggerFactory.getLogger(V5OnDiskFormat.class);
-
     public static final V5OnDiskFormat instance = new V5OnDiskFormat();
 
-    private static final boolean WRITE_V5_VECTOR_POSTINGS = Boolean.parseBoolean(System.getProperty("cassandra.sai.write_v5_vector_postings", "true"));
     public static boolean writeV5VectorPostings()
     {
-        // circular reference from Version -> V5OnDiskFormat means we can't just evaluate this in a static block
-        if (WRITE_V5_VECTOR_POSTINGS && !Version.latest().onOrAfter(Version.DC))
-        {
-            logger.error("V5 vector postings are configured but latest version does not support them.  Disabling V5 vector postings.");
-            return false;
-        }
-        return WRITE_V5_VECTOR_POSTINGS;
+        return Version.latest().onOrAfter(Version.DC);
     }
 
     @Override

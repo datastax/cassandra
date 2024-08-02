@@ -371,10 +371,8 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
     {
-        var indexes = new ArrayList<>(indexContext.getView().getIndexes());
-
         int segmentsChecked = 0;
-        for (SSTableIndex index : indexes)
+        for (SSTableIndex index : indexContext.getView().getIndexes())
         {
             for (Segment segment : index.getSegments())
             {
