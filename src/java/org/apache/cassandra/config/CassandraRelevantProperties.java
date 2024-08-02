@@ -221,6 +221,8 @@ public enum CassandraRelevantProperties
     CONSISTENT_DIRECTORY_LISTINGS("cassandra.consistent_directory_listings"),
     CONSISTENT_RANGE_MOVEMENT("cassandra.consistent.rangemovement", "true"),
     CONSISTENT_SIMULTANEOUS_MOVES_ALLOW("cassandra.consistent.simultaneousmoves.allow"),
+    COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
+    COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     CRYPTO_PROVIDER_CLASS_NAME("cassandra.crypto_provider_class_name"),
     /** Which class to use for coordinator client request metrics */
     CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY("cassandra.custom_client_request_metrics_provider_class"),
