@@ -68,7 +68,6 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.PriorityQueueUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -322,8 +321,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     static class MergingRangeIterator extends RangeIterator
     {
-        PriorityQueue<Object> keySets;  // class invariant: each object placed in this queue contains at least one key
-
+        org.apache.lucene.util.PriorityQueue<Object> keySets;  // class invariant: each object placed in this queue contains at least one key
 
         MergingRangeIterator(Collection<Object> keySets,
                              PrimaryKey minKey,
@@ -332,9 +330,19 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             super(minKey, maxKey, count);
 
-            // don't change this to Comparator.comparing, because it introduces another indirection layer
-            // and is slower than this lambda
-            this.keySets = PriorityQueueUtil.createQueue(keySets, (a, b) -> peek(a).compareTo(peek(b)));
+            // Use Lucene PriorityQueue because:
+            // - it has optimized O(n) addAll
+            // - it allows for a single-operation fast update of the top of the queue instead of poll+offer
+            this.keySets = new org.apache.lucene.util.PriorityQueue<>(keySets.size())
+            {
+                @Override
+                protected boolean lessThan(Object keys1, Object keys2)
+                {
+                    return peek(keys1).compareTo(peek(keys2)) < 0;
+                }
+            };
+
+            this.keySets.addAll(keySets);
         }
 
         static Builder builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity)
@@ -347,22 +355,30 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             while (true)
             {
-                // Preview the next key, but don't change the state of this iterator.
+                // Preview the next key, but don't change the state of this iterator yet.
                 // We cannot use `this.peek()` to preview the key, because it may actually
                 // change the internal state of this iterator and would cause the keySets to no longer contain
                 // the previewed key.
-                Object keys = keySets.peek();
+                Object keys = keySets.top();
                 if (keys == null || peek(keys).compareTo(nextKey) >= 0)
                     break;
 
-                // Now that we know we're skipping past the previewed key, so perform the skip on this keySet.
-                keySets.poll();
                 if (keys instanceof SortedSetRangeIterator)
                 {
+                    // If we got an iterator, skip to the correct key and,
+                    // if there are any keys left, update the position of the iterator in the queue.
                     var iterator = (SortedSetRangeIterator) keys;
                     iterator.skipTo(nextKey);
                     if (iterator.hasNext())
-                        keySets.offer(iterator);
+                        keySets.updateTop(iterator);
+                    else
+                        keySets.pop();
+                }
+                else
+                {
+                    // We got a single key so just pop it from the queue.
+                    assert keys instanceof PrimaryKey;
+                    keySets.pop();
                 }
             }
         }
@@ -370,7 +386,7 @@ public class TrieMemoryIndex extends MemoryIndex
         @Override
         protected PrimaryKey computeNext()
         {
-            Object keys = keySets.poll();
+            Object keys = keySets.top();
             if (keys == null)
                 return endOfData();
 
@@ -379,7 +395,9 @@ public class TrieMemoryIndex extends MemoryIndex
 
             SortedSetRangeIterator iterator = dropFirst(keys);
             if (iterator != null)
-                keySets.offer(iterator);
+                keySets.updateTop(iterator);
+            else
+                keySets.pop();
 
             return result;
         }
