@@ -1845,7 +1845,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             if (notice.memtable().isEmpty())
             {
                 IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableAdded(notice);
-                build(decision, notice.added);
+                build(decision, notice.added, i -> i.shouldBuildBlocking() && !i.isSSTableAttached());
             }
         }
         else if (notification instanceof SSTableListChangedNotification)
@@ -1853,30 +1853,22 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             SSTableListChangedNotification notice = (SSTableListChangedNotification) notification;
 
             IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableListChanged(notice);
-            build(decision, notice.added);
+            build(decision, notice.added, Index::shouldBuildBlocking);
         }
     }
 
-    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables)
+    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables, Predicate<Index> indexFilter)
     {
         if (decision == IndexBuildDecider.Decision.ASYNC)
         {
             buildIndexesAsync(Lists.newArrayList(sstables),
-                              indexes.values()
-                                     .stream()
-                                     .filter(Index::shouldBuildBlocking)
-                                     .filter(i -> !i.isSSTableAttached())
-                                     .collect(Collectors.toSet()),
+                              indexes.values().stream().filter(indexFilter).collect(Collectors.toSet()),
                               false);
         }
         else if (decision == IndexBuildDecider.Decision.SYNC)
         {
             buildIndexesBlocking(Lists.newArrayList(sstables),
-                                 indexes.values()
-                                        .stream()
-                                        .filter(Index::shouldBuildBlocking)
-                                        .filter(i -> !i.isSSTableAttached())
-                                        .collect(Collectors.toSet()),
+                                 indexes.values().stream().filter(indexFilter).collect(Collectors.toSet()),
                                  false);
         }
     }
