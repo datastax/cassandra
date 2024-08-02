@@ -141,6 +141,12 @@ public class CompactionGraph implements Closeable, Accountable
         postingsStructure = Structure.ONE_TO_ONE; // until proven otherwise
         this.compressor = compressor;
         this.encodedOmittedVector = vts.createByteSequence(compressor.compressedVectorSize());
+        // `allRowsHaveVectors` only tells us about data for which we have already built indexes; if we
+        // are adding previously unindexed data then we could still encounter rows with null vectors,
+        // so this is just a best guess.  If the guess is wrong then the penalty is that we end up
+        // with "holes" in the ordinal sequence (and pq and data files) which we would prefer to avoid
+        // (hence the effort to predict `allRowsHaveVectors` but will not cause correctness issues,
+        // and the next compaction will fill in the holes.
         this.supportsOneToMany = allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
