@@ -57,7 +57,7 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
 
     public static AbstractBounds<PartitionPosition> unbounded(IPartitioner partitioner)
     {
-        return bounds(partitioner.getMinimumToken().minKeyBound(), false,
+        return bounds(partitioner.getMinimumToken().minKeyBound(), true,
                       partitioner.getMaximumToken().maxKeyBound(), true);
     }
 
