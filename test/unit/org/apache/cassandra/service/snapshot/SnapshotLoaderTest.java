@@ -21,7 +21,6 @@ package org.apache.cassandra.service.snapshot;
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -93,9 +92,9 @@ public class SnapshotLoaderTest
         }
 
         // Check no snapshots are found
-        SnapshotLoader loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_3)));
+        SnapshotLoader loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
         assertThat(loader.loadSnapshots()).isEmpty();
     }
 
@@ -119,9 +118,9 @@ public class SnapshotLoaderTest
         }
 
         // Verify all 3 snapshots are found correctly from data directories
-        SnapshotLoader loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_3)));
+        SnapshotLoader loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
         Set<TableSnapshot> snapshots = loader.loadSnapshots();
         assertThat(snapshots).hasSize(3);
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_1, TABLE1_NAME, TABLE1_ID, TAG1, null, null, tag1Files, false));
@@ -129,18 +128,18 @@ public class SnapshotLoaderTest
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_2, TABLE3_NAME, TABLE3_ID,  TAG3, null, null, tag3Files, false));
 
         // Verify snapshot loading for a specific keyspace
-        loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                  Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                  Paths.get(baseDir.toString(), DATA_DIR_3)));
+        loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
 
         snapshots = loader.loadSnapshots(KEYSPACE_1);
         assertThat(snapshots).hasSize(2);
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_1, TABLE1_NAME, TABLE1_ID, TAG1, null, null, tag1Files, false));
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_1, TABLE2_NAME, TABLE2_ID,  TAG2, null, null, tag2Files, false));
 
-        loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                  Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                  Paths.get(baseDir.toString(), DATA_DIR_3)));
+        loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
         snapshots = loader.loadSnapshots(KEYSPACE_2);
         assertThat(snapshots).hasSize(1);
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_2, TABLE3_NAME, TABLE3_ID,  TAG3, null, null, tag3Files, false));
@@ -167,9 +166,9 @@ public class SnapshotLoaderTest
         }
 
         // Verify snapshot is found correctly from data directories
-        SnapshotLoader loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_3)));
+        SnapshotLoader loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
 
         Set<TableSnapshot> snapshots = loader.loadSnapshots();
         assertThat(snapshots).hasSize(1);
@@ -213,9 +212,9 @@ public class SnapshotLoaderTest
         writeManifest(tag3ManifestLocation, tag3Ts, null);
 
         // Verify all 3 snapshots are found correctly from data directories
-        SnapshotLoader loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_3)));
+        SnapshotLoader loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
         Set<TableSnapshot> snapshots = loader.loadSnapshots();
         assertThat(snapshots).hasSize(3);
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_1, TABLE1_NAME, TABLE1_ID, TAG1, tag1Ts, null, tag1Files, false));
@@ -223,18 +222,18 @@ public class SnapshotLoaderTest
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_2, TABLE3_NAME, TABLE3_ID,  TAG3, tag3Ts, null, tag3Files, false));
 
         // Verify snapshot loading for a specific keyspace
-        loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                  Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                  Paths.get(baseDir.toString(), DATA_DIR_3)));
+        loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
 
         snapshots = loader.loadSnapshots(KEYSPACE_1);
         assertThat(snapshots).hasSize(2);
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_1, TABLE1_NAME, TABLE1_ID, TAG1, tag1Ts, null, tag1Files, false));
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_1, TABLE2_NAME, TABLE2_ID,  TAG2, tag2Ts, tag2Ts.plusSeconds(tag2Ttl.toSeconds()), tag2Files, false));
 
-        loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                  Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                  Paths.get(baseDir.toString(), DATA_DIR_3)));
+        loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
         snapshots = loader.loadSnapshots(KEYSPACE_2);
         assertThat(snapshots).hasSize(1);
         assertThat(snapshots).contains(new TableSnapshot(KEYSPACE_2, TABLE3_NAME, TABLE3_ID,  TAG3, tag3Ts, null, tag3Files, false));
@@ -260,9 +259,9 @@ public class SnapshotLoaderTest
         }
 
         // Check no snapshots are loaded
-        SnapshotLoader loader = new SnapshotLoader(Arrays.asList(Paths.get(baseDir.toString(), DATA_DIR_1),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_2),
-                                                                 Paths.get(baseDir.toString(), DATA_DIR_3)));
+        SnapshotLoader loader = new SnapshotLoader(new File[] {new File(Paths.get(baseDir.toString(), DATA_DIR_1)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_2)),
+                                                               new File(Paths.get(baseDir.toString(), DATA_DIR_3))});
         assertThat(loader.loadSnapshots()).isEmpty();
     }
 
