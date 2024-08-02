@@ -288,14 +288,25 @@ abstract public class Plan
      */
     public final String toString()
     {
+        String title = title();
         String description = description();
-        return (description.isEmpty())
-            ? String.format("%s (%s)", getClass().getSimpleName(), cost())
-            : String.format("%s %s (%s)", getClass().getSimpleName(), description, cost());
+        return (title.isEmpty())
+            ? String.format("%s (%s)\n%s", getClass().getSimpleName(), cost(), description).stripTrailing()
+            : String.format("%s %s (%s)\n%s", getClass().getSimpleName(), title, cost(), description).stripTrailing();
     }
 
     /**
-     * Returns additional information specific to the node.
+     * Returns additional information specific to the node displayed in the first line.
+     * The information is included in the output of {@link #toString()} and {@link #toStringRecursive()}.
+     * It is up to subclasses to implement it.
+     */
+    protected String title()
+    {
+        return "";
+    }
+
+    /**
+     * Returns additional information specific to the node, displayed below the title.
      * The information is included in the output of {@link #toString()} and {@link #toStringRecursive()}.
      * It is up to subclasses to implement it.
      */
@@ -323,7 +334,7 @@ abstract public class Plan
         leaves.sort(Comparator.comparingDouble(Plan::selectivity).reversed());
         for (Leaf leaf : leaves)
         {
-            Plan candidate = bestPlanSoFar.remove(leaf.id);
+            Plan candidate = bestPlanSoFar.removeRestriction(leaf.id);
             if (logger.isTraceEnabled())
                 logger.trace("Candidate query plan:\n{}", candidate.toStringRecursive());
 
@@ -358,7 +369,7 @@ abstract public class Plan
     }
 
     /**
-     * Returns a new plan with the given node removed.
+     * Returns a new plan with the given node filtering restriction removed.
      * Searches for the subplan to remove recursively down the tree.
      * If the new plan is different, its estimates are also recomputed.
      * If *this* plan matches the id, then the {@link Everything} node is returned.
@@ -368,14 +379,19 @@ abstract public class Plan
      * Sometimes not doing an intersection and post-filtering instead can be faster, so by removing child nodes from
      * intersections we can potentially get a better plan.
      */
-    final Plan remove(int id)
+    final Plan removeRestriction(int id)
     {
+        if (this.id != id)
+            return withUpdatedSubplans(subplan -> subplan.removeRestriction(id));
+
         // If id is the same, replace this node with "everything"
         // because a query with no filter expression returns all rows
-        // (removing restrictions should widen the result set)
-        return (this.id == id)
-                ? factory.everything
-                : withUpdatedSubplans(subplan -> subplan.remove(id));
+        // (removing restrictions should widen the result set).
+        // Beware we must not remove ordering because that would change the semantics of the query.
+        Orderer ordering = this.ordering();
+        return (ordering != null)
+                ? factory.sort(factory.everything, ordering)
+                : factory.everything;
     }
 
     /**
@@ -727,20 +743,42 @@ abstract public class Plan
         public IndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
             super(factory, id, access);
-            // TODO: we don't support both ordering and filtering on the same index yet.
-            Preconditions.checkArgument(predicate != null ^ ordering != null,
-                                        "Either predicate or ordering must be set, but not both");
+            Preconditions.checkArgument(predicate != null || ordering != null,
+                                        "Either predicate or ordering must be set");
+            Preconditions.checkArgument(predicate == null
+                                        || ordering == null
+                                        || predicate.getIndexName().equals(ordering.getIndexName()),
+                                        "Ordering must use the same index as the predicate");
             this.predicate = predicate;
-            this.ordering = ordering;
+            // If we match by equality, ordering makes no sense because all term values would be the same.
+            this.ordering = (predicate == null || predicate.getOp() != Expression.Op.EQ) ? ordering : null;
             this.matchingKeysCount = matchingKeysCount;
         }
 
         @Override
-        protected final String description()
+        protected final String title()
         {
-            var indexName = predicate != null ? predicate.getIndexName() : ordering.getIndexName();
-            var using = predicate != null ? predicate : ordering;
-            return String.format("of %s using %s (sel: %.9f, step: %.1f)", indexName, using, selectivity(), access.meanDistance());
+            return String.format("of %s (sel: %.9f, step: %.1f)",
+                                 getIndexName(), selectivity(), access.meanDistance());
+        }
+
+        @Override
+        protected String description()
+        {
+            StringBuilder sb = new StringBuilder();
+            if (predicate != null)
+            {
+                sb.append("predicate: ");
+                sb.append(predicate);
+                sb.append('\n');
+            }
+            if (ordering != null)
+            {
+                sb.append("ordering: ");
+                sb.append(ordering);
+                sb.append('\n');
+            }
+            return sb.toString();
         }
 
         @Nullable
@@ -822,10 +860,15 @@ abstract public class Plan
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
         {
-            assert predicate != null ^ ordering != null;
             return (ordering != null)
-                ? executor.getTopKRows(softLimit)
+                ? executor.getTopKRows(predicate, softLimit)
                 : executor.getKeysFromIndex(predicate);
+        }
+
+        public String getIndexName()
+        {
+            assert predicate != null || ordering != null;
+            return predicate != null ? predicate.getIndexName() : ordering.getIndexName();
         }
     }
     /**
@@ -1272,7 +1315,7 @@ abstract public class Plan
             // occurs that we collected enough rows. keysCount() gives us the
             // average expected number of rows that will be needed but
             // many queries will need fewer than that.
-            return executor.getTopKRows(max(1, softLimit / 2));
+            return executor.getTopKRows((Expression) null, max(1, softLimit / 2));
         }
 
         @Override
@@ -1460,7 +1503,7 @@ abstract public class Plan
         }
 
         @Override
-        protected String description()
+        protected String title()
         {
             return String.format("%s (sel: %.9f)", filter, selectivity() / source.get().selectivity());
         }
@@ -1528,7 +1571,7 @@ abstract public class Plan
         }
 
         @Override
-        protected String description()
+        protected String title()
         {
             return "" + limit;
         }
@@ -1680,6 +1723,17 @@ abstract public class Plan
 
         private KeysIteration sort(@Nonnull KeysIteration source, @Nonnull Orderer ordering, int id)
         {
+            if (source instanceof IndexScan)
+            {
+                // Optimization
+                // If we want to sort on the same column as the index scan we already have,
+                // then we collapse sorting with filtering in a single plan node as the index
+                // is already sorted.
+                IndexScan indexScan = (IndexScan) source;
+                if (indexScan.getIndexName().equals(ordering.getIndexName()))
+                    return indexScan(indexScan.predicate, indexScan.matchingKeysCount, ordering, id);
+            }
+
             return (source instanceof Everything)
                    ? indexScan(null, tableMetrics.rows, ordering, id)
                    : new KeysSort(this, id, source, defaultAccess, ordering);
@@ -1760,7 +1814,7 @@ abstract public class Plan
     public interface Executor
     {
         Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
-        Iterator<? extends PrimaryKey> getTopKRows(int softLimit);
+        Iterator<? extends PrimaryKey> getTopKRows(Expression predicate, int softLimit);
         Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, int softLimit);
     }
 
