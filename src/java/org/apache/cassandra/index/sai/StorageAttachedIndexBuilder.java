@@ -139,7 +139,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return false;
         }
 
-        SSTableContext existingPerSSTableContext = group.sstableContextManager().getContext(sstable);
         IndexDescriptor indexDescriptor = group.descriptorFor(sstable);
         Set<Component> replacedComponents = new HashSet<>();
 
@@ -191,11 +190,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     long bytesRead = keys.getBytesRead();
                     bytesProcessed += bytesRead - previousBytesRead;
                     previousBytesRead = bytesRead;
-
-                    // Fail fast if index build has been aborted. Index writer won't throw when it's aborted. Because
-                    // it's used during compaction and we don't want to fail compaction on index error.
-                    if (indexWriter.isAborted())
-                        throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
@@ -299,9 +293,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                                  Set<Component> replacedComponents) throws InterruptedException
     {
         indexWriter.complete(sstable);
-
-        if (indexWriter.isAborted())
-            throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
 
         if (latch != null)
         {
