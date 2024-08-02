@@ -46,22 +46,7 @@ import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static java.lang.Math.max;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_DEGREE;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_EDGELIST_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_OPEN_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SIMILARITY_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.DISK_ACCESS_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.POINT_LOOKUP_SKIP_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.POINT_LOOKUP_SKIP_COST_DISTANCE_EXPONENT;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.POINT_LOOKUP_SKIP_COST_DISTANCE_FACTOR;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST_DISTANCE_EXPONENT;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST_DISTANCE_FACTOR;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_EXPONENT;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_FACTOR;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ROW_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_KEY_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_OPEN_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
 
 /**
  * The common base class for query execution plan nodes.
