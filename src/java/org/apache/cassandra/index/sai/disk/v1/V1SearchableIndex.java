@@ -174,15 +174,23 @@ public class V1SearchableIndex implements SearchableIndex
     {
         RangeConcatIterator.Builder rangeConcatIteratorBuilder = RangeConcatIterator.builder(segments.size());
 
-        for (Segment segment : segments)
+        try
         {
-            if (segment.intersects(keyRange))
+            for (Segment segment : segments)
             {
-                rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer, limit));
+                if (segment.intersects(keyRange))
+                {
+                    rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer, limit));
+                }
             }
-        }
 
-        return rangeConcatIteratorBuilder.build();
+            return rangeConcatIteratorBuilder.build();
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(rangeConcatIteratorBuilder.ranges());
+            throw t;
+        }
     }
 
     @Override
@@ -193,31 +201,47 @@ public class V1SearchableIndex implements SearchableIndex
                                                                   long totalRows) throws IOException
     {
         var iterators = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(segments.size());
-        for (Segment segment : segments)
+        try
         {
-            if (segment.intersects(keyRange))
+            for (Segment segment : segments)
             {
-                var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
-                iterators.add(segment.orderBy(orderer, keyRange, context, segmentLimit));
+                if (segment.intersects(keyRange))
+                {
+                    var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
+                    iterators.add(segment.orderBy(orderer, keyRange, context, segmentLimit));
+                }
             }
-        }
 
-        return iterators;
+            return iterators;
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(iterators);
+            throw t;
+        }
     }
 
     @Override
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
     {
         var results = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(segments.size());
-        for (Segment segment : segments)
+        try
         {
-            // Only pass the primary keys in a segment's range to the segment index.
-            var segmentKeys = getKeysInRange(keys, segment);
-            var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
-            results.add(segment.orderResultsBy(context, segmentKeys, orderer, segmentLimit));
-        }
+            for (Segment segment : segments)
+            {
+                // Only pass the primary keys in a segment's range to the segment index.
+                var segmentKeys = getKeysInRange(keys, segment);
+                var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
+                results.add(segment.orderResultsBy(context, segmentKeys, orderer, segmentLimit));
+            }
 
-        return results;
+            return results;
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(results);
+            throw t;
+        }
     }
 
     @Override
