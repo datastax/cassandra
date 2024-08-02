@@ -162,7 +162,7 @@ public class VectorMemtableIndexTest extends SAITester
             long expectedResults = Math.min(limit, keysInRange.size());
 
             // execute the random ANN expression, and check that we get back as many keys as we asked for
-            var iterators = memtableIndex.orderBy(new QueryContext(), orderer, keyRange, limit);
+            var iterators = memtableIndex.orderBy(new QueryContext(), orderer, null, keyRange, limit);
             assertEquals(1, iterators.size());
             try (var iterator = iterators.get(0))
             {

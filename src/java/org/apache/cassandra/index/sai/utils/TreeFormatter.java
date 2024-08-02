@@ -73,10 +73,17 @@ public class TreeFormatter<T>
             sb.append(padding);
             sb.append(hasRightSibling ? " ├─ " : " └─ ");
             padding.append(hasRightSibling ? " │  " : "    ");
-
         }
-        sb.append(toString.apply(node));
+
+        String[] nodeStr = toString.apply(node).split("\n");
+        sb.append(nodeStr[0]);
         sb.append('\n');
+        for (int i = 1; i < nodeStr.length; i++)
+        {
+            sb.append(padding);
+            sb.append(nodeStr[i]);
+            sb.append('\n');
+        }
 
         var iter = children.apply(node).iterator();
         while (iter.hasNext())

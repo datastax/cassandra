@@ -27,6 +27,9 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
+
+import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -95,15 +98,15 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         int oldToNew(int rowID);
     }
 
-    public IteratorState iteratorState(boolean isAscending) throws IOException
+    public IteratorState iteratorState(boolean isAscending, IntersectVisitor query) throws IOException
     {
-        return new IteratorState(rowID -> rowID, isAscending);
+        return new IteratorState(rowID -> rowID, isAscending, query);
     }
 
     @VisibleForTesting
     public IteratorState iteratorState() throws IOException
     {
-        return iteratorState(true);
+        return iteratorState(true, null);
     }
 
     public IteratorState iteratorState(DocMapper docMapper) throws IOException
@@ -123,21 +126,22 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         private final DocMapper docMapper;
         private final Iterator<Map.Entry<Long,Integer>> iterator;
 
-        private int leaf;
         private int leafPointCount;
         private int leafPointIndex = -1;
 
-        private boolean ascending;
+        private final boolean ascending;
+        private final BKDReader.IntersectVisitor query;
 
         public IteratorState(DocMapper docMapper) throws IOException
         {
-            this(docMapper, true);
+            this(docMapper, true, null);
         }
 
-        public IteratorState(DocMapper docMapper, boolean isAscending) throws IOException
+        public IteratorState(DocMapper docMapper, boolean isAscending, BKDReader.IntersectVisitor query) throws IOException
         {
             this.docMapper = docMapper;
             this.ascending = isAscending;
+            this.query = query;
 
             scratch = new byte[packedBytesLength];
 
@@ -147,11 +151,64 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             bkdInput.seek(firstLeafFilePointer);
 
             var leafNodeToLeafFP = isAscending ? getLeafOffsets() : getLeafOffsets().descendingMap();
+            if (query != null)
+            {
+                var minLeafFP = findMinLeafFP(query);
+                var maxLeafFP = Math.max(minLeafFP, findMaxLeafFP(query));
+                // Inclusive on both ends because min/maxLeafFP return the offsets to the leaves
+                // that intersect the query (i.e. contain at least one point matching the query) and
+                // possible range query exclusiveness is handled by the query object.
+                leafNodeToLeafFP = leafNodeToLeafFP.subMap(minLeafFP, true, maxLeafFP, true);
+            }
 
             // init the first leaf
             iterator = leafNodeToLeafFP.entrySet().iterator();
             final Map.Entry<Long,Integer> entry = iterator.next();
             leafPointCount = readLeaf(entry.getKey(), entry.getValue(), bkdInput, packedValues, bkdPostingsInput, postings, tempPostings);
+        }
+
+        /**
+         * Returns the file pointer to the left-most KD-tree leaf that intersects the query
+         */
+        private long findMinLeafFP(@Nonnull BKDReader.IntersectVisitor query)
+        {
+            return findLeafFP(split -> query.compare(minPackedValue, split) == Relation.CELL_OUTSIDE_QUERY);
+        }
+
+        /**
+         * Returns the file pointer to the right-most KD-tree leaf that intersects the query
+         */
+        private long findMaxLeafFP(@Nonnull BKDReader.IntersectVisitor query)
+        {
+            return findLeafFP(split -> query.compare(split, maxPackedValue) != Relation.CELL_OUTSIDE_QUERY);
+        }
+
+        /**
+         * Recursively goes down the KD-tree until it reaches a leaf node.
+         * At every non-leaf node, uses the provided function to decide the direction to go.
+         *
+         * @param shouldGoRight a function that takes the split point of a non-leaf node
+         *                      and returns true if the search path should follow to the right child
+         * @return file pointer of the found node
+         */
+        private long findLeafFP(Predicate<byte[]> shouldGoRight)
+        {
+            final PackedIndexTree index = new PackedIndexTree();
+            while (!index.isLeafNode())
+            {
+                // It is tempting to call index.getSplitPackedValue(), but that would return an empty array.
+                // It looks the user of the PackedIndexTree is supposed to build the splitPackedValue by themselves
+                // by assembling them from the values provided by getSplitDimValue for each dimension.
+                // Caution: This won't work if we ever support more than 1 dimension.
+                // But for 1 dimension, splitDimValue is the whole value we need.
+                byte[] splitPackedValue = index.getSplitDimValue().bytes;
+
+                if (shouldGoRight.test(splitPackedValue))
+                    index.pushRight();
+                else
+                    index.pushLeft();
+            }
+            return index.getLeafBlockFP();
         }
 
         @Override
@@ -180,11 +237,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             {
                 if (leafPointIndex == leafPointCount - 1)
                 {
-                    leaf++;
-                    if (leaf == numLeaves && leafPointIndex == leafPointCount - 1)
-                    {
+                    if (!iterator.hasNext())
                         return endOfData();
-                    }
+
                     final Map.Entry<Long, Integer> entry = iterator.next();
                     try
                     {
@@ -203,7 +258,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 int pointer = ascending ? leafPointIndex : leafPointCount - leafPointIndex - 1;
 
                 System.arraycopy(packedValues, pointer * packedBytesLength, scratch, 0, packedBytesLength);
-                return docMapper.oldToNew(postings[pointer]);
+                if (query == null || query.visit(scratch))
+                    return docMapper.oldToNew(postings[pointer]);
             }
         }
 

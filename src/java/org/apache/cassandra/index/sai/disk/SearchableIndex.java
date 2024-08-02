@@ -70,6 +70,7 @@ public interface SearchableIndex extends Closeable
                                 boolean defer, int limit) throws IOException;
 
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                  Expression slice,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   QueryContext context,
                                                                   int limit,

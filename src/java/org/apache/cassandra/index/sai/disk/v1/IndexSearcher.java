@@ -103,12 +103,13 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * Order the on-disk index synchronously and produce an iterator in score order
      *
      * @param orderer      the object containing the ordering logic
+     * @param slice        optional predicate to get a slice of the index
      * @param keyRange     key range specific in read command, used by ANN index
      * @param queryContext to track per sstable cache and per query metrics
      * @param limit        the num of rows to returned, used by ANN index
      * @return an iterator of {@link PrimaryKeyWithSortKey} in score order
      */
-    public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException;
+    public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException;
 
 
     @Override
