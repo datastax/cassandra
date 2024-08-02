@@ -357,13 +357,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 // Now that we know we're skipping past the previewed key, so perform the skip on this keySet.
                 keySets.poll();
-                if (keys instanceof SortedSet)
-                {
-                    var newKeys = ((SortedSet<PrimaryKey>) keys).tailSet(nextKey);
-                    if (!newKeys.isEmpty())
-                        keySets.offer(newKeys);
-                }
-                else if (keys instanceof SortedSetRangeIterator)
+                if (keys instanceof SortedSetRangeIterator)
                 {
                     var iterator = (SortedSetRangeIterator) keys;
                     iterator.skipTo(nextKey);
@@ -406,10 +400,7 @@ public class TrieMemoryIndex extends MemoryIndex
             if (keys instanceof PrimaryKey)
                 return null;
 
-            SortedSetRangeIterator iterator = (keys instanceof SortedSetRangeIterator)
-                ? (SortedSetRangeIterator) keys
-                : new SortedSetRangeIterator((SortedSet<PrimaryKey>) keys);
-
+            SortedSetRangeIterator iterator = (SortedSetRangeIterator) keys;
             assert iterator.hasNext();
             iterator.next();
             return iterator.hasNext() ? iterator : null;
@@ -419,8 +410,6 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             if (keys instanceof PrimaryKey)
                 return (PrimaryKey) keys;
-            if (keys instanceof SortedSet)
-                return (PrimaryKey) ((SortedSet<?>) keys).first();
             if (keys instanceof SortedSetRangeIterator)
                 return ((SortedSetRangeIterator) keys).peek();
 
@@ -453,7 +442,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 if (size == 1)
                     keySets.add(keys.first());
                 else
-                    keySets.add(keys);
+                    keySets.add(new SortedSetRangeIterator(keys, min, max, size));
 
                 count += size;
             }
@@ -486,6 +475,13 @@ public class TrieMemoryIndex extends MemoryIndex
             super(source.first(), source.last(), source.size());
             this.primaryKeySet = source;
         }
+
+        private SortedSetRangeIterator(SortedSet<PrimaryKey> source, PrimaryKey min, PrimaryKey max, long count)
+        {
+            super(min, max, count);
+            this.primaryKeySet = source;
+        }
+
 
         @Override
         protected PrimaryKey computeNext()
