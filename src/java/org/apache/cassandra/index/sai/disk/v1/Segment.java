@@ -153,9 +153,9 @@ public class Segment implements Closeable
      * @param limit      the num of rows to returned, used by ANN index
      * @return an iterator of {@link PrimaryKeyWithSortKey} in score order
      */
-    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
-        return index.orderBy(orderer, keyRange, context, limit);
+        return index.orderBy(orderer, slice, keyRange, context, limit);
     }
 
     public IndexSearcher getIndexSearcher()

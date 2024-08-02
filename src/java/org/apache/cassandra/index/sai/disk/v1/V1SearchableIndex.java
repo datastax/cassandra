@@ -194,7 +194,7 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer, Expression slice,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   QueryContext context,
                                                                   int limit,
@@ -208,7 +208,7 @@ public class V1SearchableIndex implements SearchableIndex
                 if (segment.intersects(keyRange))
                 {
                     var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
-                    iterators.add(segment.orderBy(orderer, keyRange, context, segmentLimit));
+                    iterators.add(segment.orderBy(orderer, slice, keyRange, context, segmentLimit));
                 }
             }
 
