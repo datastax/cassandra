@@ -29,8 +29,10 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
@@ -49,6 +51,12 @@ import static org.junit.Assert.*;
 public class PlanTest
 {
     private static final Orderer ordering = orderer();
+
+    @BeforeClass
+    public static void setupDD()
+    {
+        Plan.hitRateSupplier = () -> 1.0;
+    }
 
     private static Orderer orderer()
     {
@@ -511,10 +519,10 @@ public class PlanTest
 
         String prettyStr = limit.toStringRecursive();
 
-        assertEquals("Limit 3 (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
-                     " └─ Filter pred1 < X AND pred2 < X AND pred4 < X (sel: 1.000000000) (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
-                     "     └─ Fetch (rows: 3.0, cost/row: 93.4, cost: 40118.3..40398.6)\n" +
-                     "         └─ KeysSort (keys: 3.0, cost/key: 10.0, cost: 40118.3..40148.3)\n" +
+        assertEquals("Limit 3 (rows: 3.0, cost/row: 253.4, cost: 35093.8..35854.1)\n" +
+                     " └─ Filter pred1 < X AND pred2 < X AND pred4 < X (sel: 1.000000000) (rows: 3.0, cost/row: 253.4, cost: 35093.8..35854.1)\n" +
+                     "     └─ Fetch (rows: 3.0, cost/row: 253.4, cost: 35093.8..35854.1)\n" +
+                     "         └─ KeysSort (keys: 3.0, cost/key: 50.0, cost: 35093.8..35243.8)\n" +
                      "             └─ Union (keys: 1999.0, cost/key: 17.0, cost: 90.0..34091.3)\n" +
                      "                 ├─ Intersection (keys: 1000.0, cost/key: 33.0, cost: 60.0..33061.3)\n" +
                      "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 1.0, cost: 30.0..2030.0)\n" +
@@ -851,14 +859,14 @@ public class PlanTest
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 1.0, 1.0), List.of(0));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 1.0), List.of(0));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 1.0), List.of(0));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 0.5), List.of(0));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 0.2), List.of(0));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 0.5), List.of(1));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 0.2), List.of(1));
 
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 1.0, 1.0), List.of(1));
 
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 1.0), List.of(1, 2));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.5), List.of(2));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.2), List.of(2));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.2), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.1), List.of(2, 3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.05), List.of(2, 3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.02), List.of(2, 3));

@@ -24,11 +24,13 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +46,22 @@ import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static java.lang.Math.max;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_DEGREE;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_EDGELIST_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_OPEN_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SIMILARITY_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.DISK_ACCESS_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.POINT_LOOKUP_SKIP_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.POINT_LOOKUP_SKIP_COST_DISTANCE_EXPONENT;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.POINT_LOOKUP_SKIP_COST_DISTANCE_FACTOR;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST_DISTANCE_EXPONENT;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST_DISTANCE_FACTOR;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_EXPONENT;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_FACTOR;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ROW_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_KEY_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_OPEN_COST;
 
 /**
  * The common base class for query execution plan nodes.
@@ -105,6 +122,13 @@ import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
 abstract public class Plan
 {
     private static final Logger logger = LoggerFactory.getLogger(Plan.class);
+
+    @VisibleForTesting
+    static DoubleSupplier hitRateSupplier = () -> {
+        // cache hit rate with reasonable defaults if we have no data
+        double hitRate = ChunkCache.instance == null ? 1.0 : ChunkCache.instance.metrics.hitRate();
+        return Double.isFinite(hitRate) ? hitRate : 1.0;
+    };
 
     /**
      * Identifier of the plan tree node.
@@ -1838,6 +1862,8 @@ abstract public class Plan
         /** Additional cost added to row fetch cost per each serialized byte of the row */
         public final static double ROW_BYTE_COST = 0.005;
 
+        /** Cost to hit disk instead of cache */
+        public final static double DISK_ACCESS_COST = 1000.0;
     }
 
     /** Convenience builder for building intersection and union nodes */
@@ -1872,17 +1898,10 @@ abstract public class Plan
         }
     }
 
-    /** cache hit rate that doesn't go below 0.01 to avoid absurdly high cost estimates when we divide something by it */
-    private static double clampedCacheHitRate()
-    {
-        double hitRate = ChunkCache.instance == null ? 1.0 : ChunkCache.instance.metrics.hitRate();
-        return Double.isFinite(hitRate) ? max(0.01, hitRate) : 1.0;
-    }
-
     /** hit-rate-scale the raw cost */
     public static double hrs(double raw)
     {
-        return raw / clampedCacheHitRate();
+        return raw + DISK_ACCESS_COST * (1 - hitRateSupplier.getAsDouble());
     }
 
     /**
