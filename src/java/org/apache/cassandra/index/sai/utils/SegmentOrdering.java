@@ -47,7 +47,7 @@ import org.apache.cassandra.utils.CloseableIterator;
  *
  * Note: a segment ordering is only used when a query has both ordering and non-ordering predicates.
  * Where a query has only ordering predicates, the ordering is handled by the
- * {@link IndexSearcher#orderBy(Orderer, AbstractBounds, QueryContext, int)}.
+ * {@link IndexSearcher#orderBy(Orderer, org.apache.cassandra.index.sai.plan.Expression, AbstractBounds, QueryContext, int)}.
  */
 public interface SegmentOrdering
 {
