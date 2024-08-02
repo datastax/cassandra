@@ -19,13 +19,9 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.Closeable;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import org.apache.cassandra.io.util.FileUtils;
 
 /**
  * Range iterators contain primary keys, in sorted order, with no duplicates.  They also
@@ -188,9 +184,6 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             // iterator with the most number of items
             protected RangeIterator maxRange;
 
-            // tracks if all of the added ranges overlap, which is useful in case of intersection,
-            // as it gives direct answer as to such iterator is going to produce any results.
-            private boolean isOverlapping = true;
 
             private boolean hasRange = false;
 
@@ -245,10 +238,6 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                         else
                             tokenCount = range.getMaxKeys();
 
-                        // check if new range is disjoint with already added ranges, which means that this intersection
-                        // is not going to produce any results, so we can cleanup range storage and never added anything to it.
-                        isOverlapping &= isOverlapping(min, max, range);
-
                         break;
 
                     default:
@@ -271,9 +260,14 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                 return a.getMaxKeys() > b.getMaxKeys() ? a : b;
             }
 
-            public boolean isDisjoint()
+            /**
+             * Returns true if the final range is not going to produce any results,
+             * so we can cleanup range storage and never added anything to it.
+             */
+            public boolean isEmptyOrDisjoint()
             {
-                return !isOverlapping;
+                // max < min if intersected ranges are disjoint
+                return tokenCount == 0 || min.compareTo(max) > 0;
             }
 
             public double sizeRatio()
