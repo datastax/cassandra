@@ -22,32 +22,32 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import java.util.function.Function;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
-import com.google.common.base.Objects;
-import com.google.common.collect.Lists;
+import com.google.common.collect.ImmutableList;
 
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Tuples;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.serializers.CollectionSerializer;
+import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.TupleSerializer;
+import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
-import static com.google.common.collect.Iterables.any;
-import static com.google.common.collect.Iterables.transform;
-
 /**
  * This is essentially like a CompositeType, but it's not primarily meant for comparison, just
  * to pack multiple values together so has a more friendly encoding.
  */
-public class TupleType extends AbstractType<ByteBuffer>
+public class TupleType extends MultiCellCapableType<ByteBuffer>
 {
     private static final String COLON = ":";
     private static final Pattern COLON_PAT = Pattern.compile(COLON);
@@ -57,36 +57,28 @@ public class TupleType extends AbstractType<ByteBuffer>
     private static final Pattern AT_PAT = Pattern.compile(AT);
     private static final String ESCAPED_AT = "\\\\@";
     private static final Pattern ESCAPED_AT_PAT = Pattern.compile(ESCAPED_AT);
-    
-    protected final List<AbstractType<?>> types;
-
     private final TupleSerializer serializer;
 
-    public TupleType(List<AbstractType<?>> types)
+    public TupleType(Iterable<AbstractType<?>> subTypes)
     {
-        this(types, true);
+        this(freeze(subTypes), false);
     }
 
-    public TupleType(List<AbstractType<?>> types, boolean freezeInner)
+    public TupleType(Iterable<AbstractType<?>> subTypes, boolean isMultiCell)
     {
-        super(ComparisonType.CUSTOM);
+        this(ImmutableList.copyOf(subTypes), isMultiCell);
+    }
 
-        if (freezeInner)
-            this.types = Lists.newArrayList(transform(types, AbstractType::freeze));
-        else
-            this.types = types;
-        this.serializer = new TupleSerializer(fieldSerializers(types));
+    public TupleType(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        super(ComparisonType.CUSTOM, isMultiCell, subTypes);
+        this.serializer = new TupleSerializer(fieldSerializers(subTypes));
     }
 
     @Override
     public boolean allowsEmpty()
     {
         return true;
-    }
-    
-    public TupleType overrideKeyspace(Function<String, String> overrideKeyspace)
-    {
-        return new TupleType(types.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell());
     }
 
     private static List<TypeSerializer<?>> fieldSerializers(List<AbstractType<?>> types)
@@ -101,56 +93,29 @@ public class TupleType extends AbstractType<ByteBuffer>
     public static TupleType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
         List<AbstractType<?>> types = parser.getTypeParameters();
-        for (int i = 0; i < types.size(); i++)
-            types.set(i, types.get(i).freeze());
-        return new TupleType(types);
+        return new TupleType(types, true);
     }
 
     @Override
-    public <V> boolean referencesUserType(V name, ValueAccessor<V> accessor)
+    public TupleType with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
     {
-        return any(types, t -> t.referencesUserType(name, accessor));
+        return new TupleType(subTypes, isMultiCell);
     }
 
     @Override
-    public TupleType withUpdatedUserType(UserType udt)
+    public ShortType nameComparator()
     {
-        return referencesUserType(udt.name)
-             ? new TupleType(Lists.newArrayList(transform(types, t -> t.withUpdatedUserType(udt))))
-             : this;
-    }
-
-    @Override
-    public AbstractType<?> expandUserTypes()
-    {
-        return new TupleType(Lists.newArrayList(transform(types, AbstractType::expandUserTypes)));
-    }
-
-    @Override
-    public boolean referencesDuration()
-    {
-        return allTypes().stream().anyMatch(f -> f.referencesDuration());
+        return ShortType.instance;
     }
 
     public AbstractType<?> type(int i)
     {
-        return types.get(i);
+        return subTypes.get(i);
     }
 
     public int size()
     {
-        return types.size();
-    }
-
-    @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return types;
-    }
-
-    public List<AbstractType<?>> allTypes()
-    {
-        return types;
+        return subTypes.size();
     }
 
     public boolean isTuple()
@@ -166,9 +131,9 @@ public class TupleType extends AbstractType<ByteBuffer>
         int offsetL = 0;
         int offsetR = 0;
 
-        for (int i = 0; !accessorL.isEmptyFromOffset(left, offsetL) && !accessorR.isEmptyFromOffset(right, offsetR) && i < types.size(); i++)
+        for (int i = 0; !accessorL.isEmptyFromOffset(left, offsetL) && !accessorR.isEmptyFromOffset(right, offsetR) && i < subTypes.size(); i++)
         {
-            AbstractType<?> comparator = types.get(i);
+            AbstractType<?> comparator = subTypes.get(i);
 
             int sizeL = accessorL.getInt(left, offsetL);
             offsetL += TypeSizes.INT_SIZE;
@@ -235,9 +200,9 @@ public class TupleType extends AbstractType<ByteBuffer>
             return null;
 
         V[] bufs = split(accessor, data);  // this may be shorter than types.size -- other srcs remain null in that case
-        ByteSource[] srcs = new ByteSource[types.size()];
+        ByteSource[] srcs = new ByteSource[subTypes.size()];
         for (int i = 0; i < bufs.length; ++i)
-            srcs[i] = bufs[i] != null ? types.get(i).asComparableBytes(accessor, bufs[i], ByteComparable.Version.LEGACY) : null;
+            srcs[i] = bufs[i] != null ? subTypes.get(i).asComparableBytes(accessor, bufs[i], ByteComparable.Version.LEGACY) : null;
 
         // We always have a fixed number of sources, with the trailing ones possibly being nulls.
         // This can only result in a prefix if the last type in the tuple allows prefixes. Since that type is required
@@ -258,7 +223,7 @@ public class TupleType extends AbstractType<ByteBuffer>
 
         ByteSource[] srcs = new ByteSource[lengthWithoutTrailingNulls];
         for (int i = 0; i < lengthWithoutTrailingNulls; ++i)
-            srcs[i] = bufs[i] != null ? types.get(i).asComparableBytes(accessor, bufs[i], version) : null;
+            srcs[i] = bufs[i] != null ? subTypes.get(i).asComparableBytes(accessor, bufs[i], version) : null;
 
         // Because we stop early when there are trailing nulls, there needs to be an explicit terminator to make the
         // type prefix-free.
@@ -272,12 +237,12 @@ public class TupleType extends AbstractType<ByteBuffer>
         if (comparableBytes == null)
             return accessor.empty();
 
-        V[] componentBuffers = accessor.createArray(types.size());
-        for (int i = 0; i < types.size(); ++i)
+        V[] componentBuffers = accessor.createArray(subTypes.size());
+        for (int i = 0; i < subTypes.size(); ++i)
         {
             if (comparableBytes.peek() == ByteSource.TERMINATOR)
                 break;  // the rest of the fields remain null
-            AbstractType<?> componentType = types.get(i);
+            AbstractType<?> componentType = subTypes.get(i);
             ByteSource.Peekable component = ByteSourceInverse.nextComponentSource(comparableBytes);
             if (component != null)
                 componentBuffers[i] = componentType.fromComparableBytes(accessor, component, version);
@@ -288,7 +253,7 @@ public class TupleType extends AbstractType<ByteBuffer>
         int terminator = comparableBytes.next();
         assert terminator == ByteSource.TERMINATOR : String.format("Expected TERMINATOR (0x%2x) after %d components",
                                                                    ByteSource.TERMINATOR,
-                                                                   types.size());
+                                                                   subTypes.size());
         return buildValue(accessor, componentBuffers);
     }
 
@@ -445,13 +410,13 @@ public class TupleType extends AbstractType<ByteBuffer>
 
         List<?> list = (List<?>) parsed;
 
-        if (list.size() > types.size())
-            throw new MarshalException(String.format("Tuple contains extra items (expected %s): %s", types.size(), parsed));
-        else if (types.size() > list.size())
-            throw new MarshalException(String.format("Tuple is missing items (expected %s): %s", types.size(), parsed));
+        if (list.size() > subTypes.size())
+            throw new MarshalException(String.format("Tuple contains extra items (expected %s): %s", subTypes.size(), parsed));
+        else if (subTypes.size() > list.size())
+            throw new MarshalException(String.format("Tuple is missing items (expected %s): %s", subTypes.size(), parsed));
 
         List<Term> terms = new ArrayList<>(list.size());
-        Iterator<AbstractType<?>> typeIterator = types.iterator();
+        Iterator<AbstractType<?>> typeIterator = subTypes.iterator();
         for (Object element : list)
         {
             if (element == null)
@@ -474,7 +439,7 @@ public class TupleType extends AbstractType<ByteBuffer>
         ByteBuffer duplicated = buffer.duplicate();
         int offset = 0;
         StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < types.size(); i++)
+        for (int i = 0; i < subTypes.size(); i++)
         {
             if (i > 0)
                 sb.append(", ");
@@ -484,7 +449,7 @@ public class TupleType extends AbstractType<ByteBuffer>
             if (value == null)
                 sb.append("null");
             else
-                sb.append(types.get(i).toJSONString(value, protocolVersion));
+                sb.append(subTypes.get(i).toJSONString(value, protocolVersion));
         }
         return sb.append("]").toString();
     }
@@ -495,61 +460,30 @@ public class TupleType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public boolean isCompatibleWith(AbstractType<?> previous)
+    protected boolean isCompatibleWithFrozen(MultiCellCapableType<?> previous)
     {
         if (!(previous instanceof TupleType))
             return false;
 
-        // Extending with new components is fine, removing is not
-        TupleType tt = (TupleType)previous;
-        if (size() < tt.size())
-            return false;
-
-        for (int i = 0; i < tt.size(); i++)
-        {
-            AbstractType<?> tprev = tt.type(i);
-            AbstractType<?> tnew = type(i);
-            if (!tnew.isCompatibleWith(tprev))
-                return false;
-        }
-        return true;
+        return isSubTypesCompatibleWith(previous, AbstractType::isCompatibleWith);
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isCompatibleWithMultiCell(MultiCellCapableType<?> previous)
     {
-        if (!(otherType instanceof TupleType))
+        if (!(previous instanceof TupleType))
             return false;
 
-        // Extending with new components is fine, removing is not
-        TupleType tt = (TupleType) otherType;
-        if (size() < tt.size())
-            return false;
-
-        for (int i = 0; i < tt.size(); i++)
-        {
-            AbstractType<?> tprev = tt.type(i);
-            AbstractType<?> tnew = type(i);
-            if (!tnew.isValueCompatibleWith(tprev))
-                return false;
-        }
-        return true;
+        return isSubTypesCompatibleWith(previous, AbstractType::isSerializationCompatibleWith);
     }
 
     @Override
-    public int hashCode()
+    protected boolean isValueCompatibleWithFrozen(MultiCellCapableType<?> previous)
     {
-        return Objects.hashCode(types);
-    }
-
-    @Override
-    public boolean equals(Object o)
-    {
-        if(!(o instanceof TupleType))
+        if (!(previous instanceof TupleType))
             return false;
 
-        TupleType that = (TupleType)o;
-        return types.equals(that.types);
+        return isSubTypesCompatibleWith(previous, AbstractType::isValueCompatibleWith);
     }
 
     @Override
@@ -559,18 +493,35 @@ public class TupleType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFreezing)
     {
-        return getClass().getName() + TypeParser.stringifyTypeParameters(types, true);
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+
+        StringBuilder sb = new StringBuilder();
+        if (includeFrozenType)
+            sb.append(FrozenType.class.getName()).append('(');
+        sb.append(getClass().getName());
+        // FrozenType applies to anything nested (it wouldn't make sense otherwise) and so we only put once at the
+        // highest level. So we can ignore freezing in the subtypes if either we're already within a frozen type
+        // (we're a sub-type ourselves and frozenType has been included at the outer level), or we're frozen.
+        sb.append(stringifyTypeParameters(ignoreFreezing || !isMultiCell()));
+        if (includeFrozenType)
+            sb.append(')');
+        return sb.toString();
+    }
+
+    protected String stringifyTypeParameters(boolean ignoreFreezing)
+    {
+        return TypeParser.stringifyTypeParameters(subTypes, ignoreFreezing);
     }
 
     @Override
     public ByteBuffer getMaskedValue()
     {
-        ByteBuffer[] buffers = new ByteBuffer[types.size()];
-        for (int i = 0; i < types.size(); i++)
+        ByteBuffer[] buffers = new ByteBuffer[subTypes.size()];
+        for (int i = 0; i < subTypes.size(); i++)
         {
-            AbstractType<?> type = types.get(i);
+            AbstractType<?> type = subTypes.get(i);
             buffers[i] = type.getMaskedValue();
         }
 

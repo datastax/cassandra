@@ -29,7 +29,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,11 +39,11 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.GaugeProvider;
 import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.io.sstable.MetricsProviders;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.filter.BloomFilterMetrics;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
@@ -554,6 +553,12 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         public ByteComparable.Version getByteComparableVersion()
         {
             return ByteComparable.Version.OSS50;
+        }
+
+        @Override
+        public boolean hasImplicitlyFrozenTuples()
+        {
+            return false;
         }
     }
 

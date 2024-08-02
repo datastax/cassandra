@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -204,6 +205,12 @@ public class TableMetadata implements SchemaElement
         regularAndStaticColumns = RegularAndStaticColumns.builder().addAll(builder.regularAndStaticColumns).build();
         columns = ImmutableMap.copyOf(builder.columns);
 
+        assert columns.values().stream().noneMatch(ColumnMetadata::isDropped) :
+                "Invalid columns (contains dropped): " + columns.values()
+                                                                .stream()
+                                                                .map(ColumnMetadata::debugString)
+                                                                .collect(Collectors.joining(", "));
+
         indexes = builder.indexes;
         triggers = builder.triggers;
 
@@ -288,7 +295,7 @@ public class TableMetadata implements SchemaElement
     {
         return false;
     }
-    
+
     public boolean isIncrementalBackupsEnabled()
     {
         return params.incrementalBackups;
@@ -483,22 +490,7 @@ public class TableMetadata implements SchemaElement
 
         params.validate();
 
-        if (partitionKeyColumns.stream().anyMatch(c -> c.type.isCounter()))
-            except("PRIMARY KEY columns cannot contain counters");
-
-        // Mixing counter with non counter columns is not supported (#2614)
-        if (isCounter())
-        {
-            for (ColumnMetadata column : regularAndStaticColumns)
-                if (!(column.type.isCounter()) && !isSuperColumnMapColumnName(column.name))
-                    except("Cannot have a non counter column (\"%s\") in a counter table", column.name);
-        }
-        else
-        {
-            for (ColumnMetadata column : regularAndStaticColumns)
-                if (column.type.isCounter())
-                    except("Cannot have a counter column (\"%s\") in a non counter table", column.name);
-        }
+        columns().forEach(c -> c.validate(isCounter()));
 
         // All tables should have a partition key
         if (partitionKeyColumns.isEmpty())
@@ -523,9 +515,9 @@ public class TableMetadata implements SchemaElement
      *   table with counters to rename that weirdly name map to something more meaningful (it's not possible today
      *   as after renaming the validation in {@link #validate} would trigger).
      */
-    private static boolean isSuperColumnMapColumnName(ColumnIdentifier columnName)
+    public static boolean isSuperColumnMapColumnName(ByteBuffer columnName)
     {
-        return !columnName.bytes.hasRemaining();
+        return !columnName.hasRemaining();
     }
 
     /**
@@ -1591,7 +1583,7 @@ public class TableMetadata implements SchemaElement
 
         if (partitionKeyType instanceof CompositeType)
         {
-            List<AbstractType<?>> components = partitionKeyType.getComponents();
+            List<AbstractType<?>> components = partitionKeyType.subTypes();
             int size = components.size();
             literals = new String[size + clusteringSize];
             ByteBuffer[] values = ((CompositeType) partitionKeyType).split(partitionKey);

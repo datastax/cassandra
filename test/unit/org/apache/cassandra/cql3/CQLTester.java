@@ -84,9 +84,9 @@ import org.junit.runner.Description;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.codahale.metrics.Gauge;
 import com.carrotsearch.randomizedtesting.generators.RandomInts;
 import com.carrotsearch.randomizedtesting.generators.RandomStrings;
+import com.codahale.metrics.Gauge;
 import com.datastax.driver.core.CloseFuture;
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.ColumnDefinitions;
@@ -163,6 +163,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ClientMetrics;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -183,11 +184,11 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JMXServerUtils;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.TimeUUID;
 import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_JMX_LOCAL_PORT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_DRIVER_CONNECTION_TIMEOUT_MS;
@@ -793,6 +794,16 @@ public abstract class CQLTester
     public ColumnFamilyStore getColumnFamilyStore(String keyspace, String table)
     {
         return Keyspace.open(keyspace).getColumnFamilyStore(table);
+    }
+
+    public ColumnMetadata getColumn(String name)
+    {
+        return getCurrentColumnFamilyStore().metadata.get().getColumn(ColumnIdentifier.getInterned(name, true));
+    }
+
+    public ColumnMetadata getDroppedColumn(String name)
+    {
+        return getCurrentColumnFamilyStore().metadata.get().getDroppedColumn(ColumnIdentifier.getInterned(name, true).bytes);
     }
 
     public void flush(boolean forceFlush)
@@ -2357,8 +2368,7 @@ public abstract class CQLTester
      */
     private static void assertMessageContains(String text, Exception e)
     {
-        Assert.assertTrue("Expected error message to contain '" + text + "', but got '" + e.getMessage() + "'",
-                e.getMessage().contains(text));
+        Assertions.assertThat(e.getMessage()).contains(text);
     }
 
     /**

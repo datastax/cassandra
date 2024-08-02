@@ -17,13 +17,14 @@
  */
 package org.apache.cassandra.db.marshal;
 
-import java.nio.ByteBuffer;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Iterator;
-import java.util.Objects;
+import java.util.List;
 import java.util.function.Consumer;
+
+import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnSpecification;
@@ -49,7 +50,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
  * Please note that this comparator shouldn't be used "manually" (as a custom
  * type for instance).
  */
-public abstract class CollectionType<T> extends AbstractType<T>
+public abstract class CollectionType<T> extends MultiCellCapableType<T>
 {
     public static CellPath.Serializer cellPathSerializer = new CollectionPathSerializer();
 
@@ -82,13 +83,12 @@ public abstract class CollectionType<T> extends AbstractType<T>
 
     public final Kind kind;
 
-    protected CollectionType(ComparisonType comparisonType, Kind kind)
+    protected CollectionType(ComparisonType comparisonType, Kind kind, boolean isMultiCell, ImmutableList<AbstractType<?>> subTypes)
     {
-        super(comparisonType);
+        super(comparisonType, isMultiCell, subTypes);
         this.kind = kind;
     }
 
-    public abstract AbstractType<?> nameComparator();
     public abstract AbstractType<?> valueComparator();
 
     protected abstract List<ByteBuffer> serializedValues(Iterator<Cell<?>> cells);
@@ -149,12 +149,6 @@ public abstract class CollectionType<T> extends AbstractType<T>
         return kind == Kind.MAP;
     }
 
-    @Override
-    public boolean isFreezable()
-    {
-        return true;
-    }
-
     // Overrided by maps
     protected int collectionSize(List<ByteBuffer> values)
     {
@@ -170,100 +164,41 @@ public abstract class CollectionType<T> extends AbstractType<T>
     }
 
     @Override
-    public boolean isCompatibleWith(AbstractType<?> previous)
+    protected boolean isCompatibleWithFrozen(MultiCellCapableType<?> previous)
     {
-        if (this == previous)
-            return true;
-
-        if (!getClass().equals(previous.getClass()))
+        if (getClass() != previous.getClass())
             return false;
 
-        CollectionType<?> tprev = (CollectionType<?>) previous;
-        if (this.isMultiCell() != tprev.isMultiCell())
-            return false;
-
-        // subclasses should handle compatibility checks for frozen collections
-        if (!this.isMultiCell())
-            return isCompatibleWithFrozen(tprev);
-
-        if (!this.nameComparator().isCompatibleWith(tprev.nameComparator()))
-            return false;
-
-        // the value comparator is only used for Cell values, so sorting doesn't matter
-        return this.valueComparator().isSerializationCompatibleWith(tprev.valueComparator());
+        // When frozen, the full collection is a blob, so everything must be sorted-compatible for the whole blob to
+        // be sorted-compatible.
+        return isSubTypesCompatibleWith(previous, AbstractType::isCompatibleWith);
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    protected boolean isCompatibleWithMultiCell(MultiCellCapableType<?> previous)
     {
-        // for multi-cell collections, compatibility and value-compatibility are the same
-        if (this.isMultiCell())
-            return isCompatibleWith(previous);
-
-        if (this == previous)
-            return true;
-
-        if (!getClass().equals(previous.getClass()))
+        if (getClass() != previous.getClass())
             return false;
 
-        CollectionType<?> tprev = (CollectionType<?>) previous;
-        if (this.isMultiCell() != tprev.isMultiCell())
-            return false;
-
-        // subclasses should handle compatibility checks for frozen collections
-        return isValueCompatibleWithFrozen(tprev);
+        // When multi-cell, the name comparator is the one used to compare cell-path so must be sorted-compatible
+        // but the value comparator is never used for sorting so serialization-compatibility is enough.
+        return this.nameComparator().isCompatibleWith(previous.nameComparator()) &&
+               this.valueComparator().isSerializationCompatibleWith(((CollectionType<?>) previous).valueComparator());
     }
 
     @Override
-    public boolean isSerializationCompatibleWith(AbstractType<?> previous)
+    protected boolean isValueCompatibleWithFrozen(MultiCellCapableType<?> previous)
     {
-        if (!isValueCompatibleWith(previous))
+        if (getClass() != previous.getClass())
             return false;
 
-        return valueComparator().isSerializationCompatibleWith(((CollectionType<?>)previous).valueComparator());
+        return nameComparator().isCompatibleWith(previous.nameComparator()) &&
+               valueComparator().isValueCompatibleWith(((CollectionType<?>) previous).valueComparator());
     }
-
-    /** A version of isCompatibleWith() to deal with non-multicell (frozen) collections */
-    protected abstract boolean isCompatibleWithFrozen(CollectionType<?> previous);
-
-    /** A version of isValueCompatibleWith() to deal with non-multicell (frozen) collections */
-    protected abstract boolean isValueCompatibleWithFrozen(CollectionType<?> previous);
 
     public CQL3Type asCQL3Type()
     {
         return new CQL3Type.Collection(this);
-    }
-
-    @Override
-    public boolean equals(Object o)
-    {
-        if (this == o)
-            return true;
-
-        if (!(o instanceof CollectionType))
-            return false;
-
-        CollectionType<?> other = (CollectionType<?>) o;
-
-        if (kind != other.kind)
-            return false;
-
-        if (isMultiCell() != other.isMultiCell())
-            return false;
-
-        return nameComparator().equals(other.nameComparator()) && valueComparator().equals(other.valueComparator());
-    }
-
-    @Override
-    public int hashCode()
-    {
-        return Objects.hash(kind, isMultiCell(), nameComparator(), valueComparator());
-    }
-
-    @Override
-    public String toString()
-    {
-        return this.toString(false);
     }
 
     static <VL, VR> int compareListOrSet(AbstractType<?> elementsComparator, VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
@@ -380,4 +315,20 @@ public abstract class CollectionType<T> extends AbstractType<T>
     }
 
     public abstract void forEach(ByteBuffer input, Consumer<ByteBuffer> action);
+
+    @Override
+    public String toString(boolean ignoreFreezing)
+    {
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+
+        StringBuilder sb = new StringBuilder();
+        if (includeFrozenType)
+            sb.append(FrozenType.class.getName()).append('(');
+        sb.append(getClass().getName());
+        sb.append(TypeParser.stringifyTypeParameters(subTypes, ignoreFreezing || !isMultiCell));
+        if (includeFrozenType)
+            sb.append(')');
+        return sb.toString();
+    }
+
 }
