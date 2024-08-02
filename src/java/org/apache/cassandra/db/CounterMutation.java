@@ -62,7 +62,7 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_FAIR_LOCK;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_NUM_STRIPES;
+import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_NUM_STRIPES_PER_THREAD;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
@@ -112,6 +112,7 @@ public class CounterMutation implements IMutation
 
     static
     {
+        int numStripes = COUNTER_LOCK_NUM_STRIPES_PER_THREAD.getInt() * DatabaseDescriptor.getConcurrentCounterWriters();
         if (COUNTER_LOCK_FAIR_LOCK.getBoolean())
         {
             try
@@ -123,7 +124,7 @@ public class CounterMutation implements IMutation
                 customMethod.setAccessible(true);
 
                 Supplier<Lock> lockSupplier = () -> new ReentrantLock(true);
-                LOCKS = (Striped<Lock>) customMethod.invoke(null, COUNTER_LOCK_NUM_STRIPES.getInt(), lockSupplier);
+                LOCKS = (Striped<Lock>) customMethod.invoke(null, numStripes, lockSupplier);
             }
             catch (Exception e)
             {
@@ -132,7 +133,7 @@ public class CounterMutation implements IMutation
         }
         else
         {
-            LOCKS = Striped.lock(COUNTER_LOCK_NUM_STRIPES.getInt());
+            LOCKS = Striped.lock(numStripes);
         }
     }
 
