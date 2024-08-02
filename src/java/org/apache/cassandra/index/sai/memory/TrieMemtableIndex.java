@@ -53,6 +53,7 @@ import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
@@ -183,13 +184,21 @@ public class TrieMemtableIndex implements MemtableIndex
 
         RangeConcatIterator.Builder builder = RangeConcatIterator.builder(endShard - startShard + 1);
 
-        for (int shard  = startShard; shard <= endShard; ++shard)
+        try
         {
-            assert rangeIndexes[shard] != null;
-            builder.add(rangeIndexes[shard].search(expression, keyRange));
-        }
+            for (int shard = startShard; shard <= endShard; ++shard)
+            {
+                assert rangeIndexes[shard] != null;
+                builder.add(rangeIndexes[shard].search(expression, keyRange));
+            }
 
-        return builder.build();
+            return builder.build();
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(builder.ranges());
+            throw t;
+        }
     }
 
     @Override
