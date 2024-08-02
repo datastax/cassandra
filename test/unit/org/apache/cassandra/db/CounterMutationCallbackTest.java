@@ -44,6 +44,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ActiveRequestSensorsFactory;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Sensor;
@@ -130,7 +131,8 @@ public class CounterMutationCallbackTest
                .build();
         int responseSize = msg.emptyResponseBuilder().currentPayloadSize(MessagingService.current_version);
 
-        RequestSensors requestSensors = new RequestSensors();
+        ActiveRequestSensorsFactory requestSensorsFactory = new ActiveRequestSensorsFactory();
+        RequestSensors requestSensors = requestSensorsFactory.create("ks1");
         RequestTracker.instance.set(requestSensors);
 
         Context context = Context.from(Keyspace.open(KEYSPACE1).getMetadata().tables.get(CF_COUTNER).get());
@@ -138,7 +140,7 @@ public class CounterMutationCallbackTest
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.incrementSensor(context, Type.WRITE_BYTES, COUNTER_MUTATION_BYTES); // mimic a counter mutation of size 56 bytes on the leader node
         requestSensors.syncAllSensors();
-        CounterMutationCallback callback = new CounterMutationCallback(msg, FBUtilities.getLocalAddressAndPort());
+        CounterMutationCallback callback = new CounterMutationCallback(msg, FBUtilities.getLocalAddressAndPort(), RequestTracker.instance.get());
         Integer replicaCount = replicaCountAndExpectedSensorValue.left;
         callback.setReplicaCount(replicaCount);
 
