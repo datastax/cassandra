@@ -18,7 +18,11 @@
 package org.apache.cassandra.index.sai.metrics;
 
 import java.io.IOException;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -27,7 +31,6 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.config.StorageAttachedIndexOptions;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -36,6 +39,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.inject.Injections.newCounter;
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
@@ -178,9 +182,10 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         // Verify that we abort exactly once and zero the memory tracker:
         verifyCompactionIndexBuilds(1, failure, currentTable());
 
+        // We should still be able to query the index if compaction is aborted:
         String select = String.format("SELECT * FROM %%s WHERE %s = %s", column, column.equals("v1") ? "0" : "'0'");
-
-        assertThatThrownBy(() -> executeNet(select)).isInstanceOf(ReadFailureException.class);
+        ResultSet rows = executeNet(select);
+        assertEquals(1, rows.all().size());
     }
 
     @Test
@@ -202,8 +207,9 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         // Verify that we abort both indices and zero the memory tracker:
         verifyCompactionIndexBuilds(2, kdTreeSegmentFlushFailure, currentTable());
 
-        assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE V1 = 0"))
-                .isInstanceOf(ReadFailureException.class);
+        // We should still be able to query the index if compaction is aborted:
+        ResultSet rows = executeNet("SELECT * FROM %s WHERE V1 = 0");
+        assertEquals(1, rows.all().size());
     }
 
     @Test
@@ -228,18 +234,15 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         execute("INSERT INTO " + KEYSPACE + "." + table2 + "(id1, v1, v2) VALUES ('1', 1, '1')");
         flush(KEYSPACE, table2);
 
-        // Start compaction against both tables/indexes and verify that they are aborted safely:
-        verifyCompactionIndexBuilds(2, segmentFlushFailure, table1, table2);
-
-        assertThatThrownBy(() -> executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1)))
-                .isInstanceOf(ReadFailureException.class);
-
-        assertThatThrownBy(() -> executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table2)))
-                .isInstanceOf(ReadFailureException.class);
+        // We should still be able to query the indexes if compaction is aborted:
+        ResultSet rows = executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1));
+        assertEquals(1, rows.all().size());
+        rows = executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table2));
+        assertEquals(1, rows.all().size());
     }
 
     @Test
-    public void shouldLeaveOnlyFailedIndexNonQueryable() throws Throwable
+    public void shouldZeroMemoryOnlyOnFailedIndexes() throws Throwable
     {
         String table1 = createTable(CREATE_TABLE_TEMPLATE);
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
@@ -263,11 +266,12 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         // Start compaction against both tables/indexes, and verify only the numeric index is aborted:
         verifyCompactionIndexBuilds(1, kdTreeSegmentFlushFailure, table1, table2);
 
-        assertThatThrownBy(() -> executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1)))
-                .isInstanceOf(ReadFailureException.class);
+        // We should still be able to query the index if compaction is aborted:
+        ResultSet rows1 = executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1));
+        assertEquals(1, rows1.all().size());
 
-        ResultSet rows = executeNet(String.format("SELECT * FROM %s WHERE v2 = '0'", KEYSPACE + "." + table2));
-        assertEquals(1, rows.all().size());
+        ResultSet rows2 = executeNet(String.format("SELECT * FROM %s WHERE v2 = '0'", KEYSPACE + "." + table2));
+        assertEquals(1, rows2.all().size());
     }
 
     private void verifyCompactionIndexBuilds(int aborts, Injection failure, String... tables) throws Throwable
@@ -277,7 +281,14 @@ public abstract class SegmentFlushingFailureTest extends SAITester
 
         try
         {
-            Arrays.stream(tables).forEach(table -> compact(KEYSPACE, table));
+            ExecutorService executor = Executors.newFixedThreadPool(tables.length);
+            List<Future<?>> results = new ArrayList<>();
+
+            for (String table : tables)
+                results.add(executor.submit(() -> compact(KEYSPACE, table)));
+
+            assertThatThrownBy(() -> FBUtilities.waitOnFutures(results)).hasRootCauseMessage("Injected failure!");
+            executor.shutdownNow();
 
             Assert.assertEquals(aborts, writerAbortCounter.get());
 

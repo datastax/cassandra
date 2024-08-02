@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteOrder;
 import java.util.EnumSet;
@@ -53,6 +54,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
@@ -197,7 +199,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public boolean validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum)
+    public void validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum)
     {
         for (IndexComponent indexComponent : perSSTableComponents())
         {
@@ -212,19 +214,24 @@ public class V1OnDiskFormat implements OnDiskFormat
                 else
                     SAICodecUtils.validate(input, earliest);
             }
-            catch (Throwable e)
+            catch (Exception e)
             {
-                if (logger.isDebugEnabled())
-                {
-                    logger.debug(indexDescriptor.logMessage("{} failed for index component {} on SSTable {}"),
-                                 (checksum ? "Checksum validation" : "Validation"),
-                                 indexComponent,
-                                 indexDescriptor.descriptor);
-                }
-                return false;
+                logger.warn(indexDescriptor.logMessage("{} failed for index component {} on SSTable {}"),
+                            (checksum ? "Checksum validation" : "Validation"),
+                            indexComponent,
+                            indexDescriptor.descriptor);
+                rethrowIOException(e);
             }
         }
-        return true;
+    }
+
+    protected static void rethrowIOException(Exception e)
+    {
+        if (e instanceof IOException)
+            throw new UncheckedIOException((IOException) e);
+        if (e.getCause() instanceof IOException)
+            throw new UncheckedIOException((IOException) e.getCause());
+        throw Throwables.unchecked(e);
     }
 
     protected Version getExpectedEarliestVersion(IndexComponent indexComponent)
@@ -240,16 +247,17 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public boolean validateOneIndexComponent(IndexComponent component, IndexDescriptor descriptor, IndexContext context, boolean checksum)
+    public void validateOneIndexComponent(IndexComponent component, IndexDescriptor descriptor, IndexContext context, boolean checksum)
     {
         if (isBuildCompletionMarker(component))
-            return true;
+            return;
+
         // starting with v3, vector components include proper headers and checksum; skip for earlier versions
         if (context.isVector()
             && isVectorDataComponent(component)
             && !descriptor.getVersion(context).onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
         {
-            return true;
+            return;
         }
 
         try (IndexInput input = descriptor.openPerIndexInput(component, context))
@@ -259,19 +267,15 @@ public class V1OnDiskFormat implements OnDiskFormat
             else
                 SAICodecUtils.validate(input);
         }
-        catch (Throwable e)
+        catch (Exception e)
         {
-            if (logger.isDebugEnabled())
-            {
-                logger.debug(descriptor.logMessage("{} failed for index component {} on SSTable {}"),
-                             (checksum ? "Checksum validation" : "Validation"),
-                             component,
-                             descriptor.descriptor,
-                             e);
-            }
-            return false;
+            logger.warn(descriptor.logMessage("{} failed for index component {} on SSTable {}"),
+                        (checksum ? "Checksum validation" : "Validation"),
+                        component,
+                        descriptor.descriptor,
+                        e);
+            rethrowIOException(e);
         }
-        return true;
     }
 
     @Override

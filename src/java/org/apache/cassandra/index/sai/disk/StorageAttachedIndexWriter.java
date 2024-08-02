@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Writes all on-disk index structures attached to a given SSTable.
@@ -214,12 +215,10 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
      */
     public void abort(Throwable accumulator, boolean fromIndex)
     {
+        if (aborted) return;
+
         // Mark the write aborted, so we can short-circuit any further operations on the component writers.
         aborted = true;
-        
-        // Make any indexes involved in this transaction non-queryable, as they will likely not match the backing table.
-        if (fromIndex)
-            indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
         
         for (PerIndexWriter perIndexWriter : perIndexWriters)
         {
@@ -241,6 +240,11 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             // If the token/offset files have already been written successfully, they can be reused later. 
             perSSTableWriter.abort(accumulator);
         }
+
+        // If the abort was from an index error, propagate the error upstream so index builds, compactions, and
+        // flushes can handle it correctly.
+        if (fromIndex)
+            throw Throwables.unchecked(accumulator);
     }
 
     private void addRow(Row row) throws IOException, InMemoryTrie.SpaceExhaustedException

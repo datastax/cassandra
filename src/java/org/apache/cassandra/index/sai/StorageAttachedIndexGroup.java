@@ -284,10 +284,9 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         {
             SSTableAddedNotification notice = (SSTableAddedNotification) notification;
 
-            // Avoid validation for index files just written following Memtable flush. ZCS streaming should
-            // validate index checksum.
-            boolean validate = notice.fromStreaming() || !notice.memtable().isPresent();
-            onSSTableChanged(Collections.emptySet(), notice.added, indices, validate);
+            // Avoid validation for index files just written following Memtable flush. Otherwise, the new SSTables have
+            // come either from import, streaming, or a standalone tool, where they have also already been validated.
+            onSSTableChanged(Collections.emptySet(), notice.added, indices, false);
         }
         else if (notification instanceof SSTableListChangedNotification)
         {
@@ -377,6 +376,42 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             }
         }
         return incomplete;
+    }
+
+    @Override
+    public boolean validateSSTableAttachedIndexes(Collection<SSTableReader> sstables, boolean throwOnIncomplete, boolean validateChecksum)
+    {
+        boolean complete = true;
+
+        for (SSTableReader sstable : sstables)
+        {
+            IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
+
+            if (indexDescriptor.isPerSSTableBuildComplete())
+            {
+                indexDescriptor.validatePerSSTableComponents(validateChecksum, true);
+
+                for (StorageAttachedIndex index : indices)
+                {
+                    if (indexDescriptor.isPerIndexBuildComplete(index.getIndexContext()))
+                        indexDescriptor.validatePerIndexComponents(index.getIndexContext(), validateChecksum, true);
+                    else if (throwOnIncomplete)
+                        throw new IllegalStateException(indexDescriptor.logMessage("Incomplete per-column index build for SSTable " + sstable.descriptor.toString()));
+                    else
+                        complete = false;
+                }
+            }
+            else if (throwOnIncomplete)
+            {
+                throw new IllegalStateException(indexDescriptor.logMessage("Incomplete per-SSTable index build" + sstable.descriptor.toString()));
+            }
+            else
+            {
+                complete = false;
+            }
+        }
+
+        return complete;
     }
 
     /**

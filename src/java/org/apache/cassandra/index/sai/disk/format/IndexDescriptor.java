@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.util.Collections;
 import java.util.Map;
@@ -340,29 +341,38 @@ public class IndexDescriptor
                          .sum();
     }
 
-    public boolean validatePerIndexComponents(IndexContext context)
-    {
-        logger.debug("validatePerIndexComponents called for " + context.getIndexName());
-        registerPerIndexComponents(context);
-        return getVersion(context).onDiskFormat().validatePerIndexComponents(this, context, false);
-    }
-
-    public boolean validatePerIndexComponentsChecksum(IndexContext context)
+    public boolean validatePerIndexComponents(IndexContext context, boolean validateChecksums, boolean rethrow)
     {
         registerPerIndexComponents(context);
-        return getVersion(context).onDiskFormat().validatePerIndexComponents(this, context, true);
+        try
+        {
+            getVersion(context).onDiskFormat().validatePerIndexComponents(this, context, validateChecksums);
+            return true;
+        }
+        catch (UncheckedIOException e)
+        {
+            if (rethrow)
+                throw e;
+            else
+                return false;
+        }
     }
 
-    public boolean validatePerSSTableComponents()
+    public boolean validatePerSSTableComponents(boolean validateChecksums, boolean rethrow)
     {
         registerPerSSTableComponents();
-        return versions.get(null).onDiskFormat().validatePerSSTableComponents(this, false);
-    }
-
-    public boolean validatePerSSTableComponentsChecksum()
-    {
-        registerPerSSTableComponents();
-        return versions.get(null).onDiskFormat().validatePerSSTableComponents(this, true);
+        try
+        {
+            getVersion(null).onDiskFormat().validatePerSSTableComponents(this, validateChecksums);
+            return true;
+        }
+        catch (UncheckedIOException e)
+        {
+            if (rethrow)
+                throw e;
+            else
+                return false;
+        }
     }
 
     public void deletePerSSTableIndexComponents()
