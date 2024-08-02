@@ -62,4 +62,25 @@ public class TreeFormatterTest
                      "     └─ child 2b\n", formattedTree);
     }
 
+    @Test
+    public void formatTreeWithMultiLineNodes() {
+        TreeNode root = new TreeNode("root line 1\nroot line 2", List.of(
+        new TreeNode("child 1\nchild 1 line 2", List.of(
+            new TreeNode("child 1a", Collections.emptyList()),
+            new TreeNode("child 1b", Collections.emptyList()))),
+        new TreeNode("child 2\nchild 2 line 2", Collections.emptyList())));
+
+        TreeFormatter<TreeNode> formatter = new TreeFormatter<>(t -> t.label, t -> t.children);
+        String formattedTree = formatter.format(root);
+
+        assertEquals("root line 1\n" +
+                     "root line 2\n" +
+                     " ├─ child 1\n" +
+                     " │  child 1 line 2\n" +
+                     " │   ├─ child 1a\n" +
+                     " │   └─ child 1b\n" +
+                     " └─ child 2\n" +
+                     "    child 2 line 2\n", formattedTree);
+    }
+
 }
