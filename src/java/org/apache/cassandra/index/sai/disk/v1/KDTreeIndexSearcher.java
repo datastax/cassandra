@@ -106,9 +106,12 @@ public class KDTreeIndexSearcher extends IndexSearcher
         }
     }
 
-    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
     {
-        var iter = new RowIdIterator(bkdReader.iteratorState(orderer.isAscending()));
+        var query = slice != null && slice.getOp().isEqualityOrRange()
+                    ? bkdQueryFrom(slice, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension())
+                    : null;
+        var iter = new RowIdIterator(bkdReader.iteratorState(orderer.isAscending(), query));
         return toMetaSortedIterator(iter, queryContext);
     }
 
