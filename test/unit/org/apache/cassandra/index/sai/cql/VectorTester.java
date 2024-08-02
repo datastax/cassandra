@@ -39,6 +39,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -58,6 +59,8 @@ public class VectorTester extends SAITester
         // the non-brute-force path gets called during tests (which mostly involve small numbers of rows)
         var n = getRandom().nextIntBetween(0, 4);
         setMaxBruteForceRows(n);
+        // override the global holes allowed so that the one-to-many path gets exercised
+        V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 1.0;
     }
 
     public static void setMaxBruteForceRows(int n)
