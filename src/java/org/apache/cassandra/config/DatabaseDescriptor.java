@@ -304,10 +304,12 @@ public class DatabaseDescriptor
         daemonInitialized = true;
 
         setConfig(config.get());
+        // SnapshotLoader requires created directories
+        // GuardrailsOptions.validateDataDiskUsageMaxDiskSize requires created directories
+        createAllDirectories();
         applyAll();
 
-        createAllDirectories();
-        applyGuardrails(); // requires created directories
+        applyGuardrails(); // GuardrailsOptions.validateDataDiskUsageMaxDiskSize requires created directories
 
         AuthConfig.applyAuth();
     }

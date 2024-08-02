@@ -56,7 +56,7 @@ public class SnapshotLoader
 
     static final Pattern SNAPSHOT_DIR_PATTERN = Pattern.compile("(?<keyspace>\\w+)/(?<tableName>\\w+)-(?<tableId>[0-9a-f]{32})/snapshots/(?<tag>.+)$");
 
-    private final Collection<Path> dataDirectories;
+    private final Collection<File> dataDirectories;
 
     public SnapshotLoader()
     {
@@ -65,17 +65,12 @@ public class SnapshotLoader
 
     public SnapshotLoader(File[] dataDirectories)
     {
-        this(Arrays.stream(dataDirectories).map(File::toPath).collect(Collectors.toList()));
-    }
-
-    public SnapshotLoader(Collection<Path> dataDirs)
-    {
-        this.dataDirectories = dataDirs;
+        this.dataDirectories = Arrays.stream(dataDirectories).collect(Collectors.toList());
     }
 
     public SnapshotLoader(Directories directories)
     {
-        this(directories.getCFDirectories().stream().map(File::toPath).collect(Collectors.toList()));
+        this.dataDirectories = directories.getCFDirectories();
     }
 
     @VisibleForTesting
@@ -166,15 +161,15 @@ public class SnapshotLoader
         Map<String, TableSnapshot.Builder> snapshots = new HashMap<>();
         Visitor visitor = new Visitor(snapshots);
 
-        for (Path dataDir : dataDirectories)
+        for (File dataDir : dataDirectories)
         {
             if (keyspace != null)
                 dataDir = dataDir.resolve(keyspace);
 
             try
             {
-                if (new File(dataDir).exists())
-                    Files.walkFileTree(dataDir, Collections.emptySet(), maxDepth, visitor);
+                if (dataDir.exists())
+                    Files.walkFileTree(dataDir.toPath(), Collections.emptySet(), maxDepth, visitor);
                 else
                     logger.debug("Skipping non-existing data directory {}", dataDir);
             }
