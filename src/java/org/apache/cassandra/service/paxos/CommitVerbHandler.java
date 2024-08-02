@@ -42,6 +42,8 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         RequestSensors sensors = new RequestSensors();
         Context context = Context.from(message.payload.update.metadata());
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
@@ -50,6 +52,9 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
         SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);
+
+        // no need to calculate outbound internode bytes because the response is NoPayload
+        SensorsCustomParams.addInternodeBytesSensorToResponse(reply, sensors, context);
         MessagingService.instance().send(reply.build(), message.from());
     }
 }
