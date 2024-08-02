@@ -263,6 +263,8 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             /**
              * Returns true if the final range is not going to produce any results,
              * so we can cleanup range storage and never added anything to it.
+             * Uses the min/max values to prevent unnecessary computation to calculate
+             * the next primary key.
              */
             public boolean isEmptyOrDisjoint()
             {
@@ -275,36 +277,6 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                 return minRange.getMaxKeys() * 1d / maxRange.getMaxKeys();
             }
         }
-    }
-
-    @VisibleForTesting
-    protected static <U extends Comparable<U>> boolean isOverlapping(RangeIterator a, RangeIterator b)
-    {
-        return isOverlapping(a.peek(), a.getMaximum(), b);
-    }
-
-    /**
-     * Ranges are overlapping the following cases:
-     *
-     *   * When they have a common subrange:
-     *
-     *   min       b.current      max          b.max
-     *   +---------|--------------+------------|
-     *
-     *   b.current      min       max          b.max
-     *   |--------------+---------+------------|
-     *
-     *   min        b.current     b.max        max
-     *   +----------|-------------|------------+
-     *
-     *
-     *  If either range is empty, they're disjoint.
-     */
-    @VisibleForTesting
-    protected static boolean isOverlapping(PrimaryKey min, PrimaryKey max, RangeIterator b)
-    {
-        return (min != null && max != null) &&
-               b.hasNext() && min.compareTo(b.getMaximum()) <= 0 && b.peek().compareTo(max) <= 0;
     }
 
     @SuppressWarnings("unchecked")

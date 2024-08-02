@@ -334,30 +334,46 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         tokens.close();
     }
 
+    // Iterators that do not overlap should result in an empty intersection
     @Test
-    public void testIsOverlapping()
+    public void testOverlappingOptimization()
     {
-        RangeIterator rangeA, rangeB;
+        RangeIterator rangeA, rangeB, intersection;
 
         rangeA = new LongIterator(new long[] { 1L, 5L });
         rangeB = new LongIterator(new long[] { 5L, 9L });
-        Assert.assertTrue(RangeIterator.isOverlapping(rangeA, rangeB));
+        intersection = RangeIntersectionIterator.builder().add(rangeA).add(rangeB).build();
+        Assert.assertEquals(5L, intersection.getMinimum().token().getLongValue());
+        Assert.assertEquals(5L, intersection.getMaximum().token().getLongValue());
+        Assert.assertEquals(2, intersection.getMaxKeys());
 
         rangeA = new LongIterator(new long[] { 5L, 9L });
         rangeB = new LongIterator(new long[] { 1L, 6L });
-        Assert.assertTrue(RangeIterator.isOverlapping(rangeA, rangeB));
+        intersection = RangeIntersectionIterator.builder().add(rangeA).add(rangeB).build();
+        Assert.assertEquals(5L, intersection.getMinimum().token().getLongValue());
+        Assert.assertEquals(6L, intersection.getMaximum().token().getLongValue());
+        Assert.assertEquals(2, intersection.getMaxKeys());
 
         rangeA = new LongIterator(new long[] { 5L, 9L });
         rangeB = new LongIterator(new long[] { 5L, 9L });
-        Assert.assertTrue(RangeIterator.isOverlapping(rangeA, rangeB));
+        intersection = RangeIntersectionIterator.builder().add(rangeA).add(rangeB).build();
+        Assert.assertEquals(5L, intersection.getMinimum().token().getLongValue());
+        Assert.assertEquals(9L, intersection.getMaximum().token().getLongValue());
+        Assert.assertEquals(2, intersection.getMaxKeys());
 
         rangeA = new LongIterator(new long[] { 1L, 4L });
         rangeB = new LongIterator(new long[] { 5L, 9L });
-        Assert.assertFalse(RangeIterator.isOverlapping(rangeA, rangeB));
+        intersection = RangeIntersectionIterator.builder().add(rangeA).add(rangeB).build();
+        Assert.assertNull(intersection.getMinimum());
+        Assert.assertNull(intersection.getMaximum());
+        Assert.assertEquals(0, intersection.getMaxKeys());
 
         rangeA = new LongIterator(new long[] { 6L, 9L });
         rangeB = new LongIterator(new long[] { 1L, 4L });
-        Assert.assertFalse(RangeIterator.isOverlapping(rangeA, rangeB));
+        intersection = RangeIntersectionIterator.builder().add(rangeA).add(rangeB).build();
+        Assert.assertNull(intersection.getMinimum());
+        Assert.assertNull(intersection.getMaximum());
+        Assert.assertEquals(0, intersection.getMaxKeys());
     }
 
     @Test
