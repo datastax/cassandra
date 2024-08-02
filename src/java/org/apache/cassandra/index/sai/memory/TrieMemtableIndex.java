@@ -54,7 +54,6 @@ import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
@@ -213,7 +212,11 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext queryContext, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext queryContext,
+                                                                  Orderer orderer,
+                                                                  Expression slice,
+                                                                  AbstractBounds<PartitionPosition> keyRange,
+                                                                  int limit)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
@@ -223,7 +226,7 @@ public class TrieMemtableIndex implements MemtableIndex
         for (int shard  = startShard; shard <= endShard; ++shard)
         {
             assert rangeIndexes[shard] != null;
-            iterators.add(rangeIndexes[shard].orderBy(orderer));
+            iterators.add(rangeIndexes[shard].orderBy(orderer, slice));
         }
 
         return iterators;

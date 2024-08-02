@@ -20,9 +20,12 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.List;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -34,13 +37,19 @@ public interface MemtableOrdering
 
     /**
      * Order the index based on the given expression.
+     *
      * @param queryContext - the query context
-     * @param orderer - the expression to order by
-     * @param keyRange - the key range to search
-     * @param limit - can be used to inform the search, but should not be used to prematurely limit the iterator
+     * @param orderer      - the expression to order by
+     * @param slice    - the expression to restrict index search by
+     * @param keyRange     - the key range to search
+     * @param limit        - can be used to inform the search, but should not be used to prematurely limit the iterator
      * @return an iterator over the results in score order.
      */
-    List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext queryContext, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit);
+    List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext queryContext,
+                                                           Orderer orderer,
+                                                           Expression slice,
+                                                           AbstractBounds<PartitionPosition> keyRange,
+                                                           int limit);
 
     /**
      * Order the given list of {@link PrimaryKey} results corresponding to the given expression.

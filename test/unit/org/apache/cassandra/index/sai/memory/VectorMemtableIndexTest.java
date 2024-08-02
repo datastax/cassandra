@@ -55,9 +55,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
@@ -163,7 +161,7 @@ public class VectorMemtableIndexTest extends SAITester
             long expectedResults = Math.min(limit, keysInRange.size());
 
             // execute the random ANN expression, and check that we get back as many keys as we asked for
-            var iterators = memtableIndex.orderBy(new QueryContext(), orderer, keyRange, limit);
+            var iterators = memtableIndex.orderBy(new QueryContext(), orderer, null, keyRange, limit);
             assertEquals(1, iterators.size());
             try (var iterator = iterators.get(0))
             {
