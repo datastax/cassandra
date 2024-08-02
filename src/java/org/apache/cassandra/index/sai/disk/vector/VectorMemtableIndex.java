@@ -30,7 +30,7 @@ import java.util.NavigableSet;
 import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.Function;
+import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterators;
@@ -55,14 +55,14 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -391,7 +391,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     /** returns true if the index is non-empty and should be flushed */
-    public boolean preFlush(Function<PrimaryKey, Integer> ordinalMapper)
+    public boolean preFlush(ToIntFunction<PrimaryKey> ordinalMapper)
     {
         return graph.preFlush(ordinalMapper);
     }

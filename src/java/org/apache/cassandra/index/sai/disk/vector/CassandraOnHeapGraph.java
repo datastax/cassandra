@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
+import java.util.function.ToIntFunction;
 import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -331,7 +332,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
      * This is split out from flush per se because of (3); we don't want to flush empty
      * index segments, but until we do (1) and (2) we don't know if the segment is empty.
      */
-    public boolean preFlush(Function<T, Integer> postingTransformer)
+    public boolean preFlush(ToIntFunction<T> postingTransformer)
     {
         var it = postingsMap.entrySet().iterator();
         while (it.hasNext()) {
