@@ -53,6 +53,9 @@ public class V5VectorPostingsWriter<T>
      * want to overuse them:
      * (1) We read the list of rowids associated with the holes into memory
      * (2) The holes make the terms component (the vector index) less cache-efficient
+     * <br>
+     * In the Cohere wikipedia dataset, we observe 0.014% vectors with multiple rows, so this
+     * almost two orders of magnitude higher than the observed rate of holes in the same dataset.
      */
     @VisibleForTesting
     public static double GLOBAL_HOLES_ALLOWED = 0.01;
@@ -61,8 +64,28 @@ public class V5VectorPostingsWriter<T>
 
     public enum Structure
     {
+        /**
+         * The mapping from vector ordinals to row ids is a bijection, i.e. each vector has exactly one row associated
+         * with it and each row has exactly one vector associated with it.  No additional mappings need to be written,
+         * and reads can happen without consulting disk.
+         */
         ONE_TO_ONE,
+
+        /**
+         * Every row has a vector and at least one vector has multiple rows. The ratio of rows without a unique vector
+         * to total rows is smaller than {@link #GLOBAL_HOLES_ALLOWED}.  Only special cases (where the row id
+         * cannot be mapped to the same vector ordinal) are written; since this is a small fraction of total
+         * rows, these special cases are read into memory and reads can happen without consulting disk.
+         */
         ONE_TO_MANY,
+
+        /**
+         * Either:
+         * 1. There is at least one row without a vector, or
+         * 2. The mapping would be {@link #ONE_TO_MANY}, but the ratio of rows without a unique vector to total rows is larger
+         *    than {@link #GLOBAL_HOLES_ALLOWED}.
+         * Explicit mappings from each row id to vector ordinal and vice versa are written.  Reads must consult disk.
+         */
         ZERO_OR_ONE_TO_MANY
     }
 
@@ -117,8 +140,6 @@ public class V5VectorPostingsWriter<T>
 
     private void writeOneToManyOrdinalMapping(SequentialWriter writer) throws IOException
     {
-        long startOffset = writer.position();
-
         // make sure we're in the right branch
         assert !remappedPostings.extraPostings.isEmpty();
 
@@ -138,7 +159,7 @@ public class V5VectorPostingsWriter<T>
         writer.writeInt(holeCount + ordinalToExtraRowIds.size());
         int entries = 0;
         for (int newOrdinal = 0; newOrdinal <= remappedPostings.maxNewOrdinal; newOrdinal++) {
-            // write the "holes"
+            // write the "holes" so they are not incorrectly associated with the corresponding rowId
             int oldOrdinal = remappedPostings.ordinalMapper.newToOld(newOrdinal);
             if (oldOrdinal == OrdinalMapper.OMITTED)
             {
@@ -340,6 +361,9 @@ public class V5VectorPostingsWriter<T>
         }
     }
 
+    /**
+     * @see RemappedPostings
+     */
     public static <T> RemappedPostings remapPostings(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
     {
         BiMap<Integer, Integer> ordinalMap = HashBiMap.create();
