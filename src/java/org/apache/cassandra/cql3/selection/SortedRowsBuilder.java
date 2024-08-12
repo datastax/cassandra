@@ -18,7 +18,6 @@ package org.apache.cassandra.cql3.selection;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.BiFunction;
@@ -28,7 +27,7 @@ import java.util.function.Supplier;
 import com.google.common.math.IntMath;
 
 import org.apache.cassandra.index.Index;
-import org.apache.lucene.util.PriorityQueue;
+import org.apache.cassandra.utils.TopKSelector;
 
 import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
 
@@ -236,12 +235,9 @@ public abstract class SortedRowsBuilder
     public static class WithHeapSort<T extends WithHeapSort.RowWithId> extends SortedRowsBuilder
     {
         private final BiFunction<List<ByteBuffer>, Integer, T> decorator;
-        private final Comparator<T> comparator;
 
-        private List<T> initialRows = new ArrayList<>(); // first limit+offset rows to be added with PriorityQueue#addAll
-        private PriorityQueue<T> heap; // lazily built for inital rows in #heapifyInitialRows
+        private TopKSelector<T> heap;
         private int numAddedRows = 0;
-        private boolean built = false;
 
         public static WithHeapSort<RowWithId> create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
         {
@@ -266,60 +262,20 @@ public abstract class SortedRowsBuilder
         {
             super(limit, offset);
             this.decorator = decorator;
-            this.comparator = comparator;
+            this.heap = new TopKSelector<>(comparator, fetchLimit);
         }
 
         @Override
         public void add(List<ByteBuffer> row)
         {
-            assert !built : "Cannot add more rows after calling build()";
-
             T decoratedRow = decorator.apply(row, numAddedRows++);
-
-            if (heap != null)
-                heap.insertWithOverflow(decoratedRow);
-            else
-                initialRows.add(decoratedRow);
-
-            if (heap == null && numAddedRows >= fetchLimit)
-                heapifyInitialRows();
-        }
-
-        private void heapifyInitialRows()
-        {
-            heap = new PriorityQueue<>(initialRows.size())
-            {
-                @Override
-                protected boolean lessThan(T t1, T t2)
-                {
-                    // Reverse compare rows, so the worst stays at the top of the heap.
-                    // Ties are solved by favoring the row which id indicates that it was inserted first.
-                    int cmp = comparator.compare(t1, t2);
-                    return cmp == 0 ? t1.id > t2.id : cmp > 0;
-                }
-            };
-            heap.addAll(initialRows);
-            initialRows = null;
+            heap.add(decoratedRow);
         }
 
         @Override
         public List<List<ByteBuffer>> build()
         {
-            built = true;
-
-            if (heap == null)
-                heapifyInitialRows();
-
-            int toPeek = heap.size() - offset;
-            if (toPeek <= 0)
-                return Collections.emptyList();
-
-            ArrayList<List<ByteBuffer>> result = new ArrayList<>(toPeek);
-            while (toPeek-- > 0)
-                result.add(heap.pop().row);
-
-            Collections.reverse(result);
-            return result;
+            return heap.getTransformedSliced(r -> r.row, offset);
         }
 
         /**

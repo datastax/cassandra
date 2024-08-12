@@ -23,23 +23,23 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
-import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterators;
-import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.Runnables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
@@ -59,7 +59,6 @@ import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
@@ -67,6 +66,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.SortingIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -184,17 +184,17 @@ public class VectorMemtableIndex implements MemtableIndex
         var qv = vts.createFloatVector(expr.lower.value.vector);
         float threshold = expr.getEuclideanSearchThreshold();
 
-        PriorityQueue<PrimaryKey> keyQueue;
+        SortingIterator.Builder<PrimaryKey> keyQueue;
         try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold))
         {
-            // Leverage PQ's O(N) complexity for building a PQ from a list.
-            var list = Lists.newArrayList(Iterators.transform(pkIterator, PrimaryKeyWithSortKey::primaryKey));
-            keyQueue = new PriorityQueue<>(list);
+            keyQueue = new SortingIterator.Builder<>();
+            while (pkIterator.hasNext())
+                keyQueue.add(pkIterator.next().primaryKey());
         }
 
-        if (keyQueue.isEmpty())
+        if (keyQueue.size() == 0)
             return RangeIterator.empty();
-        return new ReorderingRangeIterator(keyQueue);
+        return new ReorderingRangeIterator(keyQueue.build(Comparator.naturalOrder()), keyQueue.size());
     }
 
     @Override
@@ -327,10 +327,12 @@ public class VectorMemtableIndex implements MemtableIndex
 
     private CloseableIterator<PrimaryKeyWithSortKey> orderByBruteForce(VectorFloat<?> queryVector, Collection<PrimaryKey> keys)
     {
-        // Use a priority queue because we often don't need to consume the entire iterator
-        var scoredPrimaryKeys = new PriorityQueue<PrimaryKeyWithSortKey>(keys.size());
-        scoreKeysAndAddToCollector(queryVector, keys, 0, scoredPrimaryKeys);
-        return new PriorityQueueIterator<>(scoredPrimaryKeys);
+        // Use a sorting iterator because we often don't need to consume the entire iterator
+        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+        return SortingIterator.createCloseable(Comparator.naturalOrder(),
+                                               keys,
+                                               key -> scoreKey(similarityFunction, queryVector, key, 0),
+                                               Runnables.doNothing());
     }
 
     private void scoreKeysAndAddToCollector(VectorFloat<?> queryVector,
@@ -341,13 +343,21 @@ public class VectorMemtableIndex implements MemtableIndex
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         for (var key : keys)
         {
-            var vector = graph.vectorForKey(key);
-            if (vector == null)
-                continue;
-            var score = similarityFunction.compare(queryVector, vector);
-            if (score >= threshold)
-                collector.add(new PrimaryKeyWithScore(indexContext, mt, key, score));
+            var scored = scoreKey(similarityFunction, queryVector, key, threshold);
+            if (scored != null)
+                collector.add(scored);
         }
+    }
+
+    private PrimaryKeyWithScore scoreKey(VectorSimilarityFunction similarityFunction, VectorFloat<?> queryVector, PrimaryKey key, float threshold)
+    {
+        var vector = graph.vectorForKey(key);
+        if (vector == null)
+            return null;
+        var score = similarityFunction.compare(queryVector, vector);
+        if (score < threshold)
+            return null;
+        return new PrimaryKeyWithScore(indexContext, mt, key, score);
     }
 
     private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)
@@ -481,19 +491,18 @@ public class VectorMemtableIndex implements MemtableIndex
 
     private class ReorderingRangeIterator extends RangeIterator
     {
-        private final PriorityQueue<PrimaryKey> keyQueue;
+        private final SortingIterator<PrimaryKey> keyQueue;
 
-        ReorderingRangeIterator(PriorityQueue<PrimaryKey> keyQueue)
+        ReorderingRangeIterator(SortingIterator<PrimaryKey> keyQueue, int expectedSize)
         {
-            super(minimumKey, maximumKey, keyQueue.size());
+            super(minimumKey, maximumKey, expectedSize);
             this.keyQueue = keyQueue;
         }
 
         @Override
         protected void performSkipTo(PrimaryKey nextKey)
         {
-            while (!keyQueue.isEmpty() && keyQueue.peek().compareTo(nextKey) < 0)
-                keyQueue.poll();
+            keyQueue.skipTo(nextKey);
         }
 
         @Override
@@ -502,9 +511,9 @@ public class VectorMemtableIndex implements MemtableIndex
         @Override
         protected PrimaryKey computeNext()
         {
-            if (keyQueue.isEmpty())
+            if (!keyQueue.hasNext())
                 return endOfData();
-            return keyQueue.poll();
+            return keyQueue.next();
         }
     }
 
