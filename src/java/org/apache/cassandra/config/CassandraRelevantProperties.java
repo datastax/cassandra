@@ -561,6 +561,11 @@ public enum CassandraRelevantProperties
     REPLACE_NODE("cassandra.replace_node"),
     REPLACE_TOKEN("cassandra.replace_token"),
     /**
+     * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
+     * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
+     */
+    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+    /**
      * Number of replicas required to store batchlog for atomicity, only accepts values of 1 or 2.
      */
     REQUIRED_BATCHLOG_REPLICA_COUNT("cassandra.batchlog.required_replica_count", "2"),
