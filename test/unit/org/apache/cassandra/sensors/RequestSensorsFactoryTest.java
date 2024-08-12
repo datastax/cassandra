@@ -28,9 +28,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class RequestSensorsFactoryTest
 {
     @Test
-    public void testCreate()
+    public void testCreateUsesNoOpByDefault()
     {
-        RequestSensorsFactory factory = new RequestSensorsFactory() {};
+        RequestSensorsFactory factory = RequestSensorsFactory.instance;
         RequestSensors sensors = factory.create("ks1");
         assertThat(sensors).isInstanceOf(NoOpRequestSensors.class);
         RequestSensors anotherSensors = factory.create("k2");

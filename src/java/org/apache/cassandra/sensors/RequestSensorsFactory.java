@@ -25,8 +25,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.REQUEST_SE
 
 /**
  * Provides a customizable factory to create a {@link RequestSensors} to track sensors per user request.
- * Configured via the {@link REQUEST_SENSORS_FACTORY} system property, if unset a {@link NoOpRequestSensors} will be used.
- * To activate tracking of request sensors, use {@link ActiveRequestSensors}.
+ * Configured via the {@link CassandraRelevantProperties#REQUEST_SENSORS_FACTORY} system property, if unset a {@link NoOpRequestSensors} will be used.
+ * To activate tracking of request sensors, use {@link ActiveRequestSensorsFactory}.
  */
 public interface RequestSensorsFactory
 {

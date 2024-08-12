@@ -29,6 +29,8 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
  * point to create and modify sensors. More specifically:
@@ -42,6 +44,8 @@ import javax.annotation.Nullable;
  * there is no automatic synchronization or coordination across sensor values belonging to different
  * {@link RequestSensors} objects, hence {@link #syncAllSensors()} MUST be invoked to propagate the sensors values
  * at a global level to the {@link SensorsRegistry}.
+ * <br/>
+ * Please note instances of this class should be created via the configured {@link RequestSensorsFactory}.
  */
 public class ActiveRequestSensors implements RequestSensors
 {
@@ -53,11 +57,13 @@ public class ActiveRequestSensors implements RequestSensors
 
     private final Map<Sensor, Double> latestSyncedValuePerSensor = new HashMap<>();
 
+    @VisibleForTesting
     public ActiveRequestSensors()
     {
         this(() -> SensorsRegistry.instance);
     }
 
+    @VisibleForTesting
     public ActiveRequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
     {
         this.sensorsRegistry = sensorsRegistry;

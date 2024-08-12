@@ -25,7 +25,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 public class ActiveRequestSensorsFactoryTest
 {
     @Test
-    public void testCreate()
+    public void testCreateActiveRequestSensors()
     {
         ActiveRequestSensorsFactory factory = new ActiveRequestSensorsFactory();
         RequestSensors sensors = factory.create("ks1");
