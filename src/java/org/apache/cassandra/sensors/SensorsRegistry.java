@@ -158,6 +158,42 @@ public class SensorsRegistry implements SchemaChangeListener
         return Optional.ofNullable(byType.get(type.name())).orElseGet(() -> ImmutableSet.of());
     }
 
+    public void removeSensorsByKeyspace(String keyspaceName)
+    {
+        stripedUpdateLock.getAt(getLockStripe(keyspaceName.hashCode())).writeLock().lock();
+        try
+        {
+            byKeyspace.remove(keyspaceName);
+
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getKeyspace().equals(keyspaceName));
+            removed.forEach(this::notifyOnSensorRemoved);
+
+            removeSensor(byTableId.values(), s -> s.getContext().getKeyspace().equals(keyspaceName));
+            removeSensor(byType.values(), s -> s.getContext().getKeyspace().equals(keyspaceName));
+        }
+        finally
+        {
+            stripedUpdateLock.getAt(getLockStripe(keyspaceName.hashCode())).writeLock().unlock();
+        }
+    }
+
+    public void removeSensorsByTableId(String keyspaceName, String tableId)
+    {
+        stripedUpdateLock.getAt(getLockStripe(keyspaceName.hashCode())).writeLock().lock();
+        try
+        {
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
+            removed.forEach(this::notifyOnSensorRemoved);
+
+            byTableId.remove(tableId);
+            removeSensor(byType.values(), s -> s.getContext().getTableId().equals(tableId));
+        }
+        finally
+        {
+            stripedUpdateLock.getAt(getLockStripe(keyspaceName.hashCode())).writeLock().unlock();
+        }
+    }
+
     @Override
     public void onCreateKeyspace(KeyspaceMetadata keyspace)
     {
