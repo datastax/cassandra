@@ -31,6 +31,7 @@ import org.apache.commons.math3.distribution.ZipfDistribution;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsRegistry;
@@ -89,7 +90,7 @@ public class RequestSensorBench
         }
 
         IntStream.range(0, THREADS).forEach(t -> {
-            requestSensorsPool[t] = new RequestSensors();
+            requestSensorsPool[t] = new ActiveRequestSensors();
             Pair<Context, Type> contextTypePair = contextFixtures.get(zipfDistributionContext.sample());
             IntStream.range(0, SENSORS_PER_THREAD).forEach(s -> fixtures[t][s] = new Fixture(contextTypePair.left, contextTypePair.right));
         });
