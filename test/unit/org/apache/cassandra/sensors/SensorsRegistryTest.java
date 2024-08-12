@@ -220,7 +220,7 @@ public class SensorsRegistryTest
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
 
-        RequestSensors requestSensors = new RequestSensors(() -> SensorsRegistry.instance);
+        RequestSensors requestSensors = new ActiveRequestSensors(() -> SensorsRegistry.instance);
         requestSensors.registerSensor(context1, type1);
 
         requestSensors.incrementSensor(context1, type1, 1.0);
@@ -233,5 +233,47 @@ public class SensorsRegistryTest
 
         requestSensors.syncAllSensors();
         assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(2.0));
+    }
+
+    @Test
+    public void testRemoveSensorByKeyspace()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata());
+
+        SensorsRegistry.instance.getOrCreateSensor(context1, type1);
+        SensorsRegistry.instance.getOrCreateSensor(context2, type1);
+        assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
+        assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
+
+        SensorsRegistry.instance.removeSensorsByKeyspace(context1.getKeyspace());
+        assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isEmpty();
+
+        SensorsRegistry.instance.getOrCreateSensor(context1, type1);
+        SensorsRegistry.instance.getOrCreateSensor(context2, type1);
+        assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
+        assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
+    }
+
+    @Test
+    public void testRemoveSensorByTableId()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata());
+
+        SensorsRegistry.instance.getOrCreateSensor(context1, type1);
+        SensorsRegistry.instance.getOrCreateSensor(context2, type1);
+        assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
+        assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
+
+        SensorsRegistry.instance.removeSensorsByTableId(context1.getKeyspace(), context1.getTableId());
+        assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
+
+        SensorsRegistry.instance.getOrCreateSensor(context1, type1);
+        assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
     }
 }
