@@ -18,15 +18,17 @@
 
 package org.apache.cassandra.fqltool;
 
-import java.util.PriorityQueue;
+import java.util.Arrays;
+import java.util.Comparator;
 
 import net.openhft.chronicle.queue.ExcerptTailer;
-import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.Merger;
 
-public class FQLQueryIterator extends AbstractIterator<FQLQuery>
+public class FQLQueryIterator implements CloseableIterator<FQLQuery>
 {
     // use a priority queue to be able to sort the head of the query logs in memory
-    private final PriorityQueue<FQLQuery> pq;
+    private final Merger<FQLQuery, Void, Void> pq;
     private final ExcerptTailer tailer;
     private final FQLQueryReader reader;
 
@@ -40,26 +42,23 @@ public class FQLQueryIterator extends AbstractIterator<FQLQuery>
         assert readAhead > 0 : "readAhead needs to be > 0";
         reader = new FQLQueryReader();
         this.tailer = tailer;
-        pq = new PriorityQueue<>(readAhead);
-        for (int i = 0; i < readAhead; i++)
-        {
-            FQLQuery next = readNext();
-            if (next != null)
-                pq.add(next);
-            else
-                break;
-        }
+        pq = new Merger<>(Arrays.asList(new Void[readAhead]), // create read-ahead many null sources
+                          avoid -> readNext(),                // calling our readNext for each of them
+                          avoid -> {},
+                          Comparator.naturalOrder(),
+                          null);
     }
 
-    protected FQLQuery computeNext()
+    @Override
+    public boolean hasNext()
     {
-        FQLQuery q = pq.poll();
-        if (q == null)
-            return endOfData();
-        FQLQuery next = readNext();
-        if (next != null)
-            pq.add(next);
-        return q;
+        return pq.hasNext();
+    }
+
+    @Override
+    public FQLQuery next()
+    {
+        return pq.nonReducingNext();
     }
 
     private FQLQuery readNext()
@@ -67,6 +66,12 @@ public class FQLQueryIterator extends AbstractIterator<FQLQuery>
         if (tailer.readDocument(reader))
             return reader.getQuery();
         return null;
+    }
+
+    @Override
+    public void close()
+    {
+        // nothing to do
     }
 }
 

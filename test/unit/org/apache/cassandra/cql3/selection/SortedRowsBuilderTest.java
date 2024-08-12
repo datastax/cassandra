@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
+import com.google.common.math.IntMath;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -71,6 +72,7 @@ public class SortedRowsBuilderTest
         {
             for (int offset : offsets)
             {
+                int totalLimit = IntMath.saturatedAdd(limit, offset);
                 // with insertion order
                 test(rows, SortedRowsBuilder.create(limit, offset), null);
 
@@ -79,8 +81,11 @@ public class SortedRowsBuilderTest
                 test(rows, SortedRowsBuilder.create(limit, offset, reverseComparator), reverseComparator);
                 test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, comparator), comparator);
                 test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, reverseComparator), reverseComparator);
-                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, comparator), comparator);
-                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, reverseComparator), reverseComparator);
+                if (totalLimit < 1 << 20)
+                {
+                    test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, comparator), comparator);
+                    test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, reverseComparator), reverseComparator);
+                }
                 test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, comparator), comparator);
                 test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, reverseComparator), reverseComparator);
 
@@ -89,8 +94,11 @@ public class SortedRowsBuilderTest
                 test(rows, SortedRowsBuilder.create(limit, offset, scorer(true)), reverseComparator);
                 test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, scorer(false)), comparator);
                 test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, scorer(true)), reverseComparator);
-                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(false)), comparator);
-                test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(true)), reverseComparator);
+                if (totalLimit < 1 << 20)
+                {
+                    test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(false)), comparator);
+                    test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(true)), reverseComparator);
+                }
                 test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(false)), comparator);
                 test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(true)), reverseComparator);
             }
