@@ -64,6 +64,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
@@ -85,6 +86,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -242,6 +244,11 @@ public class IndexContext
     public Memtable.Owner owner()
     {
         return owner;
+    }
+
+    public IPartitioner getPartitioner()
+    {
+        return owner.getPartitioner();
     }
 
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
@@ -429,12 +436,20 @@ public class IndexContext
 
         RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
 
-        for (MemtableIndex index : memtables)
+        try
         {
-            builder.add(index.search(context, e, keyRange, limit));
-        }
+            for (MemtableIndex index : memtables)
+            {
+                builder.add(index.search(context, e, keyRange, limit));
+            }
 
-        return builder.build();
+            return builder.build();
+        }
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(builder.ranges());
+            throw ex;
+        }
     }
 
     private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
@@ -447,12 +462,21 @@ public class IndexContext
 
         RangeIterator.Builder builder = RangeUnionIterator.builder(memtables.size());
 
-        for (Memtable memtable : memtables)
+        try
         {
-            RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
-            builder.add(memtableIterator);
+            for (Memtable memtable : memtables)
+            {
+                RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+                builder.add(memtableIterator);
+            }
+
+            return builder.build();
         }
-        return builder.build();
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(builder.ranges());
+            throw ex;
+        }
     }
 
     // Search all memtables for all PrimaryKeys in list.
@@ -464,10 +488,18 @@ public class IndexContext
             return List.of();
 
         List<CloseableIterator<PrimaryKeyWithSortKey>> result = new ArrayList<>(memtables.size());
-        for (MemtableIndex index : memtables)
-            result.add(index.orderResultsBy(context, source, orderer, limit));
+        try
+        {
+            for (MemtableIndex index : memtables)
+                result.add(index.orderResultsBy(context, source, orderer, limit));
 
-        return result;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(result);
+            throw ex;
+        }
     }
 
     public long liveMemtableWriteCount()
