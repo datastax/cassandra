@@ -127,7 +127,7 @@ public class Replay implements Runnable
                  QueryReplayer replayer = new QueryReplayer(iter, targetHosts, resultPaths, filters, queryStorePath))
             {
                 replayer.replay();
-            }
+            } // closing iter also closes iterators
         }
         catch (Exception e)
         {
@@ -135,8 +135,6 @@ public class Replay implements Runnable
         }
         finally
         {
-            if (iterators != null)
-                iterators.forEach(AbstractIterator::close);
             if (readQueues != null)
                 readQueues.forEach(Closeable::close);
         }
