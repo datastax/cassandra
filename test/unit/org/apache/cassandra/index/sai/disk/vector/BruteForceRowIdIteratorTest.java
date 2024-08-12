@@ -18,9 +18,10 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import java.util.Comparator;
 import java.util.NoSuchElementException;
-import java.util.PriorityQueue;
 
+import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.graph.GraphIndex;
@@ -31,6 +32,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.utils.SortingIterator;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
@@ -44,7 +46,7 @@ public class BruteForceRowIdIteratorTest
     public void testBruteForceRowIdIteratorForEmptyPQAndTopKEqualsLimit()
     {
         var queryVector = vts.createFloatVector(new float[] { 1f, 0f });
-        var pq = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(10);
+        var pq = SortingIterator.create(BruteForceRowIdIterator.RowWithApproximateScore::compare, ImmutableList.of());
         var topK = 10;
         var limit = 10;
 

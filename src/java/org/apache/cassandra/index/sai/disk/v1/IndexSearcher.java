@@ -21,7 +21,8 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.PriorityQueue;
+
+import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RegularAndStaticColumns;
@@ -41,7 +42,6 @@ import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.index.sai.utils.RowIdToPrimaryKeyWithSortKeyIterator;
@@ -51,6 +51,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.SortingIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -115,27 +116,31 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     @Override
     public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
     {
-        var pq = new PriorityQueue<PrimaryKeyWithSortKey>(orderer.getComparator());
-        for (var key : keys)
-        {
-            var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
-            // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
-            try (var iter = reader.iterator(key.partitionKey(), slices, columnFilter, false, NOOP_LISTENER))
+        return SortingIterator.createCloseable(
+            orderer.getComparator(),
+            keys,
+            key ->
             {
-                if (iter.hasNext())
+                var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
+                // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
+                try (var iter = reader.iterator(key.partitionKey(), slices, columnFilter, false, NOOP_LISTENER))
                 {
-                    var row = (Row) iter.next();
-                    assert !iter.hasNext();
-                    var cell = row.getCell(indexContext.getDefinition());
-                    if (cell == null)
-                        continue;
-                    // We encode the bytes to make sure they compare correctly.
-                    var byteComparable = encode(cell.buffer());
-                    pq.add(new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable));
+                    if (iter.hasNext())
+                    {
+                        var row = (Row) iter.next();
+                        assert !iter.hasNext();
+                        var cell = row.getCell(indexContext.getDefinition());
+                        if (cell == null)
+                            return null;
+                        // We encode the bytes to make sure they compare correctly.
+                        var byteComparable = encode(cell.buffer());
+                        return new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable);
+                    }
                 }
-            }
-        }
-        return new PriorityQueueIterator<>(pq);
+                return null;
+            },
+            Runnables.doNothing()
+        );
     }
 
     private ByteComparable encode(ByteBuffer input)

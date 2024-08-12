@@ -25,12 +25,12 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-import java.util.PriorityQueue;
 import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -50,7 +50,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
-import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -58,6 +57,7 @@ import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
+import org.apache.cassandra.utils.SortingIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -237,25 +237,28 @@ public class TrieMemtableIndex implements MemtableIndex
     {
         if (keys.isEmpty())
             return CloseableIterator.emptyIterator();
-        var pq = new PriorityQueue<PrimaryKeyWithSortKey>(orderer.getComparator());
-        for (PrimaryKey key : keys)
-        {
-            var partition = memtable.getPartition(key.partitionKey());
-            if (partition == null)
-                continue;
-            var row = partition.getRow(key.clustering());
-            if (row == null)
-                continue;
-            var cell = row.getCell(indexContext.getDefinition());
-            if (cell == null)
-                continue;
+        return SortingIterator.createCloseable(
+            orderer.getComparator(),
+            keys,
+            key ->
+            {
+                var partition = memtable.getPartition(key.partitionKey());
+                if (partition == null)
+                    return null;
+                var row = partition.getRow(key.clustering());
+                if (row == null)
+                    return null;
+                var cell = row.getCell(indexContext.getDefinition());
+                if (cell == null)
+                    return null;
 
-            // We do two kinds of encoding... it'd be great to make this more straight forward, but this is what
-            // we have for now. I leave it to the reader to inspect the two methods to see the nuanced differences.
-            var encoding = encode(TypeUtil.encode(cell.buffer(), validator));
-            pq.add(new PrimaryKeyWithByteComparable(indexContext, memtable, key, encoding));
-        }
-        return new PriorityQueueIterator<>(pq);
+                // We do two kinds of encoding... it'd be great to make this more straight forward, but this is what
+                // we have for now. I leave it to the reader to inspect the two methods to see the nuanced differences.
+                var encoding = encode(TypeUtil.encode(cell.buffer(), validator));
+                return new PrimaryKeyWithByteComparable(indexContext, memtable, key, encoding);
+            },
+            Runnables.doNothing()
+        );
     }
 
     private ByteComparable encode(ByteBuffer input)
