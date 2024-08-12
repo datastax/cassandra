@@ -21,7 +21,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.Optional;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableSet;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +40,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestSensorsFactory;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
@@ -105,17 +105,14 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         MessageParams.reset();
 
         // Initialize the sensor and set ExecutorLocals
+        RequestSensors requestSensors = RequestSensorsFactory.instance.create(command.metadata().keyspace);
         Context context = Context.from(command);
-        ImmutableSet<TableMetadata> tables = ImmutableSet.of(command.metadata());
-        RequestSensors requestSensors = new RequestSensors();
         requestSensors.registerSensor(context, Type.READ_BYTES);
         RequestTracker.instance.set(requestSensors);
 
         // Initialize internode bytes with the inbound message size:
-        tables.forEach(tm -> {
-            requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
-        });
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+        requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
         command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
@@ -158,11 +155,8 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         if (command.complete())
         {
             Message.Builder<ReadResponse> replyBuilder = message.responseWithBuilder(response);
-            int size = replyBuilder.currentPayloadSize(MessagingService.current_version);
-            RequestTracker.instance.get().incrementSensor(context, Type.INTERNODE_BYTES, size);
-            RequestTracker.instance.get().syncAllSensors();
 
-            addInternodeSensorToResponse(replyBuilder, context);
+            addInternodeSensorToResponse(requestSensors, context, replyBuilder);
             SensorsCustomParams.addReadSensorToResponse(replyBuilder, requestSensors, context);
 
             Tracing.trace("Enqueuing response to {}", message.from());
@@ -177,15 +171,19 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
     }
 
-    private void addInternodeSensorToResponse(Message.Builder<ReadResponse> reply, Context context)
+    private void addInternodeSensorToResponse(RequestSensors requestSensors, Context context, Message.Builder<ReadResponse> reply)
     {
-        Optional<Sensor> requestSensor = RequestTracker.instance.get().getSensor(context, Type.INTERNODE_BYTES);
+        int size = reply.currentPayloadSize(MessagingService.current_version);
+        requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+        requestSensors.syncAllSensors();
+
+        Optional<Sensor> requestSensor = requestSensors.getSensor(context, Type.INTERNODE_BYTES);
         requestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> {
             reply.withCustomParam(SensorsCustomParams.encodeTableInInternodeBytesRequestParam(context.getTable()),
                                      bytes);
         });
 
-        Optional<Sensor> tableSensor = SensorsRegistry.instance.getOrCreateSensor(context, Type.INTERNODE_BYTES);
+        Optional<Sensor> tableSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_BYTES);
         tableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> {
             reply.withCustomParam(SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable()),
                                   bytes);
