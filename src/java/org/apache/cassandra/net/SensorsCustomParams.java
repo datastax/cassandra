@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.Optional;
 import java.util.function.Function;
 
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
@@ -139,6 +141,10 @@ public final class SensorsCustomParams
      */
     public static <T> void addWriteSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
     {
+        Preconditions.checkNotNull(response);
+        Preconditions.checkNotNull(sensors);
+        Preconditions.checkNotNull(context);
+
         addSensorToResponse(response, sensors, context, Type.WRITE_BYTES,
                             (sensor) -> SensorsCustomParams.encodeTableInWriteBytesRequestParam(sensor.getContext().getTable()),
                             (sensor) -> SensorsCustomParams.encodeTableInWriteBytesTableParam(sensor.getContext().getTable()));
@@ -149,6 +155,10 @@ public final class SensorsCustomParams
      */
     public static <T> void addReadSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
     {
+        Preconditions.checkNotNull(response);
+        Preconditions.checkNotNull(sensors);
+        Preconditions.checkNotNull(context);
+
         addSensorToResponse(response, sensors, context, Type.READ_BYTES,
                             (ignored) -> SensorsCustomParams.READ_BYTES_REQUEST,
                             (ignored) -> SensorsCustomParams.READ_BYTES_TABLE);
