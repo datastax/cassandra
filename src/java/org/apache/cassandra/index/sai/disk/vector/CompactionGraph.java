@@ -182,6 +182,14 @@ public class CompactionGraph implements Closeable, Accountable
     private OnDiskGraphIndexWriter createTermsWriter(int maxVectorOrdinal) throws IOException
     {
         var indexConfig = context.getIndexWriterConfig();
+        // We can use IdentityMapper here because it does the right thing in all three scenarios:
+        // 1-to-1: trivially correct because rowId == ordinal since rows are added to the index
+        //         in the same order as they are added to the sstable
+        // 1-to-many: by construction, the ordinal of a shared vector will be the rowId of the first row
+        //            with the corresponding vector, which is what we want
+        // 0-or-1-to-many: we write an exhaustive explicit mapping and no renumbering is required
+        //
+        // See also the comments around the `supportsOneToMany` field.
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                       .withStartOffset(termsOffset)
                       .with(new InlineVectors(dimension))
