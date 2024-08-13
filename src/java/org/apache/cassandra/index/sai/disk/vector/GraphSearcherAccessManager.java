@@ -19,44 +19,50 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
 import io.github.jbellis.jvector.graph.GraphSearcher;
 
 /**
- * Manages access to a {@link GraphSearcher} instance, ensuring that it is only locked by a single search at a time.
- * Because the {@link GraphSearcher} is not thread-safe, this class is not thread-safe either.
+ * Manages access to a {@link GraphSearcher} instance, validating that we respect the contract of GraphSearcher
+ * to only use it in a single search at a time.
  */
 @NotThreadSafe
 public class GraphSearcherAccessManager
 {
     private final GraphSearcher searcher;
-    private boolean locked;
+    private final AtomicBoolean locked;
 
     public GraphSearcherAccessManager(GraphSearcher searcher)
     {
         this.searcher = searcher;
-        this.locked = false;
+        this.locked = new AtomicBoolean(false);
     }
 
-    public GraphSearcher getSearcher()
+    /**
+     * Get the {@link GraphSearcher} instance, locking it to the current in-progress search.
+     */
+    public GraphSearcher get()
     {
+        if (locked.compareAndSet(false, true))
+            throw new IllegalStateException("GraphAccessManager is already locked");
         return searcher;
     }
 
-    public void lock()
-    {
-        if (locked)
-            throw new IllegalStateException("GraphAccessManager is already locked");
-        locked = true;
-    }
-
+    /**
+     * Release the {@link GraphSearcher} instance, allowing it to be used in another search.
+     */
     public void release()
     {
-        locked = false;
+        if (locked.compareAndSet(true, false))
+            throw new IllegalStateException("GraphAccessManager is already unlocked");
     }
 
+    /**
+     * Close the {@link GraphSearcher} instance.  It cannot be used again after being closed.
+     */
     public void close() throws IOException
     {
         searcher.close();

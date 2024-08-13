@@ -310,16 +310,20 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
         var graphAccessManager = searchers.get();
-        var searcher = graphAccessManager.getSearcher();
+        var searcher = graphAccessManager.get();
         var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
         var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
         Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results",
                       limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
-        // Threshold based searches do not support resuming the search.
-        return threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
-                             : new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true);
+        if (threshold > 0)
+        {
+            // Threshold based searches do not support resuming the search.
+            graphAccessManager.release();
+            return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
+        }
+        return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true);
     }
 
     public Set<Integer> computeDeletedOrdinals(Function<T, Integer> postingTransformer)

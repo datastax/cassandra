@@ -71,10 +71,6 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         this.limit = max(1, limit / 2); // we shouldn't need as many results on resume
         this.rerankK = rerankK;
         this.inMemory = inMemory;
-
-        // Throws an exception if it is already locked. Because we might need to
-        // resume the search, we need to ensure that no other iterator is using the searcher.
-        accessManager.lock();
     }
 
     @Override

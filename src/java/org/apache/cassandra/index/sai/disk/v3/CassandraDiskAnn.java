@@ -221,7 +221,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         VectorValidation.validateIndexable(queryVector, similarityFunction);
 
         var graphAccessManager = searchers.get();
-        var searcher = graphAccessManager.getSearcher();
+        var searcher = graphAccessManager.get();
         var view = (GraphIndex.ScoringView) searcher.getView();
         SearchScoreProvider ssp;
         if (features.contains(FeatureId.FUSED_ADC))
@@ -250,9 +250,10 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
         Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results",
                       limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
-        // Threshold based searches are comprehensive and do not need to resume the search.
         if (threshold > 0)
         {
+            // Threshold based searches are comprehensive and do not need to resume the search.
+            graphAccessManager.release();
             nodesVisitedConsumer.accept(result.getVisitedCount());
             var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
             return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
