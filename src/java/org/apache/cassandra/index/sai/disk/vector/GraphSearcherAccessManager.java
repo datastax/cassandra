@@ -46,7 +46,7 @@ public class GraphSearcherAccessManager
      */
     public GraphSearcher get()
     {
-        if (locked.compareAndSet(false, true))
+        if (!locked.compareAndSet(false, true))
             throw new IllegalStateException("GraphAccessManager is already locked");
         return searcher;
     }
@@ -56,7 +56,7 @@ public class GraphSearcherAccessManager
      */
     public void release()
     {
-        if (locked.compareAndSet(true, false))
+        if (!locked.compareAndSet(true, false))
             throw new IllegalStateException("GraphAccessManager is already unlocked");
     }
 
