@@ -394,8 +394,10 @@ public abstract class SegmentBuilder
         @Override
         protected SegmentMetadata.ComponentMetadataMap flushInternal() throws IOException
         {
-            if (!graphIndex.preFlush(p -> p))
-                return null;
+            var shouldFlush = graphIndex.preFlush(p -> p);
+            // there are no deletes to worry about when building the index during compaction,
+            // and SegmentBuilder::flush checks for the empty index case before calling flushInternal
+            assert shouldFlush;
             return graphIndex.flush(components);
         }
 
