@@ -49,6 +49,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.PQVersion;
+import org.apache.cassandra.index.sai.disk.vector.GraphSearcherAccessManager;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.NodeScoreToRowIdWithScoreIterator;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
@@ -81,7 +82,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final VectorCompression compression;
     final boolean pqUnitVectors;
 
-    private final ExplicitThreadLocal<GraphSearcher> searchers;
+    private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
     public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context) throws IOException
     {
@@ -154,7 +155,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
-        searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcher(graph));
+        searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
     }
 
     public ProductQuantization getPQ()
@@ -219,7 +220,8 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     {
         VectorValidation.validateIndexable(queryVector, similarityFunction);
 
-        var searcher = searchers.get();
+        var graphAccessManager = searchers.get();
+        var searcher = graphAccessManager.getSearcher();
         var view = (GraphIndex.ScoringView) searcher.getView();
         SearchScoreProvider ssp;
         if (features.contains(FeatureId.FUSED_ADC))
@@ -257,7 +259,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         }
         else
         {
-            var nodeScores = new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, limit, rerankK, false);
+            var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false);
             return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
         }
     }

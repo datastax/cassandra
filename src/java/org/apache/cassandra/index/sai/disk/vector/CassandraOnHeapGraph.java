@@ -92,7 +92,6 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.lucene.util.StringHelper;
 
 import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
@@ -124,7 +123,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private volatile boolean hasDeletions;
 
     // we don't need to explicitly close these since only on-heap resources are involved
-    private final ThreadLocal<GraphSearcher> searchers;
+    private final ThreadLocal<GraphSearcherAccessManager> searchers;
 
     /**
      * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
@@ -155,7 +154,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                         indexConfig.getConstructionBeamWidth(),
                                         1.0f, // no overflow means add will be a bit slower but flush will be faster
                                         dimension > 3 ? 1.2f : 2.0f);
-        searchers = ThreadLocal.withInitial(() -> new GraphSearcher(builder.getGraph()));
+        searchers = ThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(builder.getGraph())));
     }
 
     public int size()
@@ -310,7 +309,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             return CloseableIterator.emptyIterator();
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
-        var searcher = searchers.get();
+        var graphAccessManager = searchers.get();
+        var searcher = graphAccessManager.getSearcher();
         var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
         var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
@@ -319,7 +319,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         context.addAnnNodesVisited(result.getVisitedCount());
         // Threshold based searches do not support resuming the search.
         return threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
-                             : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, limit, rerankK, true);
+                             : new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true);
     }
 
     public Set<Integer> computeDeletedOrdinals(Function<T, Integer> postingTransformer)
