@@ -106,13 +106,15 @@ public class CompactionGraph implements Closeable, Accountable
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
-    private int nextOrdinal = 0;
     private final ProductQuantization compressor;
     private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
-    private final boolean supportsOneToMany;
     private int lastRowId = -1;
     private final ByteSequence<?> encodedOmittedVector;
+    // caller's best guess as to whether we should expect to see vectors for all rows.  see comments in constructor
+    private final boolean supportsOneToMany;
+    // if `supportsOneToMany` is true then we use rowId as source of ordinals, otherwise use this to avoid holes
+    private int nextOrdinal = 0;
 
     public CompactionGraph(IndexComponents.ForWrite perIndexComponents, ProductQuantization compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
     {
@@ -292,8 +294,8 @@ public class CompactionGraph implements Closeable, Accountable
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
-        assert nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
-                                                                        nextOrdinal, builder.getGraph().size());
+        assert supportsOneToMany || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
+                                                                                             nextOrdinal, builder.getGraph().size());
         assert pqVectors.count() == builder.getGraph().size() : String.format("vector count %d != graph size %d",
                                                                               pqVectors.count(), builder.getGraph().size());
         assert postingsMap.keySet().size() == builder.getGraph().size() : String.format("postings map entry count %d != vector count %d",
