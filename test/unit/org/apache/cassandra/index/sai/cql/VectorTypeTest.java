@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -57,7 +58,7 @@ import static org.junit.Assert.assertEquals;
 public class VectorTypeTest extends VectorTester
 {
     @Parameterized.Parameter
-    public static Version version;
+    public Version version;
 
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
@@ -71,6 +72,13 @@ public class VectorTypeTest extends VectorTester
     public static void setupClass()
     {
         System.setProperty("cassandra.custom_tracing_class", "org.apache.cassandra.tracing.TracingTestImpl");
+    }
+
+    @Before
+    @Override
+    public void setup() throws Throwable
+    {
+        super.setup();
         SAIUtil.setLatestVersion(version);
     }
 
