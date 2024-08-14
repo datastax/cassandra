@@ -46,9 +46,9 @@ public class CommitLogReplayerTest
     }
     @Test
     @BMRules(rules = { @BMRule(name = "Fail applying mutation",
-    targetClass = "org.apache.cassandra.concurrent.Stage",
-    targetMethod = "submit",
-    action = "return CompletableFuture.failedFuture(new RuntimeException(\"mutation failed\"));") } )
+            targetClass = "org.apache.cassandra.concurrent.Stage",
+            targetMethod = "submit",
+            action = "return CompletableFuture.failedFuture(new RuntimeException(\"mutation failed\"));") } )
     public void testTrackingSegmentsWhenMutationFails()
     {
         CommitLogReplayer.MutationInitiator mutationInitiator = new CommitLogReplayer.MutationInitiator();
