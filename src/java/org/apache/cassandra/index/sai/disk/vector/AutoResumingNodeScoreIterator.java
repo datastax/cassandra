@@ -36,6 +36,7 @@ import static java.lang.Math.max;
 public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult.NodeScore>
 {
     private final GraphSearcher searcher;
+    private final GraphSearcherAccessManager accessManager;
     private final int limit;
     private final int rerankK;
     private final boolean inMemory;
@@ -55,6 +56,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
      * @param inMemory whether the graph is in memory or on disk (used for trace logging)
      */
     public AutoResumingNodeScoreIterator(GraphSearcher searcher,
+                                         GraphSearcherAccessManager accessManager,
                                          SearchResult result,
                                          IntConsumer nodesVisitedConsumer,
                                          int limit,
@@ -62,6 +64,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
                                          boolean inMemory)
     {
         this.searcher = searcher;
+        this.accessManager = accessManager;
         this.nodeScores = Arrays.stream(result.getNodes()).iterator();
         this.cumulativeNodesVisited = result.getVisitedCount();
         this.nodesVisitedConsumer = nodesVisitedConsumer;
@@ -97,5 +100,6 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     public void close()
     {
         nodesVisitedConsumer.accept(cumulativeNodesVisited);
+        accessManager.release();
     }
 }
