@@ -76,7 +76,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final VectorCompression compression;
     final boolean pqUnitVectors;
 
-    private final ExplicitThreadLocal<GraphSearcher> searchers;
+    private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
     public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {
@@ -149,7 +149,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
         ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
-        searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcher(graph));
+        searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
     }
 
     @Override
@@ -225,7 +225,8 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     {
         VectorValidation.validateIndexable(queryVector, similarityFunction);
 
-        var searcher = searchers.get();
+        var graphAccessManager = searchers.get();
+        var searcher = graphAccessManager.get();
         var view = (GraphIndex.ScoringView) searcher.getView();
         SearchScoreProvider ssp;
         if (features.contains(FeatureId.FUSED_ADC))
@@ -254,16 +255,17 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
         Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results",
                       limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
-        // Threshold based searches are comprehensive and do not need to resume the search.
         if (threshold > 0)
         {
+            // Threshold based searches are comprehensive and do not need to resume the search.
+            graphAccessManager.release();
             nodesVisitedConsumer.accept(result.getVisitedCount());
             var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
             return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
         }
         else
         {
-            var nodeScores = new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, limit, rerankK, false);
+            var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false);
             return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
         }
     }

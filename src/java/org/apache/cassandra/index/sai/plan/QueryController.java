@@ -77,7 +77,6 @@ import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -95,18 +94,14 @@ import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 import static java.lang.Math.max;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE;
 
 public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
-
-    public static final int ORDER_CHUNK_SIZE = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
 
     /**
      * Controls whether we optimize query plans.
@@ -561,34 +556,30 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(RangeIterator source, int softLimit)
     {
-        List<CloseableIterator<PrimaryKeyWithSortKey>> scoredPrimaryKeyIterators = new ArrayList<>();
-        OrderingFilterRangeIterator<List<CloseableIterator<PrimaryKeyWithSortKey>>> iter = null;
         try
         {
+            if (!source.hasNext())
+            {
+                FileUtils.closeQuietly(source);
+                return CloseableIterator.emptyIterator();
+            }
+            List<PrimaryKey> primaryKeys = new ArrayList<>();
+            while (source.hasNext())
+                primaryKeys.add(source.next());
+            var result = getTopKRows(primaryKeys, softLimit);
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
             // that might not be needed until a deeper search into the ordering index, which happens after
             // we exit this block.
-            iter = new OrderingFilterRangeIterator<>(source,
-                                                     ORDER_CHUNK_SIZE,
-                                                     queryContext,
-                                                     list -> this.getTopKRows(list, softLimit));
-            while (iter.hasNext())
-            {
-                var next = iter.next();
-                scoredPrimaryKeyIterators.addAll(next);
-            }
-            var merged = MergeIterator.getNonReducingCloseable(scoredPrimaryKeyIterators, orderer.getComparator());
-            return CloseableIterator.withOnClose(merged, iter::close);
+            return CloseableIterator.withOnClose(result, source);
         }
         catch (Throwable t)
         {
-            FileUtils.closeQuietly(iter);
-            FileUtils.closeQuietly(scoredPrimaryKeyIterators);
+            FileUtils.closeQuietly(source);
             throw t;
         }
     }
 
-    private List<CloseableIterator<PrimaryKeyWithSortKey>> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
+    private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
         var memtableResults = queryContext.view.memtableIndexes.stream()
@@ -598,7 +589,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             var sstableScoredPrimaryKeyIterators = orderSstables(queryContext.view, sourceKeys, softLimit);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
-            return sstableScoredPrimaryKeyIterators;
+            return MergeIterator.getNonReducingCloseable(sstableScoredPrimaryKeyIterators, orderer.getComparator());
         }
         catch (Throwable t)
         {
