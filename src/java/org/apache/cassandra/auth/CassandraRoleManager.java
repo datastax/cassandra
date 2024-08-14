@@ -81,7 +81,7 @@ public class CassandraRoleManager implements IRoleManager
     static final String DEFAULT_SUPERUSER_NAME = "cassandra";
     static final String DEFAULT_SUPERUSER_PASSWORD = "cassandra";
 
-    // In some cased we want to avoid creating default super user accounts (for security purposes). For example CNDB
+    // In some cases we want to avoid creating default super user accounts (for security purposes). For example CNDB
     // can create roles without requiring default SU account. So we need a flag to tell C* to skip creating this role.
     // Even though this says SKIP it's actually safer to create the user as non super user with no login creds
     // and a timestamp of 1 in case a user forgets the flag on another node.
