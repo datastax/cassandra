@@ -26,13 +26,17 @@ import java.util.function.IntUnaryOperator;
 import com.google.common.annotations.VisibleForTesting;
 
 import io.github.jbellis.jvector.util.RamUsageEstimator;
+import io.github.jbellis.jvector.vector.ArrayVectorFloat;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.jctools.maps.NonBlockingHashMapLong;
 
 public class ConcurrentVectorValues implements RamAwareVectorValues
 {
     private final int dimensions;
-    private final NonBlockingHashMapLong<float[]> values = new NonBlockingHashMapLong<>();
+    private final NonBlockingHashMapLong<VectorFloat<?>> values = new NonBlockingHashMapLong<>();
 
     public ConcurrentVectorValues(int dimensions)
     {
@@ -52,13 +56,13 @@ public class ConcurrentVectorValues implements RamAwareVectorValues
     }
 
     @Override
-    public float[] vectorValue(int i)
+    public VectorFloat<?> getVector(int i)
     {
         return values.get(i);
     }
 
     /** return approximate bytes used by the new vector */
-    public long add(int ordinal, float[] vector)
+    public long add(int ordinal, VectorFloat<?> vector)
     {
         values.put(ordinal, vector);
         return RamEstimation.concurrentHashMapRamUsed(1) + oneVectorBytesUsed();
@@ -98,7 +102,7 @@ public class ConcurrentVectorValues implements RamAwareVectorValues
 
         for (var i = 0; i < size(); i++) {
             int ord = ordinalMapper.applyAsInt(i);
-            var fb = FloatBuffer.wrap(values.get(ord));
+            var fb = FloatBuffer.wrap(((ArrayVectorFloat) values.get(ord)).get());
             var bb = ByteBuffer.allocate(fb.capacity() * Float.BYTES);
             bb.asFloatBuffer().put(fb);
             writer.write(bb);

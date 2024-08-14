@@ -29,6 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
@@ -40,7 +41,6 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
-import org.apache.lucene.codecs.CodecUtil;
 
 public class IndexFileUtils
 {
@@ -62,12 +62,12 @@ public class IndexFileUtils
     protected IndexFileUtils()
     {}
 
-    public IndexOutputWriter openOutput(File file, boolean append) throws IOException
+    public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append) throws IOException
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
 
         var checksumWriter = new IncrementalChecksumSequentialWriter(file);
-        IndexOutputWriter indexOutputWriter = new IndexOutputWriter(checksumWriter);
+        IndexOutputWriter indexOutputWriter = new IndexOutputWriter(checksumWriter, order);
         if (append)
         {
             // Got to recalculate checksum for the file opened for append, otherwise final checksum will be wrong.
@@ -77,6 +77,17 @@ public class IndexFileUtils
         }
 
         return indexOutputWriter;
+    }
+
+    public BufferedRandomAccessWriter openRandomAccessOutput(File file, boolean append) throws IOException
+    {
+        assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
+
+        var out = new BufferedRandomAccessWriter(file.toPath());
+        if (append)
+            out.seek(file.length());
+
+        return out;
     }
 
     public IndexInput openInput(FileHandle handle)

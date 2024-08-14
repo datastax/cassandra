@@ -38,6 +38,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
@@ -1129,6 +1130,28 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
+    public void insertstuff() throws Throwable
+    {
+        // This test requires the non-bruteforce route
+        setMaxBruteForceRows(0);
+        createTable("CREATE TABLE %s (pk int, val text, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Insert data
+        execute("INSERT INTO %s (pk, val) VALUES (1, 'A')");
+        execute("INSERT INTO %s (pk, val) VALUES (2, 'B')");
+        execute("INSERT INTO %s (pk, val) VALUES (3, 'C')");
+
+        // no solution yet, so flush()
+        flush();
+
+        // query with order
+        assertRows(execute("SELECT pk FROM %s ORDER BY val limit 3"), row(1), row(2), row(3));
+        assertRows(execute("SELECT pk FROM %s ORDER BY val limit 1"), row(1));
+    }
+
+    @Test
     public void testQueryOnEmptyTable() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
@@ -1139,5 +1162,30 @@ public class VectorTypeTest extends VectorTester
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"));
         });
+    }
+
+    @Test
+    public void testCompactionWithEnoughRowsForPQAndDeleteARow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        disableCompaction();
+
+        for (int i = 0; i <= CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(i, i + 1));
+        flush();
+
+        // By deleting a row, we trigger a key histogram to round its estimate to 0 instead of 1 rows per key, and
+        // that broke compaction, so we test that here.
+        execute("DELETE FROM %s WHERE pk = 0");
+        flush();
+
+        // Run compaction, it fails if compaction is not successful
+        compact();
+
+        // Confirm we can query the data
+        assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
     }
 }

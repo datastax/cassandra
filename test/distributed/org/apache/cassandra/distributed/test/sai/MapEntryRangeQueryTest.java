@@ -108,16 +108,16 @@ public class MapEntryRangeQueryTest extends TestBaseImpl
                 KEYSPACE + '.' + table, value.left, value.right));
 
         // Test each kind or range query
-        assertThat(execute("SELECT pk FROM %s WHERE inventory['apple'] >= 50"))
+        assertThat((Object[]) execute("SELECT pk FROM %s WHERE inventory['apple'] >= 50"))
         .hasSameElementsAs(getExpectedFilteredResults(values, i -> i >= 50));
 
-        assertThat(execute("SELECT pk FROM %s WHERE inventory['apple'] > 25"))
+        assertThat((Object[]) execute("SELECT pk FROM %s WHERE inventory['apple'] > 25"))
         .hasSameElementsAs(getExpectedFilteredResults(values, i -> i > 25));
 
-        assertThat(execute("SELECT pk FROM %s WHERE inventory['apple'] <= 30"))
+        assertThat((Object[]) execute("SELECT pk FROM %s WHERE inventory['apple'] <= 30"))
         .hasSameElementsAs(getExpectedFilteredResults(values, i -> i <= 30));
 
-        assertThat(execute("SELECT pk FROM %s WHERE inventory['apple'] < 56"))
+        assertThat((Object[]) execute("SELECT pk FROM %s WHERE inventory['apple'] < 56"))
         .hasSameElementsAs(getExpectedFilteredResults(values, i -> i < 56));
     }
 

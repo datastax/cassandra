@@ -18,11 +18,15 @@
 
 package org.apache.cassandra.cache;
 
-import org.apache.cassandra.io.util.*;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.ChunkReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;

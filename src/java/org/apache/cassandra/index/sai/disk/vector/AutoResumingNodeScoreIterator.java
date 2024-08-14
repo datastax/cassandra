@@ -22,13 +22,12 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.function.IntConsumer;
 
-import javax.annotation.Nullable;
-
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
+
+import static java.lang.Math.max;
 
 /**
  * An iterator over {@link SearchResult.NodeScore} backed by a {@link SearchResult} that resumes search
@@ -36,10 +35,11 @@ import org.apache.cassandra.utils.AbstractIterator;
  */
 public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult.NodeScore>
 {
-    private final GraphSearcher<float[]> searcher;
-    private final int topK;
+    private final GraphSearcher searcher;
+    private final GraphSearcherAccessManager accessManager;
+    private final int limit;
+    private final int rerankK;
     private final boolean inMemory;
-    private final AutoCloseable onClose;
     private final IntConsumer nodesVisitedConsumer;
     private Iterator<SearchResult.NodeScore> nodeScores;
     private int cumulativeNodesVisited;
@@ -51,24 +51,26 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
      * @param searcher the {@link GraphSearcher} to use to resume search.
      * @param result the first {@link SearchResult} to iterate over
      * @param nodesVisitedConsumer a consumer that accepts the total number of nodes visited
-     * @param topK the limit to pass to the {@link GraphSearcher} when resuming search
+     * @param limit the limit to pass to the {@link GraphSearcher} when resuming search
+     * @param rerankK the rerankK to pass to the {@link GraphSearcher} when resuming search
      * @param inMemory whether the graph is in memory or on disk (used for trace logging)
-     * @param onClose an {@link AutoCloseable} object to close when this iterator is closed
      */
-    public AutoResumingNodeScoreIterator(GraphSearcher<float[]> searcher,
+    public AutoResumingNodeScoreIterator(GraphSearcher searcher,
+                                         GraphSearcherAccessManager accessManager,
                                          SearchResult result,
                                          IntConsumer nodesVisitedConsumer,
-                                         int topK,
-                                         boolean inMemory,
-                                         @Nullable AutoCloseable onClose)
+                                         int limit,
+                                         int rerankK,
+                                         boolean inMemory)
     {
         this.searcher = searcher;
+        this.accessManager = accessManager;
         this.nodeScores = Arrays.stream(result.getNodes()).iterator();
         this.cumulativeNodesVisited = result.getVisitedCount();
         this.nodesVisitedConsumer = nodesVisitedConsumer;
-        this.topK = topK;
+        this.limit = max(1, limit / 2); // we shouldn't need as many results on resume
+        this.rerankK = rerankK;
         this.inMemory = inMemory;
-        this.onClose = onClose;
     }
 
     @Override
@@ -77,7 +79,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         if (nodeScores.hasNext())
             return nodeScores.next();
 
-        var nextResult = searcher.resume(topK);
+        var nextResult = searcher.resume(limit, rerankK);
         maybeLogTrace(nextResult);
         cumulativeNodesVisited += nextResult.getVisitedCount();
         // If the next result is empty, we are done searching.
@@ -89,15 +91,15 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     {
         if (!Tracing.isTracing())
             return;
-        String msg = inMemory ? "ANN resumed search and visited {} in-memory nodes to return {} results"
-                              : "DiskANN resumed search and visited {} nodes to return {} results";
-        Tracing.trace(msg, result.getVisitedCount(), result.getNodes().length);
+        String msg = inMemory ? "ANN resume for {}/{} visited {} nodes, reranked {} to return {} results"
+                              : "DiskANN resume for {}/{} visited {} nodes, reranked {} to return {} results";
+        Tracing.trace(msg, limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
     }
 
     @Override
     public void close()
     {
         nodesVisitedConsumer.accept(cumulativeNodesVisited);
-        FileUtils.closeQuietly(onClose);
+        accessManager.release();
     }
 }

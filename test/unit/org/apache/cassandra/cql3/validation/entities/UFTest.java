@@ -87,17 +87,17 @@ public class UFTest extends CQLTester
     }
 
     @Test
-    public void testSchemaChange() throws Throwable
+    public void testSchemaChange()
     {
         String f = createFunctionName(KEYSPACE);
         String functionName = shortFunctionName(f);
         registerFunction(f, "double, double");
 
-        assertSchemaChange("CREATE OR REPLACE FUNCTION " + f + "(state double, val double) " +
+        assertSchemaChange("CREATE OR REPLACE FUNCTION " + f + "(state double, val double)" +
                            "RETURNS NULL ON NULL INPUT " +
                            "RETURNS double " +
-                           "LANGUAGE javascript " +
-                           "AS '\"string\";';",
+                           "LANGUAGE java " +
+                           "AS ' return Double.valueOf(Math.max(state, val)); ';",
                            Change.CREATED,
                            Target.FUNCTION,
                            KEYSPACE, functionName,
@@ -108,8 +108,8 @@ public class UFTest extends CQLTester
         assertSchemaChange("CREATE OR REPLACE FUNCTION " + f + "(state int, val int) " +
                            "RETURNS NULL ON NULL INPUT " +
                            "RETURNS int " +
-                           "LANGUAGE javascript " +
-                           "AS '\"string\";';",
+                           "LANGUAGE java " +
+                           "AS ' return Integer.valueOf(Math.max(state, val));';",
                            Change.CREATED,
                            Target.FUNCTION,
                            KEYSPACE, functionName,
@@ -118,8 +118,8 @@ public class UFTest extends CQLTester
         assertSchemaChange("CREATE OR REPLACE FUNCTION " + f + "(state int, val int) " +
                            "RETURNS NULL ON NULL INPUT " +
                            "RETURNS int " +
-                           "LANGUAGE javascript " +
-                           "AS '\"string1\";';",
+                           "LANGUAGE java " +
+                           "AS ' return Integer.valueOf(Math.min(state, val));';",
                            Change.UPDATED,
                            Target.FUNCTION,
                            KEYSPACE, functionName,
@@ -137,8 +137,8 @@ public class UFTest extends CQLTester
         assertSchemaChange("CREATE OR REPLACE FUNCTION " + fl + "(state list<tuple<int, int>>, val double) " +
                            "RETURNS NULL ON NULL INPUT " +
                            "RETURNS double " +
-                           "LANGUAGE javascript " +
-                           "AS '\"string\";';",
+                           "LANGUAGE java " +
+                           "AS ' return val;';",
                            Change.CREATED, Target.FUNCTION,
                            KEYSPACE, shortFunctionName(fl),
                            "list<tuple<int, int>>", "double");
@@ -333,8 +333,8 @@ public class UFTest extends CQLTester
                                         "CREATE FUNCTION %s ( input double ) " +
                                         "CALLED ON NULL INPUT " +
                                         "RETURNS double " +
-                                        "LANGUAGE javascript " +
-                                        "AS 'input'");
+                                        "LANGUAGE java " +
+                                        "AS 'return Double.valueOf(Math.log(input.doubleValue()));'");
         Assert.assertEquals(1, Schema.instance.getUserFunctions(parseFunctionName(function)).size());
 
         List<ResultMessage.Prepared> prepared = new ArrayList<>();
@@ -793,11 +793,10 @@ public class UFTest extends CQLTester
     public void testDuplicateArgNames() throws Throwable
     {
         assertInvalidMessage("Duplicate argument names for given function",
-                             "CREATE OR REPLACE FUNCTION " + KEYSPACE + ".scrinv(val double, val text) " +
-                             "RETURNS NULL ON NULL INPUT " +
-                             "RETURNS text " +
-                             "LANGUAGE javascript\n" +
-                             "AS '\"foo bar\";';");
+                             "CREATE OR REPLACE FUNCTION " + KEYSPACE + ".scrinv(input double, input int) " +
+                             "CALLED ON NULL INPUT " +
+                             "RETURNS double " +
+                             "LANGUAGE java AS 'return Math.max(input, input)';");
     }
 
     @Test
@@ -1026,6 +1025,47 @@ public class UFTest extends CQLTester
                                        "AS 'return val;'");
             }).isInstanceOf(InvalidRequestException.class)
               .hasMessageContaining("Function name '%s' is invalid", funcName);
+        }
+    }
+
+    @Test
+    public void testRejectInvalidLanguageOnCreation()
+    {
+        for (String funcName : Arrays.asList("my/fancy/func", "my_other[fancy]func"))
+        {
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE javascript\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
+
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE JAVASCRIPT\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
+
+            // test with weird made up word for language
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE JAVASCRI\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
         }
     }
 }

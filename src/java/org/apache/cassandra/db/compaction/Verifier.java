@@ -17,14 +17,33 @@
  */
 package org.apache.cassandra.db.compaction;
 
+import java.io.Closeable;
+import java.io.DataInputStream;
+import java.io.IOError;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -40,6 +59,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata.FileDigestValidator;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -52,22 +72,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.UUIDGen;
-
-import java.io.Closeable;
-import java.io.DataInputStream;
-import java.io.IOError;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.util.*;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.Function;
-
-import javax.annotation.Nullable;
-
-import org.apache.cassandra.io.util.File;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
@@ -148,7 +152,7 @@ public class Verifier implements Closeable
         boolean extended = options.extendedVerification;
         long rowStart = 0;
 
-        outputHandler.output(String.format("Verifying %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length())));
+        outputHandler.output(String.format("Verifying %s (%s) with options %s", sstable, FBUtilities.prettyPrintMemory(dataFile.length()), options));
         if (options.checkVersion && !sstable.descriptor.version.isLatestVersion())
         {
             String msg = String.format("%s is not the latest version, run upgradesstables", sstable);
@@ -269,7 +273,7 @@ public class Verifier implements Closeable
 
         try(PartitionIndexIterator indexIterator = sstable.allKeysIterator())
         {
-            if (indexIterator.dataPosition() != 0)
+            if (indexIterator.dataPosition() != sstable.getDataFileSliceDescriptor().dataStart)
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
 
             List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(
@@ -341,9 +345,16 @@ public class Verifier implements Closeable
                     if (key == null || dataSize > dataFile.length())
                         markAndThrow(new RuntimeException(String.format("key = %s, dataSize=%d, dataFile.length() = %d", key, dataSize, dataFile.length())));
 
-                    //mimic the scrub read path, intentionally unused
-                    try (UnfilteredRowIterator iterator = SSTableIdentityIterator.create(sstable, dataFile, key))
+                    //mimic the scrub read path
+                    try (UnfilteredRowIterator identity = SSTableIdentityIterator.create(sstable, dataFile, key);
+                         UnfilteredRowIterator iterator = UnfilteredRowIterators.withValidation(identity, dataFile.getFile()))
                     {
+                        if (options.validateAllRows)
+                        {
+                            // validate all rows and cells
+                            while (iterator.hasNext())
+                                iterator.next();
+                        }
                     }
 
                     if ( (prevKey != null && prevKey.compareTo(key) > 0) || !key.getKey().equals(currentIndexKey) || dataStart != dataStartFromIndex )
@@ -574,21 +585,26 @@ public class Verifier implements Closeable
     {
         public final boolean invokeDiskFailurePolicy;
         public final boolean extendedVerification;
+        public final boolean validateAllRows;
         public final boolean checkVersion;
         public final boolean mutateRepairStatus;
         public final boolean checkOwnsTokens;
         public final boolean quick;
         public final Function<String, ? extends Collection<Range<Token>>> tokenLookup;
 
-        private Options(boolean invokeDiskFailurePolicy, boolean extendedVerification, boolean checkVersion, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, Function<String, ? extends Collection<Range<Token>>> tokenLookup)
+        private Options(boolean invokeDiskFailurePolicy, boolean extendedVerification, boolean validateAllRows, boolean checkVersion, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, Function<String, ? extends Collection<Range<Token>>> tokenLookup)
         {
             this.invokeDiskFailurePolicy = invokeDiskFailurePolicy;
             this.extendedVerification = extendedVerification;
+            this.validateAllRows = validateAllRows;
             this.checkVersion = checkVersion;
             this.mutateRepairStatus = mutateRepairStatus;
             this.checkOwnsTokens = checkOwnsTokens;
             this.quick = quick;
             this.tokenLookup = tokenLookup;
+
+            if (validateAllRows && !extendedVerification)
+                throw new IllegalArgumentException("validateAllRows must be enabled with extended verification");
         }
 
         @Override
@@ -597,6 +613,7 @@ public class Verifier implements Closeable
             return "Options{" +
                    "invokeDiskFailurePolicy=" + invokeDiskFailurePolicy +
                    ", extendedVerification=" + extendedVerification +
+                   ", validateAllRows=" + validateAllRows +
                    ", checkVersion=" + checkVersion +
                    ", mutateRepairStatus=" + mutateRepairStatus +
                    ", checkOwnsTokens=" + checkOwnsTokens +
@@ -608,6 +625,7 @@ public class Verifier implements Closeable
         {
             private boolean invokeDiskFailurePolicy = false; // invoking disk failure policy can stop the node if we find a corrupt stable
             private boolean extendedVerification = false;
+            private boolean validateAllRows = false; // whether to validate all rows in each partition in extended verification mode
             private boolean checkVersion = false;
             private boolean mutateRepairStatus = false; // mutating repair status can be dangerous
             private boolean checkOwnsTokens = false;
@@ -623,6 +641,12 @@ public class Verifier implements Closeable
             public Builder extendedVerification(boolean param)
             {
                 this.extendedVerification = param;
+                return this;
+            }
+
+            public Builder validateAllRows(boolean param)
+            {
+                this.validateAllRows = param;
                 return this;
             }
 
@@ -658,7 +682,7 @@ public class Verifier implements Closeable
 
             public Options build()
             {
-                return new Options(invokeDiskFailurePolicy, extendedVerification, checkVersion, mutateRepairStatus, checkOwnsTokens, quick, tokenLookup);
+                return new Options(invokeDiskFailurePolicy, extendedVerification, validateAllRows, checkVersion, mutateRepairStatus, checkOwnsTokens, quick, tokenLookup);
             }
 
         }

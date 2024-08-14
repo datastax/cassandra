@@ -18,17 +18,22 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.function.IntConsumer;
 
 import org.slf4j.Logger;
 
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.utils.RowIdWithScore;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
@@ -54,30 +59,56 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
     public abstract OrdinalsView getOrdinalsView() throws IOException;
     public abstract VectorSupplier getVectorSupplier() throws IOException;
 
+    public abstract VectorCompression getCompression();
+
     /** returns null if no compression was performed */
     public abstract CompressedVectors getCompressedVectors();
 
     /**
      * See CassandraDiskANN::search
      */
-    public abstract CloseableIterator<ScoredRowId> search(float[] queryVector, int topK, float threshold, Bits bits, QueryContext context, IntConsumer nodesVisited);
+    public abstract CloseableIterator<RowIdWithScore> search(VectorFloat<?> queryVector, int limit, int rerankK, float threshold, Bits bits, QueryContext context, IntConsumer nodesVisited);
 
     public abstract void close() throws IOException;
 
-    protected SegmentMetadata.ComponentMetadata getComponentMetadata(IndexComponent component)
+    public static interface VectorSupplier extends AutoCloseable
     {
-        try
+        /**
+         * Returns the score function for the given query vector.
+         */
+        ScoreFunction.ExactScoreFunction getScoreFunction(VectorFloat<?> queryVector, VectorSimilarityFunction similarityFunction);
+
+        /**
+         * Close the vectors view, logging any exceptions.
+         */
+        @Override
+        void close();
+    }
+
+    /**
+     * An ExactScoreFunction that closes the underlying {@link VectorSupplier} when closed.
+     */
+    public static class CloseableReranker implements ScoreFunction.ExactScoreFunction, Closeable
+    {
+        private final VectorSupplier vectorSupplier;
+        private final ExactScoreFunction scoreFunction;
+
+        public CloseableReranker(VectorSimilarityFunction similarityFunction, VectorFloat<?> queryVector, VectorSupplier supplier)
         {
-            return componentMetadatas.get(component);
+            this.vectorSupplier = supplier;
+            this.scoreFunction = supplier.getScoreFunction(queryVector, similarityFunction);
         }
-        catch (IllegalArgumentException e)
+
+        @Override
+        public float similarityTo(int i)
         {
-            logger.warn("Component metadata is missing " + component + ", assuming single segment");
-            // take our best guess and assume there is a single segment
-            // this will silently use the wrong data if it is actually a multi-segment file
-            var file = indexFiles.getFile(component);
-            // 7 is the length of the header written by SAICodecUtils
-            return new SegmentMetadata.ComponentMetadata(-1, 7, file.onDiskLength - 7); // graph indexes ignore root
+            return scoreFunction.similarityTo(i);
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(vectorSupplier);
         }
     }
 }

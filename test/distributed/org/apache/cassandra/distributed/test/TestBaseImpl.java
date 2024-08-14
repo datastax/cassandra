@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.ImmutableSet;
 
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 
 import org.apache.cassandra.db.marshal.*;
@@ -38,6 +39,7 @@ import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.shared.DistributedTestBase;
 import org.apache.cassandra.distributed.util.ColumnTypeUtil;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -151,5 +153,28 @@ public class TestBaseImpl extends DistributedTestBase
 
         // in real live repair is needed in this case, but in the test case it doesn't matter if the tables loose
         // anything, so ignoring repair to speed up the tests.
+    }
+
+    /* Provide the cluster cannot start with the configured options */
+    void assertCannotStartDueToConfigurationException(Cluster cluster)
+    {
+        Throwable tr = null;
+        try
+        {
+            cluster.startup();
+        }
+        catch (Throwable maybeConfigException)
+        {
+            tr = maybeConfigException;
+        }
+
+        if (tr == null)
+        {
+            Assert.fail("Expected a ConfigurationException");
+        }
+        else
+        {
+            Assert.assertEquals(ConfigurationException.class.getName(), tr.getClass().getName());
+        }
     }
 }

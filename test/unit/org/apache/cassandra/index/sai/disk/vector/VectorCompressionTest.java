@@ -26,12 +26,8 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.v3.V3VectorIndexSearcher;
-import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
-import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
-import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -41,14 +37,14 @@ public class VectorCompressionTest extends VectorTester
     public void testAda002() throws IOException
     {
         // ADA002 is always 1536
-        testOne(VectorSourceModel.ADA002, 1536, new VectorCompression(BINARY_QUANTIZATION, 1536 / 8));
+        testOne(VectorSourceModel.ADA002, 1536, VectorSourceModel.ADA002.compressionProvider.apply(1536));
     }
 
     @Test
     public void testGecko() throws IOException
     {
         // GECKO is always 768
-        testOne(VectorSourceModel.GECKO, 768, new VectorCompression(PRODUCT_QUANTIZATION, 768 / 8));
+        testOne(VectorSourceModel.GECKO, 768, VectorSourceModel.GECKO.compressionProvider.apply(768));
     }
 
     @Test
@@ -58,7 +54,7 @@ public class VectorCompressionTest extends VectorTester
         for (int i = 1; i < 3; i++)
         {
             int D = 3072 / i;
-            testOne(VectorSourceModel.OPENAI_V3_LARGE, D, new VectorCompression(PRODUCT_QUANTIZATION, D / 16));
+            testOne(VectorSourceModel.OPENAI_V3_LARGE, D, VectorSourceModel.OPENAI_V3_LARGE.compressionProvider.apply(D));
         }
     }
 
@@ -69,7 +65,7 @@ public class VectorCompressionTest extends VectorTester
         for (int i = 1; i < 3; i++)
         {
             int D = 1536 / i;
-            testOne(VectorSourceModel.OPENAI_V3_SMALL, D, new VectorCompression(PRODUCT_QUANTIZATION, D / 16));
+            testOne(VectorSourceModel.OPENAI_V3_SMALL, D, VectorSourceModel.OPENAI_V3_SMALL.compressionProvider.apply(D));
         }
     }
 
@@ -77,9 +73,9 @@ public class VectorCompressionTest extends VectorTester
     public void testBert() throws IOException
     {
         // BERT is more of a family than a specific model
-        for (int i : List.of(128, 256, 512, 1024))
+        for (int dimension : List.of(128, 256, 512, 1024))
         {
-            testOne(VectorSourceModel.BERT, i, new VectorCompression(PRODUCT_QUANTIZATION, i / 4));
+            testOne(VectorSourceModel.BERT, dimension, VectorSourceModel.BERT.compressionProvider.apply(dimension));
         }
     }
 
@@ -88,49 +84,47 @@ public class VectorCompressionTest extends VectorTester
     {
         // NV_QA_4 is anecdotally 1024 based on reviewing https://build.nvidia.com/nvidia/embed-qa-4. Couldn't
         // find supporting documentation for this number, though.
-        testOne(VectorSourceModel.NV_QA_4, 1024, new VectorCompression(PRODUCT_QUANTIZATION, 1024 / 8));
+        testOne(VectorSourceModel.NV_QA_4, 1024, VectorSourceModel.NV_QA_4.compressionProvider.apply(1024));
     }
 
     @Test
     public void testOther() throws IOException
     {
-        // Glove
-        testOne(VectorSourceModel.OTHER, 25, new VectorCompression(PRODUCT_QUANTIZATION, 25));
-        testOne(VectorSourceModel.OTHER, 50, new VectorCompression(PRODUCT_QUANTIZATION, 32));
-        testOne(VectorSourceModel.OTHER, 100, new VectorCompression(PRODUCT_QUANTIZATION, 50));
-        testOne(VectorSourceModel.OTHER, 200, new VectorCompression(PRODUCT_QUANTIZATION, 100));
-        // Ada002
-        testOne(VectorSourceModel.OTHER, 1536, new VectorCompression(BINARY_QUANTIZATION, 1536 / 8));
-        // Something unknown and large
-        testOne(VectorSourceModel.OTHER, 2000, new VectorCompression(PRODUCT_QUANTIZATION, 2000 / 8));
+        // 25..200 -> Glove dimensions
+        // 1536 -> Ada002
+        // 2000 -> something unknown and large
+        for (int dimension : List.of(25, 50, 100, 200, 1536, 2000))
+            testOne(VectorSourceModel.OTHER, dimension, VectorSourceModel.OTHER.compressionProvider.apply(dimension));
     }
 
     @Test
     public void testFewRows() throws IOException
     {
-        testOne(1, VectorSourceModel.OTHER, 200, new VectorCompression(NONE, 200 * 8));
-        // BQ still works with tiny dataset
-        testOne(1, VectorSourceModel.ADA002, 1536, new VectorCompression(BINARY_QUANTIZATION, 1536 / 8));
+        // with fewer than MIN_PQ_ROWS we expect to observe no compression no matter
+        // what the source model would prefer
+        testOne(1, VectorSourceModel.OTHER, 200, VectorCompression.NO_COMPRESSION);
     }
 
     private void testOne(VectorSourceModel model, int originalDimension, VectorCompression expectedCompression) throws IOException
     {
-        testOne(1024, model, originalDimension, expectedCompression);
+        testOne(CassandraOnHeapGraph.MIN_PQ_ROWS, model, originalDimension, expectedCompression);
     }
 
     private void testOne(int rows, VectorSourceModel model, int originalDimension, VectorCompression expectedCompression) throws IOException
     {
         createTable("CREATE TABLE %s " + String.format("(pk int, v vector<float, %d>, PRIMARY KEY(pk))", originalDimension));
-        createIndex("CREATE CUSTOM INDEX ON %s(v) " + String.format("USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model': '%s'}", model));
-        waitForIndexQueryable();
 
         for (int i = 0; i < rows; i++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVector(originalDimension));
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVectorBoxed(originalDimension));
         flush();
         // the larger models may flush mid-test automatically, so compact to make sure that we
         // end up with a single sstable (otherwise PQ might conclude there aren't enough vectors to train on)
         compact();
         waitForCompactionsFinished();
+
+        // create index after compaction so we don't have to wait for it to (potentially) build twice
+        createIndex("CREATE CUSTOM INDEX ON %s(v) " + String.format("USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model': '%s'}", model));
+        waitForIndexQueryable();
 
         // get a View of the sstables that contain indexed data
         var sim = getCurrentColumnFamilyStore().indexManager;
@@ -147,14 +141,13 @@ public class VectorCompressionTest extends VectorTester
         try (var segment = segments.iterator().next();
              var searcher = (V3VectorIndexSearcher) segment.getIndexSearcher())
         {
-            var cv = searcher.getCompressedVectors();
-            var msg = String.format("Expected %s but got %s", expectedCompression,
-                                    cv == null ? "NONE" : cv.getClass().getSimpleName() + '@' + cv.getCompressedSize());
-            assertTrue(msg, expectedCompression.matches(cv));
-            if (cv != null)
+            var vc = searcher.getCompression();
+            var msg = String.format("Expected %s but got %s", expectedCompression, vc);
+            assertEquals(msg, expectedCompression, vc);
+            if (vc.type != NONE)
             {
-                assertEquals((int) (100 * VectorSourceModel.tapered2x(100) * model.overqueryProvider.apply(cv)),
-                             model.topKFor(100, cv));
+                assertEquals((int) (100 * VectorSourceModel.tapered2x(100) * model.overqueryProvider.apply(vc)),
+                             model.rerankKFor(100, vc));
             }
         }
     }

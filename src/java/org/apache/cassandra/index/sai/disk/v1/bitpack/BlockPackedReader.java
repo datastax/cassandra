@@ -26,7 +26,6 @@ import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.index.CorruptIndexException;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.checkBlockSize;
@@ -61,9 +60,8 @@ public class BlockPackedReader implements LongArray.Factory
         blockOffsets = new long[numBlocks];
         minValues = new long[numBlocks];
 
-        try (final RandomAccessReader reader = this.file.createReader())
+        try (final IndexInputReader in = IndexInputReader.create(this.file.createReader()))
         {
-            final IndexInputReader in = IndexInputReader.create(reader);
             SAICodecUtils.validate(in);
             in.seek(meta.blockMetaOffset);
 

@@ -26,8 +26,9 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
@@ -45,9 +46,9 @@ import org.apache.cassandra.utils.Throwables;
  * This uses the following on-disk structures:
  * <ul>
  *     <li>Block-packed structure for rowId to token lookups using {@link BlockPackedReader}.
- *     Uses component {@link IndexComponent#TOKEN_VALUES} </li>
+ *     Uses component {@link IndexComponentType#TOKEN_VALUES} </li>
  *     <li>Monotonic-block-packed structure for rowId to partition key offset lookups using {@link MonotonicBlockPackedReader}.
- *     Uses component {@link IndexComponent#OFFSETS_VALUES} </li>
+ *     Uses component {@link IndexComponentType#OFFSETS_VALUES} </li>
  * </ul>
  *
  * This uses a {@link KeyFetcher} to read the {@link org.apache.cassandra.db.DecoratedKey} for a {@link PrimaryKey} from the
@@ -59,6 +60,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class PartitionAwarePrimaryKeyMapFactory implements Factory
     {
+        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final LongArray.Factory offsetReaderFactory;
         private final MetadataSource metadata;
@@ -70,22 +72,27 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private FileHandle token = null;
         private FileHandle offset = null;
 
-        public PartitionAwarePrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable)
+        public PartitionAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, SSTableReader sstable, PrimaryKey.Factory primaryKeyFactory)
         {
             try
             {
-                this.metadata = MetadataSource.loadGroupMetadata(indexDescriptor);
-                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentFileName(IndexComponent.OFFSETS_VALUES)));
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
+                this.perSSTableComponents = perSSTableComponents;
+                this.metadata = MetadataSource.loadMetadata(perSSTableComponents);
 
-                token = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
-                offset = indexDescriptor.createPerSSTableFileHandle(IndexComponent.OFFSETS_VALUES);
+                IndexComponent.ForRead offsetsComponent = perSSTableComponents.get(IndexComponentType.OFFSETS_VALUES);
+                IndexComponent.ForRead tokensComponent = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES);
+
+                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(offsetsComponent));
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(tokensComponent));
+
+                token = tokensComponent.createFileHandle();
+                offset = offsetsComponent.createFileHandle();
 
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
                 this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);
-                this.partitioner = indexDescriptor.partitioner;
+                this.partitioner = sstable.metadata().partitioner;
                 this.keyFetcher = new KeyFetcher(sstable);
-                this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
+                this.primaryKeyFactory = primaryKeyFactory;
                 this.sstableId = sstable.getId();
             }
             catch (Throwable t)
@@ -158,7 +165,13 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long ceiling(PrimaryKey key)
     {
-        throw new UnsupportedOperationException();
+        var rowId = exactRowIdOrInvertedCeiling(key);
+        if (rowId >= 0)
+            return rowId;
+        if (rowId == Long.MIN_VALUE)
+            return -1;
+        else
+            return -rowId - 1;
     }
 
     @Override

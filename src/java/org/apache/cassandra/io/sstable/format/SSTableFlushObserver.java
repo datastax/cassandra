@@ -22,6 +22,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.io.sstable.SSTable;
 
 /**
  * Observer for events in the lifecycle of writing out an sstable.
@@ -103,7 +104,7 @@ public interface SSTableFlushObserver
     /**
      * Called when all data is written to the file and it's ready to be finished up.
      */
-    void complete();
+    void complete(SSTable sstable);
 
     /**
      * Clean up resources on error. There should be no side effects if called multiple times.

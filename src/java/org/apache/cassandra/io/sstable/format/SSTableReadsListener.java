@@ -58,6 +58,14 @@ public interface SSTableReadsListener
     }
 
     /**
+     * Handles notification that the specified SSTable has been selected for searching its partition index.
+     * @param sstable the sstable reader
+     */
+    default void onSSTablePartitionIndexAccessed(SSTableReader sstable)
+    {
+    }
+
+    /**
      * Handles notification that the specified SSTable has been selected during a single partition query.
      *
      * @param sstable the SSTable reader

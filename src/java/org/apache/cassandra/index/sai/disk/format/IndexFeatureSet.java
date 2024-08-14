@@ -81,7 +81,7 @@ public interface IndexFeatureSet
         public IndexFeatureSet complete()
         {
             complete = true;
-            return Version.LATEST.onDiskFormat().indexFeatureSet();
+            return Version.latest().onDiskFormat().indexFeatureSet();
         }
     }
 }

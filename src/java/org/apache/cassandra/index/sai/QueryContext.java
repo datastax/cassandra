@@ -25,7 +25,10 @@ import javax.annotation.concurrent.NotThreadSafe;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.plan.QueryViewBuilder;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+
+import static java.lang.Math.max;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
@@ -38,6 +41,8 @@ public class QueryContext
     protected final long queryStartTimeNanos;
 
     public final long executionQuotaNano;
+
+    public QueryViewBuilder.QueryView view;
 
     private final LongAdder sstablesHit = new LongAdder();
     private final LongAdder segmentsHit = new LongAdder();
@@ -58,6 +63,7 @@ public class QueryContext
     private final LongAdder queryTimeouts = new LongAdder();
 
     private final LongAdder annNodesVisited = new LongAdder();
+    private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
@@ -227,6 +233,17 @@ public class QueryContext
     public long getShadowedPrimaryKeyCount()
     {
         return shadowedPrimaryKeyCount.longValue();
+    }
+
+    public float getAnnRerankFloor()
+    {
+        return annRerankFloor;
+    }
+
+    public void updateAnnRerankFloor(float observedFloor)
+    {
+        if (observedFloor < Float.POSITIVE_INFINITY)
+            annRerankFloor = max(annRerankFloor, observedFloor);
     }
 
     /**

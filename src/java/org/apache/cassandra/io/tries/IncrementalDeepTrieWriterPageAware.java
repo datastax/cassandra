@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * This class is a variant of {@link IncrementalTrieWriterPageAware} which is able to build even very deep
@@ -30,19 +31,19 @@ import org.apache.cassandra.io.util.DataOutputPlus;
  * very long keys. This implementation can switch processing from stack to heap at a certain depth (provided
  * as a constructor param).
  */
-public class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWriterPageAware<VALUE>
+class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWriterPageAware<VALUE>
 {
     private final int maxRecursionDepth;
 
-    public IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, int maxRecursionDepth)
+    IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, int maxRecursionDepth, ByteComparable.Version version)
     {
-        super(trieSerializer, dest);
+        super(trieSerializer, dest, version);
         this.maxRecursionDepth = maxRecursionDepth;
     }
 
-    public IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
+    IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version version)
     {
-        this(trieSerializer, dest, 64);
+        this(trieSerializer, dest, 64, version);
     }
 
     @Override

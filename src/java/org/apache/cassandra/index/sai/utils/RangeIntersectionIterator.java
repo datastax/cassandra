@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
@@ -216,18 +217,24 @@ public class RangeIntersectionIterator extends RangeIterator
             return rangeIterators.size();
         }
 
+        @Override
+        public Collection<RangeIterator> ranges()
+        {
+            return rangeIterators;
+        }
+
         protected RangeIterator buildIterator()
         {
             // if the range is disjoint or we have an intersection with an empty set,
             // we can simply return an empty iterator, because it's not going to produce any results.
-            if (statistics.isDisjoint())
+            if (statistics.isEmptyOrDisjoint())
             {
                 // release posting lists
-                FileUtils.closeQuietly(ranges);
+                FileUtils.closeQuietly(rangeIterators);
                 return RangeIterator.empty();
             }
 
-            if (ranges.size() == 1)
+            if (rangeCount() == 1)
                 return rangeIterators.get(0);
 
             return new RangeIntersectionIterator(statistics, rangeIterators);

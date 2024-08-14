@@ -170,6 +170,7 @@ import org.awaitility.Awaitility;
 import static com.datastax.driver.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_MILLIS;
 import static com.datastax.driver.core.SocketOptions.DEFAULT_READ_TIMEOUT_MILLIS;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.apache.cassandra.index.sai.SAITester.vector;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -994,7 +995,7 @@ public abstract class CQLTester
         schemaChange(formattedQuery);
     }
 
-    protected String createIndex(String query)
+    public String createIndex(String query)
     {
         return createIndex(KEYSPACE, query);
     }
@@ -1110,7 +1111,7 @@ public abstract class CQLTester
         QueryProcessor.executeOnceInternal(fullQuery);
     }
 
-    protected void dropIndex(String query) throws Throwable
+    public void dropIndex(String query)
     {
         String fullQuery = String.format(query, KEYSPACE);
         logger.info(fullQuery);
@@ -1495,6 +1496,24 @@ public abstract class CQLTester
 
     public static void assertRows(UntypedResultSet result, Object[]... rows)
     {
+        assertRows(result, false, rows);
+    }
+
+    public static void assertRows(UntypedResultSet result, boolean printAssertedRows, Object[]... rows)
+    {
+        // Useful for manual debugging, but generally unnecessary on
+        if (printAssertedRows)
+        {
+            // Print all the rows
+            for (Object[] row : rows)
+            {
+                System.out.print("Expected row:");
+                for (Object column : row)
+                    System.out.print("  " + column);
+                System.out.println();
+            }
+        }
+
         if (result == null)
         {
             if (rows.length > 0)
@@ -1757,22 +1776,22 @@ public abstract class CQLTester
             throw new AssertionError(String.format("Expected empty result but got %d rows: %s \n", result.size(), makeRowStrings(result)));
     }
 
-    protected void assertInvalid(String query, Object... values) throws Throwable
+    protected void assertInvalid(String query, Object... values)
     {
         assertInvalidMessage(null, query, values);
     }
 
-    protected void assertInvalidMessage(String errorMessage, String query, Object... values) throws Throwable
+    protected void assertInvalidMessage(String errorMessage, String query, Object... values)
     {
         assertInvalidThrowMessage(errorMessage, null, query, values);
     }
 
-    protected void assertInvalidThrow(Class<? extends Throwable> exception, String query, Object... values) throws Throwable
+    protected void assertInvalidThrow(Class<? extends Throwable> exception, String query, Object... values)
     {
         assertInvalidThrowMessage(null, exception, query, values);
     }
 
-    protected void assertInvalidThrowMessage(String errorMessage, Class<? extends Throwable> exception, String query, Object... values) throws Throwable
+    protected void assertInvalidThrowMessage(String errorMessage, Class<? extends Throwable> exception, String query, Object... values)
     {
         assertInvalidThrowMessage(Optional.empty(), errorMessage, exception, query, values);
     }
@@ -1783,7 +1802,7 @@ public abstract class CQLTester
                                              String errorMessage,
                                              Class<? extends Throwable> exception,
                                              String query,
-                                             Object... values) throws Throwable
+                                             Object... values)
     {
         try
         {
@@ -2164,22 +2183,34 @@ public abstract class CQLTester
     }
 
     /** @return a normalized vector with the given dimension */
-    protected static Vector<Float> randomVector(int dimension)
+    public static Vector<Float> randomVectorBoxed(int dimension)
     {
+        var floats = randomVector(dimension);
+        return vector(floats);
+    }
+
+    public static ByteBuffer randomVectorSerialized(int dimension)
+    {
+        var rawVector = randomVectorBoxed(dimension);
+        return VectorType.getInstance(FloatType.instance, dimension).getSerializer().serialize(rawVector);
+    }
+
+    public static float[] randomVector(int dimension)
+    {
+        // this can be called from concurrent threads so don't use getRandom()
         var R = ThreadLocalRandom.current();
 
-        var vector = new Float[dimension];
+        var vector = new float[dimension];
         for (int i = 0; i < dimension; i++)
         {
             vector[i] = R.nextFloat();
         }
         normalize(vector);
-
-        return new Vector<>(vector);
+        return vector;
     }
 
     /** Normalize the given vector in-place */
-    protected static void normalize(Float[] v)
+    protected static void normalize(float[] v)
     {
         var sum = 0.0f;
         for (int i = 0; i < v.length; i++)
@@ -2464,6 +2495,11 @@ public abstract class CQLTester
         public void printSeedOnFailure()
         {
             System.err.println("Randomized test failed. To rerun test use -Dcassandra.test.random.seed=" + seed);
+        }
+
+        public Random getRandom()
+        {
+            return random;
         }
 
         public int nextInt()

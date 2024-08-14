@@ -36,7 +36,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
-import org.apache.cassandra.service.ClientWarn;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +44,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -52,6 +53,10 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -59,26 +64,29 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -122,7 +130,7 @@ public class IndexContext
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;
     private final AbstractType<?> validator;
-    private final Memtable.Owner owner;
+    private final ColumnFamilyStore owner;
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
     private final IndexMetadata config;
@@ -149,7 +157,7 @@ public class IndexContext
                         @Nonnull ColumnMetadata column,
                         @Nonnull IndexTarget.Type indexType,
                         IndexMetadata config,
-                        @Nonnull Memtable.Owner owner)
+                        @Nonnull ColumnFamilyStore owner)
     {
         this.keyspace = keyspace;
         this.table = table;
@@ -166,7 +174,7 @@ public class IndexContext
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                               : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
 
-        this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(clusteringComparator);
+        this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
         if (config != null)
         {
@@ -238,16 +246,14 @@ public class IndexContext
         return owner;
     }
 
+    public IPartitioner getPartitioner()
+    {
+        return owner.getPartitioner();
+    }
+
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
     {
-        MemtableIndex current = liveMemtables.get(memtable);
-
-        // VSTODO this is obsolete once we no longer support Java 8
-        // We expect the relevant IndexMemtable to be present most of the time, so only make the
-        // call to computeIfAbsent() if it's not. (see https://bugs.openjdk.java.net/browse/JDK-8161372)
-        MemtableIndex target = (current != null)
-                               ? current
-                               : liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this));
+        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
 
         long start = System.nanoTime();
 
@@ -430,27 +436,20 @@ public class IndexContext
 
         RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
 
-        for (MemtableIndex index : memtables)
+        try
         {
-            builder.add(index.search(context, e, keyRange, limit));
+            for (MemtableIndex index : memtables)
+            {
+                builder.add(index.search(context, e, keyRange, limit));
+            }
+
+            return builder.build();
         }
-
-        return builder.build();
-    }
-
-    public List<CloseableIterator<ScoredPrimaryKey>> orderMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
-    {
-        Collection<MemtableIndex> memtables = liveMemtables.values();
-
-        if (memtables.isEmpty())
-            return List.of();
-
-        var result = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(memtables.size());
-
-        for (MemtableIndex index : memtables)
-            result.add(index.orderBy(context, e, keyRange, limit));
-
-        return result;
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(builder.ranges());
+            throw ex;
+        }
     }
 
     private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
@@ -463,27 +462,44 @@ public class IndexContext
 
         RangeIterator.Builder builder = RangeUnionIterator.builder(memtables.size());
 
-        for (Memtable memtable : memtables)
+        try
         {
-            RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
-            builder.add(memtableIterator);
+            for (Memtable memtable : memtables)
+            {
+                RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+                builder.add(memtableIterator);
+            }
+
+            return builder.build();
         }
-        return builder.build();
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(builder.ranges());
+            throw ex;
+        }
     }
 
     // Search all memtables for all PrimaryKeys in list.
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Orderer orderer, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
             return List.of();
 
-        List<CloseableIterator<ScoredPrimaryKey>> result = new ArrayList<>(memtables.size());
-        for (MemtableIndex index : memtables)
-            result.add(index.orderResultsBy(context, source, e, limit));
+        List<CloseableIterator<PrimaryKeyWithSortKey>> result = new ArrayList<>(memtables.size());
+        try
+        {
+            for (MemtableIndex index : memtables)
+                result.add(index.orderResultsBy(context, source, orderer, limit));
 
-        return result;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(result);
+            throw ex;
+        }
     }
 
     public long liveMemtableWriteCount()
@@ -569,12 +585,12 @@ public class IndexContext
      */
     public int openPerIndexFiles()
     {
-        return viewManager.getView().size() * Version.LATEST.onDiskFormat().openFilesPerIndex(this);
+        return viewManager.getView().size() * Version.latest().onDiskFormat().openFilesPerIndex(this);
     }
 
-    public void drop(Collection<SSTableReader> sstablesToRebuild)
+    public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
     {
-        viewManager.drop(sstablesToRebuild);
+        viewManager.prepareSSTablesForRebuild(sstablesToRebuild);
     }
 
     public boolean isIndexed()
@@ -613,7 +629,7 @@ public class IndexContext
         if (op.isLike() || op == Operator.LIKE) return false;
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operator is ANALYZER_MATCHES.
-        if (isAnalyzed || op == Operator.ANALYZER_MATCHES) return isAnalyzed && op == Operator.ANALYZER_MATCHES;
+        if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;
 
         // ANN is only supported against vectors.
         // BOUNDED_ANN is only supported against vectors with a Euclidean similarity function.
@@ -622,6 +638,15 @@ public class IndexContext
             return op == Operator.ANN || (op == Operator.BOUNDED_ANN && hasEuclideanSimilarityFunc);
         if (op == Operator.ANN || op == Operator.BOUNDED_ANN)
             return false;
+
+        // Only regular columns can be sorted by SAI (at least for now)
+        if (op == Operator.ORDER_BY_ASC || op == Operator.ORDER_BY_DESC)
+            return !isCollection()
+                   && column.isRegular()
+                   &&  !(column.type instanceof InetAddressType  // Possible, but need to add decoding logic based on
+                                                                 // SAI's TypeUtil.encode method.
+                         || column.type instanceof DecimalType   // Currently truncates to 24 bytes
+                         || column.type instanceof IntegerType); // Currently truncates to 20 bytes
 
         Expression.Op operator = Expression.Op.valueOf(op);
 
@@ -732,7 +757,7 @@ public class IndexContext
         {
             float[] value = TypeUtil.decomposeVector(getValidator(), getValueOf(key, row, FBUtilities.nowInSeconds()));
             if (value != null)
-                CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
+                VectorValidation.validateIndexable(value, vectorSimilarityFunction);
         }
     }
 
@@ -746,7 +771,7 @@ public class IndexContext
             if (expression.operator() == Operator.ANN && expression.column().equals(column))
             {
                 float[] value = TypeUtil.decomposeVector(getValidator(), expression.getIndexValue());
-                CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
+                VectorValidation.validateIndexable(value, vectorSimilarityFunction);
                 // There is only one ANN expression per query.
                 return;
             }
@@ -806,7 +831,9 @@ public class IndexContext
             if (context.sstable.isMarkedCompacted())
                 return;
 
-            if (!context.indexDescriptor.isPerIndexBuildComplete(this))
+            var perSSTableComponents = context.usedPerSSTableComponents();
+            var perIndexComponents = perSSTableComponents.indexDescriptor().perIndexComponents(this);
+            if (!perSSTableComponents.isComplete() || !perIndexComponents.isComplete())
             {
                 logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
                 return;
@@ -816,15 +843,15 @@ public class IndexContext
             {
                 if (validate)
                 {
-                    if (!context.indexDescriptor.validatePerIndexComponents(this))
+                    if (!perIndexComponents.validateComponents(context.sstable, owner.getTracker(), false))
                     {
-                        logger.warn(logMessage("Invalid per-column component for SSTable {}"), context.descriptor());
+                        // Note that a precise warning is already logged by the validation if there is an issue.
                         invalid.add(context);
                         return;
                     }
                 }
 
-                SSTableIndex index = new SSTableIndex(context, this);
+                SSTableIndex index = new SSTableIndex(context, perIndexComponents);
                 logger.debug(logMessage("Successfully created index for SSTable {}."), context.descriptor());
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.

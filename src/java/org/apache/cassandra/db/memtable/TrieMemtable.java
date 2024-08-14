@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -138,6 +139,14 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
     @Unmetered
     private final TrieMemtableMetricsView metrics;
+
+    /**
+     * Keeps an estimate of the average row size in this memtable, computed from a small sample of rows.
+     * Because computing this estimate is potentially costly, as it requires iterating the rows,
+     * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
+     * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
+     */
+    private volatile MemtableAverageRowSize estimatedAverageRowSize;
 
     @VisibleForTesting
     public static final String SHARD_COUNT_PROPERTY = "cassandra.trie.memtable.shard.count";
@@ -292,14 +301,6 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return shards.length;
     }
 
-    @Override
-    public long rowCount()
-    {
-        DataRange range = DataRange.allData(metadata().partitioner);
-        ColumnFilter columnFilter = ColumnFilter.allRegularColumnsBuilder(metadata(), true).build();
-        return rowCount(columnFilter, range);
-    }
-
     public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         int total = 0;
@@ -314,6 +315,14 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         }
 
         return total;
+    }
+
+    @Override
+    public long getEstimatedAverageRowSize()
+    {
+        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
+            estimatedAverageRowSize = new MemtableAverageRowSize(this);
+        return estimatedAverageRowSize.rowSize;
     }
 
     /**

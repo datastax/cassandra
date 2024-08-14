@@ -25,6 +25,7 @@ import java.util.function.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.Maps;
 import org.apache.cassandra.cql3.Term;
@@ -109,10 +110,12 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     }
 
     @Override
-    public boolean referencesDuration()
+    public boolean referencesDuration(boolean legacyMode)
     {
-        // Maps cannot be created with duration as keys
-        return getValuesType().referencesDuration();
+        if (legacyMode)
+            return getValuesType().referencesDuration(true);
+        else
+            return super.referencesDuration(false);
     }
 
     @SuppressWarnings("unchecked")

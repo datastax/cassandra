@@ -37,6 +37,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
@@ -241,6 +242,8 @@ public class CommitLogReaderTest extends CQLTester
                 seenMutations.add(m);
             }
         }
+
+        public void handleInvalidMutation(TableId id){}
 
         public int seenMutationCount() { return seenMutations.size(); }
     }

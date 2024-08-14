@@ -35,14 +35,16 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -62,23 +64,33 @@ public class SSTableIndex
     private final IndexContext indexContext;
     private final SSTableReader sstable;
     private final SearchableIndex searchableIndex;
+    private final IndexComponents.ForRead perIndexComponents;
 
     private final AtomicInteger references = new AtomicInteger(1);
-    private final AtomicBoolean obsolete = new AtomicBoolean(false);
+    private final AtomicBoolean indexWasDropped = new AtomicBoolean(false);
 
-    public SSTableIndex(SSTableContext sstableContext, IndexContext indexContext)
+    public SSTableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        assert indexContext.getValidator() != null;
-        this.searchableIndex = sstableContext.indexDescriptor.newSearchableIndex(sstableContext, indexContext);
+        assert perIndexComponents.context().getValidator() != null;
+        this.perIndexComponents = perIndexComponents;
+        this.searchableIndex = perIndexComponents.version().onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
 
         this.sstableContext = sstableContext.sharedCopy(); // this line must not be before any code that may throw
-        this.indexContext = indexContext;
+        this.indexContext = perIndexComponents.context();
         this.sstable = sstableContext.sstable;
     }
 
     public IndexContext getIndexContext()
     {
         return indexContext;
+    }
+
+    /**
+     * Returns the concrete on-disk perIndex components used by this index instance.
+     */
+    public IndexComponents.ForRead usedPerIndexComponents()
+    {
+        return perIndexComponents;
     }
 
     public SSTableContext getSSTableContext()
@@ -109,7 +121,7 @@ public class SSTableIndex
      */
     public long sizeOfPerColumnComponents()
     {
-        return sstableContext.indexDescriptor.sizeOnDiskOfPerIndexComponents(indexContext);
+        return perIndexComponents.liveSizeOnDiskInBytes();
     }
 
     /**
@@ -117,7 +129,7 @@ public class SSTableIndex
      */
     public long sizeOfPerSSTableComponents()
     {
-        return sstableContext.indexDescriptor.sizeOnDiskOfPerSSTableComponents();
+        return sstableContext.usedPerSSTableComponents().liveSizeOnDiskInBytes();
     }
 
     /**
@@ -182,12 +194,13 @@ public class SSTableIndex
         return searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
-    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
-                                                             AbstractBounds<PartitionPosition> keyRange,
-                                                             QueryContext context,
-                                                             int limit) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                  AbstractBounds<PartitionPosition> keyRange,
+                                                                  QueryContext context,
+                                                                  int limit,
+                                                                  long totalRows) throws IOException
     {
-        return searchableIndex.orderBy(expression, keyRange, context, limit);
+        return searchableIndex.orderBy(orderer, keyRange, context, limit, totalRows);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)
@@ -197,7 +210,7 @@ public class SSTableIndex
 
     public Version getVersion()
     {
-        return sstableContext.indexDescriptor.getVersion(indexContext);
+        return perIndexComponents.version();
     }
 
     public IndexFeatureSet indexFeatureSet()
@@ -245,18 +258,20 @@ public class SSTableIndex
 
             /*
              * When SSTable is removed, storage-attached index components will be automatically removed by LogTransaction.
-             * We only remove index components explicitly in case of index corruption or index rebuild.
+             * We only remove index components explicitly in case of index corruption or index rebuild if immutable
+             * components are not in use.
              */
-            if (obsolete.get())
-            {
-                sstableContext.indexDescriptor.deleteColumnIndex(indexContext);
-            }
+            if (indexWasDropped.get())
+                perIndexComponents.forWrite().forceDeleteAllComponents();
         }
     }
 
-    public void markObsolete()
+    /**
+     * Indicates that this index has been dropped by the user, and so the underlying files can be safely removed.
+     */
+    public void markIndexDropped()
     {
-        obsolete.getAndSet(true);
+        indexWasDropped.getAndSet(true);
         release();
     }
 
@@ -273,9 +288,9 @@ public class SSTableIndex
         return Objects.hashCode(sstableContext, indexContext);
     }
 
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
     {
-        return searchableIndex.orderResultsBy(context, keys, exp, limit);
+        return searchableIndex.orderResultsBy(context, keys, orderer, limit, totalRows);
     }
 
     public String toString()

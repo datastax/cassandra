@@ -348,7 +348,7 @@ public class BackgroundCompactionRunner implements Runnable
         }
         else
         {
-            logger.debug("No compaction tasks for {}", cfs);
+            logger.trace("No compaction tasks for {}", cfs);
             return null;
         }
     }
@@ -397,7 +397,7 @@ public class BackgroundCompactionRunner implements Runnable
         }
         else
         {
-            logger.debug("No upgrade tasks for {}", cfs);
+            logger.trace("No upgrade tasks for {}", cfs);
             return null;
         }
     }

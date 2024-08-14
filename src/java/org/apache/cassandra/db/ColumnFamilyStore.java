@@ -800,7 +800,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             storageHandler.unload();
 
-            if (status.isInvalidAndShouldDropData())
+            // wait for sstable GlobalTidy to complete
+            if (!status.isValid())
             {
                 LifecycleTransaction.waitForDeletions(); // just in case an index had a reference on the sstable
             }
@@ -1589,7 +1590,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public ShardBoundaries localRangeSplits(int shardCount)
     {
-        if (shardCount == 1 || !getPartitioner().splitter().isPresent() || SchemaConstants.isLocalSystemKeyspace(keyspace.getName()))
+        if (shardCount == 1 ||
+            !getPartitioner().splitter().isPresent() ||
+            // shard PAXOS table like any other table
+            (SchemaConstants.isLocalSystemKeyspace(keyspace.getName()) && !name.equals(SystemKeyspace.PAXOS)))
             return ShardBoundaries.NONE;
 
         ShardBoundaries shardBoundaries = cachedShardBoundaries;
@@ -2390,18 +2394,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         invalidateCachedPartition(new RowCacheKey(metadata(), key));
     }
 
-    public ClockAndCount getCachedCounter(ByteBuffer partitionKey, Clustering<?> clustering, ColumnMetadata column, CellPath path)
+    public ClockAndCount getCachedCounter(CounterCacheKey key)
     {
         if (CacheService.instance.counterCache.getCapacity() == 0L) // counter cache disabled.
             return null;
-        return CacheService.instance.counterCache.get(CounterCacheKey.create(metadata(), partitionKey, clustering, column, path));
+        return CacheService.instance.counterCache.get(key);
     }
 
-    public void putCachedCounter(ByteBuffer partitionKey, Clustering<?> clustering, ColumnMetadata column, CellPath path, ClockAndCount clockAndCount)
+    public void putCachedCounter(CounterCacheKey key, ClockAndCount clockAndCount)
     {
         if (CacheService.instance.counterCache.getCapacity() == 0L) // counter cache disabled.
             return;
-        CacheService.instance.counterCache.put(CounterCacheKey.create(metadata(), partitionKey, clustering, column, path), clockAndCount);
+        CacheService.instance.counterCache.put(key, clockAndCount);
     }
 
     public void forceMajorCompaction()
@@ -2562,6 +2566,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      * For testing.  No effort is made to clear historical or even the current memtables, nor for
      * thread safety.  All we do is wipe the sstable containers clean, while leaving the actual
      * data files present on disk.  (This allows tests to easily call loadNewSSTables on them.)
+     *
+     * This will release references to current SSTableReader instances. Test that wishes to keep
+     * references to these sstables must reference then prior to calling this method via
+     * {@link SSTableReader#selfRef().ref()}.
      */
     @VisibleForTesting
     public void clearUnsafe()
@@ -3050,7 +3058,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return count > 0 ? sum * 1.0 / count : 0;
     }
 
-    public int getMeanRowCount()
+    public int getMeanRowsPerPartition()
     {
         long totalRows = 0;
         long totalPartitions = 0;

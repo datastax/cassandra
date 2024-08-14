@@ -27,6 +27,8 @@ import org.apache.cassandra.utils.obs.OffHeapBitSet;
 public class FilterFactory
 {
     public static final IFilter AlwaysPresent = new AlwaysPresentFilter();
+    // marker for lazy bloom filter
+    public static final IFilter AlwaysPresentForLazyLoading = new AlwaysPresentFilter();
 
     private static final Logger logger = LoggerFactory.getLogger(FilterFactory.class);
     private static final long BITSET_EXCESS = 20;

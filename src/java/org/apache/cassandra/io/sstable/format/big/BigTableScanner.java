@@ -105,14 +105,26 @@ public class BigTableScanner implements ISSTableScanner
     {
         assert sstable != null;
 
-        this.dfile = sstable.openDataReader();
-        this.ifile = sstable.openIndexReader();
-        this.sstable = sstable;
-        this.columns = columns;
-        this.dataRange = dataRange;
-        this.rowIndexEntrySerializer = new BigTableRowIndexEntry.Serializer(sstable.descriptor.version, sstable.header);
-        this.rangeIterator = rangeIterator;
-        this.listener = listener;
+        RandomAccessReader dfile = null;
+        RandomAccessReader ifile = null;
+        try
+        {
+            dfile = sstable.openDataReader();
+            ifile = sstable.openIndexReader();
+            this.sstable = sstable;
+            this.columns = columns;
+            this.dataRange = dataRange;
+            this.rowIndexEntrySerializer = new BigTableRowIndexEntry.Serializer(sstable.descriptor.version, sstable.header);
+            this.rangeIterator = rangeIterator;
+            this.listener = listener;
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(dfile, ifile);
+            throw t;
+        }
+        this.dfile = dfile;
+        this.ifile = ifile;
     }
 
     private static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, Collection<Range<Token>> tokenRanges)

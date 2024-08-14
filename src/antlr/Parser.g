@@ -255,6 +255,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
     @init {
         Term.Raw limit = null;
         Term.Raw perPartitionLimit = null;
+        Term.Raw offset = null;
         List<Ordering.Raw> orderings = new ArrayList<>();
         List<ColumnIdentifier> groups = new ArrayList<>();
         boolean allowFiltering = false;
@@ -268,7 +269,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
       ( K_GROUP K_BY groupByClause[groups] ( ',' groupByClause[groups] )* )?
       ( K_ORDER K_BY orderByClause[orderings] ( ',' orderByClause[orderings] )* )?
       ( K_PER K_PARTITION K_LIMIT rows=intValue { perPartitionLimit = rows; } )?
-      ( K_LIMIT rows=intValue { limit = rows; } )?
+      ( K_LIMIT rows=intValue { limit = rows; } ( K_OFFSET rows=intValue { offset = rows; } )? )?
       ( K_ALLOW K_FILTERING  { allowFiltering = true; } )?
       {
           SelectStatement.Parameters params = new SelectStatement.Parameters(orderings,
@@ -277,7 +278,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
                                                                              allowFiltering,
                                                                              isJson);
           WhereClause where = wclause == null ? WhereClause.empty() : wclause.build();
-          $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit);
+          $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit, offset);
       }
     ;
 
@@ -1794,7 +1795,9 @@ comparatorTypeWithoutTuples returns [CQL3Type.Raw t]
     | K_FROZEN '<' f=comparatorType '>'
       {
         try {
-            $t = f.freeze();
+            // antlr might try to recover and give a null for f. It will still properly error out in the end, but we want
+            // to avoid NPE in the call to #freeze() so we should bypass this or we'll have a weird user-facing error.
+            $t = f == null ? null : f.freeze();
         } catch (InvalidRequestException e) {
             addRecognitionError(e.getMessage());
         }
@@ -1964,5 +1967,6 @@ basic_unreserved_keyword returns [String str]
         | K_COLUMN
         | K_RECORD
         | K_ANN_OF
+        | K_OFFSET
         ) { $str = $k.text; }
     ;

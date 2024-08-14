@@ -117,13 +117,13 @@ public class AnalzyerDistributedTest extends TestBaseImpl
         }
         // We match the first inserted statement here, and that one is just written 1/100 times
         var result = execute("SELECT * FROM %s WHERE val : 'tokenized'");
-        assertThat(result).hasSize(iterations / 100);
+        assertThat(result).hasNumberOfRows(iterations / 100);
         // We match the first and second inserted statements here, and those account for 1/2 the inserts
         result = execute("SELECT * FROM %s WHERE val : 'this'");
-        assertThat(result).hasSize(iterations / 2);
+        assertThat(result).hasNumberOfRows(iterations / 2);
         // We match the last write here, and that accounts for the other 1/2 of the inserts
         result = execute("SELECT * FROM %s WHERE val : 'test'");
-        assertThat(result).hasSize(iterations / 2);
+        assertThat(result).hasNumberOfRows(iterations / 2);
     }
 
     private static Object[][] execute(String query)

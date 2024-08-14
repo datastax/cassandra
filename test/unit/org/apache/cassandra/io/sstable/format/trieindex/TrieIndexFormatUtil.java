@@ -36,22 +36,25 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 
 public class TrieIndexFormatUtil
 {
-    static
+    public static PartitionIndex partitionIndex;
+
+    public static void init(ByteComparable.Version version)
     {
         try
         {
             File f = FileUtils.createTempFile("empty-index", "db");
             try (SequentialWriter writer = new SequentialWriter(f);
                  FileHandle.Builder fhBuilder = new FileHandle.Builder(f);
-                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder))
+                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version))
             {
                 builder.complete();
-                partitionIndex = PartitionIndex.load(fhBuilder, Util.testPartitioner(), false);
+                partitionIndex = PartitionIndex.load(fhBuilder, Util.testPartitioner(), false, version);
             }
         }
         catch (IOException e)
@@ -60,7 +63,6 @@ public class TrieIndexFormatUtil
         }
     }
 
-    public static final PartitionIndex partitionIndex;
 
     public static SSTableReader emptyReader(Descriptor desc,
                                             Set<Component> components,

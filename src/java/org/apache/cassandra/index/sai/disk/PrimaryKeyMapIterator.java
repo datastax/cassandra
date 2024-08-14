@@ -24,6 +24,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.schema.TableMetadata;
@@ -69,12 +70,14 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     {
         KeyFilter filter;
         TableMetadata metadata = ctx.sstable().metadata();
-        if (metadata.hasStaticColumns())
+        // if not row-aware, we don't have clustering
+        var perSSTableComponents = ctx.usedPerSSTableComponents();
+        if (perSSTableComponents.version().onDiskFormat().indexFeatureSet().isRowAware() && metadata.hasStaticColumns())
             filter = KeyFilter.KEYS_WITH_CLUSTERING;
         else // the table doesn't consist anything we want to filter out, so let's use the cheap option
             filter = KeyFilter.ALL;
 
-        if (ctx.indexDescriptor().isSSTableEmpty())
+        if (perSSTableComponents.isEmpty())
             return RangeIterator.empty();
 
         PrimaryKeyMap keys = ctx.primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
@@ -85,7 +88,7 @@ public final class PrimaryKeyMapIterator extends RangeIterator
             return RangeIterator.empty();
         }
 
-        PrimaryKey.Factory pkFactory = ctx.indexDescriptor.primaryKeyFactory;
+        PrimaryKey.Factory pkFactory = ctx.primaryKeyFactory();
         Token minToken = keyRange.left.getToken();
         PrimaryKey minKeyBound = pkFactory.createTokenOnly(minToken);
         PrimaryKey sstableMinKey = keys.primaryKeyFromRowId(0);

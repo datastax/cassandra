@@ -29,16 +29,16 @@ import org.slf4j.LoggerFactory;
 
 import org.agrona.collections.IntArrayList;
 import org.agrona.collections.LongArrayList;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdapter;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
+import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.store.DataOutput;
-import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.packed.DirectWriter;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.Math.max;
@@ -100,18 +100,20 @@ public class PostingsWriter implements Closeable
     private final long[] deltaBuffer;
     private final LongArrayList blockOffsets = new LongArrayList();
     private final LongArrayList blockMaxIDs = new LongArrayList();
-    private final ResettableByteBuffersIndexOutput inMemoryOutput = new ResettableByteBuffersIndexOutput(1024, "blockOffsets");
+    private final ResettableByteBuffersIndexOutput inMemoryOutput;
 
     private final long startOffset;
 
     private int bufferUpto;
     private long lastSegmentRowId;
     private long maxDelta;
+    // This number is the count of row ids written to the postings for this segment. Because a segment row id can be in
+    // multiple postings list for the segment, this number could exceed Integer.MAX_VALUE, so we use a long.
     private long totalPostings;
 
-    public PostingsWriter(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
+    public PostingsWriter(IndexComponents.ForWrite components) throws IOException
     {
-        this(indexDescriptor, indexContext, BLOCK_SIZE);
+        this(components, BLOCK_SIZE);
     }
 
     public PostingsWriter(IndexOutput dataOutput) throws IOException
@@ -120,9 +122,9 @@ public class PostingsWriter implements Closeable
     }
 
     @VisibleForTesting
-    PostingsWriter(IndexDescriptor indexDescriptor, IndexContext indexContext, int blockSize) throws IOException
+    PostingsWriter(IndexComponents.ForWrite components, int blockSize) throws IOException
     {
-        this(indexDescriptor.openPerIndexOutput(IndexComponent.POSTING_LISTS, indexContext, true), blockSize);
+        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), blockSize);
     }
 
     private PostingsWriter(IndexOutput dataOutput, int blockSize) throws IOException
@@ -133,6 +135,7 @@ public class PostingsWriter implements Closeable
         this.dataOutput = dataOutput;
         startOffset = dataOutput.getFilePointer();
         deltaBuffer = new long[blockSize];
+        inMemoryOutput = LuceneCompat.getResettableByteBuffersIndexOutput(dataOutput.order(), 1024, "blockOffsets");
         SAICodecUtils.writeHeader(dataOutput);
     }
 
@@ -182,7 +185,7 @@ public class PostingsWriter implements Closeable
         blockOffsets.clear();
         blockMaxIDs.clear();
 
-        long segmentRowId;
+        int segmentRowId;
         // When postings list are merged, we don't know exact size, just an upper bound.
         // We need to count how many postings we added to the block ourselves.
         int size = 0;
@@ -271,14 +274,14 @@ public class PostingsWriter implements Closeable
 
     private void writePostingsBlock(long maxValue, int blockSize) throws IOException
     {
-        final int bitsPerValue = maxValue == 0 ? 0 : DirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxValue);
 
         assert bitsPerValue < Byte.MAX_VALUE;
 
         dataOutput.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriter writer = DirectWriter.getInstance(dataOutput, blockSize, bitsPerValue);
+            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, blockSize, bitsPerValue);
             for (int i = 0; i < blockSize; ++i)
             {
                 writer.add(deltaBuffer[i]);
@@ -292,11 +295,11 @@ public class PostingsWriter implements Closeable
         final long maxValue = values.getLong(values.size() - 1);
 
         assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : DirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(output.order(), maxValue);
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriter writer = DirectWriter.getInstance(output, values.size(), bitsPerValue);
+            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(output.order(), output, values.size(), bitsPerValue);
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getLong(i));
@@ -310,11 +313,11 @@ public class PostingsWriter implements Closeable
         final int maxValue = values.getInt(values.size() - 1);
 
         assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : DirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(output.order(), maxValue);
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriter writer = DirectWriter.getInstance(output, values.size(), bitsPerValue);
+            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(output.order(), output, values.size(), bitsPerValue);
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getInt(i));

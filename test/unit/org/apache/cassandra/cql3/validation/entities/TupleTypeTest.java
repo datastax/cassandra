@@ -35,6 +35,8 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.DurationType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -327,7 +329,7 @@ public class TupleTypeTest extends CQLTester
     }
 
     /**
-     * This test verifies if the tuple type is properly parsed from CQL. In particular, it checks that when a column is 
+     * This test verifies if the tuple type is properly parsed from CQL. In particular, it checks that when a column is
      * defined as a tuple, the tuple type is implicitly frozen, which applies also to all the nested tuples and UDTs.
      * For dropped columns we chech that the top level type (and only it) is not automatically frozen.
      */
@@ -390,7 +392,8 @@ public class TupleTypeTest extends CQLTester
 
     private static Gen<TypeAndRows> typesAndRowsGen(int numRows)
     {
-        Gen<TupleType> typeGen = tupleTypeGen(primitiveTypeGen(), SourceDSL.integers().between(1, 10));
+        // duration type is invalid for keys
+        Gen<TupleType> typeGen = tupleTypeGen(primitiveTypeGen(DurationType.instance, DecimalType.instance), SourceDSL.integers().between(1, 10));
         Set<ByteBuffer> distinctRows = new HashSet<>(numRows); // reuse the memory
         Gen<TypeAndRows> gen = rnd -> {
             TypeAndRows c = new TypeAndRows();
