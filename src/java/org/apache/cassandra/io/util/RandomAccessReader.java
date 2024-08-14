@@ -93,7 +93,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     @Override
     public void read(float[] dest, int offset, int count) throws IOException
     {
-        while (count > 0)
+        var copied = 0;
+        while (copied < count)
         {
             var bh = bufferHolder;
             long position = getPosition();
@@ -111,7 +112,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             }
             else
             {
-                // offset is non-zero, and probably not aligned to Float.BYTES, so
+                // bufferHolder offset is non-zero, and probably not aligned to Float.BYTES, so
                 // set the position before converting to FloatBuffer.
                 var bb = bh.buffer();
                 bb.order(order);
@@ -119,28 +120,28 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
                 floatBuffer = bb.asFloatBuffer();
             }
 
-            var elementsRead = Math.min(floatBuffer.remaining(), count);
-            if (elementsRead == 0)
+            var remaining = floatBuffer.remaining();
+            if (remaining == 0)
             {
-                dest[offset] = readFloat();
+                // slow path -- desired slice is across region boundaries
+                dest[offset + copied] = readFloat();
                 seek(position + Float.BYTES);
-                count--;
-                offset++;
+                copied++;
             }
             else
             {
-                floatBuffer.get(dest, offset, elementsRead);
-                seek(position + ((long) elementsRead * Float.BYTES));
-                count -= elementsRead;
-                offset += elementsRead;
+                var elementsToRead = Math.min(remaining, count - copied);
+                floatBuffer.get(dest, offset + copied, elementsToRead);
+                seek(position + ((long) elementsToRead * Float.BYTES));
+                copied += elementsToRead;
             }
         }
     }
 
     @Override
     public void readFully(long[] dest) throws IOException {
-        int offset = 0;
-        while (offset < dest.length)
+        int copied = 0;
+        while (copied < dest.length)
         {
             var bh = bufferHolder;
             long position = getPosition();
@@ -166,18 +167,20 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
                 longBuffer = bb.asLongBuffer();
             }
 
-            var elementsRead = Math.min(longBuffer.remaining(), dest.length - offset);
-            if (elementsRead == 0)
+            var remaining = longBuffer.remaining();
+            if (remaining == 0)
             {
-                dest[offset] = readLong();
+                // slow path -- desired slice is across region boundaries
+                dest[copied] = readLong();
                 seek(position + Long.BYTES);
-                offset++;
+                copied++;
             }
             else
             {
-                longBuffer.get(dest, offset, elementsRead);
-                seek(position + ((long) elementsRead * Long.BYTES));
-                offset += elementsRead;
+                var elementsToRead = Math.min(remaining, dest.length - copied);
+                longBuffer.get(dest, copied, elementsToRead);
+                seek(position + ((long) elementsToRead * Long.BYTES));
+                copied += elementsToRead;
             }
         }
     }
@@ -194,7 +197,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     @Override
     public void read(int[] dest, int offset, int count) throws IOException
     {
-        while (count > 0)
+        int copied = 0;
+        while (copied < count)
         {
             var bh = bufferHolder;
             long position = getPosition();
@@ -220,20 +224,20 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
                 intBuffer = bb.asIntBuffer();
             }
 
-            var elementsRead = Math.min(intBuffer.remaining(), count);
-            if (elementsRead == 0)
+            var remaining = intBuffer.remaining();
+            if (remaining == 0)
             {
-                dest[offset] = readInt();
+                // slow path -- desired slice is across region boundaries
+                dest[offset + copied] = readInt();
                 seek(position + Integer.BYTES);
-                count--;
-                offset++;
+                copied++;
             }
             else
             {
-                intBuffer.get(dest, offset, elementsRead);
-                seek(position + ((long) elementsRead * Integer.BYTES));
-                count -= elementsRead;
-                offset += elementsRead;
+                var elementsToRead = Math.min(remaining, count - copied);
+                intBuffer.get(dest, offset + copied, elementsToRead);
+                seek(position + ((long) elementsToRead * Integer.BYTES));
+                copied += elementsToRead;
             }
         }
     }
