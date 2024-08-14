@@ -259,7 +259,8 @@ class SSTableReversedIterator extends AbstractSSTableIterator<RowIndexEntry>
                 indexReader.close();
             indexReader = new RowIndexReverseIterator(ifile,
                                                       indexEntry,
-                                                      comparator.asByteComparable(slice.end()));
+                                                      comparator.asByteComparable(slice.end()),
+                                                      sstable.descriptor.version.getByteComparableVersion());
             gotoBlock(indexReader.nextIndexInfo(), true, Long.MAX_VALUE);
         }
 

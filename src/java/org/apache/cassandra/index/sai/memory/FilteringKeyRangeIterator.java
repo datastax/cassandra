@@ -17,30 +17,48 @@
  */
 package org.apache.cassandra.index.sai.memory;
 
-import java.util.SortedSet;
+import java.io.IOException;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.RangeIterator;
 
 /**
- * A {@link KeyRangeIterator} that filters the returned {@PrimaryKey}s based on the provided keyRange
+ * A {@link RangeIterator} that filters the returned {@link PrimaryKey}s based on the provided keyRange
  */
-public class FilteringKeyRangeIterator extends KeyRangeIterator
+public class FilteringKeyRangeIterator extends RangeIterator
 {
     private final AbstractBounds<PartitionPosition> keyRange;
+    private final RangeIterator source;
 
-    public FilteringKeyRangeIterator(SortedSet<PrimaryKey> keys, AbstractBounds<PartitionPosition> keyRange)
+    public FilteringKeyRangeIterator(RangeIterator source, AbstractBounds<PartitionPosition> keyRange)
     {
-        super(keys);
+        super(source.getMinimum(), source.getMaximum(), source.getMaxKeys());
         this.keyRange = keyRange;
+        this.source = source;
     }
 
+    @Override
     protected PrimaryKey computeNext()
     {
-        PrimaryKey key = computeNextKey();
-        while (key != null && !keyRange.contains(key.partitionKey()))
-            key = computeNextKey();
-        return key == null ? endOfData() : key;
+        while (source.hasNext())
+        {
+            PrimaryKey key = source.next();
+            if (keyRange.contains(key.partitionKey()))
+                return key;
+        }
+        return endOfData();
+    }
+
+    @Override
+    protected void performSkipTo(PrimaryKey nextKey)
+    {
+        source.skipTo(nextKey);
+    }
+
+    @Override
+    public void close() throws IOException
+    {
     }
 }

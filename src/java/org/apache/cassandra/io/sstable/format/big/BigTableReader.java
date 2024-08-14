@@ -19,7 +19,6 @@ package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 
@@ -79,7 +78,11 @@ public class BigTableReader extends SSTableReader
 
     @Override
     public void setup(boolean trackHotness) {
-        tidy.setup(this, trackHotness, Arrays.asList(bf, indexSummary, dfile, ifile));
+        tidy.setup(this, trackHotness);
+        tidy.addCloseable(bf);
+        tidy.addCloseable(indexSummary);
+        tidy.addCloseable(dfile);
+        tidy.addCloseable(ifile);
         super.setup(trackHotness);
     }
     @Override
@@ -184,7 +187,7 @@ public class BigTableReader extends SSTableReader
         if (op == Operator.EQ)
         {
             assert key instanceof DecoratedKey; // EQ only make sense if the key is a valid row key
-            if (!bf.isPresent((DecoratedKey)key))
+            if (!inBloomFilter((DecoratedKey)key))
             {
                 listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
                 if (Tracing.traceSinglePartitions())
@@ -249,6 +252,8 @@ public class BigTableReader extends SSTableReader
         // next index position because the searched key can be greater the last key of the index interval checked if it
         // is lesser than the first key of next interval (and in that case we must return the position of the first key
         // of the next interval).
+        listener.onSSTablePartitionIndexAccessed(this);
+
         int i = 0;
         File path = null;
         try (FileDataInput in = ifile.createReader(sampledPosition))

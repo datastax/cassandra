@@ -23,7 +23,6 @@ import java.util.Collections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 
@@ -69,61 +68,99 @@ public class NativeLibraryLinux implements NativeLibraryWrapper
         }
     }
 
-    private static native int mlockall(int flags) throws LastErrorException;
-    private static native int munlockall() throws LastErrorException;
-    private static native int fcntl(int fd, int command, long flags) throws LastErrorException;
-    private static native int posix_fadvise(int fd, long offset, int len, int flag) throws LastErrorException;
-    private static native int open(String path, int flags) throws LastErrorException;
-    private static native int fsync(int fd) throws LastErrorException;
-    private static native int close(int fd) throws LastErrorException;
-    private static native Pointer strerror(int errnum) throws LastErrorException;
-    private static native long getpid() throws LastErrorException;
+    private static native int mlockall(int flags);
+    private static native int munlockall();
+    private static native int fcntl(int fd, int command, long flags);
+    private static native int posix_fadvise(int fd, long offset, int len, int flag);
+    private static native int posix_madvise(Pointer addr, long length, int advice);
+    private static native int open(String path, int flags);
+    private static native int fsync(int fd);
+    private static native int close(int fd);
+    private static native Pointer strerror(int errnum);
+    private static native long getpid();
 
-    public int callMlockall(int flags) throws UnsatisfiedLinkError, RuntimeException
+    private void throwNativeError() throws NativeError
     {
-        return mlockall(flags);
+        var errno = Native.getLastError();
+        throw new NativeError(strerror(errno).getString(0), errno);
     }
 
-    public int callMunlockall() throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public void callMlockall(int flags) throws NativeError
     {
-        return munlockall();
+        int r = mlockall(flags);
+        if (r != 0)
+            throwNativeError();
     }
 
-    public int callFcntl(int fd, int command, long flags) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public void callMunlockall() throws NativeError
     {
-        return fcntl(fd, command, flags);
+        int r = munlockall();
+        if (r != 0)
+            throwNativeError();
     }
 
-    public int callPosixFadvise(int fd, long offset, int len, int flag) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callFcntl(int fd, int command, long flags) throws NativeError
     {
-        return posix_fadvise(fd, offset, len, flag);
+        int r = fcntl(fd, command, flags);
+        if (r < 0)
+            throwNativeError();
+        return r;
     }
 
-    public int callOpen(String path, int flags) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public void callPosixFadvise(int fd, long offset, int len, int flag) throws NativeError
     {
-        return open(path, flags);
+        int r = posix_fadvise(fd, offset, len, flag);
+        if (r != 0)
+            throwNativeError();
     }
 
-    public int callFsync(int fd) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public void callPosixMadvise(Pointer addr, long length, int advice) throws NativeError
     {
-        return fsync(fd);
+        int r = posix_madvise(addr, length, advice);
+        if (r != 0)
+            throwNativeError();
     }
 
-    public int callClose(int fd) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callOpen(String path, int flags) throws NativeError
     {
-        return close(fd);
+        int r = open(path, flags);
+        if (r < 0)
+            throwNativeError();
+        return r;
     }
 
-    public Pointer callStrerror(int errnum) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public void callFsync(int fd) throws NativeError
     {
-        return strerror(errnum);
+        int r = fsync(fd);
+        if (r != 0)
+            throwNativeError();
     }
 
-    public long callGetpid() throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public void callClose(int fd) throws NativeError
     {
-        return getpid();
+        int r = close(fd);
+        if (r != 0)
+            throwNativeError();
     }
 
+    @Override
+    public long callGetpid() throws NativeError
+    {
+        long r = getpid();
+        if (r < 0)
+            throwNativeError();
+        return r;
+    }
+
+    @Override
     public boolean isAvailable()
     {
         return available;

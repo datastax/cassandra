@@ -28,21 +28,27 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.Pair;
 import org.quicktheories.core.Gen;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -51,16 +57,41 @@ import static org.quicktheories.generators.SourceDSL.booleans;
 import static org.quicktheories.generators.SourceDSL.integers;
 import static org.quicktheories.generators.SourceDSL.longs;
 
+@RunWith(Parameterized.class)
 public class DecayingEstimatedHistogramReservoirTest
 {
+    @Parameterized.Parameter
+    public Boolean useDseHistogramBehaviour;
+
+    @Parameterized.Parameters(name = "dseHistograms={0}")
+    public static Iterable<Boolean> useDseHistogramBehaviour()
+    {
+        return ImmutableSet.of(false, true);
+    }
+
     public static final Logger logger = LoggerFactory.getLogger(DecayingEstimatedHistogramReservoirTest.class);
     private static final double DOUBLE_ASSERT_DELTA = 0;
 
     public static final int numExamples = 1000000;
-    public static final Gen<long[]> offsets = integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT)
-                                                        .upToAndIncluding(DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT - 10)
-                                                        .zip(booleans().all(), EstimatedHistogram::newOffsets);
+    public Gen<long[]> offsets;
 
+    public static final long[] dseOffsetsWith0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, true);
+    public static final long[] dseOffsetsWithout0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, false);
+
+    private Gen<long[]> generateOffsets()
+    {
+        assertEquals(useDseHistogramBehaviour, CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean());
+        return integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT)
+                  .upToAndIncluding(DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT - 10)
+                  .zip(booleans().all(), EstimatedHistogram::newOffsets);
+    }
+
+    @Before
+    public void setup()
+    {
+        CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.setBoolean(useDseHistogramBehaviour);
+        offsets = generateOffsets();
+    }
 
     @Test
     public void testFindIndex()
@@ -86,7 +117,38 @@ public class DecayingEstimatedHistogramReservoirTest
     {
         int modelIndex = Arrays.binarySearch(offsets, value);
         if (modelIndex < 0)
+        {
             modelIndex = -modelIndex - 1;
+            // Special DSE handling of overflows:
+            // in C* overflows have their own bucket. there's one bucket more than the offsets.
+            // with C* behaviour the largest offset defines the overflow boundary
+            // with DSE behaviour the offsets are lower bound, but the index calculation doesn't really care
+            // about offsets, and can compute the index for arbitrary values. Only if the index is greater
+            // than the number of offsets, the value is considered an overflow.
+            // The model cannot replicate this behaviour with binarySearch, because it doesn't know this overflow
+            // boundary (which is the smallest offset not included in the offsets[] array)
+            // Let's use extended dse offsets to let the model handle overflows
+            if (useDseHistogramBehaviour && modelIndex == offsets.length && modelIndex < MAX_BUCKET_COUNT)
+            {
+                int dseModelIndex = offsets[0] == 0 ?
+                       findIndexModel(dseOffsetsWith0, value) :
+                       findIndexModel(dseOffsetsWithout0, value);
+                if (dseModelIndex >= offsets.length)
+                    return offsets.length; // overflow
+                else
+                    return offsets.length - 1; // no overflow; just a value that belongs to the last bucket
+            }
+            // Special DSE handling of bucket boundaries
+            // DSE offsets are lower inclusive bounds, not upper inclusive bounds as in C* (or as in Arrays.binarySearch)
+            // so the value belongs to a bucket with a lower offset; we need to decrement the modelIndex
+            //special case:
+            // - value 0, for which the insertion point will be -1, and thus modelIndex = 0 belongs to the first bucket
+            // (there is no bucket with smaller offset), so no need to decrement modelIndex
+            if (useDseHistogramBehaviour && value > 0)
+            {
+                modelIndex--;
+            }
+        }
 
         return modelIndex;
     };
@@ -94,6 +156,8 @@ public class DecayingEstimatedHistogramReservoirTest
     @Test
     public void showEstimationWorks()
     {
+        if (useDseHistogramBehaviour)
+            return; // doesn't make sense with DSE buckets
         qt().withExamples(numExamples)
             .forAll(offsets.flatMap(offs -> this.offsetsAndValue(offs, false, 9)))
             .check(this::checkEstimation);
@@ -227,7 +291,15 @@ public class DecayingEstimatedHistogramReservoirTest
         histogram.update(16);
         Snapshot snapshot = histogram.getSnapshot();
         assertEquals(15, snapshot.getMin());
-        assertEquals(17, snapshot.getMax());
+        if (useDseHistogramBehaviour)
+        {
+            // DSE bucket boundary is 16, not 17
+            assertEquals(16, snapshot.getMax());
+        }
+        else
+        {
+            assertEquals(17, snapshot.getMax());
+        }
     }
 
     @Test
@@ -285,6 +357,8 @@ public class DecayingEstimatedHistogramReservoirTest
     @Test
     public void testFindingCorrectBuckets()
     {
+        if (useDseHistogramBehaviour)
+            return; // doesn't make sense with DSE buckets; too big reliance on particular bucket boundaries
         TestClock clock = new TestClock();
 
         DecayingEstimatedHistogramReservoir histogram = new DecayingEstimatedHistogramReservoir(DecayingEstimatedHistogramReservoir.DEFAULT_ZERO_CONSIDERATION, 90, 1, clock);
@@ -301,6 +375,7 @@ public class DecayingEstimatedHistogramReservoirTest
         assertEquals(2, snapshot.getValues()[13]);
         assertEquals(6277304.5D, snapshot.getMean(), DOUBLE_ASSERT_DELTA);
     }
+
 
     @Test
     public void testPercentile()
@@ -338,6 +413,7 @@ public class DecayingEstimatedHistogramReservoirTest
             assertEquals(5, snapshot.getValue(1.00), DOUBLE_ASSERT_DELTA);
         }
 
+        if (!useDseHistogramBehaviour) // the test is too reliant on particular bucket boundaries to use with DSE histogram
         {
             TestClock clock = new TestClock();
 
@@ -392,6 +468,8 @@ public class DecayingEstimatedHistogramReservoirTest
                     histogram.update(v);
                 }
             }
+
+            DecayingEstimatedHistogramReservoir.EstimatedHistogramReservoirSnapshot s = (DecayingEstimatedHistogramReservoir.EstimatedHistogramReservoirSnapshot) histogram.getSnapshot();
 
             Snapshot snapshot = histogram.getSnapshot();
             assertEstimatedQuantile(05, snapshot.getValue(0.05));
@@ -492,7 +570,7 @@ public class DecayingEstimatedHistogramReservoirTest
             clock.addSeconds(DecayingEstimatedHistogramReservoir.HALF_TIME_IN_S * 100);
             assertEquals(0, histogram.getSnapshot().getValue(0.99), DOUBLE_ASSERT_DELTA);
         }
-
+        if (!useDseHistogramBehaviour) // test too reliant on particular bucket boundaries; no sense to use it with DSE buckets
         {
             TestClock clock = new TestClock();
 
@@ -699,6 +777,17 @@ public class DecayingEstimatedHistogramReservoirTest
 
     private void assertEstimatedQuantile(long expectedValue, double actualValue)
     {
+        if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+        {
+            // DSE histograms have a different bucketing scheme, so let's be more liberal
+            // checking the estimated quantiles (especially that we're only using the non-decaying buckets)
+            long geBound = Math.round(expectedValue * 0.8);
+            long leBound = Math.round(expectedValue * 1.2);
+            assertTrue("Expected at least [" + geBound + "] but actual is [" + actualValue + "]", actualValue >= geBound);
+            assertTrue("Expected no more than [" + leBound + "] but actual is [" + actualValue + "]", actualValue <= leBound);
+            return;
+        }
+
         assertTrue("Expected at least [" + expectedValue + "] but actual is [" + actualValue + "]", actualValue >= expectedValue);
         assertTrue("Expected less than [" + Math.round(expectedValue * 1.2) + "] but actual is [" + actualValue + "]", actualValue < Math.round(expectedValue * 1.2));
     }

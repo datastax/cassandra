@@ -133,4 +133,34 @@ public interface Rebufferer extends ReaderFileProxy
             // nothing to do
         }
     };
+
+    static BufferHolder emptyBufferHolderAt(long offset)
+    {
+        return new BufferHolder()
+        {
+            @Override
+            public ByteBuffer buffer()
+            {
+                return EMPTY.buffer();
+            }
+
+            @Override
+            public ByteOrder order()
+            {
+                return EMPTY.order();
+            }
+
+            @Override
+            public long offset()
+            {
+                return offset;
+            }
+
+            @Override
+            public void release()
+            {
+                // nothing to do
+            }
+        };
+    }
 }

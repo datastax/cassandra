@@ -39,7 +39,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.net.AsyncStreamingInputPlus;
@@ -127,6 +126,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         for (SequentialWriter writer : componentWriters.values())
             writer.finish();
 
+        SSTable.appendTOC(descriptor, components());
         return finished();
     }
 
@@ -134,7 +134,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     public Collection<SSTableReader> finished()
     {
         if (finalReader == null)
-            finalReader = descriptor.getFormat().getReaderFactory().open(descriptor, components, metadata);
+            finalReader = descriptor.getFormat().getReaderFactory().open(descriptor, components(), metadata);
 
         return ImmutableList.of(finalReader);
     }

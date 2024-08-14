@@ -30,48 +30,65 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Executes {@link Expression}s against the trie-based terms dictionary for an individual index segment.
  */
-public class InvertedIndexSearcher extends IndexSearcher
+public class InvertedIndexSearcher extends IndexSearcher implements SegmentOrdering
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final TermsReader reader;
     private final QueryEventListener.TrieIndexEventListener perColumnEventListener;
+    private final Version version;
+    private final boolean filterRangeResults;
 
-    InvertedIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
-                          PerIndexFiles perIndexFiles,
-                          SegmentMetadata segmentMetadata,
-                          IndexDescriptor indexDescriptor,
-                          IndexContext indexContext) throws IOException
+    protected InvertedIndexSearcher(SSTableContext sstableContext,
+                                    PerIndexFiles perIndexFiles,
+                                    SegmentMetadata segmentMetadata,
+                                    IndexContext indexContext,
+                                    Version version,
+                                    boolean filterRangeResults) throws IOException
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
+        super(sstableContext.primaryKeyMapFactory(), perIndexFiles, segmentMetadata, indexContext);
 
-        long root = metadata.getIndexRoot(IndexComponent.TERMS_DATA);
+        long root = metadata.getIndexRoot(IndexComponentType.TERMS_DATA);
         assert root >= 0;
 
+        this.version = version;
+        this.filterRangeResults = filterRangeResults;
         perColumnEventListener = (QueryEventListener.TrieIndexEventListener)indexContext.getColumnQueryMetrics();
 
-        Map<String,String> map = metadata.componentMetadatas.get(IndexComponent.TERMS_DATA).attributes;
+        Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
         long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
+        var perIndexComponents = perIndexFiles.usedPerIndexComponents();
         reader = new TermsReader(indexContext,
                                  indexFiles.termsData(),
+                                 perIndexComponents.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
                                  indexFiles.postingLists(),
-                                 root, footerPointer);
+                                 root,
+                                 footerPointer,
+                                 version);
     }
 
     @Override
@@ -94,18 +111,28 @@ public class InvertedIndexSearcher extends IndexSearcher
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
 
+        // We use the version to encode the search boundaries for the trie to ensure we use version appropriate bounds.
         if (exp.getOp().isEquality() || exp.getOp() == Expression.Op.MATCH)
         {
-            final ByteComparable term = ByteComparable.fixedLength(exp.lower.value.encoded);
+            final ByteComparable term = version.onDiskFormat().encodeForTrie(exp.lower.value.encoded, indexContext.getValidator());
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             return reader.exactMatch(term, listener, context);
         }
         else if (exp.getOp() == Expression.Op.RANGE)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-            return reader.rangeMatch(exp, listener, context);
+            var lower = exp.getEncodedLowerBoundByteComparable(version);
+            var upper = exp.getEncodedUpperBoundByteComparable(version);
+            return reader.rangeMatch(filterRangeResults ? exp : null, lower, upper, listener, context);
         }
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
+    }
+
+    @Override
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    {
+        var iter = new RowIdWithTermsIterator(reader.allTerms(orderer.isAscending()));
+        return toMetaSortedIterator(iter, queryContext);
     }
 
     @Override
@@ -120,5 +147,51 @@ public class InvertedIndexSearcher extends IndexSearcher
     public void close()
     {
         reader.close();
+    }
+
+    /**
+     * An iterator that iterates over a source
+     */
+    private static class RowIdWithTermsIterator extends AbstractIterator<RowIdWithByteComparable>
+    {
+        private final TermsIterator source;
+        private PostingList currentPostingList = PostingList.EMPTY;
+        private ByteComparable currentTerm = null;
+
+        RowIdWithTermsIterator(TermsIterator source)
+        {
+            this.source = source;
+        }
+
+        @Override
+        protected RowIdWithByteComparable computeNext()
+        {
+            try
+            {
+                while (true)
+                {
+                    long nextPosting = currentPostingList.nextPosting();
+                    if (nextPosting != PostingList.END_OF_STREAM)
+                        return new RowIdWithByteComparable(Math.toIntExact(nextPosting), currentTerm);
+
+                    if (!source.hasNext())
+                        return endOfData();
+
+                    currentTerm = source.next();
+                    FileUtils.closeQuietly(currentPostingList);
+                    currentPostingList = source.postings();
+                }
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(source, currentPostingList);
+        }
     }
 }

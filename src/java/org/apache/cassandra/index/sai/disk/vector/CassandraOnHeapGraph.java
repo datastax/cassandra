@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -34,6 +36,7 @@ import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
@@ -41,91 +44,117 @@ import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
-import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.NodeSimilarity;
-import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
+import io.github.jbellis.jvector.graph.disk.Feature;
+import io.github.jbellis.jvector.graph.disk.FeatureId;
+import io.github.jbellis.jvector.graph.disk.InlineVectors;
+import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
+import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.pq.VectorCompressor;
+import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
-import io.github.jbellis.jvector.vector.VectorEncoding;
+import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
-import org.apache.cassandra.config.CassandraRelevantProperties;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.ByteSequence;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+
 import org.apache.cassandra.db.compaction.CompactionSSTable;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
-import org.apache.cassandra.index.sai.utils.IndexFileUtils;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.lucene.util.StringHelper;
 
-public class CassandraOnHeapGraph<T>
+import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
+
+public class CassandraOnHeapGraph<T> implements Accountable
 {
+    // Cassandra's PQ features, independent of JVector's
+    public enum PQVersion {
+        V0, // initial version
+        V1, // includes unit vector calculation
+    }
+
+    /** minimum number of rows to perform PQ codebook generation */
+    public static final int MIN_PQ_ROWS = 1024;
+
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnHeapGraph.class);
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private final ConcurrentVectorValues vectorValues;
-    private final GraphIndexBuilder<float[]> builder;
+    private final GraphIndexBuilder builder;
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
-    private final ConcurrentMap<float[], VectorPostings<T>> postingsMap;
+    private final ConcurrentMap<VectorFloat<?>, VectorPostings<T>> postingsMap;
     private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
-    private final NonBlockingHashMap<T, float[]> vectorsByKey;
+    private final NonBlockingHashMap<T, VectorFloat<?>> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private final VectorSourceModel sourceModel;
+    private final InvalidVectorBehavior invalidVectorBehavior;
     private volatile boolean hasDeletions;
 
+    // we don't need to explicitly close these since only on-heap resources are involved
+    private final ThreadLocal<GraphSearcherAccessManager> searchers;
+
     /**
-     * @param termComparator the vector type -- passed as AbstractType for caller's convenience
-     * @param indexConfig
      * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
      */
-    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexConfig, boolean forSearching)
+    public CassandraOnHeapGraph(IndexContext context, boolean forSearching)
     {
-        serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
-        vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
+        var indexConfig = context.getIndexWriterConfig();
+        var termComparator = context.getValidator();
+        serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
+        var dimension = ((VectorType<?>) termComparator).dimension;
+        vectorValues = new ConcurrentVectorValues(dimension);
         similarityFunction = indexConfig.getSimilarityFunction();
         sourceModel = indexConfig.getSourceModel();
         // We need to be able to inexpensively distinguish different vectors, with a slower path
         // that identifies vectors that are equal but not the same reference.  A comparison-
         // based Map (which only needs to look at vector elements until a difference is found)
         // is thus a better option than hash-based (which has to look at all elements to compute the hash).
-        postingsMap = new ConcurrentSkipListMap<>(Arrays::compare);
+        postingsMap = new ConcurrentSkipListMap<>((a, b) -> {
+            return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
+        });
         postingsByOrdinal = new NonBlockingHashMapLong<>();
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
+        invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
-        builder = new GraphIndexBuilder<>(vectorValues,
-                                          VectorEncoding.FLOAT32,
-                                          similarityFunction,
-                                          indexConfig.getMaximumNodeConnections(),
-                                          indexConfig.getConstructionBeamWidth(),
-                                          1.2f,
-                                          1.2f);
+        builder = new GraphIndexBuilder(vectorValues,
+                                        similarityFunction,
+                                        indexConfig.getAnnMaxDegree(),
+                                        indexConfig.getConstructionBeamWidth(),
+                                        1.0f, // no overflow means add will be a bit slower but flush will be faster
+                                        dimension > 3 ? 1.2f : 2.0f);
+        searchers = ThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(builder.getGraph())));
     }
 
     public int size()
@@ -138,14 +167,19 @@ public class CassandraOnHeapGraph<T>
         return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
     }
 
+    public int getOrdinal(VectorFloat<?> vector)
+    {
+        return postingsMap.get(vector).getOrdinal();
+    }
+
     /**
-     * @return the incremental bytes ysed by adding the given vector to the index
+     * @return the incremental bytes used by adding the given vector to the index
      */
-    public long add(ByteBuffer term, T key, InvalidVectorBehavior behavior)
+    public long add(ByteBuffer term, T key)
     {
         assert term != null && term.remaining() != 0;
 
-        var vector = serializer.deserializeFloatArray(term);
+        var vector = vts.createFloatVector(serializer.deserializeFloatArray(term));
         // Validate the vector.  Almost always, this is called at insert time (which sets invalid behavior to FAIL,
         // resulting in the insert being aborted if the vector is invalid), or while writing out an sstable
         // from flush or compaction (which sets invalid behavior to IGNORE, since we can't just rip existing data out of
@@ -154,13 +188,14 @@ public class CassandraOnHeapGraph<T>
         // However, it's also possible for this to be called during commitlog replay if the node previously crashed
         // AFTER processing CREATE INDEX, but BEFORE flushing active memtables.  Commitlog replay will then follow
         // the normal insert code path, (which would set behavior to FAIL) so we special-case it here; see VECTOR-269.
+        var behavior = invalidVectorBehavior;
         if (!StorageService.instance.isInitialized())
             behavior = InvalidVectorBehavior.IGNORE; // we're replaying the commitlog so force IGNORE
         if (behavior == InvalidVectorBehavior.IGNORE)
         {
             try
             {
-                validateIndexable(vector, similarityFunction);
+                VectorValidation.validateIndexable(vector, similarityFunction);
             }
             catch (InvalidRequestException e)
             {
@@ -174,7 +209,7 @@ public class CassandraOnHeapGraph<T>
         else
         {
             assert behavior == InvalidVectorBehavior.FAIL;
-            validateIndexable(vector, similarityFunction);
+            VectorValidation.validateIndexable(vector, similarityFunction);
         }
 
         var bytesUsed = 0L;
@@ -199,7 +234,7 @@ public class CassandraOnHeapGraph<T>
         // in the other structures as well.
         if (postings == null)
         {
-            postings = new VectorPostings<T>(key);
+            postings = new VectorPostings<>(key);
             // since we are using ConcurrentSkipListMap, it is NOT correct to use computeIfAbsent here
             if (postingsMap.putIfAbsent(vector, postings) == null)
             {
@@ -208,9 +243,9 @@ public class CassandraOnHeapGraph<T>
                 postings.setOrdinal(ordinal);
                 bytesUsed += RamEstimation.concurrentHashMapRamUsed(1); // the new posting Map entry
                 bytesUsed += vectorValues.add(ordinal, vector);
-                bytesUsed += VectorPostings.emptyBytesUsed() + VectorPostings.bytesPerPosting();
+                bytesUsed += postings.ramBytesUsed();
                 postingsByOrdinal.put(ordinal, postings);
-                bytesUsed += builder.addGraphNode(ordinal, vectorValues);
+                bytesUsed += builder.addGraphNode(ordinal, vector);
                 return bytesUsed;
             }
             else
@@ -221,47 +256,10 @@ public class CassandraOnHeapGraph<T>
         // postings list already exists, just add the new key (if it's not already in the list)
         if (postings.add(key))
         {
-            bytesUsed += VectorPostings.bytesPerPosting();
+            bytesUsed += postings.bytesPerPosting();
         }
 
         return bytesUsed;
-    }
-
-    // copied out of a Lucene PR -- hopefully committed soon
-    public static final float MAX_FLOAT32_COMPONENT = 1E17f;
-    public static float[] checkInBounds(float[] v) {
-        for (int i = 0; i < v.length; i++) {
-            if (!Float.isFinite(v[i])) {
-                throw new IllegalArgumentException("non-finite value at vector[" + i + "]=" + v[i]);
-            }
-
-            if (Math.abs(v[i]) > MAX_FLOAT32_COMPONENT) {
-                throw new IllegalArgumentException("Out-of-bounds value at vector[" + i + "]=" + v[i]);
-            }
-        }
-        return v;
-    }
-
-    public static void validateIndexable(float[] vector, VectorSimilarityFunction similarityFunction)
-    {
-        try
-        {
-            checkInBounds(vector);
-        }
-        catch (IllegalArgumentException e)
-        {
-            throw new InvalidRequestException(e.getMessage());
-        }
-
-        if (similarityFunction == VectorSimilarityFunction.COSINE)
-        {
-            for (int i = 0; i < vector.length; i++)
-            {
-                if (vector[i] < -1E-6 || vector[i] > 1E-6)
-                    return;
-            }
-            throw new InvalidRequestException("Zero and near-zero vectors cannot be indexed or queried with cosine similarity");
-        }
     }
 
     public Collection<T> keysFromOrdinal(int node)
@@ -269,7 +267,7 @@ public class CassandraOnHeapGraph<T>
         return postingsByOrdinal.get(node).getPostings();
     }
 
-    public float[] vectorForKey(T key)
+    public VectorFloat<?> vectorForKey(T key)
     {
         if (vectorsByKey == null)
             throw new IllegalStateException("vectorsByKey is not initialized");
@@ -280,8 +278,9 @@ public class CassandraOnHeapGraph<T>
     {
         assert term != null && term.remaining() != 0;
 
-        var vector = serializer.deserializeFloatArray(term);
-        var postings = postingsMap.get(vector);
+        var rawVector = serializer.deserializeFloatArray(term);
+        VectorFloat<?> v = vts.createFloatVector(rawVector);
+        var postings = postingsMap.get(v);
         if (postings == null)
         {
             // it's possible for this to be called against a different memtable than the one
@@ -295,34 +294,36 @@ public class CassandraOnHeapGraph<T>
         if (vectorsByKey != null)
             // On updates to a row, we call add then remove, so we must pass the key's value to ensure we only remove
             // the deleted vector from vectorsByKey
-            vectorsByKey.remove(key, vector);
+            vectorsByKey.remove(key, v);
     }
 
     /**
-     * @return an itererator over {@link ScoredPrimaryKey} in the graph's {@link SearchResult} order
+     * @return an itererator over {@link PrimaryKeyWithSortKey} in the graph's {@link SearchResult} order
      */
-    public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, float[] queryVector, int limit, float threshold, Bits toAccept)
+    public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, VectorFloat<?> queryVector, int limit, float threshold, Bits toAccept)
     {
-        validateIndexable(queryVector, similarityFunction);
+        VectorValidation.validateIndexable(queryVector, similarityFunction);
 
         // search() errors out when an empty graph is passed to it
         if (vectorValues.size() == 0)
             return CloseableIterator.emptyIterator();
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
-        // VSTODO re-use searcher objects
-        GraphIndex<float[]> graph = builder.getGraph();
-        var searcher = new GraphSearcher.Builder<>(graph.getView()).withConcurrentUpdates().build();
-        NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
-            return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
-        };
-        var topK = sourceModel.topKFor(limit, null);
-        var result = searcher.search(scoreFunction, null, topK, threshold, bits);
-        Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+        var graphAccessManager = searchers.get();
+        var searcher = graphAccessManager.get();
+        var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
+        var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
+        var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
+        Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results",
+                      limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
-        // Threshold based searches do not support resuming the search.
-        return threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
-                             : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, topK, true, null);
+        if (threshold > 0)
+        {
+            // Threshold based searches do not support resuming the search.
+            graphAccessManager.release();
+            return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
+        }
+        return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true);
     }
 
     public Set<Integer> computeDeletedOrdinals(Function<T, Integer> postingTransformer)
@@ -339,7 +340,7 @@ public class CassandraOnHeapGraph<T>
         return deletedOrdinals;
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap flush(IndexComponents.ForWrite perIndexComponents, Set<Integer> deletedOrdinals) throws IOException
     {
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -351,70 +352,108 @@ public class CassandraOnHeapGraph<T>
                                                                                   postingsMap.keySet().size(), vectorValues.size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
-        try (var pqOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.PQ, indexContext), true);
-             var postingsOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.POSTING_LISTS, indexContext), true);
-             var indexOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.TERMS_DATA, indexContext), true))
+        // remove deleted ordinals from the graph.  this is not done at remove() time, because the same vector
+        // could be added back again, "undeleting" the ordinal, and the concurrency gets tricky
+        if (V3OnDiskFormat.ENABLE_JVECTOR_DELETES)
+        {
+            deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
+            deletedOrdinals = Set.of();
+        }
+        builder.cleanup();
+
+        // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
+        // null if remapping is not possible because vectors:rows are not 1:1
+        final BiMap<Integer, Integer> ordinalMap = buildOrdinalMap();
+        boolean postingsOneToOne = ordinalMap != null;
+        IntUnaryOperator newToOldMapper; // new ordinal -> old ordinal
+        OrdinalMapper ordinalMapper;
+        if (postingsOneToOne)
+        {
+            // we have a 1:1 correspondence between vectors and rows, so we can simplify the question of
+            // "what rowid does this ordinal correspond to" by remapping the graph ordinals to their corresponding rowid
+            ordinalMapper = new OrdinalMapper.MapMapper(ordinalMap);
+            newToOldMapper = x -> ordinalMap.inverse().get(x);
+        }
+        else
+        {
+            // vectors:rows are not 1:1 so there is no point in renumbering the ordinals, we're going to have to
+            // write the ordinal<->rowid mapping out explicitly
+            ordinalMapper = new OrdinalMapper.MapMapper(OnDiskGraphIndexWriter.sequentialRenumbering(builder.getGraph()));
+            newToOldMapper = ordinalMapper::newToOld;
+        }
+
+        IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
+        var indexFile = termsDataComponent.file();
+        long termsOffset = SAICodecUtils.headerSize();
+        if (indexFile.exists())
+            termsOffset += indexFile.length();
+        try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
+             var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
+             var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
+                               .withVersion(JVECTOR_2_VERSION) // always write old-version format since we're not using the new features
+                               .withMapper(ordinalMapper)
+                               .with(new InlineVectors(vectorValues.dimension()))
+                               .withStartOffset(termsOffset)
+                               .build())
         {
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
-            SAICodecUtils.writeHeader(indexOutput);
-
-            // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
-            // null if remapping is not possible
-            final BiMap <Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
-
-            boolean canFastFindRows = ordinalMap != null && CassandraRelevantProperties.VSEARCH_11_9_UPGRADES.getBoolean();
-            IntUnaryOperator ordinalMapper = canFastFindRows
-                                                ? x -> ordinalMap.getOrDefault(x, x)
-                                                : x -> x;
-            IntUnaryOperator reverseOrdinalMapper = canFastFindRows
-                                                        ? x -> ordinalMap.inverse().getOrDefault(x, x)
-                                                        : x -> x;
+            indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
+            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()));
+            assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper, indexContext);
+            long pqPosition = writePQ(pqOutput.asSequentialWriter(), newToOldMapper, perIndexComponents.context());
             long pqLength = pqPosition - pqOffset;
 
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
-            long postingsPosition = new VectorPostingsWriter<T>(canFastFindRows, reverseOrdinalMapper)
+            long postingsPosition = new VectorPostingsWriter<T>(postingsOneToOne, builder.getGraph().size(), newToOldMapper)
                                             .writePostings(postingsOutput.asSequentialWriter(),
                                                            vectorValues, postingsMap, deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
 
-            // complete (internal clean up) and write the graph
-            builder.cleanup();
-            long termsOffset = indexOutput.getFilePointer();
+            // write the graph
+            var start = System.nanoTime();
+            var suppliers = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
+            indexWriter.write(suppliers);
+            SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
+            logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
+            long termsLength = indexWriter.getOutput().position() - termsOffset;
 
-            OnDiskGraphIndex.write(new RemappingOnDiskGraphIndex<>(builder.getGraph(), ordinalMapper, reverseOrdinalMapper),
-                                   new RemappingRamAwareVectorValues(vectorValues, reverseOrdinalMapper),
-                                   indexOutput.asSequentialWriter());
-            long termsLength = indexOutput.getFilePointer() - termsOffset;
-
-            // write footers/checksums
+            // write remaining footers/checksums
             SAICodecUtils.writeFooter(pqOutput);
             SAICodecUtils.writeFooter(postingsOutput);
-            SAICodecUtils.writeFooter(indexOutput);
 
             // add components to the metadata map
-            SegmentMetadata.ComponentMetadataMap metadataMap = new SegmentMetadata.ComponentMetadataMap();
-            metadataMap.put(IndexComponent.TERMS_DATA, -1, termsOffset, termsLength, Map.of());
-            metadataMap.put(IndexComponent.POSTING_LISTS, -1, postingsOffset, postingsLength, Map.of());
-            Map<String, String> vectorConfigs = Map.of("SEGMENT_ID", ByteBufferUtil.bytesToHex(ByteBuffer.wrap(StringHelper.randomId())));
-            metadataMap.put(IndexComponent.PQ, -1, pqOffset, pqLength, vectorConfigs);
-            return metadataMap;
+            return createMetadataMap(termsOffset, termsLength, postingsOffset, postingsLength, pqOffset, pqLength);
         }
     }
 
-    private static CompressedVectors getCompressedVectorsIfPresent(IndexContext indexContext, VectorCompression preferredCompression)
+    static SegmentMetadata.ComponentMetadataMap createMetadataMap(long termsOffset, long termsLength, long postingsOffset, long postingsLength, long pqOffset, long pqLength)
     {
-        // Retrieve the first compressed vectors for a segment with more than MAX_PQ_TRAINING_SET_SIZE rows
-        // or the one with the most rows if none are larger than MAX_PQ_TRAINING_SET_SIZE
+        SegmentMetadata.ComponentMetadataMap metadataMap = new SegmentMetadata.ComponentMetadataMap();
+        metadataMap.put(IndexComponentType.TERMS_DATA, -1, termsOffset, termsLength, Map.of());
+        metadataMap.put(IndexComponentType.POSTING_LISTS, -1, postingsOffset, postingsLength, Map.of());
+        Map<String, String> vectorConfigs = Map.of("SEGMENT_ID", ByteBufferUtil.bytesToHex(ByteBuffer.wrap(StringHelper.randomId())));
+        metadataMap.put(IndexComponentType.PQ, -1, pqOffset, pqLength, vectorConfigs);
+        return metadataMap;
+    }
+
+    /**
+     * Return the best previous CompressedVectors for this column that matches the `matcher` predicate.
+     * "Best" means the most recent one that hits the row count target of {@link ProductQuantization#MAX_PQ_TRAINING_SET_SIZE},
+     * or the one with the most rows if none are larger than that.
+     */
+    public static PqInfo getPqIfPresent(IndexContext indexContext, Function<VectorCompression, Boolean> matcher)
+    {
+        // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
+        // or the one with the most rows if none reach that size
         var indexes = new ArrayList<>(indexContext.getView().getIndexes());
         indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
 
-        CompressedVectors compressedVectors = null;
+        PqInfo cvi = null;
         long maxRows = 0;
         for (SSTableIndex index : indexes)
         {
@@ -423,48 +462,49 @@ public class CassandraOnHeapGraph<T>
                 if (segment.metadata.numRows < maxRows)
                     continue;
 
-                var searcher = segment.getIndexSearcher();
-                assert searcher instanceof V2VectorIndexSearcher;
-                var cv = ((V2VectorIndexSearcher) searcher).getCompressedVectors();
-                if (preferredCompression.matches(cv))
+                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                var cv = searcher.getCompression();
+                if (matcher.apply(cv))
                 {
                     // We can exit now because we won't find a better candidate
-                    if (segment.metadata.numRows > ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
-                        return cv;
+                    var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors());
+                    if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
+                        return candidate;
 
-                    compressedVectors = cv;
+                    cvi = candidate;
                     maxRows = segment.metadata.numRows;
                 }
             }
         }
-        return compressedVectors;
+        return cvi;
     }
 
-    private BiMap <Integer, Integer> buildOrdinalMap()
+    /**
+     * @return a map of vector ordinal to row id, or null if the vectors are not 1:1 with rows
+     */
+    private BiMap<Integer, Integer> buildOrdinalMap()
     {
-        BiMap <Integer, Integer> ordinalMap = HashBiMap.create();
+        BiMap<Integer, Integer> ordinalMap = HashBiMap.create();
         int minRow = Integer.MAX_VALUE;
         int maxRow = Integer.MIN_VALUE;
         for (VectorPostings<T> vectorPostings : postingsMap.values())
         {
             if (vectorPostings.getRowIds().size() != 1)
             {
+                // multiple rows associated with this vector
                 return null;
             }
             int rowId = vectorPostings.getRowIds().getInt(0);
             int ordinal = vectorPostings.getOrdinal();
             minRow = Math.min(minRow, rowId);
             maxRow = Math.max(maxRow, rowId);
-            if (ordinalMap.containsKey(ordinal))
-            {
-                return null;
-            } else {
-                ordinalMap.put(ordinal, rowId);
-            }
+            assert !ordinalMap.containsKey(ordinal); // vector <-> ordinal should be unique
+            ordinalMap.put(ordinal, rowId);
         }
 
         if (minRow != 0 || maxRow != postingsMap.values().size() - 1)
         {
+            // not every row had a vector associated with it
             return null;
         }
         return ordinalMap;
@@ -483,14 +523,15 @@ public class CassandraOnHeapGraph<T>
         synchronized (CassandraOnHeapGraph.class)
         {
             // build encoder (expensive for PQ, cheaper for BQ)
-            if (preferredCompression.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
+            if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
-                var previousCV = getCompressedVectorsIfPresent(indexContext, preferredCompression);
+                var cvi = getPqIfPresent(indexContext, preferredCompression::equals);
+                var previousCV = cvi == null ? null : cvi.pq;
                 compressor = computeOrRefineFrom(previousCV, preferredCompression);
             }
             else
             {
-                assert preferredCompression.type == VectorCompression.CompressionType.BINARY_QUANTIZATION : preferredCompression.type;
+                assert preferredCompression.type == CompressionType.BINARY_QUANTIZATION : preferredCompression.type;
                 compressor = BinaryQuantization.compute(vectorValues);
             }
             assert !vectorValues.isValueShared();
@@ -500,19 +541,13 @@ public class CassandraOnHeapGraph<T>
 
             containsUnitVectors = IntStream.range(0, vectorValues.size())
                                            .parallel()
-                                           .mapToObj(vectorValues::vectorValue)
+                                           .mapToObj(vectorValues::getVector)
                                            .allMatch(v -> Math.abs(VectorUtil.dotProduct(v, v) - 1.0f) < 0.01);
         }
 
-        // version and optional fields
-        writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
-        writer.writeInt(1); // version
-        writer.writeBoolean(containsUnitVectors);
-
-        // write the compression type
-        var actualType = compressor == null ? VectorCompression.CompressionType.NONE : preferredCompression.type;
-        writer.writeByte(actualType.ordinal());
-        if (actualType == VectorCompression.CompressionType.NONE)
+        var actualType = compressor == null ? CompressionType.NONE : preferredCompression.type;
+        writePqHeader(writer, containsUnitVectors, actualType);
+        if (actualType == CompressionType.NONE)
             return writer.position();
 
         // save (outside the synchronized block, this is io-bound not CPU)
@@ -520,28 +555,43 @@ public class CassandraOnHeapGraph<T>
         if (compressor instanceof BinaryQuantization)
             cv = new BQVectors((BinaryQuantization) compressor, (long[][]) encoded);
         else
-            cv = new PQVectors((ProductQuantization) compressor, (byte[][]) encoded);
-        cv.write(writer);
+            cv = new PQVectors((ProductQuantization) compressor, (ByteSequence<?>[]) encoded);
+        cv.write(writer, JVECTOR_2_VERSION);
         return writer.position();
     }
 
-    private VectorCompressor<?> computeOrRefineFrom(CompressedVectors previousCV, VectorCompression preferredCompression)
+    static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type)
+    throws IOException
+    {
+        if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
+        {
+            // version and optional fields
+            writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
+            writer.writeInt(PQVersion.V1.ordinal());
+            writer.writeBoolean(unitVectors);
+        }
+
+        // write the compression type
+        writer.writeByte(type.ordinal());
+    }
+
+    VectorCompressor<?> computeOrRefineFrom(ProductQuantization previousPQ, VectorCompression preferredCompression)
     {
         // refining an existing codebook is much faster than starting from scratch
         VectorCompressor<?> compressor;
-        if (previousCV == null)
+        if (previousPQ == null)
         {
-            if (vectorValues.size() < 1024)
+            if (vectorValues.size() < MIN_PQ_ROWS)
                 compressor = null;
             else
-                compressor = ProductQuantization.compute(vectorValues, preferredCompression.compressToBytes, false);
+                compressor = ProductQuantization.compute(vectorValues, preferredCompression.getCompressedSize(), 256, false);
         }
         else
         {
-            if (vectorValues.size() < 1024)
-                compressor = previousCV.getCompressor();
+            if (vectorValues.size() < MIN_PQ_ROWS)
+                compressor = previousPQ;
             else
-                compressor = ((ProductQuantization) previousCV.getCompressor()).refine(vectorValues);
+                compressor = previousPQ.refine(vectorValues);
         }
         return compressor;
     }
@@ -550,11 +600,17 @@ public class CassandraOnHeapGraph<T>
     {
         if (compressor instanceof ProductQuantization)
             return IntStream.range(0, vectorValues.size()).parallel()
-                       .mapToObj(i -> ((ProductQuantization) compressor).encode(vectorValues.vectorValue(reverseOrdinalMapper.applyAsInt(i))))
-                       .toArray(byte[][]::new);
+                       .mapToObj(i -> {
+                           var v = vectorValues.getVector(reverseOrdinalMapper.applyAsInt(i));
+                           return ((ProductQuantization) compressor).encode(v);
+                       })
+                       .toArray(ByteSequence<?>[]::new);
         else if (compressor instanceof BinaryQuantization)
             return IntStream.range(0, vectorValues.size()).parallel()
-                            .mapToObj(i -> ((BinaryQuantization) compressor).encode(vectorValues.vectorValue(reverseOrdinalMapper.applyAsInt(i))))
+                            .mapToObj(i -> {
+                                var v = vectorValues.getVector(reverseOrdinalMapper.applyAsInt(i));
+                                return ((BinaryQuantization) compressor).encode(v);
+                            })
                             .toArray(long[][]::new);
         throw new UnsupportedOperationException("Unrecognized compressor " + compressor.getClass());
     }
@@ -571,14 +627,29 @@ public class CassandraOnHeapGraph<T>
                + postingsMap.values().stream().mapToLong(VectorPostings::ramBytesUsed).sum();
     }
 
-    private long exactRamBytesUsed()
-    {
-        return ObjectSizes.measureDeep(this);
-    }
-
     public enum InvalidVectorBehavior
     {
         IGNORE,
         FAIL
+    }
+
+    public static class PqInfo
+    {
+        public final ProductQuantization pq;
+        /** an empty Optional indicates that the index was written with an older version that did not record this information */
+        public final Optional<Boolean> unitVectors;
+
+        public PqInfo(ProductQuantization pq, Optional<Boolean> unitVectors)
+        {
+            this.pq = pq;
+            this.unitVectors = unitVectors;
+        }
+    }
+
+    /** ensures that the graph is connected -- normally not necessary but it can help tests reason about the state */
+    @VisibleForTesting
+    public void cleanup()
+    {
+        builder.cleanup();
     }
 }

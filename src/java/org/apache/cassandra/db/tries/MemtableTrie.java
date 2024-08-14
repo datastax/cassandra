@@ -829,7 +829,7 @@ public class MemtableTrie<T> extends MemtableReadTrie<T>
      */
     public <U> void apply(Trie<U> mutation, final UpsertTransformer<T, U> transformer) throws SpaceExhaustedException
     {
-        Cursor<U> mutationCursor = mutation.cursor();
+        Cursor<U> mutationCursor = mutation.cursor(Direction.FORWARD);
         assert mutationCursor.depth() == 0;
         ApplyState state = applyState;
         state.reset();

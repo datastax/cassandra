@@ -102,7 +102,7 @@ public class SnapshotTest extends SAITester
 
         // Rebuild the index to verify that the index files are overridden
         rebuildIndexes(numericIndexContext.getIndexName());
-        verifyIndexFiles(numericIndexContext, null, 2, 0);
+        verifyIndexComponentFiles(numericIndexContext, null);
         assertNotEquals(snapshotLastModified, indexFilesLastModified());
         assertNumRows(2, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(2, 2); // compaction should not validate

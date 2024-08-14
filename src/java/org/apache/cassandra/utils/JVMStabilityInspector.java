@@ -22,7 +22,9 @@ import java.net.SocketException;
 import java.nio.file.FileSystemException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -111,15 +113,24 @@ public final class JVMStabilityInspector
 
     public static void inspectThrowable(Throwable t, Consumer<Throwable> additionalHandler) throws OutOfMemoryError
     {
-        if (t == null)
-            return;
-        additionalHandler.accept(t);
-        globalHandler.accept(t);
+        Set<Integer> throwables = new HashSet<>();
+        while (true)
+        {
+            if (!throwables.add(System.identityHashCode(t)))
+            {
+                logger.error("Recursive cause chain", t);
+                throw new IllegalStateException("Recursive cause chain detected", t);
+            }
+            if (t == null)
+                return;
+            additionalHandler.accept(t);
+            globalHandler.accept(t);
 
-        for (Throwable suppressed : t.getSuppressed())
-            inspectThrowable(suppressed, additionalHandler);
+            for (Throwable suppressed : t.getSuppressed())
+                inspectThrowable(suppressed, additionalHandler);
 
-        inspectThrowable(t.getCause(), additionalHandler);
+            t = t.getCause();
+        }
     }
 
     private static void defaultGlobalErrorHandler(Throwable t)

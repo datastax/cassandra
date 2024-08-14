@@ -243,6 +243,7 @@ public class BaseCompactionStrategyTest
         when(ret.getPendingRepair()).thenReturn(pendingRepair);
         when(ret.isPendingRepair()).thenReturn(pendingRepair != null);
         when(ret.getColumnFamilyName()).thenReturn(table);
+        when(ret.getKeyspaceName()).thenReturn(keyspace);
         when(ret.getId()).thenReturn(new SequenceBasedSSTableId(level));
         when(ret.getDataFile()).thenReturn(new File(UUIDBasedSSTableId.Builder.instance.generator(Stream.empty()).get() + ".db"));
         when(ret.toString()).thenReturn(String.format("Bytes on disk: %s, level %d, hotness %f, timestamp %d, first %s, last %s, disk index: %d, repaired: %b, pend. repair: %b",

@@ -191,7 +191,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataFile.getLastFlushOffset());
             invalidateCacheAtBoundary(dfile);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
-                                                               components, metadata,
+                                                               components(), metadata,
                                                                ifile, dfile, partitionIndex, iwriter.bf.sharedCopy(),
                                                                maxDataAge, stats, SSTableReader.OpenReason.EARLY, header);
 
@@ -231,7 +231,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
         invalidateCacheAtBoundary(dfile);
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
-                                                            components,
+                                                            components(),
                                                             this.metadata,
                                                             rowIndexFile,
                                                             dfile,
@@ -313,7 +313,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             rowIndexFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
             partitionIndexFile = new SequentialWriter(descriptor.fileFor(Component.PARTITION_INDEX), WRITER_OPTION);
             partitionIndexFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-            partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder);
+            partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
             bf = FilterFactory.getFilter(keyCount, table.params.bloomFilterFpChance);
             // register listeners to be alerted when the data files are flushed
             partitionIndexFile.setPostFlushListener(() -> partitionIndex.markPartitionIndexSynced(partitionIndexFile.getLastFlushOffset()));
@@ -361,7 +361,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
          */
         void flushBf()
         {
-            if (components.contains(Component.FILTER))
+            if (components().contains(Component.FILTER))
             {
                 File path = descriptor.fileFor(Component.FILTER);
                 try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
@@ -426,7 +426,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             complete();
             try
             {
-                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false);
+                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false, descriptor.version.getByteComparableVersion());
             }
             catch (IOException e)
             {

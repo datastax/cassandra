@@ -20,11 +20,10 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 import java.io.Closeable;
 import java.io.IOException;
 
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.lucene.store.IndexOutput;
 
 
 public class NumericValuesWriter implements Closeable
@@ -32,52 +31,40 @@ public class NumericValuesWriter implements Closeable
     public static final int MONOTONIC_BLOCK_SIZE = Integer.getInteger("dse.sai.numeric_values.monotonic_block_size", 16384);
     public static final int BLOCK_SIZE = Integer.getInteger("dse.sai.numeric_values.block_size", 128);
 
+    private final IndexComponent.ForWrite components;
     private final IndexOutput output;
     private final AbstractBlockPackedWriter writer;
     private final MetadataWriter metadataWriter;
-    private final String componentName;
     private final int blockSize;
     private long count = 0;
 
-    public NumericValuesWriter(String componentName,
-                               IndexOutput indexOutput,
+    public NumericValuesWriter(IndexComponent.ForWrite components,
                                MetadataWriter metadataWriter,
                                boolean monotonic) throws IOException
     {
-        this(componentName, indexOutput, metadataWriter, monotonic, monotonic ? MONOTONIC_BLOCK_SIZE : BLOCK_SIZE);
+        this(components, metadataWriter, monotonic, monotonic ? MONOTONIC_BLOCK_SIZE : BLOCK_SIZE);
     }
 
-    public NumericValuesWriter(IndexDescriptor indexDescriptor,
-                               IndexComponent component,
+    public NumericValuesWriter(IndexComponent.ForWrite components,
                                MetadataWriter metadataWriter,
                                boolean monotonic,
                                int blockSize) throws IOException
     {
-        this(indexDescriptor.componentFileName(component),
-             indexDescriptor.openPerSSTableOutput(component),
-             metadataWriter,
-             monotonic,
-             blockSize);
-    }
+        this.components = components;
+        this.output = components.openOutput();
+        SAICodecUtils.writeHeader(output);
 
-    private NumericValuesWriter(String componentName,
-                                IndexOutput indexOutput,
-                                MetadataWriter metadataWriter,
-                                boolean monotonic, int blockSize) throws IOException
-    {
-        SAICodecUtils.writeHeader(indexOutput);
-        this.writer = monotonic ? new MonotonicBlockPackedWriter(indexOutput, blockSize)
-                                : new BlockPackedWriter(indexOutput, blockSize);
-        this.output = indexOutput;
-        this.componentName = componentName;
+        this.writer = monotonic ? new MonotonicBlockPackedWriter(output, blockSize)
+                                : new BlockPackedWriter(output, blockSize);
         this.metadataWriter = metadataWriter;
         this.blockSize = blockSize;
+
     }
 
     @Override
     public void close() throws IOException
     {
-        try (IndexOutput o = metadataWriter.builder(componentName))
+        try (IndexOutput o = metadataWriter.builder(components.fileNamePart()))
         {
             final long fp = writer.finish();
             SAICodecUtils.writeFooter(output);

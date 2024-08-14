@@ -202,7 +202,7 @@ public class BigTableWriter extends SortedTableWriter
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(boundary.dataLength);
         invalidateCacheAtBoundary(dfile);
         SSTableReader sstable = BigTableReader.internalOpen(descriptor,
-                                                           components, metadata,
+                                                           components(), metadata,
                                                            ifile, dfile,
                                                            indexSummary,
                                                            iwriter.bf.sharedCopy(),
@@ -245,7 +245,7 @@ public class BigTableWriter extends SortedTableWriter
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
         invalidateCacheAtBoundary(dfile);
         SSTableReader sstable = SSTableReader.internalOpen(descriptor,
-                                                           components,
+                                                           components(),
                                                            metadata,
                                                            ifile,
                                                            dfile,
@@ -348,7 +348,7 @@ public class BigTableWriter extends SortedTableWriter
          */
         void flushBf()
         {
-            if (components.contains(Component.FILTER))
+            if (components().contains(Component.FILTER))
             {
                 File path = descriptor.fileFor(Component.FILTER);
                 try (FileOutputStreamPlus stream = new FileOutputStreamPlus(path))

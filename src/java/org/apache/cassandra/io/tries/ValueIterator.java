@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.io.tries;
 
-import java.util.function.LongSupplier;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.util.Rebufferer;
@@ -30,65 +28,27 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * <p>
  * The main utility of this class is the {@link #nextPayloadedNode()} method, which lists all nodes that contain a
  * payload within the requested bounds. The treatment of the bounds is non-standard (see
- * {@link #ValueIterator(Rebufferer, long, ByteComparable, ByteComparable, LeftBoundTreatment, boolean)}), necessary to
+ * {@link #ValueIterator(Rebufferer, long, ByteComparable, ByteComparable, LeftBoundTreatment, boolean, ByteComparable.Version)}), necessary to
  * properly walk tries of prefixes and separators.
  */
 @NotThreadSafe
-public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Walker<CONCRETE>
+public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends BaseValueIterator<CONCRETE>
 {
-    private final ByteSource limit;
-    private final TransitionBytesCollector collector;
-    protected IterationPosition stack;
-    private long next;
 
-    private static final long NOT_PREPARED = -2;
-
-    protected enum LeftBoundTreatment
+    protected ValueIterator(Rebufferer source, long root, ByteComparable.Version version)
     {
-        ADMIT_PREFIXES,
-        ADMIT_EXACT,
-        GREATER
+        this(source, root, false, version);
     }
 
-    protected static class IterationPosition
+    protected ValueIterator(Rebufferer source, long root, boolean collecting, ByteComparable.Version version)
     {
-        final long node;
-        final int limit;
-        final IterationPosition prev;
-        int childIndex;
-
-        IterationPosition(long node, int childIndex, int limit, IterationPosition prev)
-        {
-            super();
-            this.node = node;
-            this.childIndex = childIndex;
-            this.limit = limit;
-            this.prev = prev;
-        }
-
-        @Override
-        public String toString()
-        {
-            return String.format("[Node %d, child %d, limit %d]", node, childIndex, limit);
-        }
-    }
-
-    protected ValueIterator(Rebufferer source, long root)
-    {
-        this(source, root, false);
-    }
-
-    protected ValueIterator(Rebufferer source, long root, boolean collecting)
-    {
-        super(source, root);
-        limit = null;
-        collector = collecting ? new TransitionBytesCollector() : null;
+        super(source, root, null, true, version);
         initializeNoLeftBound(root, 256);
     }
 
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, ByteComparable.Version version)
     {
-        this(source, root, start, end, admitPrefix, false);
+        this(source, root, start, end, admitPrefix, false, version);
     }
 
     /**
@@ -103,14 +63,12 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
      * </ul>
      * This behaviour is shared with the reverse counterpart {@link ReverseValueIterator}.
      */
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
     {
-        super(source, root);
-        limit = end != null ? end.asComparableBytes(BYTE_COMPARABLE_VERSION) : null;
-        collector = collecting ? new TransitionBytesCollector() : null;
+        super(source, root, end != null ? end.asComparableBytes(version) : null, collecting, version);
 
         if (start != null)
-            initializeWithLeftBound(root, start.asComparableBytes(BYTE_COMPARABLE_VERSION), admitPrefix, limit != null);
+            initializeWithLeftBound(root, start.asComparableBytes(byteComparableVersion), admitPrefix, limit != null);
         else
             initializeNoLeftBound(root, limit != null ? limit.next() : 256);
     }
@@ -148,54 +106,6 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
     }
 
     /**
-     * Returns the payload node position.
-     *
-     * This method must be async-read-safe, see {@link #advanceNode()}.
-     */
-    protected long nextPayloadedNode()
-    {
-        if (next != NOT_PREPARED)
-        {
-            long toReturn = next;
-            next = NOT_PREPARED;
-            return toReturn;
-        }
-        else
-            return advanceNode();
-    }
-
-    protected boolean hasNext()
-    {
-        if (next == NOT_PREPARED)
-            next = advanceNode();
-        return next != NONE;
-    }
-
-    protected <VALUE> VALUE nextValue(Supplier<VALUE> supplier)
-    {
-        long node = nextPayloadedNode();
-        if (node == NONE)
-            return null;
-        go(node);
-        return supplier.get();
-    }
-
-    protected long nextValueAsLong(LongSupplier supplier, long valueIfNone)
-    {
-        long node = nextPayloadedNode();
-        if (node == NONE)
-            return valueIfNone;
-        go(node);
-        return supplier.getAsLong();
-    }
-
-    protected ByteComparable collectedKey()
-    {
-        assert collector != null : "Cannot get a collected value from a non-collecting iterator";
-        return collector.toByteComparable();
-    }
-
-    /**
      * Skip to the given key or the closest after it in iteration order. Inclusive when admitPrefix = ADMIT_EXACT,
      * exclusive when GREATER (ADMIT_PREFIXES is not supported).
      * Requires that the iterator is collecting bytes.
@@ -210,7 +120,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
         assert admitPrefix != LeftBoundTreatment.ADMIT_PREFIXES : "Skipping with ADMIT_PREFIXES is not supported";
         if (stack == null)
             return; // exhausted whole trie
-        ByteSource skipToBytes = skipTo.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource skipToBytes = skipTo.asComparableBytes(byteComparableVersion);
         int pos;
         int nextByte = skipToBytes.next();
         final int collectedLength = collector.pos;

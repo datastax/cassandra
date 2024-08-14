@@ -40,18 +40,19 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     private long markedPointer;
 
     final Rebufferer rebufferer;
-    private BufferHolder bufferHolder = Rebufferer.EMPTY;
     private final ByteOrder order;
     private ByteBuffer temporaryBuffer;
+    private BufferHolder bufferHolder;
 
     /**
      * Only created through Builder
      *
      * @param rebufferer Rebufferer to use
      */
-    RandomAccessReader(Rebufferer rebufferer, ByteOrder order)
+    RandomAccessReader(Rebufferer rebufferer, ByteOrder order, BufferHolder bufferHolder)
     {
-        super(Rebufferer.EMPTY.buffer(), false);
+        super(bufferHolder.buffer(), false);
+        this.bufferHolder = bufferHolder;
         this.rebufferer = rebufferer;
         this.order = order;
     }
@@ -70,11 +71,19 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     private void reBufferAt(long position)
     {
         bufferHolder.release();
-        bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
-        bufferHolder = rebufferer.rebuffer(position);
-        buffer = bufferHolder.buffer();
-        buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
-        buffer.order(order);
+        if (position == length())
+        {
+            bufferHolder = Rebufferer.emptyBufferHolderAt(position);
+            buffer = bufferHolder.buffer();
+        }
+        else
+        {
+            bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
+            bufferHolder = rebufferer.rebuffer(position);
+            buffer = bufferHolder.buffer();
+            buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
+            buffer.order(order);
+        }
     }
 
     public ByteOrder order()
@@ -82,15 +91,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         return order;
     }
 
-    /**
-     * Read a float[] at the current position.
-     *
-     * @param dest the array to read into (always the entire array will be filled)
-     *
-     * Will change the buffer position.
-     */
     @Override
-    public void readFully(float[] dest) throws IOException
+    public void read(float[] dest, int offset, int count) throws IOException
     {
         var bh = bufferHolder;
         long position = getPosition();
@@ -108,7 +110,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
         else
         {
-            // offset is non-zero, and probably not aligned to Float.BYTES, so
+            // bufferHolder offset is non-zero, and probably not aligned to Float.BYTES, so
             // set the position before converting to FloatBuffer.
             var bb = bh.buffer();
             bb.order(order);
@@ -116,8 +118,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             floatBuffer = bb.asFloatBuffer();
         }
 
-        int bytesToRead = Float.BYTES * dest.length;
-        if (dest.length > floatBuffer.remaining())
+        int bytesToRead = Float.BYTES * count;
+        if (count > floatBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
             var bb = getTemporaryBuffer(bytesToRead);
@@ -125,7 +127,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             floatBuffer = bb.asFloatBuffer();
         }
 
-        floatBuffer.get(dest);
+        floatBuffer.get(dest, offset, count);
         seek(position + bytesToRead);
     }
 
@@ -446,7 +448,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         RandomAccessReaderWithOwnChannel(Rebufferer rebufferer)
         {
-            super(rebufferer, ByteOrder.BIG_ENDIAN);
+            super(rebufferer, ByteOrder.BIG_ENDIAN, Rebufferer.EMPTY);
         }
 
         @Override

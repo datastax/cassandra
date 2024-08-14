@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Stopwatch;
@@ -38,14 +39,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.agrona.collections.IntArrayList;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PackedLongsPostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsWriter;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.packed.PackedLongValues;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -73,15 +73,15 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
     private final Multimap<Integer, Integer> nodeToChildLeaves = HashMultimap.create();
 
     private final IndexWriterConfig config;
-    private final IndexContext indexContext;
+    private final Function<String, String> logMessage;
     int numNonLeafPostings = 0;
     int numLeafPostings = 0;
 
-    OneDimBKDPostingsWriter(List<PackedLongValues> postings, IndexWriterConfig config, IndexContext indexContext)
+    OneDimBKDPostingsWriter(List<PackedLongValues> postings, IndexWriterConfig config, Function<String, String> logMessage)
     {
         this.postings = postings;
         this.config = config;
-        this.indexContext = indexContext;
+        this.logMessage = logMessage;
     }
 
     @Override
@@ -127,7 +127,7 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
 
         final Collection<Integer> leafNodeIDs = leafOffsetToNodeID.values();
 
-        logger.debug(indexContext.logMessage("Writing posting lists for {} internal and {} leaf kd-tree nodes. Leaf postings memory usage: {}."),
+        logger.debug(logMessage.apply("Writing posting lists for {} internal and {} leaf kd-tree nodes. Leaf postings memory usage: {}."),
                      internalNodeIDs.size(),
                      leafNodeIDs.size(),
                      FBUtilities.prettyPrintMemory(postingsRamBytesUsed));
@@ -149,9 +149,9 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
                 numNonLeafPostings++;
             }
 
-            var postingLists = new ArrayList<PostingList.PeekablePostingList>(leaves.size());
+            var postingLists = new ArrayList<PostingList>(leaves.size());
             for (Integer leaf : leaves)
-                postingLists.add(new PackedLongsPostingList(leafToPostings.get(leaf)).peekable());
+                postingLists.add(new PackedLongsPostingList(leafToPostings.get(leaf)));
 
             final PostingList mergedPostingList = MergePostingList.merge(postingLists);
             final long postingFilePosition = postingsWriter.write(mergedPostingList);
@@ -161,7 +161,7 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
                 nodeIDToPostingsFilePointer.put(nodeID, postingFilePosition);
         }
         flushTime.stop();
-        logger.debug(indexContext.logMessage("Flushed {} of posting lists for kd-tree nodes in {} ms."),
+        logger.debug(logMessage.apply("Flushed {} of posting lists for kd-tree nodes in {} ms."),
                      FBUtilities.prettyPrintMemory(out.getFilePointer() - startFP),
                      flushTime.elapsed(TimeUnit.MILLISECONDS));
 

@@ -23,7 +23,11 @@ import java.util.PriorityQueue;
 
 import org.junit.Test;
 
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
@@ -31,17 +35,19 @@ import static org.junit.Assert.assertTrue;
 
 public class BruteForceRowIdIteratorTest
 {
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     @Test
     public void testBruteForceRowIdIteratorForEmptyPQAndTopKEqualsLimit()
     {
-        var queryVector = new float[] { 1f, 0f };
+        var queryVector = vts.createFloatVector(new float[] { 1f, 0f });
         var pq = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(10);
         var topK = 10;
         var limit = 10;
 
         // Should work for an empty pq
         var view = new TestVectorSupplier();
-        CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
+        JVectorLuceneOnDiskGraph.CloseableReranker reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
         var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
@@ -50,14 +56,16 @@ public class BruteForceRowIdIteratorTest
         assertTrue(view.isClosed);
     }
 
-    private static class TestVectorSupplier implements VectorSupplier
+    private static class TestVectorSupplier implements JVectorLuceneOnDiskGraph.VectorSupplier
     {
         private boolean isClosed = false;
 
         @Override
-        public float[] getVectorForOrdinal(int ordinal)
+        public ScoreFunction.ExactScoreFunction getScoreFunction(VectorFloat<?> queryVector, VectorSimilarityFunction similarityFunction)
         {
-            return new float[] { ordinal };
+            return ordinal -> {
+                return similarityFunction.compare(queryVector, vts.createFloatVector(new float[] { ordinal }));
+            };
         }
 
         @Override

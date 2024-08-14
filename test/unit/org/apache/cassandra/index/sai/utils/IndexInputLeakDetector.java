@@ -37,11 +37,11 @@ public class IndexInputLeakDetector extends TestRuleAdapter
 {
     private final static Set<TrackingIndexFileUtils> trackedIndexFileUtils = Collections.synchronizedSet(new HashSet<>());
 
-    public IndexDescriptor newIndexDescriptor(Descriptor descriptor, TableMetadata tableMetadata, SequentialWriterOption sequentialWriterOption)
+    public IndexDescriptor newIndexDescriptor(Descriptor descriptor, SequentialWriterOption sequentialWriterOption)
     {
         TrackingIndexFileUtils trackingIndexFileUtils = new TrackingIndexFileUtils(sequentialWriterOption);
         trackedIndexFileUtils.add(trackingIndexFileUtils);
-        return IndexDescriptor.createNew(descriptor, tableMetadata.partitioner, tableMetadata.comparator);
+        return IndexDescriptor.empty(descriptor);
     }
 
     @Override

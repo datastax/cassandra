@@ -20,10 +20,12 @@ package org.apache.cassandra.distributed.test.sai;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntToDoubleFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -39,13 +41,15 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -61,20 +65,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class VectorDistributedTest extends TestBaseImpl
 {
     private static final Logger logger = LoggerFactory.getLogger(VectorDistributedTest.class);
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     @Rule
     public SAITester.FailureWatcher failureRule = new SAITester.FailureWatcher();
 
     private static final String CREATE_KEYSPACE = "CREATE KEYSPACE %%s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': %d}";
     private static final String CREATE_TABLE = "CREATE TABLE %%s (pk int primary key, val vector<float, %d>)";
-    private static final String CREATE_TABLE_TWO_VECTORS = "CREATE TABLE %%s (pk int primary key, val1 vector<float, %d>, val2 vector<float, %d>)";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'";
 
     private static final VectorSimilarityFunction function = VectorSourceModel.OTHER.defaultSimilarityFunction;
 
-    private static final String INVALID_LIMIT_MESSAGE = "Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than 1000";
-
-    private static final double MIN_RECALL = 0.8;
+    private static final double MIN_RECALL_AVG = 0.8;
     // Multiple runs of the geo search test shows the recall test results in between 89% and 97%
     private static final double MIN_GEO_SEARCH_RECALL = 0.85;
 
@@ -135,38 +137,41 @@ public class VectorDistributedTest extends TestBaseImpl
             execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ", " + vectorString(vector) + " )");
 
         // query memtable index
-        int limit = Math.min(getRandom().nextIntBetween(10, 50), vectors.size());
-        float[] queryVector = randomVector();
-        Object[][] result = searchWithLimit(queryVector, limit);
+        double memtableRecall = testMultiple((__) ->
+        {
+            float[] queryVector = randomVector();
+            int limit = Math.min(getRandom().nextIntBetween(10, 50), vectors.size());
+            Object[][] result = searchWithLimit(queryVector, limit);
+            return computeRecall(queryVector, vectors, getVectors(result));
+        });
+        assertThat(memtableRecall).isGreaterThanOrEqualTo(MIN_RECALL_AVG);
 
-        List<float[]> resultVectors = getVectors(result);
-        assertDescendingScore(queryVector, resultVectors);
-        double memtableRecall = computeRecall(vectors, queryVector, resultVectors);
-        assertThat(memtableRecall).isGreaterThanOrEqualTo(MIN_RECALL);
-
-        assertThatThrownBy(() -> searchWithoutLimit(randomVector(), vectorCount))
-        .hasMessageContaining(INVALID_LIMIT_MESSAGE);
-
-        int pageSize = getRandom().nextIntBetween(40, 70);
-        limit = getRandom().nextIntBetween(20, 50);
-        result = searchWithPageAndLimit(queryVector, pageSize, limit);
-
-        resultVectors = getVectors(result);
-        assertDescendingScore(queryVector, resultVectors);
-        double memtableRecallWithPaging = computeRecall(vectors, queryVector, resultVectors);
-        assertThat(memtableRecallWithPaging).isGreaterThanOrEqualTo(MIN_RECALL);
-
-        assertThatThrownBy(() -> searchWithPageWithoutLimit(randomVector(), 10))
-        .hasMessageContaining(INVALID_LIMIT_MESSAGE);
+        double memtableRecallWithPaging = testMultiple((__) -> {
+            float[] queryVector = randomVector();
+            int pageSize = getRandom().nextIntBetween(40, 70);
+            var limit = getRandom().nextIntBetween(20, 50);
+            var result = searchWithPageAndLimit(queryVector, pageSize, limit);
+            return computeRecall(queryVector, vectors, getVectors(result));
+        });
+        assertThat(memtableRecallWithPaging).isGreaterThanOrEqualTo(MIN_RECALL_AVG);
 
         // query on-disk index
         cluster.forEach(n -> n.flush(KEYSPACE));
 
-        limit = Math.min(getRandom().nextIntBetween(10, 50), vectors.size());
-        queryVector = randomVector();
-        result = searchWithLimit(queryVector, limit);
-        double sstableRecall = computeRecall(vectors, queryVector, getVectors(result));
-        assertThat(sstableRecall).isGreaterThanOrEqualTo(MIN_RECALL);
+        double sstableRecall = testMultiple((__) ->
+        {
+            float[] queryVector = randomVector();
+            var limit = Math.min(getRandom().nextIntBetween(20, 50), vectors.size());
+            var result = searchWithLimit(queryVector, limit);
+            return computeRecall(queryVector, vectors, getVectors(result));
+        });
+        assertThat(sstableRecall).isGreaterThanOrEqualTo(MIN_RECALL_AVG);
+    }
+
+    private double testMultiple(IntToDoubleFunction f)
+    {
+        int ITERS = 10;
+        return IntStream.range(0, ITERS).mapToDouble(f).sum() / ITERS;
     }
 
     @Test
@@ -198,15 +203,14 @@ public class VectorDistributedTest extends TestBaseImpl
         }
 
         // query multiple sstable indexes in multiple node
-        int limit = Math.min(getRandom().nextIntBetween(50, 100), allVectors.size());
-        float[] queryVector = randomVector();
-        Object[][] result = searchWithLimit(queryVector, limit);
-
-        // expect recall to be at least 0.8
-        List<float[]> resultVectors = getVectors(result);
-        assertDescendingScore(queryVector, resultVectors);
-        double recall = computeRecall(allVectors, queryVector, getVectors(result));
-        assertThat(recall).isGreaterThanOrEqualTo(MIN_RECALL);
+        double recall = testMultiple((__) ->
+        {
+            int limit = Math.min(getRandom().nextIntBetween(50, 100), allVectors.size());
+            float[] queryVector = randomVector();
+            Object[][] result = searchWithLimit(queryVector, limit);
+            return computeRecall(queryVector, allVectors, getVectors(result));
+        });
+        assertThat(recall).isGreaterThanOrEqualTo(MIN_RECALL_AVG);
     }
 
     @Test
@@ -290,7 +294,7 @@ public class VectorDistributedTest extends TestBaseImpl
     }
 
     @Test
-    public void rangeRestrictedTest() throws Throwable
+    public void rangeRestrictedTest()
     {
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
@@ -317,18 +321,19 @@ public class VectorDistributedTest extends TestBaseImpl
 
             long minToken = Math.min(token1, token2);
             long maxToken = Math.max(token1, token2);
+            float[] queryVector = randomVector();
             List<float[]> expected = vectorsByToken.entries().stream()
                                                    .filter(e -> e.getKey() >= minToken && e.getKey() <= maxToken)
                                                    .map(Map.Entry::getValue)
+                                                   .sorted(Comparator.comparingDouble(v -> function.compare(vts.createFloatVector(v), vts.createFloatVector(queryVector))).reversed())
                                                    .collect(Collectors.toList());
 
-            float[] queryVector = randomVector();
             List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
             if (expected.isEmpty())
                 assertThat(resultVectors).isEmpty();
             else
             {
-                double recall = computeRecall(resultVectors, queryVector, expected);
+                double recall = computeRecall(queryVector, resultVectors, expected);
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
@@ -345,18 +350,19 @@ public class VectorDistributedTest extends TestBaseImpl
 
             long minToken = Math.min(token1, token2);
             long maxToken = Math.max(token1, token2);
+            float[] queryVector = randomVector();
             List<float[]> expected = vectorsByToken.entries().stream()
                                                    .filter(e -> e.getKey() >= minToken && e.getKey() <= maxToken)
                                                    .map(Map.Entry::getValue)
+                                                   .sorted(Comparator.comparingDouble(v -> function.compare(vts.createFloatVector(v), vts.createFloatVector(queryVector))).reversed())
                                                    .collect(Collectors.toList());
 
-            float[] queryVector = randomVector();
             List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
             if (expected.isEmpty())
                 assertThat(resultVectors).isEmpty();
             else
             {
-                double recall = computeRecall(resultVectors, queryVector, expected);
+                double recall = computeRecall(queryVector, resultVectors, expected);
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
@@ -396,31 +402,18 @@ public class VectorDistributedTest extends TestBaseImpl
         assertInvalidCosineOperations();
     }
 
-    private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize) throws Throwable
+    private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
     {
         Object[][] result = execute("SELECT val FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
-        assertThat(result).hasSize(expectedSize);
+        assertThat(result).hasNumberOfRows(expectedSize);
         return getVectors(result);
     }
 
     private Object[][] searchWithLimit(float[] queryVector, int limit)
     {
         Object[][] result = execute("SELECT val FROM %s ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT " + limit);
-        assertThat(result).hasSize(limit);
+        assertThat(result).hasNumberOfRows(limit);
         return result;
-    }
-
-    private Object[][] searchWithoutLimit(float[] queryVector, int results)
-    {
-        Object[][] result = execute("SELECT val FROM %s ORDER BY val ann of " + Arrays.toString(queryVector));
-        assertThat(result).hasSize(results);
-        return result;
-    }
-
-
-    private Object[][] searchWithPageWithoutLimit(float[] queryVector, int pageSize)
-    {
-        return executeWithPaging("SELECT val FROM %s ORDER BY val ann of " + Arrays.toString(queryVector), pageSize);
     }
 
     private Object[][] searchWithPageAndLimit(float[] queryVector, int pageSize, int limit)
@@ -429,28 +422,20 @@ public class VectorDistributedTest extends TestBaseImpl
         return executeWithPaging("SELECT val FROM %s ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT " + limit, pageSize);
     }
 
-    private void searchByKeyWithoutLimit(int key, float[] queryVector, List<float[]> vectors)
-    {
-        Object[][] result = execute("SELECT val FROM %s WHERE pk = " + key + " AND val ann of " + Arrays.toString(queryVector));
-        assertThat(result).hasSize(1);
-        float[] output = getVectors(result).get(0);
-        assertThat(output).isEqualTo(vectors.get(key));
-    }
-
     private void searchByKeyWithLimit(int key, float[] queryVector, int limit, List<float[]> vectors)
     {
         Object[][] result = execute("SELECT val FROM %s WHERE pk = " + key + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT " + limit);
-        assertThat(result).hasSize(1);
+        assertThat(result).hasNumberOfRows(1);
         float[] output = getVectors(result).get(0);
         assertThat(output).isEqualTo(vectors.get(key));
     }
 
-    private void assertDescendingScore(float[] queryVector, List<float[]> resultVectors)
+    private static void assertDescendingScore(float[] queryVector, List<float[]> resultVectors)
     {
         float prevScore = -1;
         for (float[] current : resultVectors)
         {
-            float score = function.compare(current, queryVector);
+            float score = function.compare(vts.createFloatVector(current), vts.createFloatVector(queryVector));
             if (prevScore >= 0)
                 assertThat(score).isLessThanOrEqualTo(prevScore);
 
@@ -458,9 +443,10 @@ public class VectorDistributedTest extends TestBaseImpl
         }
     }
 
-    private static double computeRecall(List<float[]> vectors, float[] query, List<float[]> result)
+    private static double computeRecall(float[] query, List<float[]> vectors, List<float[]> results)
     {
-        return VectorTester.computeRecall(vectors, query, result, function);
+        assertDescendingScore(query, results);
+        return VectorTester.computeRecall(vectors, query, results, function);
     }
 
     private List<float[]> generateVectors(int vectorCount)
@@ -490,19 +476,9 @@ public class VectorDistributedTest extends TestBaseImpl
         return Arrays.toString(vector);
     }
 
-    private String randomVectorString()
-    {
-        return vectorString(randomVector());
-    }
-
     private float[] randomVector()
     {
-        float[] rawVector = new float[dimensionCount];
-        for (int i = 0; i < dimensionCount; i++)
-        {
-            rawVector[i] = getRandom().nextFloat();
-        }
-        return rawVector;
+        return CQLTester.randomVector(dimensionCount);
     }
 
     private List<float[]> generateUSBoundedGeoVectors(int vectorCount)
@@ -544,11 +520,6 @@ public class VectorDistributedTest extends TestBaseImpl
     private static Object[][] execute(String query)
     {
         return execute(query, ConsistencyLevel.QUORUM);
-    }
-
-    private static Object[][] executeAll(String query)
-    {
-        return execute(query, ConsistencyLevel.ALL);
     }
 
     private static Object[][] execute(String query, ConsistencyLevel consistencyLevel)

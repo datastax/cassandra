@@ -1361,8 +1361,8 @@ public class LogTransactionTest extends AbstractTransactionalTest
      */
     static Set<File> getAllFilePaths(SSTableReader sstable, boolean existingOnly)
     {
-        Set<File> ret = new HashSet<>(sstable.getComponents().size());
-        for (Component component : sstable.getComponents())
+        Set<File> ret = new HashSet<>(sstable.components().size());
+        for (Component component : sstable.components())
         {
             File path = sstable.descriptor.fileFor(component);
 

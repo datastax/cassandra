@@ -20,7 +20,8 @@ package org.apache.cassandra.index.sai;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
@@ -37,17 +38,20 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 public class SSTableContext extends SharedCloseableImpl
 {
     public final SSTableReader sstable;
-    public final IndexDescriptor indexDescriptor;
+    private final IndexComponents.ForRead perSSTableComponents;
+    public final PrimaryKey.Factory primaryKeyFactory;
     public final PrimaryKeyMap.Factory primaryKeyMapFactory;
 
     private SSTableContext(SSTableReader sstable,
-                           IndexDescriptor indexDescriptor,
+                           IndexComponents.ForRead perSSTableComponents,
+                           PrimaryKey.Factory primaryKeyFactory,
                            PrimaryKeyMap.Factory primaryKeyMapFactory,
                            Cleanup cleanup)
     {
         super(cleanup);
         this.sstable = sstable;
-        this.indexDescriptor = indexDescriptor;
+        this.perSSTableComponents = perSSTableComponents;
+        this.primaryKeyFactory = primaryKeyFactory;
         this.primaryKeyMapFactory = primaryKeyMapFactory;
     }
 
@@ -55,17 +59,20 @@ public class SSTableContext extends SharedCloseableImpl
     {
         super(copy);
         this.sstable = copy.sstable;
-        this.indexDescriptor = copy.indexDescriptor;
+        this.perSSTableComponents = copy.perSSTableComponents;
+        this.primaryKeyFactory = copy.primaryKeyFactory;
         this.primaryKeyMapFactory = copy.primaryKeyMapFactory;
     }
 
     @SuppressWarnings("resource")
-    public static SSTableContext create(SSTableReader sstable)
+    public static SSTableContext create(SSTableReader sstable, IndexComponents.ForRead perSSTableComponents)
     {
+        var onDiskFormat = perSSTableComponents.version().onDiskFormat();
+        PrimaryKey.Factory primaryKeyFactory = onDiskFormat.newPrimaryKeyFactory(sstable.metadata().comparator);
+
         Ref<? extends SSTableReader> sstableRef = null;
         PrimaryKeyMap.Factory primaryKeyMapFactory = null;
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
         try
         {
             sstableRef = sstable.tryRef();
@@ -75,11 +82,11 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
-            primaryKeyMapFactory = indexDescriptor.newPrimaryKeyMapFactory(sstable);
+            primaryKeyMapFactory = onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
 
             Cleanup cleanup = new Cleanup(primaryKeyMapFactory, sstableRef);
 
-            return new SSTableContext(sstable, indexDescriptor, primaryKeyMapFactory, cleanup);
+            return new SSTableContext(sstable, perSSTableComponents, primaryKeyFactory, primaryKeyMapFactory, cleanup);
         }
         catch (Throwable t)
         {
@@ -90,6 +97,14 @@ public class SSTableContext extends SharedCloseableImpl
 
             throw Throwables.unchecked(Throwables.close(t, primaryKeyMapFactory));
         }
+    }
+
+    /**
+     * Returns the concrete on-disk perSStable components used by this context instance.
+     */
+    public IndexComponents.ForRead usedPerSSTableComponents()
+    {
+        return perSSTableComponents;
     }
 
     @Override
@@ -111,9 +126,9 @@ public class SSTableContext extends SharedCloseableImpl
         return sstable;
     }
 
-    public IndexDescriptor indexDescriptor()
+    public PrimaryKey.Factory primaryKeyFactory()
     {
-        return indexDescriptor;
+        return primaryKeyFactory;
     }
 
     public PrimaryKeyMap.Factory primaryKeyMapFactory()
@@ -126,7 +141,7 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public int openFilesPerSSTable()
     {
-        return indexDescriptor.getVersion().onDiskFormat().openFilesPerSSTable();
+        return perSSTableComponents.version().onDiskFormat().openFilesPerSSTable();
     }
 
     @Override

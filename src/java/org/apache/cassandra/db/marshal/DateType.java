@@ -46,6 +46,8 @@ public class DateType extends AbstractType<Date>
 
     public static final DateType instance = new DateType();
 
+    private static final TypeSerializer<Date> serializer = new TimestampSerializer();
+
     DateType() {super(ComparisonType.BYTE_ORDER);} // singleton
 
     public boolean isEmptyValueMeaningless()
@@ -131,7 +133,7 @@ public class DateType extends AbstractType<Date>
 
     public TypeSerializer<Date> getSerializer()
     {
-        return TimestampSerializer.instance;
+        return serializer;
     }
 
     @Override

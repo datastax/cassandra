@@ -201,7 +201,6 @@ public class ComplexQueryTest extends SAITester
         resultSet = execute("SELECT pk FROM %s WHERE b = 4 OR a = 3 OR c = 5");
 
         assertRowsIgnoringOrder(resultSet, row(3), row(4), row(5));
-
     }
 
     @Test

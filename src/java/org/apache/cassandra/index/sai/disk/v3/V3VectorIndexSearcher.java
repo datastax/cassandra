@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v3;
 
 import java.io.IOException;
+import java.util.Optional;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
@@ -34,9 +35,14 @@ public class V3VectorIndexSearcher extends V2VectorIndexSearcher
     public V3VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                                  PerIndexFiles perIndexFiles,
                                  SegmentMetadata segmentMetadata,
-                                 IndexDescriptor indexDescriptor,
                                  IndexContext indexContext) throws IOException
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext, new CassandraDiskAnn(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
+        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexContext, new CassandraDiskAnn(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
+    }
+
+    @Override
+    public Optional<Boolean> containsUnitVectors()
+    {
+        return Optional.of(((CassandraDiskAnn) graph).pqUnitVectors);
     }
 }

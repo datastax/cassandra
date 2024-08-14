@@ -25,9 +25,22 @@ import org.junit.Test;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 
 public class VectorDotProductWithLengthTest extends VectorTester
 {
+    @Override
+    public void setup() throws Throwable
+    {
+        super.setup();
+        V3OnDiskFormat.enableJVector3Format(); // we are testing unit vector detection which is part of the v3 changes
+    }
+
+    // This tests our detection of unit-length vectors used with dot product and PQ.
+    // We want to switch to cosine similarity for PQ-based comparisons in those cases to preserve the angular semantics
+    // (since PQ compression does not preserve unit length of the compressed results),
+    // but if someone actually wants dot-product-with-length semantics (which this test does)
+    // then switching to cosine is incorrect.
     @Test
     public void testTrueDotproduct()
     {
@@ -43,15 +56,19 @@ public class VectorDotProductWithLengthTest extends VectorTester
         flush();
 
         // check that results are consistent with dot product similarity knn
-        for (int i = 0; i < 10; i++) {
+        double recall = 0;
+        int ITERS = 10;
+        for (int i = 0; i < ITERS; i++) {
             var q = create2DVector();
-            var result = execute("SELECT pk, v FROM %s ORDER BY v ANN OF ? LIMIT 3", vector(q));
+            var result = execute("SELECT pk, v FROM %s ORDER BY v ANN OF ? LIMIT 20", vector(q));
             var ann = result.stream().map(row -> {
                 var vList = row.getVector("v", FloatType.instance, 2);
                 return new float[] { vList.get(0), vList.get(1)};
             }).collect(Collectors.toList());
-            assert computeRecall(vectors, q, ann, VectorSimilarityFunction.DOT_PRODUCT) > 0.9;
+            recall += computeRecall(vectors, q, ann, VectorSimilarityFunction.DOT_PRODUCT);
         }
+        recall /= ITERS;
+        assert recall >= 0.9 : recall;
     }
 
     private static float[] create2DVector() {

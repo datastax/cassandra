@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.Term;
@@ -73,7 +74,6 @@ public final class VectorType<T> extends AbstractType<List<T>>
         }
     }
 
-    private static final boolean FLOAT_ONLY = Boolean.parseBoolean(System.getProperty("cassandra.float_only_vectors", "true"));
     private static final ConcurrentHashMap<Key, VectorType> instances = new ConcurrentHashMap<>();
 
     public final AbstractType<T> elementType;
@@ -82,10 +82,15 @@ public final class VectorType<T> extends AbstractType<List<T>>
     private final int valueLengthIfFixed;
     private final VectorSerializer serializer;
 
+    private static final boolean isVectorTypeAllowed = CassandraRelevantProperties.VECTOR_TYPE_ALLOWED.getBoolean();
+    private static final boolean isVectorTypeFloatOnly = CassandraRelevantProperties.VECTOR_FLOAT_ONLY.getBoolean();
+
     private VectorType(AbstractType<T> elementType, int dimension)
     {
         super(ComparisonType.CUSTOM);
-        if (FLOAT_ONLY && !(elementType instanceof FloatType))
+        if (!isVectorTypeAllowed)
+            throw new InvalidRequestException("vector type is not allowed");
+        if (isVectorTypeFloatOnly && !(elementType instanceof FloatType))
             throw new InvalidRequestException(String.format("vectors may only use float. given %s", elementType.asCQL3Type()));
         if (dimension <= 0)
             throw new InvalidRequestException(String.format("vectors may only have positive dimensions; given %d", dimension));
