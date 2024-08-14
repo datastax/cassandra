@@ -208,21 +208,27 @@ public class GeoDistanceRestrictionTest extends VectorTester
         execute("INSERT INTO %s (city, coordinates) VALUES ('Chicago', [41.8781, -87.6298])");
         execute("INSERT INTO %s (city, coordinates) VALUES ('Boston', [42.3601, -71.0589])");
 
-        // Cities within 5 meters of Boston
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [42.3601, -71.0589]) < 5"),
-                   row("Boston"));
+        beforeAndAfterFlush(() -> {
+            // Cities within 5 meters of Boston
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [42.3601, -71.0589]) < 5"),
+                                    row("Boston"));
 
-        // Cities within 328.4 km of Washington DC
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [38.8951, -77.0364]) < 328400"),
-                                row("New York City"), row("Washington DC"));
 
-        // Cities within 500 km of New York City
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
-                   row("Boston"), row("New York City"), row("Washington DC"));
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [42.3601, -71.0589]) < 5 LIMIT 1"),
+                                    row("Boston"));
 
-        // Cities within 1000 km of New York City
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
-                                row("Boston"), row("New York City"), row("Washington DC"));
+            // Cities within 328.4 km of Washington DC
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [38.8951, -77.0364]) < 328400"),
+                                    row("New York City"), row("Washington DC"));
+
+            // Cities within 500 km of New York City
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
+                                    row("Boston"), row("New York City"), row("Washington DC"));
+
+            // Cities within 1000 km of New York City
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
+                                    row("Boston"), row("New York City"), row("Washington DC"));
+        });
     }
 
     @Test
@@ -240,17 +246,19 @@ public class GeoDistanceRestrictionTest extends VectorTester
         execute("INSERT INTO %s (city, coordinates) VALUES ('Baseball Field 6', [40.793018,-73.957565])");
         execute("INSERT INTO %s (city, coordinates) VALUES ('Baseball Field 5', [40.793193,-73.958644])");
 
-        // Point within 40 meters of field 6
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 40"),
-                                row("Baseball Field 6"));
+        beforeAndAfterFlush(() -> {
+            // Point within 40 meters of field 6
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 40"),
+                                    row("Baseball Field 6"));
 
-        // Point within 43 meters of field 6 (field 7 is 43.14 meters away)
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 43.5"),
-                                row("Baseball Field 6"), row("Baseball Field 7"));
+            // Point within 43 meters of field 6 (field 7 is 43.14 meters away)
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 43.5"),
+                                    row("Baseball Field 6"), row("Baseball Field 7"));
 
-        // Point within 95 meters of field 6 (field 5 is 93 meters away)
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 95"),
-                                row("Baseball Field 6"), row("Baseball Field 7"), row("Baseball Field 5"));
+            // Point within 95 meters of field 6 (field 5 is 93 meters away)
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 95"),
+                                    row("Baseball Field 6"), row("Baseball Field 7"), row("Baseball Field 5"));
+        });
     }
 
     @Test
