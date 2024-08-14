@@ -142,15 +142,15 @@ public class V2VectorPostingsWriter<T>
         {
             // Collect all (rowId, vectorOrdinal) pairs
             List<Pair<Integer, Integer>> pairs = new ArrayList<>();
-            for (var i = 0; i < graphSize; i++) {
+            for (var newOrdinal = 0; newOrdinal < graphSize; newOrdinal++) {
+                int oldOrdinal = newToOldMapper.applyAsInt(newOrdinal);
                 // if it's an on-disk Map then this is an expensive assert, only do it when in memory
                 if (postingsMap instanceof ConcurrentSkipListMap)
-                    assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
+                    assert postingsMap.get(vectorValues.getVector(oldOrdinal)).getOrdinal() == oldOrdinal;
 
-                int ord = newToOldMapper.applyAsInt(i);
-                var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
+                var rowIds = postingsMap.get(vectorValues.getVector(oldOrdinal)).getRowIds();
                 for (int r = 0; r < rowIds.size(); r++)
-                    pairs.add(Pair.create(rowIds.getInt(r), i));
+                    pairs.add(Pair.create(rowIds.getInt(r), newOrdinal));
             }
 
             // Sort the pairs by rowId
