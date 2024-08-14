@@ -64,6 +64,7 @@ import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -500,10 +501,10 @@ public class VectorMemtableIndex implements MemtableIndex
      */
     private class NodeScoreToScoredPrimaryKeyIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
-        private final Iterator<SearchResult.NodeScore> nodeScores;
+        private final CloseableIterator<SearchResult.NodeScore> nodeScores;
         private Iterator<PrimaryKeyWithScore> primaryKeysForNode = Collections.emptyIterator();
 
-        NodeScoreToScoredPrimaryKeyIterator(Iterator<SearchResult.NodeScore> nodeScores)
+        NodeScoreToScoredPrimaryKeyIterator(CloseableIterator<SearchResult.NodeScore> nodeScores)
         {
             this.nodeScores = nodeScores;
         }
@@ -526,6 +527,12 @@ public class VectorMemtableIndex implements MemtableIndex
             }
 
             return endOfData();
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(nodeScores);
         }
     }
 
