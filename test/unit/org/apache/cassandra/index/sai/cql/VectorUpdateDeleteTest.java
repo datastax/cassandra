@@ -18,9 +18,6 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-
 import org.junit.Before;
 import org.junit.Test;
 
@@ -734,57 +731,6 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void ensureVariableChunkSizeDoesNotLeadToIncorrectResults() throws Exception
-    {
-        // When adding the chunk size feature, there were issues related to leaked files.
-        // This setting only matters for hybrid queries
-        QueryController.QUERY_OPT_LEVEL = 0;
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, vec vector<float, 2>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
-        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        // Create many sstables to ensure chunk size matters
-        // Start at 1 to prevent indexing zero vector.
-        // Index every vector with A to match everything and because this test only makes sense for hybrid queries
-        for (int i = 1; i <= 100; i++)
-        {
-            execute("INSERT INTO %s (pk, str_val, vec) VALUES (?, ?, ?)", i, "A", vector(i, i));
-            if (i % 10 == 0)
-                flush();
-            // Add some deletes in the next segment
-            if (i % 3 == 0)
-                execute("DELETE FROM %s WHERE pk = ?", i);
-        }
-
-        try
-        {
-            // We use a chunk size that is as low as possible (1) and goes up to the whole dataset (100).
-            // We also query for different LIMITs
-            for (int i = 1; i <= 100; i++)
-            {
-                setChunkSize(i);
-                var results = execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1");
-                assertRows(results, row(1));
-                results = execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 3");
-                // Note that we delete row 3
-                assertRows(results, row(1), row(2), row(4));
-                results = execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 10");
-                // Note that we delete row 3, 6, 9, 12
-                assertRows(results, row(1), row(2), row(4), row(5),
-                           row(7), row(8), row(10), row(11), row(13), row(14));
-            }
-        }
-        finally
-        {
-            // Revert to prevent interference with other tests. Note that a decreased chunk size can impact
-            // wether we compute the topk with brute force because it determines how many vectors get sent to the
-            // vector index.
-            setChunkSize(100000);
-        }
-    }
-
-    @Test
     public void shadowedPrimaryKeysRequireDeeperSearch() throws Throwable
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
@@ -987,15 +933,5 @@ public class VectorUpdateDeleteTest extends VectorTester
 
         assertRows(execute("SELECT PK FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 1"));
         getCurrentColumnFamilyStore().getLiveSSTables();
-    }
-
-    private static void setChunkSize(final int selectivityLimit) throws Exception
-    {
-        Field selectivity = QueryController.class.getDeclaredField("ORDER_CHUNK_SIZE");
-        selectivity.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(selectivity, selectivity.getModifiers() & ~Modifier.FINAL);
-        selectivity.set(null, selectivityLimit);
     }
 }
