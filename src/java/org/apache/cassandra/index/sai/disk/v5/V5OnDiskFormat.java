@@ -20,17 +20,15 @@ package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
 
-import org.slf4j.Logger;
-
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
 
-public class V5OnDiskFormat extends V3OnDiskFormat
+public class V5OnDiskFormat extends V4OnDiskFormat
 {
     public static final V5OnDiskFormat instance = new V5OnDiskFormat();
 
