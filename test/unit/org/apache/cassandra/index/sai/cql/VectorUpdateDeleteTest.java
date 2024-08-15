@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @RunWith(Parameterized.class)
@@ -953,5 +954,24 @@ public class VectorUpdateDeleteTest extends VectorTester
 
         assertRows(execute("SELECT PK FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 1"));
         getCurrentColumnFamilyStore().getLiveSSTables();
+    }
+
+    @Test
+    public void ensureCompressedVectorsCanFlush() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, val vector<float, 4>, PRIMARY KEY(pk))");
+        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // insert enough vectors for pq plus 1 because we need quantization and we're deleting a row
+        for (int i = 0; i < MIN_PQ_ROWS + 1; i++)
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vector(randomVector(4)));
+
+        // Delete a single vector to trigger the regression
+        execute("DELETE from %s WHERE pk = 0");
+
+        flush();
+
+        verifySSTableIndexes(indexName, 1);
     }
 }
