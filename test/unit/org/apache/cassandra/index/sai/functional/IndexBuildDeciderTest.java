@@ -20,6 +20,7 @@
  */
 package org.apache.cassandra.index.sai.functional;
 
+import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
@@ -124,11 +125,11 @@ public class IndexBuildDeciderTest extends SAITester
 
         // check the second sstable flushed at index creation is now indexed:
         SSTableReader secondSSTable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable).findFirst().get();
-        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
-        assertEquals(initialSSTableFileCount + indexFileCount(sai.getIndexContext()), sstableFileCount(secondSSTable));
+        assertEquals(initialSSTableFileCount + numericIndexFileCount(), sstableFileCount(secondSSTable));
         assertTrue(sstableContext.contains(secondSSTable));
 
         // SAI#canFlushFromMemtableIndex should be true
+        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
         assertTrue(sai.canFlushFromMemtableIndex());
 
         // flush another memtable: it should be flushed with MemtableIndexWriter
@@ -137,16 +138,18 @@ public class IndexBuildDeciderTest extends SAITester
         assertEquals(1, flushWithMemtableIndexWriterCount.get());
         SSTableReader thirdSStable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable && s != secondSSTable).findFirst().get();
 
-        assertEquals(initialSSTableFileCount + indexFileCount(sai.getIndexContext()), sstableFileCount(thirdSStable));
+        assertEquals(initialSSTableFileCount + numericIndexFileCount(), sstableFileCount(thirdSStable));
         assertTrue(sstableContext.contains(thirdSStable));
     }
 
     private int sstableFileCount(SSTableReader secondSSTable)
     {
-        return FileUtils.listPathsWithAbsolutePath(secondSSTable.descriptor.baseFileURI()).size();
+        Path sstableDir = secondSSTable.descriptor.directory.toPath();
+        String prefix = sstableDir + "/" + secondSSTable.descriptor.filenamePart();
+        return FileUtils.listPaths(sstableDir, path -> path.toString().startsWith(prefix)).size();
     }
 
-    private int indexFileCount(IndexContext ignored)
+    private int numericIndexFileCount()
     {
         IndexContext context = createIndexContext("v1", Int32Type.instance);
         return V2OnDiskFormat.instance.perIndexComponentTypes(context).size()
