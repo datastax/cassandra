@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -421,6 +422,9 @@ public class V5VectorPostingsWriter<T>
         return new RemappedPostings(structure, maxNewOrdinal, maxRow, ordinalMap, extraPostings);
     }
 
+    /**
+     * return an exhaustive zero-to-many mapping with the live ordinals renumbered sequentially
+     */
     private static RemappedPostings createGenericMapping(Set<Integer> liveOrdinals, int maxOldOrdinal, int maxRow)
     {
         var sequentialMap = new Int2IntHashMap(maxOldOrdinal, 0.65f, Integer.MIN_VALUE);
@@ -430,5 +434,16 @@ public class V5VectorPostingsWriter<T>
                 sequentialMap.put(i, nextOrdinal++);
         }
         return new RemappedPostings(nextOrdinal - 1, maxRow, sequentialMap);
+    }
+
+    /**
+     * return an exhaustive zero-to-many mapping for v2 postings, which never contain missing ordinals
+     * since deleted vectors are only removed from the index in its next compaction
+     */
+    public static <T> RemappedPostings createGenericV2Mapping(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
+    {
+        int maxOldOrdinal = postingsMap.size() - 1;
+        int maxRow = postingsMap.values().stream().flatMap(p -> p.getRowIds().stream()).mapToInt(i -> i).max().orElseThrow();
+        return createGenericMapping(IntStream.range(0, postingsMap.size()).boxed().collect(Collectors.toSet()), maxOldOrdinal, maxRow);
     }
 }

@@ -27,8 +27,13 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.IntUnaryOperator;
 
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
+
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
+import org.agrona.collections.Int2IntHashMap;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.Pair;
@@ -165,5 +170,49 @@ public class V2VectorPostingsWriter<T>
 
         // write the position of the beginning of rowid -> ordinals mappings to the end
         writer.writeLong(startOffset);
+    }
+
+    /**
+     * @return a map of vector ordinal to row id and the largest rowid, or null if the vectors are not 1:1 with rows
+     */
+    private static <T> Pair<BiMap<Integer, Integer>, Integer> buildOrdinalMap(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
+    {
+        BiMap<Integer, Integer> ordinalMap = HashBiMap.create();
+        int minRow = Integer.MAX_VALUE;
+        int maxRow = Integer.MIN_VALUE;
+        for (VectorPostings<T> vectorPostings : postingsMap.values())
+        {
+            if (vectorPostings.getRowIds().size() != 1)
+            {
+                // multiple rows associated with this vector
+                return null;
+            }
+            int rowId = vectorPostings.getRowIds().getInt(0);
+            int ordinal = vectorPostings.getOrdinal();
+            minRow = Math.min(minRow, rowId);
+            maxRow = Math.max(maxRow, rowId);
+            assert !ordinalMap.containsKey(ordinal); // vector <-> ordinal should be unique
+            ordinalMap.put(ordinal, rowId);
+        }
+
+        if (minRow != 0 || maxRow != postingsMap.values().size() - 1)
+        {
+            // not every row had a vector associated with it
+            return null;
+        }
+        return Pair.create(ordinalMap, maxRow);
+    }
+
+    public static <T> V5VectorPostingsWriter.RemappedPostings remapPostings(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
+                                                                            boolean containsDeletes)
+    {
+        var p = buildOrdinalMap(postingsMap);
+        int maxNewOrdinal = postingsMap.size() - 1; // no in-graph deletes in v2
+        if (p == null || containsDeletes)
+            return V5VectorPostingsWriter.createGenericV2Mapping(postingsMap);
+
+        var ordinalMap = p.left;
+        var maxRow = p.right;
+        return new V5VectorPostingsWriter.RemappedPostings(V5VectorPostingsWriter.Structure.ONE_TO_ONE, maxNewOrdinal, maxRow, ordinalMap, new Int2IntHashMap(Integer.MIN_VALUE));
     }
 }

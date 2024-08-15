@@ -345,10 +345,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             var vp = entry.getValue();
             vp.computeRowIds(postingTransformer);
             if (vp.isEmpty() || vp.shouldAppendDeletedOrdinal())
-            {
                 deletedOrdinals.add(vp.getOrdinal());
-                it.remove();
-            }
         }
         return deletedOrdinals.size() < builder.getGraph().size();
     }
@@ -361,23 +358,40 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                                                               nextOrdinal.get(), builder.getGraph().size());
         assert vectorValues.size() == builder.getGraph().size() : String.format("vector count %d != graph size %d",
                                                                                 vectorValues.size(), builder.getGraph().size());
-        assert postingsMap.keySet().size() + deletedOrdinals.size() == vectorValues.size()
-        : String.format("postings map entry count %d + deleted count %d != vector count %d",
-                        postingsMap.keySet().size(), deletedOrdinals.size(), vectorValues.size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
-
-        // remove deleted ordinals from the graph.  this is not done at remove() time, because the same vector
-        // could be added back again, "undeleting" the ordinal, and the concurrency gets tricky
-        if (V5OnDiskFormat.writeV5VectorPostings() && V3OnDiskFormat.ENABLE_JVECTOR_DELETES)
-        {
-            deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
-            deletedOrdinals.clear();
-        }
-        builder.cleanup();
 
         // compute the remapping of old ordinals to new (to fill in holes from deletion and/or to create a
         // closer correspondance to rowids, simplifying postings lookups later)
-        var remappedPostings = V5VectorPostingsWriter.remapPostings(postingsMap);
+        V5VectorPostingsWriter.RemappedPostings remappedPostings;
+        if (V5OnDiskFormat.writeV5VectorPostings())
+        {
+            // remove postings corresponding to marked-deleted vectors
+            var it = postingsMap.entrySet().iterator();
+            while (it.hasNext()) {
+                var entry = it.next();
+                var vp = entry.getValue();
+                if (deletedOrdinals.contains(vp.getOrdinal()))
+                    it.remove();
+            }
+
+            assert postingsMap.keySet().size() + deletedOrdinals.size() == vectorValues.size()
+            : String.format("postings map entry count %d + deleted count %d != vector count %d",
+                            postingsMap.keySet().size(), deletedOrdinals.size(), vectorValues.size());
+            // remove deleted ordinals from the graph.  this is not done at remove() time, because the same vector
+            // could be added back again, "undeleting" the ordinal, and the concurrency gets tricky
+            deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
+            deletedOrdinals.clear();
+            builder.cleanup();
+            remappedPostings = V5VectorPostingsWriter.remapPostings(postingsMap);
+        }
+        else
+        {
+            assert postingsMap.keySet().size() == vectorValues.size() : String.format("postings map entry count %d != vector count %d",
+                                                                                      postingsMap.keySet().size(), vectorValues.size());
+            builder.cleanup();
+            remappedPostings = V2VectorPostingsWriter.remapPostings(postingsMap, !deletedOrdinals.isEmpty());
+        }
+
         OrdinalMapper ordinalMapper = remappedPostings.ordinalMapper;
 
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
