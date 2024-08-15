@@ -368,7 +368,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         // remove deleted ordinals from the graph.  this is not done at remove() time, because the same vector
         // could be added back again, "undeleting" the ordinal, and the concurrency gets tricky
-        if (V3OnDiskFormat.ENABLE_JVECTOR_DELETES)
+        if (V5OnDiskFormat.writeV5VectorPostings() && V3OnDiskFormat.ENABLE_JVECTOR_DELETES)
         {
             deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
             deletedOrdinals.clear();
