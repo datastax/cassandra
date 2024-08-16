@@ -23,6 +23,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Functions;
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,7 +48,6 @@ import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -57,7 +57,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  * The builder holds a mutable trie to which content may be added in any order, also taking care of
  * merging any duplicate rows, and keeping track of statistics and column coverage.
  */
-public class TriePartitionUpdate extends TrieBackedPartition implements PartitionUpdate
+public class TriePartitionUpdate extends TrieBackedPartition.FullRows implements PartitionUpdate
 {
     protected static final Logger logger = LoggerFactory.getLogger(TriePartitionUpdate.class);
 
@@ -192,7 +192,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @SuppressWarnings("resource")
     public static TriePartitionUpdate fromIterator(UnfilteredRowIterator iterator)
     {
-        ContentBuilder builder = build(iterator, true);
+        ContentBuilder builder = build(Functions.identity(), iterator, true);
 
         return new TriePartitionUpdate(iterator.metadata(),
                                        iterator.partitionKey(),
@@ -246,24 +246,15 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 public Object apply(Object shouldBeNull, Object o)
                 {
                     assert shouldBeNull == null;
-                    if (o instanceof RowData)
-                        return applyRowData((RowData) o);
+                    if (o instanceof Row)
+                        return applyRow((Row) o);
                     else
                         return applyDeletion((DeletionInfo) o);
                 }
 
-                public RowData applyRowData(RowData update)
+                public Row applyRow(Row update)
                 {
-                    LivenessInfo newInfo = update.livenessInfo.isEmpty()
-                                           ? update.livenessInfo
-                                           : update.livenessInfo.withUpdatedTimestamp(newTimestamp);
-                    DeletionTime newDeletion = update.deletion.isLive()
-                                               ? DeletionTime.LIVE
-                                               : new DeletionTime(newTimestamp - 1, update.deletion.localDeletionTime());
-
-                    return new RowData(BTree.transformAndFilter(update.columnsBTree,
-                                                                (ColumnData cd) -> cd.updateAllTimestamp(newTimestamp)),
-                                       newInfo, newDeletion);
+                    return update.updateAllTimestamp(newTimestamp);
                 }
 
                 public DeletionInfo applyDeletion(DeletionInfo update)
@@ -503,14 +494,14 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             return pu;
         }
 
-        RowData merge(Object existing, Row update)
+        Row merge(Object existing, Row update)
         {
             if (existing != null)
             {
                 // this is not expected to happen much, so going through toRow and the existing size is okay
-                RowData rowData = (RowData) existing;
-                update = Rows.merge(rowData.toRow(update.clustering()), update);
-                dataSize += update.dataSize() - rowData.dataSize();
+                Row row = (Row) existing;
+                update = Rows.merge(row, update);
+                dataSize += update.dataSize() - row.dataSize();
             }
             else
             {
@@ -518,7 +509,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 dataSize += update.dataSize();
             }
 
-            return rowToData(update);
+            return update;
         }
 
         public RegularAndStaticColumns columns()

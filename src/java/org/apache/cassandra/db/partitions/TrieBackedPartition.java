@@ -20,6 +20,7 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.Iterator;
 import java.util.NavigableSet;
+import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
@@ -77,7 +78,7 @@ import org.apache.cassandra.utils.memory.EnsureOnHeap;
  * Currently all descendants and instances of this class are immutable (even tail tries from mutable memtables are
  * guaranteed to not change as we use forced copying below the partition level), though this may change in the future.
  */
-public class TrieBackedPartition implements Partition
+public abstract class TrieBackedPartition<R> implements Partition
 {
     /**
      * If keys are below this length, we will use a recursive procedure for inserting data when building the backing
@@ -91,70 +92,7 @@ public class TrieBackedPartition implements Partition
     /** Pre-made path for BOTTOM, to avoid creating path object when iterating rows. */
     public static final ByteComparable BOTTOM_PATH = v -> ByteSource.oneByte(ClusteringBound.Kind.INCL_START_BOUND.asByteComparableValue(v));
 
-    /**
-     * The representation of a row stored at the leaf of a trie. Does not contain the row key.
-     *
-     * The methods toRow and copyToOnHeapRow combine this with a clustering for the represented Row.
-     */
-    public static class RowData
-    {
-        final Object[] columnsBTree;
-        final LivenessInfo livenessInfo;
-        final DeletionTime deletion;
-        final int minLocalDeletionTime;
-
-        RowData(Object[] columnsBTree, LivenessInfo livenessInfo, DeletionTime deletion)
-        {
-            this(columnsBTree, livenessInfo, deletion, BTreeRow.minDeletionTime(columnsBTree, livenessInfo, deletion));
-        }
-
-        RowData(Object[] columnsBTree, LivenessInfo livenessInfo, DeletionTime deletion, int minLocalDeletionTime)
-        {
-            this.columnsBTree = columnsBTree;
-            this.livenessInfo = livenessInfo;
-            this.deletion = deletion;
-            this.minLocalDeletionTime = minLocalDeletionTime;
-        }
-
-        Row toRow(Clustering<?> clustering)
-        {
-            return BTreeRow.create(clustering,
-                                   livenessInfo,
-                                   Row.Deletion.regular(deletion),
-                                   columnsBTree,
-                                   minLocalDeletionTime);
-        }
-
-        public int dataSize()
-        {
-            int dataSize = livenessInfo.dataSize() + deletion.dataSize();
-
-            return Ints.checkedCast(BTree.accumulate(columnsBTree, (ColumnData cd, long v) -> v + cd.dataSize(), dataSize));
-        }
-
-        public long unsharedHeapSizeExcludingData()
-        {
-            long heapSize = EMPTY_ROWDATA_SIZE
-                            + BTree.sizeOfStructureOnHeap(columnsBTree)
-                            + livenessInfo.unsharedHeapSize()
-                            + deletion.unsharedHeapSize();
-
-            return BTree.accumulate(columnsBTree, (ColumnData cd, long v) -> v + cd.unsharedHeapSizeExcludingData(), heapSize);
-        }
-
-        public String toString()
-        {
-            return "row " + livenessInfo + " size " + dataSize();
-        }
-
-        public RowData clone(Cloner cloner)
-        {
-            Object[] tree = BTree.<ColumnData, ColumnData>transform(columnsBTree, c -> c.clone(cloner));
-            return new RowData(tree, livenessInfo, deletion, minLocalDeletionTime);
-        }
-    }
-
-    private static final long EMPTY_ROWDATA_SIZE = ObjectSizes.measure(new RowData(null, null, null, 0));
+    private final Class<R> rowDataClass;
 
     protected final Trie<Object> trie;
     protected final DecoratedKey partitionKey;
@@ -164,7 +102,8 @@ public class TrieBackedPartition implements Partition
     protected final int rowCountIncludingStatic;
     protected final boolean canHaveShadowedData;
 
-    public TrieBackedPartition(DecoratedKey partitionKey,
+    public TrieBackedPartition(Class<R> rowDataClass,
+                               DecoratedKey partitionKey,
                                RegularAndStaticColumns columns,
                                EncodingStats stats,
                                int rowCountIncludingStatic,
@@ -172,6 +111,7 @@ public class TrieBackedPartition implements Partition
                                TableMetadata metadata,
                                boolean canHaveShadowedData)
     {
+        this.rowDataClass = rowDataClass;
         this.partitionKey = partitionKey;
         this.trie = trie;
         this.metadata = metadata;
@@ -185,23 +125,11 @@ public class TrieBackedPartition implements Partition
         assert stats != null;
     }
 
-    public static TrieBackedPartition create(UnfilteredRowIterator iterator)
-    {
-        ContentBuilder builder = build(iterator, false);
-        return new TrieBackedPartition(iterator.partitionKey(),
-                                       iterator.columns(),
-                                       iterator.stats(),
-                                       builder.rowCountIncludingStatic(),
-                                       builder.trie(),
-                                       iterator.metadata(),
-                                       false);
-    }
-
-    protected static ContentBuilder build(UnfilteredRowIterator iterator, boolean collectDataSize)
+    protected static <R> ContentBuilder<R> build(Function<Row, R> fromRow, UnfilteredRowIterator iterator, boolean collectDataSize)
     {
         try
         {
-            ContentBuilder builder = new ContentBuilder(iterator.metadata(), iterator.partitionLevelDeletion(), iterator.isReverseOrder(), collectDataSize);
+            ContentBuilder builder = new ContentBuilder(fromRow, iterator.metadata(), iterator.partitionLevelDeletion(), iterator.isReverseOrder(), collectDataSize);
 
             builder.addStatic(iterator.staticRow());
 
@@ -216,70 +144,8 @@ public class TrieBackedPartition implements Partition
         }
     }
 
-    /**
-     * Create a row with the given properties and content, making sure to copy all off-heap data to keep it alive when
-     * the given access mode requires it.
-     */
-    public static TrieBackedPartition create(DecoratedKey partitionKey,
-                                             RegularAndStaticColumns columnMetadata,
-                                             EncodingStats encodingStats,
-                                             int rowCountIncludingStatic,
-                                             Trie<Object> trie,
-                                             TableMetadata metadata,
-                                             EnsureOnHeap ensureOnHeap)
-    {
-        return ensureOnHeap == EnsureOnHeap.NOOP
-               ? new TrieBackedPartition(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, trie, metadata, true)
-               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, trie, metadata, true, ensureOnHeap);
-    }
-
-    class RowIterator extends TrieEntriesIterator<Object, Row>
-    {
-        public RowIterator(Trie<Object> trie, Direction direction)
-        {
-            super(trie, direction, RowData.class::isInstance);
-        }
-
-        @Override
-        protected Row mapContent(Object content, byte[] bytes, int byteLength)
-        {
-            var rd = (RowData) content;
-            return toRow(rd, metadata.comparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
-                                                                              ByteComparable.fixedLength(bytes, 0, byteLength)));
-        }
-    }
-
-    private Iterator<Row> rowIterator(Trie<Object> trie, Direction direction)
-    {
-        return new RowIterator(trie, direction);
-    }
-
-    static RowData rowToData(Row row)
-    {
-        BTreeRow brow = (BTreeRow) row;
-        return new RowData(brow.getBTree(), row.primaryKeyLivenessInfo(), row.deletion().time(), brow.getMinLocalDeletionTime());
-    }
-
-    /**
-     * Conversion from RowData to Row. TrieBackedPartitionOnHeap overrides this to do the necessary copying
-     * (hence the non-static method).
-     */
-    Row toRow(RowData data, Clustering clustering)
-    {
-        return data.toRow(clustering);
-    }
-
-    /**
-     * Put the given unfiltered in the trie.
-     * @param comparator for converting key to byte-comparable
-     * @param useRecursive whether the key length is guaranteed short and recursive put can be used
-     * @param trie destination
-     * @param row content to put
-     */
-    protected static void putInTrie(ClusteringComparator comparator, boolean useRecursive, InMemoryTrie<Object> trie, Row row) throws TrieSpaceExhaustedException
-    {
-        trie.putSingleton(comparator.asByteComparable(row.clustering()), rowToData(row), NO_CONFLICT_RESOLVER, useRecursive);
-    }
+    protected abstract Row toRow(R data, Clustering clustering);
+    protected abstract Iterator<Row> rowIterator(Trie<Object> trie, Direction direction);
 
     /**
      * Check if we can use recursive operations when putting a value in tries.
@@ -339,7 +205,7 @@ public class TrieBackedPartition implements Partition
 
     public Row staticRow()
     {
-        RowData staticRow = (RowData) trie.get(STATIC_CLUSTERING_PATH);
+        R staticRow = (R) trie.get(STATIC_CLUSTERING_PATH);
 
         if (staticRow != null)
             return toRow(staticRow, Clustering.STATIC_CLUSTERING);
@@ -397,7 +263,7 @@ public class TrieBackedPartition implements Partition
 
     public Row getRow(Clustering clustering)
     {
-        RowData data = (RowData) trie.get(path(clustering));
+        R data = (R) trie.get(path(clustering));
 
         DeletionInfo deletionInfo = deletionInfo();
         RangeTombstone rt = deletionInfo.rangeCovering(clustering);
@@ -465,8 +331,8 @@ public class TrieBackedPartition implements Partition
                 {
                     Clustering<?> clustering = clusterings.next();
                     Object rowData = trie.get(path(clustering));
-                    if (rowData instanceof RowData)
-                        return toRow((RowData) rowData, clustering);
+                    if (rowDataClass.isInstance(rowData))
+                        return toRow((R) rowData, clustering);
                 }
                 return endOfData();
             }
@@ -566,41 +432,6 @@ public class TrieBackedPartition implements Partition
 
 
     /**
-     * An snapshot of the current TrieBackedPartition data, copied on heap when retrieved.
-     */
-    private static final class WithEnsureOnHeap extends TrieBackedPartition
-    {
-        final DeletionInfo onHeapDeletion;
-        EnsureOnHeap ensureOnHeap;
-
-        public WithEnsureOnHeap(DecoratedKey partitionKey,
-                                RegularAndStaticColumns columns,
-                                EncodingStats stats,
-                                int rowCountIncludingStatic,
-                                Trie<Object> trie,
-                                TableMetadata metadata,
-                                boolean canHaveShadowedData,
-                                EnsureOnHeap ensureOnHeap)
-        {
-            super(partitionKey, columns, stats, rowCountIncludingStatic, trie, metadata, canHaveShadowedData);
-            this.ensureOnHeap = ensureOnHeap;
-            this.onHeapDeletion = ensureOnHeap.applyToDeletionInfo(super.deletionInfo());
-        }
-
-        @Override
-        public Row toRow(RowData data, Clustering clustering)
-        {
-            return ensureOnHeap.applyToRow(super.toRow(data, clustering));
-        }
-
-        @Override
-        public DeletionInfo deletionInfo()
-        {
-            return onHeapDeletion;
-        }
-    }
-
-    /**
      * Resolver for operations with trie-backed partitions. We don't permit any overwrites/merges.
      */
     public static final InMemoryTrie.UpsertTransformer<Object, Object> NO_CONFLICT_RESOLVER =
@@ -616,7 +447,7 @@ public class TrieBackedPartition implements Partition
      *
      * Note: This is not collecting any stats or columns!
      */
-    public static class ContentBuilder
+    public static class ContentBuilder<R>
     {
         final TableMetadata metadata;
         final ClusteringComparator comparator;
@@ -627,11 +458,14 @@ public class TrieBackedPartition implements Partition
         private final boolean useRecursive;
         private final boolean collectDataSize;
 
+        private final Function<Row, R> fromRow;
+
         private int rowCountIncludingStatic;
         private long dataSize;
 
-        public ContentBuilder(TableMetadata metadata, DeletionTime partitionLevelDeletion, boolean isReverseOrder, boolean collectDataSize)
+        public ContentBuilder(Function<Row, R> fromRow, TableMetadata metadata, DeletionTime partitionLevelDeletion, boolean isReverseOrder, boolean collectDataSize)
         {
+            this.fromRow = fromRow;
             this.metadata = metadata;
             this.comparator = metadata.comparator;
 
@@ -657,7 +491,7 @@ public class TrieBackedPartition implements Partition
 
         public ContentBuilder addRow(Row row) throws TrieSpaceExhaustedException
         {
-            putInTrie(comparator, useRecursive, trie, row);
+            trie.putSingleton(comparator.asByteComparable(row.clustering()), fromRow.apply(row), NO_CONFLICT_RESOLVER, useRecursive);
             ++rowCountIncludingStatic;
             if (collectDataSize)
                 dataSize += row.dataSize();
@@ -701,6 +535,239 @@ public class TrieBackedPartition implements Partition
         {
             assert collectDataSize;
             return Ints.saturatedCast(dataSize);
+        }
+    }
+
+
+    /**
+     * The representation of a row stored at the leaf of a trie. Does not contain the row key.
+     *
+     * The method toRow combines this with a clustering for the represented Row.
+     */
+    public static class RowData
+    {
+        final Object[] columnsBTree;
+        final LivenessInfo livenessInfo;
+        final DeletionTime deletion;
+        final int minLocalDeletionTime;
+
+        RowData(Object[] columnsBTree, LivenessInfo livenessInfo, DeletionTime deletion)
+        {
+            this(columnsBTree, livenessInfo, deletion, BTreeRow.minDeletionTime(columnsBTree, livenessInfo, deletion));
+        }
+
+        RowData(Object[] columnsBTree, LivenessInfo livenessInfo, DeletionTime deletion, int minLocalDeletionTime)
+        {
+            this.columnsBTree = columnsBTree;
+            this.livenessInfo = livenessInfo;
+            this.deletion = deletion;
+            this.minLocalDeletionTime = minLocalDeletionTime;
+        }
+
+        Row toRow(Clustering<?> clustering)
+        {
+            return BTreeRow.create(clustering,
+                                   livenessInfo,
+                                   Row.Deletion.regular(deletion),
+                                   columnsBTree,
+                                   minLocalDeletionTime);
+        }
+
+        public int dataSize()
+        {
+            int dataSize = livenessInfo.dataSize() + deletion.dataSize();
+
+            return Ints.checkedCast(BTree.accumulate(columnsBTree, (ColumnData cd, long v) -> v + cd.dataSize(), dataSize));
+        }
+
+        public long unsharedHeapSizeExcludingData()
+        {
+            long heapSize = EMPTY_ROWDATA_SIZE
+                            + BTree.sizeOfStructureOnHeap(columnsBTree)
+                            + livenessInfo.unsharedHeapSize()
+                            + deletion.unsharedHeapSize();
+
+            return BTree.accumulate(columnsBTree, (ColumnData cd, long v) -> v + cd.unsharedHeapSizeExcludingData(), heapSize);
+        }
+
+        public String toString()
+        {
+            return "row " + livenessInfo + " size " + dataSize();
+        }
+
+        public RowData clone(Cloner cloner)
+        {
+            Object[] tree = BTree.<ColumnData, ColumnData>transform(columnsBTree, c -> c.clone(cloner));
+            return new RowData(tree, livenessInfo, deletion, minLocalDeletionTime);
+        }
+    }
+
+    protected static RowData rowToData(Row row)
+    {
+        BTreeRow brow = (BTreeRow) row;
+        return new RowData(brow.getBTree(), row.primaryKeyLivenessInfo(), row.deletion().time(), brow.getMinLocalDeletionTime());
+    }
+
+    public static RowData cloneRowToData(Cloner cloner, BTreeRow row)
+    {
+        Object[] tree = BTree.<ColumnData, ColumnData>transform(row.getBTree(), c -> c.clone(cloner));
+        return new RowData(tree, row.primaryKeyLivenessInfo(), row.deletion().time());
+    }
+
+    private static final long EMPTY_ROWDATA_SIZE = ObjectSizes.measure(new RowData(null, null, null, 0));
+    public static class KeylessRows extends TrieBackedPartition<RowData>
+    {
+        public KeylessRows(DecoratedKey partitionKey, RegularAndStaticColumns columns, EncodingStats stats, int rowCount, Trie<Object> trie, TableMetadata metadata, boolean canHaveShadowedData)
+        {
+            super(RowData.class, partitionKey, columns, stats, rowCount, trie, metadata, canHaveShadowedData);
+        }
+
+        public static KeylessRows create(UnfilteredRowIterator iterator)
+        {
+            ContentBuilder<RowData> builder = build(TrieBackedPartition::rowToData, iterator, false);
+            return new KeylessRows(iterator.partitionKey(),
+                                   iterator.columns(),
+                                   iterator.stats(),
+                                   builder.rowCountIncludingStatic(),
+                                   builder.trie(),
+                                   iterator.metadata(),
+                                   false);
+        }
+
+        /**
+         * Create a row with the given properties and content, making sure to copy all off-heap data to keep it alive when
+         * the given access mode requires it.
+         */
+        public static KeylessRows create(DecoratedKey partitionKey,
+                                         RegularAndStaticColumns columnMetadata,
+                                         EncodingStats encodingStats,
+                                         int rowCount,
+                                         Trie<Object> trie,
+                                         TableMetadata metadata,
+                                         EnsureOnHeap ensureOnHeap)
+        {
+            return ensureOnHeap == EnsureOnHeap.NOOP
+                   ? new KeylessRows(partitionKey, columnMetadata, encodingStats, rowCount, trie, metadata, true)
+                   : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCount, trie, metadata, true, ensureOnHeap);
+        }
+
+        @Override
+        protected Row toRow(RowData data, Clustering clustering)
+        {
+            return data.toRow(clustering);
+        }
+
+        class RowIterator extends TrieEntriesIterator<Object, Row>
+        {
+            public RowIterator(Trie<Object> trie, Direction direction)
+            {
+                super(trie, direction, RowData.class::isInstance);
+            }
+
+            @Override
+            protected Row mapContent(Object content, byte[] bytes, int byteLength)
+            {
+                var rd = (RowData) content;
+                return toRow(rd, metadata.comparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
+                                                                                  ByteComparable.fixedLength(bytes, 0, byteLength)));
+            }
+        }
+
+        protected Iterator<Row> rowIterator(Trie<Object> trie, Direction direction) // overridden by FullKeys
+        {
+            return new RowIterator(trie, direction);
+        }
+
+        /**
+         * Put the given row in the trie.
+         * @param comparator for converting key to byte-comparable
+         * @param useRecursive whether the key length is guaranteed short and recursive put can be used
+         * @param trie destination
+         * @param row content to put
+         */
+        protected static void putInTrie(ClusteringComparator comparator, boolean useRecursive, InMemoryTrie<Object> trie, Row row) throws TrieSpaceExhaustedException
+        {
+            trie.putSingleton(comparator.asByteComparable(row.clustering()), rowToData(row), NO_CONFLICT_RESOLVER, useRecursive);
+        }
+    }
+
+
+    /**
+     * An snapshot of the current TrieBackedPartition data, copied on heap when retrieved.
+     */
+    private static final class WithEnsureOnHeap extends KeylessRows
+    {
+        final DeletionInfo onHeapDeletion;
+        EnsureOnHeap ensureOnHeap;
+
+        public WithEnsureOnHeap(DecoratedKey partitionKey,
+                                RegularAndStaticColumns columns,
+                                EncodingStats stats,
+                                int rowCount,
+                                Trie<Object> trie,
+                                TableMetadata metadata,
+                                boolean canHaveShadowedData,
+                                EnsureOnHeap ensureOnHeap)
+        {
+            super(partitionKey, columns, stats, rowCount, trie, metadata, canHaveShadowedData);
+            this.ensureOnHeap = ensureOnHeap;
+            this.onHeapDeletion = ensureOnHeap.applyToDeletionInfo(super.deletionInfo());
+        }
+
+        @Override
+        public Row toRow(RowData data, Clustering clustering)
+        {
+            return ensureOnHeap.applyToRow(super.toRow(data, clustering));
+        }
+
+        @Override
+        public DeletionInfo deletionInfo()
+        {
+            return onHeapDeletion;
+        }
+    }
+
+    public static class FullRows extends TrieBackedPartition<Row>
+    {
+        public FullRows(DecoratedKey partitionKey, RegularAndStaticColumns columns, EncodingStats stats, int rowCount, Trie<Object> trie, TableMetadata metadata, boolean canHaveShadowedData)
+        {
+            super(Row.class, partitionKey, columns, stats, rowCount, trie, metadata, canHaveShadowedData);
+        }
+
+        public static FullRows create(UnfilteredRowIterator iterator)
+        {
+            ContentBuilder<Row> builder = build(Function.identity(), iterator, false);
+            return new FullRows(iterator.partitionKey(),
+                                iterator.columns(),
+                                iterator.stats(),
+                                builder.rowCountIncludingStatic(),
+                                builder.trie(),
+                                iterator.metadata(),
+                                false);
+        }
+
+        @Override
+        protected Row toRow(Row data, Clustering clustering)
+        {
+            return data;
+        }
+
+        @Override
+        public Iterator<Row> rowIterator(Trie<Object> trie, Direction direction)
+        {
+            return trie.filteredValuesIterator(direction, Row.class);
+        }
+
+        /**
+         * Put the given row in the trie.
+         * @param comparator for converting key to byte-comparable
+         * @param useRecursive whether the key length is guaranteed short and recursive put can be used
+         * @param trie destination
+         * @param row content to put
+         */
+        protected static void putInTrie(ClusteringComparator comparator, boolean useRecursive, InMemoryTrie<Object> trie, Row row) throws TrieSpaceExhaustedException
+        {
+            trie.putSingleton(comparator.asByteComparable(row.clustering()), row, NO_CONFLICT_RESOLVER, useRecursive);
         }
     }
 }

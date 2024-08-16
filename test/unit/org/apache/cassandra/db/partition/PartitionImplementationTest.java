@@ -60,7 +60,8 @@ public class PartitionImplementationTest
     enum Implementation
     {
         BTREE(ImmutableBTreePartition::create),
-        TRIE(TrieBackedPartition::create);
+        TRIE_KEYLESS(TrieBackedPartition.KeylessRows::create),
+        TRIE_ROWS(TrieBackedPartition.FullRows::create);
 
         final Function<UnfilteredRowIterator, Partition> creator;
 

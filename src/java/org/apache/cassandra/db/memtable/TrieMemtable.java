@@ -428,7 +428,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return createPartition(metadata(), allocator.ensureOnHeap(), key, trie);
     }
 
-    private static TrieBackedPartition createPartition(TableMetadata metadata, EnsureOnHeap ensureOnHeap, DecoratedKey key, Trie<Object> trie)
+    private static TrieBackedPartition.KeylessRows createPartition(TableMetadata metadata, EnsureOnHeap ensureOnHeap, DecoratedKey key, Trie<Object> trie)
     {
         if (trie == null)
             return null;
@@ -438,13 +438,13 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         // PartitionData (because the attachment of a new or modified partition to the trie is atomic).
         assert holder != null : "Entry for " + key + " without associated PartitionData";
 
-        return TrieBackedPartition.create(key,
-                                          holder.columns(),
-                                          holder.stats(),
-                                          holder.rowCountIncludingStatic(),
-                                          trie,
-                                          metadata,
-                                          ensureOnHeap);
+        return TrieBackedPartition.KeylessRows.create(key,
+                                                      holder.columns(),
+                                                      holder.stats(),
+                                                      holder.rowCountIncludingStatic(),
+                                                      trie,
+                                                      metadata,
+                                                      ensureOnHeap);
     }
 
     private static DecoratedKey getPartitionKeyFromPath(TableMetadata metadata, ByteComparable path)
@@ -645,7 +645,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
         public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
         {
-            TriePartitionUpdater updater = new TriePartitionUpdater(allocator.cloner(opGroup), indexer, metadata.get(), this);
+            TriePartitionUpdater updater = new TriePartitionUpdater(allocator.cloner(opGroup), indexer, this);
             boolean locked = writeLock.tryLock();
             if (locked)
             {
@@ -771,17 +771,17 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         }
 
         @Override
-        protected TrieBackedPartition mapContent(Object content, Trie<Object> tailTrie, byte[] bytes, int byteLength)
+        protected TrieBackedPartition.KeylessRows mapContent(Object content, Trie<Object> tailTrie, byte[] bytes, int byteLength)
         {
             PartitionData pd = (PartitionData) content;
             DecoratedKey key = getPartitionKeyFromPath(metadata, ByteComparable.fixedLength(bytes, 0, byteLength));
-            return TrieBackedPartition.create(key,
-                                              pd.columns(),
-                                              pd.stats(),
-                                              pd.rowCountIncludingStatic(),
-                                              tailTrie,
-                                              metadata,
-                                              ensureOnHeap);
+            return TrieBackedPartition.KeylessRows.create(key,
+                                                          pd.columns(),
+                                                          pd.stats(),
+                                                          pd.rowCountIncludingStatic(),
+                                                          tailTrie,
+                                                          metadata,
+                                                          ensureOnHeap);
         }
     }
 

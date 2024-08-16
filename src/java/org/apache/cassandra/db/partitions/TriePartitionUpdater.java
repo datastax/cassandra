@@ -22,14 +22,11 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.memory.Cloner;
 
 import static org.apache.cassandra.db.partitions.TrieBackedPartition.RowData;
@@ -39,30 +36,27 @@ import static org.apache.cassandra.db.partitions.TrieBackedPartition.RowData;
  */
 public final class TriePartitionUpdater
 extends BasePartitionUpdater
-implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
+implements InMemoryTrie.UpsertTransformer<Object, Object>
 {
     private final UpdateTransaction indexer;
-    private final TableMetadata metadata;
     private TrieMemtable.PartitionData currentPartition;
     private final TrieMemtable.MemtableShard owner;
     public int partitionsAdded = 0;
 
     public TriePartitionUpdater(Cloner cloner,
                                 UpdateTransaction indexer,
-                                TableMetadata metadata,
                                 TrieMemtable.MemtableShard owner)
     {
         super(cloner);
         this.indexer = indexer;
-        this.metadata = metadata;
         this.owner = owner;
     }
 
     @Override
-    public Object apply(Object existing, Object update, InMemoryTrie.KeyProducer<Object> keyState)
+    public Object apply(Object existing, Object update)
     {
-        if (update instanceof RowData)
-            return applyRow((RowData) existing, (RowData) update, keyState);
+        if (update instanceof BTreeRow)
+            return applyRow((RowData) existing, (BTreeRow) update);
         else if (update instanceof DeletionInfo)
             return applyDeletion((TrieMemtable.PartitionData) existing, (DeletionInfo) update);
         else
@@ -74,17 +68,16 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
      *
      * @param existing Existing RowData for this clustering, or null if there isn't any.
      * @param insert RowData to be inserted.
-     * @param keyState Used to obtain the path through which this node was reached.
      * @return the insert row, or the merged row, copied using our allocator
      */
-    private RowData applyRow(RowData existing, RowData insert, InMemoryTrie.KeyProducer<Object> keyState)
+    private RowData applyRow(RowData existing, BTreeRow insert)
     {
         if (existing == null)
         {
-            RowData data = insert.clone(cloner);
+            RowData data = TrieBackedPartition.cloneRowToData(cloner, insert);
 
             if (indexer != UpdateTransaction.NO_OP)
-                indexer.onInserted(data.toRow(clusteringFor(keyState)));
+                indexer.onInserted(insert);
 
             this.dataSize += data.dataSize();
             this.heapSize += data.unsharedHeapSizeExcludingData();
@@ -98,7 +91,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
 
             if (indexer != UpdateTransaction.NO_OP)
             {
-                Clustering<?> clustering = clusteringFor(keyState);
+                Clustering<?> clustering = insert.clustering();
                 indexer.onUpdated(existing.toRow(clustering), reconciled.toRow(clustering));
             }
 
@@ -106,24 +99,18 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
         }
     }
 
-    private RowData merge(RowData existing, RowData update)
+    private RowData merge(RowData existing, BTreeRow update)
     {
 
-        LivenessInfo livenessInfo = LivenessInfo.merge(update.livenessInfo, existing.livenessInfo);
-        DeletionTime deletion = DeletionTime.merge(update.deletion, existing.deletion);
+        LivenessInfo livenessInfo = LivenessInfo.merge(update.primaryKeyLivenessInfo(), existing.livenessInfo);
+        DeletionTime deletion = DeletionTime.merge(update.deletion().time(), existing.deletion);
         if (deletion.deletes(livenessInfo))
             livenessInfo = LivenessInfo.EMPTY;
 
         Object[] tree = BTreeRow.mergeRowBTrees(this,
-                                                existing.columnsBTree, update.columnsBTree,
+                                                existing.columnsBTree, update.getBTree(),
                                                 deletion, existing.deletion);
         return new RowData(tree, livenessInfo, deletion);
-    }
-
-    private Clustering<?> clusteringFor(InMemoryTrie.KeyProducer<Object> keyState)
-    {
-        return metadata.comparator.clusteringFromByteComparable(ByteArrayAccessor.instance,
-                                                                ByteComparable.fixedLength(keyState.getBytes(TrieMemtable.IS_PARTITION_BOUNDARY)));
     }
 
     /**
