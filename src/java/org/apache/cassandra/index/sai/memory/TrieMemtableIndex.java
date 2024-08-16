@@ -167,7 +167,7 @@ public class TrieMemtableIndex implements MemtableIndex
         if (oldRemaining == 0 && newRemaining == 0)
             return;
 
-        boolean differentByteBuffers = oldRemaining != newRemaining ? true : validator.compare(oldValue, newValue) != 0;
+        boolean differentByteBuffers = oldRemaining != newRemaining || validator.compare(oldValue, newValue) != 0;
 
         // The terms inserted into the index could still be the same in the case of certain analyzer configs.
         // We don't know yet though, and instead of eagerly determining it, we leave it to the index to handle it.

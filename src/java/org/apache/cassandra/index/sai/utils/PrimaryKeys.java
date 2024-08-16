@@ -48,13 +48,7 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
     public long put(PrimaryKey key, Object source)
     {
         // Store the latest reference associated with the key.
-        return keys.put(key, source) != null ? MAP_ENTRY_OVERHEAD : 0;
-    }
-
-    public void addAll(Iterable<PrimaryKey> keys, Object value)
-    {
-        for (var key : keys)
-            put(key, value);
+        return keys.put(key, source) == null ? MAP_ENTRY_OVERHEAD : 0;
     }
 
     /**
@@ -66,7 +60,7 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
      */
     public long removeIfUnique(PrimaryKey key, Object source)
     {
-        // If the reference associated with the key is the
+        // If the reference associated with the key is the one that added it, we want to keep the key.
         var result = keys.compute(key, (k, currentRef) -> {
             if (currentRef == source)
                 return currentRef;
