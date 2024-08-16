@@ -159,6 +159,9 @@ public class VectorTypeTest extends VectorTester
             assertThat(trace).doesNotContain("Executing single-partition query");
         // manual inspection to verify that no extra traces were included
         logger.info(((TracingTestImpl) Tracing.instance).getTraces().toString());
+
+        // because we parameterized the test class we need to clean up after ourselves or the second run will fail
+        Tracing.instance.stopSession();
     }
 
     @Test
