@@ -123,7 +123,11 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             var remaining = floatBuffer.remaining();
             if (remaining == 0)
             {
-                // slow path -- desired slice is across region boundaries
+                // slow path -- the next float bytes are across a buffer boundary (we never start a loop iteration with
+                // the "current" buffer fully exhausted, so `remaining == 0` truly means "some bytes remains, but not
+                // enough for a float"), so we read that float individually (which will read it byte by byte,
+                // reBuffering as needed). After that we loop, which will switch back to the faster path for any
+                // remaining floats in the newly reloaded buffer.
                 dest[offset + copied] = readFloat();
                 seek(position + Float.BYTES);
                 copied++;
@@ -170,7 +174,11 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             var remaining = longBuffer.remaining();
             if (remaining == 0)
             {
-                // slow path -- desired slice is across region boundaries
+                // slow path -- the next long bytes are across a buffer boundary (we never start a loop iteration with
+                // the "current" buffer fully exhausted, so `remaining == 0` truly means "some bytes remains, but not
+                // enough for a long"), so we read that long individually (which will read it byte by byte,
+                // reBuffering as needed). After that we loop, which will switch back to the faster path for any
+                // remaining longs in the newly reloaded buffer.
                 dest[copied] = readLong();
                 seek(position + Long.BYTES);
                 copied++;
@@ -227,7 +235,11 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             var remaining = intBuffer.remaining();
             if (remaining == 0)
             {
-                // slow path -- desired slice is across region boundaries
+                // slow path -- the next int bytes are across a buffer boundary (we never start a loop iteration with
+                // the "current" buffer fully exhausted, so `remaining == 0` truly means "some bytes remains, but not
+                // enough for an int"), so we read that int individually (which will read it byte by byte,
+                // reBuffering as needed). After that we loop, which will switch back to the faster path for any
+                // remaining ints in the newly reloaded buffer.
                 dest[offset + copied] = readInt();
                 seek(position + Integer.BYTES);
                 copied++;
