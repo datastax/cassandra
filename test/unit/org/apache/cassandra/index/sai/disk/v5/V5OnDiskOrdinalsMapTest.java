@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.StreamSupport;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
@@ -38,7 +39,9 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.cql.VectorTester;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.RamAwareVectorValues;
@@ -56,6 +59,14 @@ import static org.junit.Assert.assertEquals;
 
 public class V5OnDiskOrdinalsMapTest extends VectorTester
 {
+    @Before
+    public void setup() throws Throwable
+    {
+        super.setup();
+        // this can be removed once LATEST is >= DC
+        SAIUtil.setLatestVersion(Version.DC);
+    }
+
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private static final int DIMENSION = 2; // not relevant to postings mapping, nothing gained by using something larger
