@@ -36,8 +36,7 @@ The main features of its implementation are:
 One of the main design drivers of the memtable trie is the desire to avoid on-heap storage and Java object management.
 The trie thus implements its own memory management for the structure of the trie (content is, at this time, still given
 as Java objects in a content array). The structure resides in one `UnsafeBuffer` (which can be on or off heap as
-desired) and is broken up in 32-byte "cells" (also called "blocks" in the code), which are the unit of allocation,
-update and reuse.
+desired) and is broken up in 32-byte "cells", which are the unit of allocation, update and reuse.
 
 Like all tries, `InMemoryTrie` is built from nodes and has a root pointer. The nodes reside in cells, but there is no
 1:1 correspondence between nodes and cells - some node types pack multiple in one cell, while other types require
@@ -284,13 +283,13 @@ offset|content|
 18 - 1B|pointer to child for ending 110|
 1C - 1F|pointer to child for ending 111|
 
-In any of the cell or pointer positions we can have `NONE`, meaning that such a child (or block of children) does not
+In any of the cell or pointer positions we can have `NONE`, meaning that such a child (or cell of children) does not
 exist. At minimum, a split node occupies 3 cells (one leading, one mid and one end), and at maximum &mdash;
 `1 + 4 + 4*8 = 37` cells i.e. `1184` bytes. If we could allocate contiguous arrays, a full split node would use `1024`
 bytes, thus this splitting can add ~15% overhead. However, real data often has additional structure that this can make
-use of to avoid creating some of the blocks, e.g. if the trie encodes US-ASCII or UTF-encoded strings where some
+use of to avoid creating some of the cells, e.g. if the trie encodes US-ASCII or UTF-encoded strings where some
 character ranges are not allowed at all, and others are prevalent. Another benefit is that to change a transition while
-preserving the previous state of the node for concurrent readers we have to only copy three blocks and not the entire
+preserving the previous state of the node for concurrent readers we have to only copy three cells and not the entire
 range of children (applications of this will be given in the [Mutation](#mutation) section).
 
 As an example, suppose we need to add a `0x51` `Q` transition to `0x455` to the 6-children sparse node from the previous
@@ -467,7 +466,7 @@ This substructure is a little more efficient than storing only one entry for the
 mid-to-tail links do not need to be followed for every new child) and also allows us to easily get the precise next 
 child and remove the backtracking entry when a cell has no further children.
 
-`InMemoryTrie` cursors also implement `advanceMultiple`, which jumps over intermediate nodes in `Chain` blocks:
+`InMemoryTrie` cursors also implement `advanceMultiple`, which jumps over intermediate nodes in `Chain` cells:
 
 ![graph](InMemoryTrie.md.wc2.svg)
 
@@ -844,7 +843,7 @@ java object content array (with separate queues).
 #### Cell recycling in long-lived tries
 
 During the application of a mutation, the `InMemoryTrie` code knows which cells are being copied to another location and
-tells the allocation strategy that the cells are going to be freed (using a `recycleBlock` or implied in `copyBlock`).
+tells the allocation strategy that the cells are going to be freed (using a `recycleCell` or implied in `copyCell`).
 This does not mean that the old cell is already free, because:
 - (1) it is probably still reachable (if the process has not backtracked enough to attach the new cell to some
   parent) by concurrent readers;

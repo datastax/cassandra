@@ -92,7 +92,7 @@ public class CellReuseTest
                                          lrobjs * 4
         ));
 
-        IntArrayList availableList = ((MemoryAllocationStrategy.OpOrderReuseStrategy) trieLong.blockAllocator).indexesInPipeline();
+        IntArrayList availableList = ((MemoryAllocationStrategy.OpOrderReuseStrategy) trieLong.cellAllocator).indexesInPipeline();
         BitSet available = new BitSet(reachable.size());
         for (int v : availableList)
             available.set(v >> 5);
@@ -195,20 +195,20 @@ public class CellReuseTest
             case InMemoryTrie.SPLIT_OFFSET:
                 for (int i = 0; i < InMemoryTrie.SPLIT_START_LEVEL_LIMIT; ++i)
                 {
-                    int mid = trie.getSplitBlockPointer(node, i, InMemoryTrie.SPLIT_START_LEVEL_LIMIT);
+                    int mid = trie.getSplitCellPointer(node, i, InMemoryTrie.SPLIT_START_LEVEL_LIMIT);
                     if (mid != InMemoryTrie.NONE)
                     {
 //                        System.out.println(trie.dumpNode(mid));
                         set.set(mid >> 5);
                         for (int j = 0; j < InMemoryTrie.SPLIT_OTHER_LEVEL_LIMIT; ++j)
                         {
-                            int tail = trie.getSplitBlockPointer(mid, j, InMemoryTrie.SPLIT_OTHER_LEVEL_LIMIT);
+                            int tail = trie.getSplitCellPointer(mid, j, InMemoryTrie.SPLIT_OTHER_LEVEL_LIMIT);
                             if (tail != InMemoryTrie.NONE)
                             {
 //                                System.out.println(trie.dumpNode(tail));
                                 set.set(tail >> 5);
                                 for (int k = 0; k < InMemoryTrie.SPLIT_OTHER_LEVEL_LIMIT; ++k)
-                                    markChild(trie, trie.getSplitBlockPointer(tail, k, InMemoryTrie.SPLIT_OTHER_LEVEL_LIMIT), set, objs);
+                                    markChild(trie, trie.getSplitCellPointer(tail, k, InMemoryTrie.SPLIT_OTHER_LEVEL_LIMIT), set, objs);
                             }
                         }
                     }

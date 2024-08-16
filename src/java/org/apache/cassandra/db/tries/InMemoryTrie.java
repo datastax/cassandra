@@ -95,7 +95,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     private int contentCount = 0;
 
     final BufferType bufferType;    // on or off heap
-    final MemoryAllocationStrategy blockAllocator;
+    final MemoryAllocationStrategy cellAllocator;
     final MemoryAllocationStrategy objectAllocator;
 
 
@@ -127,11 +127,11 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         switch (lifetime)
         {
             case SHORT:
-                blockAllocator = new MemoryAllocationStrategy.NoReuseStrategy(this::allocateNewCell);
+                cellAllocator = new MemoryAllocationStrategy.NoReuseStrategy(this::allocateNewCell);
                 objectAllocator = new MemoryAllocationStrategy.NoReuseStrategy(this::allocateNewObject);
                 break;
             case LONG:
-                blockAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(this::allocateNewCell, opOrder);
+                cellAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(this::allocateNewCell, opOrder);
                 objectAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(this::allocateNewObject, opOrder);
                 break;
             default:
@@ -160,7 +160,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     }
 
 
-    // Buffer, content list and block management
+    // Buffer, content list and cell management
 
     final void putInt(int pos, int value)
     {
@@ -205,28 +205,28 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             // that attached the new path.
         }
 
-        allocatedPos += BLOCK_SIZE;
+        allocatedPos += CELL_SIZE;
         return v;
     }
 
-    int allocateBlock() throws TrieSpaceExhaustedException
+    int allocateCell() throws TrieSpaceExhaustedException
     {
-        int cell = blockAllocator.allocate();
-        getChunk(cell).setMemory(inChunkPointer(cell), BLOCK_SIZE, (byte) 0);
+        int cell = cellAllocator.allocate();
+        getChunk(cell).setMemory(inChunkPointer(cell), CELL_SIZE, (byte) 0);
         return cell;
     }
 
-    void recycleBlock(int block)
+    void recycleCell(int cell)
     {
-        blockAllocator.recycle(block & -BLOCK_SIZE);
+        cellAllocator.recycle(cell & -CELL_SIZE);
     }
 
-    public int copyBlock(int block) throws TrieSpaceExhaustedException
+    public int copyCell(int cell) throws TrieSpaceExhaustedException
     {
-        int copy = blockAllocator.allocate();
-        getChunk(copy).putBytes(inChunkPointer(copy), getChunk(block), inChunkPointer(block & -BLOCK_SIZE), BLOCK_SIZE);
-        recycleBlock(block);
-        return copy | (block & (BLOCK_SIZE - 1));
+        int copy = cellAllocator.allocate();
+        getChunk(copy).putBytes(inChunkPointer(copy), getChunk(cell), inChunkPointer(cell & -CELL_SIZE), CELL_SIZE);
+        recycleCell(cell);
+        return copy | (cell & (CELL_SIZE - 1));
     }
 
     private int allocateNewObject()
@@ -295,7 +295,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     private int copyIfOriginal(int node, int originalNode) throws TrieSpaceExhaustedException
     {
         return (node == originalNode)
-               ? copyBlock(originalNode)
+               ? copyCell(originalNode)
                : node;
     }
 
@@ -305,7 +305,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         if (child != NONE)
             return child;
 
-        child = allocateBlock() | offsetWhenAllocating;
+        child = allocateCell() | offsetWhenAllocating;
         // volatile writes not needed because this branch is not attached yet
         putInt(pointerAddress, child);
         return child;
@@ -317,9 +317,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         if (child == originalChild)
         {
             if (originalChild == NONE)
-                child = allocateBlock() | offsetWhenAllocating;
+                child = allocateCell() | offsetWhenAllocating;
             else
-                child = copyBlock(originalChild);
+                child = copyCell(originalChild);
 
             // volatile writes not needed because this branch is not attached yet
             putInt(pointerAddress, child);
@@ -342,7 +342,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * Attach a child to the given non-content node. This may be an update for an existing branch, or a new child for
      * the node. An update _is_ required (i.e. this is only called when the newChild pointer is not the same as the
      * existing value).
-     * This method is called when the original node content must be preserved for concurrent readers (i.e. any block to
+     * This method is called when the original node content must be preserved for concurrent readers (i.e. any cell to
      * be modified needs to be copied first.)
      *
      * @param node pointer to the node to update or copy
@@ -369,7 +369,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 // it again.
                 return attachChildToSparseCopying(node, originalNode, trans, newChild);
             case SPLIT_OFFSET:
-                // This call will copy the split node itself and any intermediate blocks as necessary to make sure blocks
+                // This call will copy the split node itself and any intermediate cells as necessary to make sure cells
                 // reachable from the original node are not modified.
                 return attachChildToSplitCopying(node, originalNode, trans, newChild);
             default:
@@ -409,32 +409,32 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      */
     private int attachChildToSplit(int node, int trans, int newChild) throws TrieSpaceExhaustedException
     {
-        int midPos = splitBlockPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
+        int midPos = splitCellPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
         int mid = getIntVolatile(midPos);
         if (isNull(mid))
         {
             mid = createEmptySplitNode();
-            int tailPos = splitBlockPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+            int tailPos = splitCellPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
             int tail = createEmptySplitNode();
-            int childPos = splitBlockPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+            int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
             putInt(childPos, newChild);
             putInt(tailPos, tail);
             putIntVolatile(midPos, mid);
             return node;
         }
 
-        int tailPos = splitBlockPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+        int tailPos = splitCellPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         int tail = getIntVolatile(tailPos);
         if (isNull(tail))
         {
             tail = createEmptySplitNode();
-            int childPos = splitBlockPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+            int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
             putInt(childPos, newChild);
             putIntVolatile(tailPos, tail);
             return node;
         }
 
-        int childPos = splitBlockPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+        int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         putIntVolatile(childPos, newChild);
         return node;
     }
@@ -446,13 +446,13 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     int attachChildToSplitNonVolatile(int node, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         assert offset(node) == SPLIT_OFFSET : "Invalid split node in trie";
-        int midPos = splitBlockPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
+        int midPos = splitCellPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
         int mid = getOrAllocate(midPos, SPLIT_OFFSET);
         assert offset(mid) == SPLIT_OFFSET : "Invalid split node in trie";
-        int tailPos = splitBlockPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+        int tailPos = splitCellPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         int tail = getOrAllocate(tailPos, SPLIT_OFFSET);
         assert offset(tail) == SPLIT_OFFSET : "Invalid split node in trie";
-        int childPos = splitBlockPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+        int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         putInt(childPos, newChild);
         return node;
     }
@@ -470,17 +470,17 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         node = copyIfOriginal(node, originalNode);
         assert offset(node) == SPLIT_OFFSET : "Invalid split node in trie";
 
-        int midPos = splitBlockPointerAddress(0, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
+        int midPos = splitCellPointerAddress(0, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
         int midOriginal = originalNode != NONE ? getIntVolatile(midPos + originalNode) : NONE;
         int mid = getCopyOrAllocate(node + midPos, midOriginal, SPLIT_OFFSET);
         assert offset(mid) == SPLIT_OFFSET : "Invalid split node in trie";
 
-        int tailPos = splitBlockPointerAddress(0, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+        int tailPos = splitCellPointerAddress(0, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         int tailOriginal = midOriginal != NONE ? getIntVolatile(tailPos + midOriginal) : NONE;
         int tail = getCopyOrAllocate(mid + tailPos, tailOriginal, SPLIT_OFFSET);
         assert offset(tail) == SPLIT_OFFSET : "Invalid split node in trie";
 
-        int childPos = splitBlockPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+        int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         putInt(childPos, newChild);
         return node;
     }
@@ -596,7 +596,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             attachChildToSplitNonVolatile(split, t, p);
         }
         attachChildToSplitNonVolatile(split, trans, newChild);
-        recycleBlock(node);
+        recycleCell(node);
         return split;
     }
 
@@ -624,7 +624,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * Attach a child to the given chain node. This may be an update for an existing branch with different target
      * address, or a second child for the node.
      * This method always copies the node -- with the exception of updates that change the child of the last node in a
-     * chain block with matching transition byte (which this method is not used for, see attachChild), modifications to
+     * chain cell with matching transition byte (which this method is not used for, see attachChild), modifications to
      * chain nodes cannot be done in place, either because we introduce a new transition byte and have to convert from
      * the single-transition chain type to sparse, or because we have to remap the child from the implicit node + 1 to
      * something else.
@@ -673,7 +673,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 assert node == originalNode;    // if we have already created a node, the character can't match what
                                                 // it was created with
 
-                recycleBlock(node);
+                recycleCell(node);
             }
 
             return expandOrCreateChainNode(transitionByte, newChild);
@@ -697,7 +697,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             // unreferenced.
             // However, these leading nodes may still be in the parent path and will be needed until the
             // mutation completes.
-            recycleBlock(node);
+            recycleCell(node);
         }
         // Otherwise the sparse node we will now create references this cell, so it can't be recycled.
         return createSparseNode(existingByte, existingChild, transitionByte, newChild);
@@ -723,7 +723,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             t = child1; child1 = child2; child2 = t;
         }
 
-        int node = allocateBlock() + SPARSE_OFFSET;
+        int node = allocateCell() + SPARSE_OFFSET;
         putByte(node + SPARSE_BYTES_OFFSET + 0,  (byte) byte1);
         putByte(node + SPARSE_BYTES_OFFSET + 1,  (byte) byte2);
         putInt(node + SPARSE_CHILDREN_OFFSET + 0 * 4, child1);
@@ -741,7 +741,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      */
     private int createNewChainNode(int transitionByte, int newChild) throws TrieSpaceExhaustedException
     {
-        int newNode = allocateBlock() + LAST_POINTER_OFFSET - 1;
+        int newNode = allocateCell() + LAST_POINTER_OFFSET - 1;
         putByte(newNode, (byte) transitionByte);
         putInt(newNode + 1, newChild);
         // Note: this does not need a volatile write as it is a new node, returning a new pointer, which needs to be
@@ -766,7 +766,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     private int createEmptySplitNode() throws TrieSpaceExhaustedException
     {
-        return allocateBlock() + SPLIT_OFFSET;
+        return allocateCell() + SPLIT_OFFSET;
     }
 
     private int createPrefixNode(int contentId, int child, boolean isSafeChain) throws TrieSpaceExhaustedException
@@ -781,13 +781,13 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             // Note: for chain nodes we have a risk that the node continues beyond the current point, in which case
             // creating the embedded node may overwrite information that is still needed by concurrent readers or the
             // mutation process itself.
-            node = (child & -BLOCK_SIZE) | PREFIX_OFFSET;
+            node = (child & -CELL_SIZE) | PREFIX_OFFSET;
             putByte(node + PREFIX_FLAGS_OFFSET, (byte) offset);
         }
         else
         {
             // Full prefix node
-            node = allocateBlock() + PREFIX_OFFSET;
+            node = allocateCell() + PREFIX_OFFSET;
             putByte(node + PREFIX_FLAGS_OFFSET, (byte) 0xFF);
             putInt(node + PREFIX_POINTER_OFFSET, child);
         }
@@ -812,7 +812,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             }
             else
             {
-                node = copyBlock(node);
+                node = copyCell(node);
                 putInt(node + PREFIX_POINTER_OFFSET, child);
                 return node;
             }
@@ -827,7 +827,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     private boolean isEmbeddedPrefixNode(int node)
     {
-        return getUnsignedByte(node + PREFIX_FLAGS_OFFSET) < BLOCK_SIZE;
+        return getUnsignedByte(node + PREFIX_FLAGS_OFFSET) < CELL_SIZE;
     }
 
     /**
@@ -1101,7 +1101,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 if (existingPreContentNode != existingPostContentNode
                     && !isNullOrLeaf(existingPreContentNode)
                     && !isEmbeddedPrefixNode(existingPreContentNode))
-                    recycleBlock(existingPreContentNode);
+                    recycleCell(existingPreContentNode);
                 return contentId;   // also fine for contentId == NONE
             }
 
@@ -1129,7 +1129,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             if (prefixData == NONE)
             {
                 if (prefixWasPresent && !prefixWasEmbedded)
-                    recycleBlock(existingPrePrefixNode);
+                    recycleCell(existingPrePrefixNode);
                 return updatedPostPrefixNode;
             }
 
@@ -1146,11 +1146,11 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                     // previous value.
                     // We could create a separate metadata node referencing the child, but in that case we'll
                     // use two nodes while one suffices. Instead, copy the child and embed the new metadata.
-                    updatedPostPrefixNode = copyBlock(existingPostPrefixNode);
+                    updatedPostPrefixNode = copyCell(existingPostPrefixNode);
                 }
                 else if (prefixWasPresent && !prefixWasEmbedded)
                 {
-                    recycleBlock(existingPrePrefixNode);
+                    recycleCell(existingPrePrefixNode);
                     // otherwise cell is already recycled by the recycling of the child
                 }
                 return createPrefixNode(prefixData, updatedPostPrefixNode, isNull(existingPostPrefixNode));
@@ -1569,13 +1569,13 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     private void completeMutation()
     {
-        blockAllocator.completeMutation();
+        cellAllocator.completeMutation();
         objectAllocator.completeMutation();
     }
 
     private void abortMutation()
     {
-        blockAllocator.abortMutation();
+        cellAllocator.abortMutation();
         objectAllocator.abortMutation();
     }
 
@@ -1599,7 +1599,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     int advanceAllocatedPos(int wantedPos) throws TrieSpaceExhaustedException
     {
         while (allocatedPos < wantedPos)
-            allocateBlock();
+            allocateCell();
         return allocatedPos;
     }
 
@@ -1629,7 +1629,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     private long usedBufferSpace()
     {
-        return allocatedPos - blockAllocator.indexCountInPipeline() * BLOCK_SIZE;
+        return allocatedPos - cellAllocator.indexCountInPipeline() * CELL_SIZE;
     }
 
     private long usedObjectSpace()
@@ -1647,7 +1647,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             UnsafeBuffer buffer = getChunk(pos);
             if (buffer != null)
                 bufferOverhead = buffer.capacity() - inChunkPointer(pos);
-            bufferOverhead += blockAllocator.indexCountInPipeline() * BLOCK_SIZE;
+            bufferOverhead += cellAllocator.indexCountInPipeline() * CELL_SIZE;
         }
 
         int index = contentCount;

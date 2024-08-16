@@ -89,7 +89,7 @@ public interface MemoryAllocationStrategy
     }
 
     /**
-     * Strategy for small short-lived tries, usually on-heap. This strategy does not reuse any cells.
+     * Strategy for small short-lived tries, usually on-heap. This strategy does not reuse any indexes.
      */
     class NoReuseStrategy implements MemoryAllocationStrategy
     {
@@ -140,7 +140,7 @@ public interface MemoryAllocationStrategy
     }
 
     /**
-     * Reuse strategy for large, long-lived tries. Recycles cells and objects when it knows that the mutation recycling
+     * Reuse strategy for large, long-lived tries. Recycles indexes when it knows that the mutation recycling
      * them has completed, and all reads started no later than this completion have also completed (signalled by an
      * OpOrder which the strategy assumes all readers subscribe to).
      *
@@ -162,15 +162,15 @@ public interface MemoryAllocationStrategy
      *   it is exhausted, we check if the next block's barrier has expired. If so, the "free" pointer moves to it.
      *   If not, there's nothing to reuse as any blocks in the list still have an active barrier, thus we grab some new
      *   memory and refill the block.
-     * - If a mutation is aborted by an error, we throw away all cells in the "justReleased" list. This is done so that
-     *   none of the cells that were marked for release, but whose parent chain may have remained in place, making them
-     *   reachable, are reused and corrupt the trie. This will leak some cells (from earlier mutations in the block
-     *   and/or ones whose parents have already been moved), but we prefer not to pay the cost of identifying the exact
-     *   cells that need to remain or be recycled.
+     * - If a mutation is aborted by an error, we throw away all indexes in the "justReleased" list. This is done so
+     *   that none of the indexes that were marked for release, but whose parent chain may have remained in place,
+     *   making them reachable, are reused and corrupt the trie. This will leak some indexes (from earlier mutations in
+     *   the block and/or ones whose parents have already been moved), but we prefer not to pay the cost of identifying
+     *   the exact indexes that need to remain or be recycled.
      *   We assume that exceptions while mutating are not normal and should not happen, and thus a temporary leak (e.g.
      *   until the memtable is switched) is acceptable. Should this change (e.g. if a trie is used for the full lifetime
      *   of the process or longer and exceptions are expected as part of its function), we can implement a reachability
-     *   walk to identify orphaned cells and call it with some frequency after one or more exceptions have occured.
+     *   walk to identify orphaned indexes and call it with some frequency after one or more exceptions have occured.
      */
     static class OpOrderReuseStrategy implements MemoryAllocationStrategy
     {

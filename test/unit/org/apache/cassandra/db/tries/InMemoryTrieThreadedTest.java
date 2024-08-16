@@ -520,7 +520,7 @@ public class InMemoryTrieThreadedTest
             t.join();
 
         System.out.format("Reuse %s %s atomicity %s on-heap %,d (+%,d) off-heap %,d\n",
-                          trie.blockAllocator.getClass().getSimpleName(),
+                          trie.cellAllocator.getClass().getSimpleName(),
                           trie.bufferType,
                           forcedCopyChecker == NO_ATOMICITY ? "none" :
                           forcedCopyChecker == FORCE_ATOMIC ? "atomic" : "consistent partition",
