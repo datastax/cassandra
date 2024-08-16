@@ -47,13 +47,8 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         Tracing.trace("Enqueuing response to {}", respondToAddress);
 
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
-
-
-        SensorsCustomParams.addWriteSensorToResponse(response, RequestTracker.instance.get());
-        SensorsCustomParams.addIndexWriteSensorToResponse(response, RequestTracker.instance.get());
         // no need to calculate outbound internode bytes because the response is NoPayload
-        SensorsCustomParams.addInternodeBytesSensorToResponse(response, RequestTracker.instance.get());
-
+        SensorsCustomParams.addSensorsToResponse(RequestTracker.instance.get(), response);
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 

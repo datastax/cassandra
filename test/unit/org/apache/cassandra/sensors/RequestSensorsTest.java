@@ -193,5 +193,9 @@ public class RequestSensorsTest
 
         assertThat(sensors.getSensors(type2)).hasSize(2);
         assertThat(sensors.getSensors(type2)).containsExactlyInAnyOrder(sensors.getSensor(context1, type2).get(), sensors.getSensor(context2, type2).get());
+
+        assertThat(sensors.getSensors()).hasSize(4);
+        assertThat(sensors.getSensors()).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context1, type2).get(),
+                                                                        sensors.getSensor(context2, type1).get(), sensors.getSensor(context2, type2).get());
     }
 }

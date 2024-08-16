@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -74,6 +75,11 @@ public class RequestSensors
     public Set<Sensor> getSensors(Type type)
     {
         return sensors.values().stream().filter(s -> s.getType() == type).collect(Collectors.toSet());
+    }
+
+    public Set<Sensor> getSensors()
+    {
+        return new HashSet<>(sensors.values());
     }
 
     public void incrementSensor(Context context, Type type, double value)

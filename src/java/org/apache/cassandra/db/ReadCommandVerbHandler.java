@@ -91,9 +91,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         int size = reply.currentPayloadSize(MessagingService.current_version);
         requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
         requestSensors.syncAllSensors();
-
-        SensorsCustomParams.addInternodeBytesSensorToResponse(reply, requestSensors, context);
-        SensorsCustomParams.addReadSensorToResponse(reply, requestSensors, context);
+        SensorsCustomParams.addSensorsToResponse(requestSensors, reply);
 
         Tracing.trace("Enqueuing response to {}", message.from());
         MessagingService.instance().send(reply.build(), message.from());

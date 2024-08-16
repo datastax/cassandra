@@ -53,14 +53,11 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
 
         Message.Builder<PrepareResponse> reply = message.responseWithBuilder(doPrepare(message.payload));
 
-        SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);
-        SensorsCustomParams.addReadSensorToResponse(reply, sensors, context);
-
         // calculate outbound internode bytes before adding the sensor to the response
         int size = reply.currentPayloadSize(MessagingService.current_version);
         RequestTracker.instance.get().incrementSensor(context, Type.INTERNODE_BYTES, size);
         RequestTracker.instance.get().syncAllSensors();
-        SensorsCustomParams.addInternodeBytesSensorToResponse(reply, sensors, context);
+        SensorsCustomParams.addSensorsToResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }
 }
