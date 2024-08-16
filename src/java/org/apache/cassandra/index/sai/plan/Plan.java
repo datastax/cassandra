@@ -1247,9 +1247,10 @@ abstract public class Plan
         @Override
         protected KeysIterationCost estimateCost()
         {
-            int keysCount = keysCount();
+            double keysCount = access.totalCount(factory.tableMetrics.rows);
+            int limit = Math.max(1, (int) Math.ceil(keysCount));
             int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering,
-                                                                               keysCount,
+                                                                               limit,
                                                                                factory.tableMetrics.rows);
             double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables + initNodesCount * ANN_NODE_COST;
             return new KeysIterationCost(keysCount,
@@ -1286,11 +1287,6 @@ abstract public class Plan
         protected double estimateSelectivity()
         {
             return 1.0;
-        }
-
-        private int keysCount()
-        {
-            return Math.round((float) access.totalCount(factory.tableMetrics.rows));
         }
     }
 
@@ -1779,7 +1775,7 @@ abstract public class Plan
          * Returns the expected number of ANN index nodes that must be visited to get the list of candidates for top K.
          *
          * @param ordering   allows to identify the proper index
-         * @param limit      number of rows to fetch
+         * @param limit      number of rows to fetch; must be > 0
          * @param candidates number of candidate rows that satisfy the expression predicates
          */
         int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates);

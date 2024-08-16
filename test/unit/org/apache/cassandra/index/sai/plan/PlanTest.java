@@ -27,6 +27,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import org.junit.Test;
 
@@ -331,6 +332,16 @@ public class PlanTest
         Plan.KeysIteration i = factory.sort(factory.everything, ordering);
         assertEquals(factory.tableMetrics.rows, i.expectedKeys(), 0.01);
         assertEquals(i.initCost() + factory.tableMetrics.rows * ANN_SCORED_KEY_COST, i.fullCost(), 0.01);
+    }
+
+    @Test
+    public void annScanOfEmptyTable()
+    {
+        Plan.TableMetrics emptyTable = new Plan.TableMetrics(0, 0, 0, 0);
+        Plan.Factory factory = new Plan.Factory(emptyTable, new CostEstimator(table1M));
+        Plan.KeysIteration plan = factory.sort(factory.everything, ordering);
+        assertEquals(0.0, plan.expectedKeys(), 0.01);
+        assertEquals(1.0, plan.selectivity(), 0.01);
     }
 
     @Test
@@ -1002,6 +1013,7 @@ public class PlanTest
         @Override
         public int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates)
         {
+            Preconditions.checkArgument(limit > 0, "limit must be > 0");
             return metrics.sstables * VectorMemtableIndex.expectedNodesVisited(
             limit / metrics.sstables,
             (int) candidates / metrics.sstables,
