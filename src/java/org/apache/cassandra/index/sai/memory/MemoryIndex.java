@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.function.LongConsumer;
 
@@ -53,6 +54,13 @@ public abstract class MemoryIndex
                                 Clustering clustering,
                                 ByteBuffer oldValue,
                                 ByteBuffer newValue,
+                                LongConsumer onHeapAllocationsTracker,
+                                LongConsumer offHeapAllocationsTracker);
+
+    public abstract void update(DecoratedKey key,
+                                Clustering clustering,
+                                Iterator<ByteBuffer> oldValues,
+                                Iterator<ByteBuffer> newValues,
                                 LongConsumer onHeapAllocationsTracker,
                                 LongConsumer offHeapAllocationsTracker);
 

@@ -565,4 +565,27 @@ public class LuceneUpdateDeleteTest extends SAITester
         assertThat(result).hasSize(1);
     }
 
+    @Test
+    public void testOverwriteThatAddsNewValuesAndRemovesOthersFromIndex() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, str_val text, val text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'an indexed phrase')");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', 'something random')");
+        // Make assertion on value
+        assertRows(execute("SELECT pk FROM %s WHERE val : 'phrase'"), row(0));
+        assertRows(execute("SELECT pk FROM %s WHERE val : 'indexed'"), row(0));
+        // Insert an update that keeps 'phrase' but gets rid of 'indexed'
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'B', 'a different phrase with some overlap')");
+
+        beforeAndAfterFlush(() -> {
+            // Validate the exected values
+            assertRows(execute("SELECT pk FROM %s WHERE val : 'phrase'"), row(0));
+            assertRows(execute("SELECT pk FROM %s WHERE val : 'indexed'"));
+        });
+    }
+
 }

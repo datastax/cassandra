@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Iterators;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -42,6 +43,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -82,8 +84,12 @@ public class TrieMemtableIndexTest extends SAITester
                                                                                                   .onMethod("search"))
                                                                            .build();
 
+    // A non-frozen list of integers
+    private final ListType<Integer> integerListType = ListType.getInstance(Int32Type.instance, true);
+
     private ColumnFamilyStore cfs;
     private IndexContext indexContext;
+    private IndexContext integerListIndexContext;
     private TrieMemtableIndex memtableIndex;
     private AbstractAllocatorMemtable memtable;
     private IPartitioner partitioner;
@@ -107,11 +113,13 @@ public class TrieMemtableIndexTest extends SAITester
         TableMetadata tableMetadata = TableMetadata.builder("ks", "tb")
                                                    .addPartitionKeyColumn("pk", Int32Type.instance)
                                                    .addRegularColumn("val", Int32Type.instance)
+                                                   .addRegularColumn("vals", integerListType)
                                                    .build();
         cfs = MockSchema.newCFS(tableMetadata);
         partitioner = cfs.getPartitioner();
         memtable = (AbstractAllocatorMemtable) cfs.getCurrentMemtable();
         indexContext = SAITester.createIndexContext("index", Int32Type.instance, cfs);
+        integerListIndexContext = SAITester.createIndexContext("collection_index", integerListType, cfs);
         indexSearchCounter.reset();
         keyMap = new TreeMap<>();
         rowMap = new HashMap<>();
@@ -255,6 +263,44 @@ public class TrieMemtableIndexTest extends SAITester
         }
     }
 
+    @Test
+    public void updateCollectionTest()
+    {
+        memtableIndex = new TrieMemtableIndex(integerListIndexContext);
+
+        addRowWithCollection(1, 1, 2, 3); // row 1, values 1, 2, 3
+        addRowWithCollection(2, 4, 5, 6); // row 2, values 4, 5, 6
+        addRowWithCollection(3, 2, 6);    // row 3, values 2, 6
+
+        // Query values
+        assertEqualsQuery(2, 1, 3);
+        assertEqualsQuery(4, 2);
+        assertEqualsQuery(6, 2, 3);
+
+        // Update row 1 to remove 2 and 3, keep 1, add 4 (not we have to manually match the 1,2,3 from above
+        updateRowWithCollection(1, List.of(1, 2, 3).iterator(), List.of(1, 4).iterator());
+
+        // Run additional queries to ensure values
+        assertEqualsQuery(1, 1);
+        assertEqualsQuery(4, 1, 2);
+        assertEqualsQuery(2, 3);
+        assertEqualsQuery(3);
+    }
+
+    private void assertEqualsQuery(int value, int... partitionKeys)
+    {
+        // Build eq expression to search for the value
+        Expression expression = new Expression(integerListIndexContext);
+        expression.add(Operator.EQ, Int32Type.instance.decompose(value));
+        AbstractBounds<PartitionPosition> keyRange = new Range<>(partitioner.getMinimumToken().minKeyBound(),
+                                                                 partitioner.getMinimumToken().minKeyBound());
+        var result = memtableIndex.search(new QueryContext(), expression, keyRange, 0);
+        // Confirm the partition keys are as expected in the provided order and that we have no more results
+        for (int partitionKey : partitionKeys)
+            assertEquals(makeKey(cfs.metadata(), partitionKey), result.next().partitionKey());
+        assertFalse(result.hasNext());
+    }
+
     private Expression generateRandomExpression()
     {
         Expression expression = new Expression(indexContext);
@@ -349,6 +395,23 @@ public class TrieMemtableIndexTest extends SAITester
                             cfs.getCurrentMemtable(),
                             new OpOrder().start());
         keyMap.put(key, pk);
+    }
+
+    private void addRowWithCollection(int pk, Integer... value)
+    {
+        for (Integer v : value)
+            addRow(pk, v);
+    }
+
+    private void updateRowWithCollection(int pk, Iterator<Integer> oldValues, Iterator<Integer> newValues)
+    {
+        DecoratedKey key = makeKey(cfs.metadata(), pk);
+        memtableIndex.update(key,
+                             Clustering.EMPTY,
+                             Iterators.transform(oldValues, Int32Type.instance::decompose),
+                             Iterators.transform(newValues, Int32Type.instance::decompose),
+                             cfs.getCurrentMemtable(),
+                             new OpOrder().start());
     }
 
     private DecoratedKey makeKey(TableMetadata table, Integer partitionKey)

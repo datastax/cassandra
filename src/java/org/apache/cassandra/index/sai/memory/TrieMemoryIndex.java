@@ -62,11 +62,13 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
+    private static final Object DUMMY = new Object();
 
     private final MemtableTrie<PrimaryKeys> data;
     private final LongAdder heapAllocations;
     private final PrimaryKeysAccumulator primaryKeysAccumulator;
     private final PrimaryKeysReducer primaryKeysReducer;
+    private final boolean analyzerTransformsValue;
 
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
@@ -84,8 +86,9 @@ public class TrieMemoryIndex extends MemoryIndex
         super(indexContext);
         this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
         this.heapAllocations = new LongAdder();
-        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations);
+        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations, DUMMY);
         this.primaryKeysReducer = new PrimaryKeysReducer(heapAllocations);
+        this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
     }
 
     public synchronized void add(DecoratedKey key,
@@ -94,7 +97,8 @@ public class TrieMemoryIndex extends MemoryIndex
                                  LongConsumer onHeapAllocationsTracker,
                                  LongConsumer offHeapAllocationsTracker)
     {
-        applyTransformer(key, clustering, value, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        applyTransformer(primaryKey, value, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
     }
 
     public synchronized void update(DecoratedKey key,
@@ -104,17 +108,79 @@ public class TrieMemoryIndex extends MemoryIndex
                                     LongConsumer onHeapAllocationsTracker,
                                     LongConsumer offHeapAllocationsTracker)
     {
-        // TODO what order is correct here? Doing it this way removes it from the index completely for a time,
-        // but there is a chance that the analyzer will produce dupes and we don't want to lose those.
-        if (oldValue != null && oldValue.hasRemaining())
-            applyTransformer(key, clustering, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysReducer);
-        if (newValue != null && newValue.hasRemaining())
-            applyTransformer(key, clustering, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        try
+        {
+            if (analyzerTransformsValue)
+            {
+                // In this case, we use this object reference to pass the accumulator and reducer to the transformer.
+                // We then use reference equality to ensure that we do not remove a new term that was added as part of
+                // this update call. Note that we're within the synchronized block on this class.
+                var ref = new Object();
+                primaryKeysAccumulator.setReference(ref);
+                primaryKeysReducer.setReference(ref);
+            }
+            else
+            {
+                // In this case, the oldValue and newValue are comparable and we can determine before
+                // calling applyTransformer whether they are the same.
+                primaryKeysAccumulator.setReference(DUMMY);
+                primaryKeysReducer.setReference(null);
+            }
 
+            // Add before removing to prevent a period where the value is not available in the index
+            if (newValue != null && newValue.hasRemaining())
+                applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+            if (oldValue != null && oldValue.hasRemaining())
+                applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysReducer);
+        }
+        finally
+        {
+            primaryKeysAccumulator.setReference(DUMMY);
+            primaryKeysReducer.setReference(null);
+        }
     }
 
-    private void applyTransformer(DecoratedKey key,
-                                  Clustering clustering,
+    public synchronized void update(DecoratedKey key,
+                                    Clustering clustering,
+                                    Iterator<ByteBuffer> oldValues,
+                                    Iterator<ByteBuffer> newValues,
+                                    LongConsumer onHeapAllocationsTracker,
+                                    LongConsumer offHeapAllocationsTracker)
+    {
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        try
+        {
+            // In this case, we use this object reference to pass the accumulator and reducer to the transformer.
+            // We then use reference equality to ensure that we do not remove a new term that was added as part of
+            // this update call. Note that we're within the synchronized block on this class.
+            var ref = new Object();
+            primaryKeysAccumulator.setReference(ref);
+            primaryKeysReducer.setReference(ref);
+
+            // Add before removing to prevent a period where the values are not available in the index
+            while (newValues != null && newValues.hasNext())
+            {
+                ByteBuffer newValue = newValues.next();
+                if (newValue != null && newValue.hasRemaining())
+                    applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+            }
+
+            while (oldValues != null && oldValues.hasNext())
+            {
+                ByteBuffer oldValue = oldValues.next();
+                if (oldValue != null && oldValue.hasRemaining())
+                    applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysReducer);
+            }
+        }
+        finally
+        {
+            primaryKeysAccumulator.setReference(DUMMY);
+            primaryKeysReducer.setReference(null);
+        }
+    }
+
+    private void applyTransformer(PrimaryKey primaryKey,
                                   ByteBuffer value,
                                   LongConsumer onHeapAllocationsTracker,
                                   LongConsumer offHeapAllocationsTracker,
@@ -125,7 +191,6 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             value = TypeUtil.encode(value, indexContext.getValidator());
             analyzer.reset(value);
-            final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
             final long initialSizeOffHeap = data.sizeOffHeap();
             final long reducerHeapSize = heapAllocations.longValue();
@@ -133,7 +198,7 @@ public class TrieMemoryIndex extends MemoryIndex
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
-                if (!indexContext.validateMaxTermSize(key, term))
+                if (!indexContext.validateMaxTermSize(primaryKey.partitionKey(), term))
                     continue;
 
                 setMinMaxTerm(term.duplicate());
@@ -282,6 +347,7 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         assert term != null;
 
+        // todo these are invalid now... but we should be able to use the trie (except when we do that shitty encoding)
         minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator());
         maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator());
     }
@@ -325,10 +391,17 @@ public class TrieMemoryIndex extends MemoryIndex
     static class PrimaryKeysAccumulator implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
+        private Object ref;
 
-        PrimaryKeysAccumulator(LongAdder heapAllocations)
+        PrimaryKeysAccumulator(LongAdder heapAllocations, Object ref)
         {
             this.heapAllocations = heapAllocations;
+            this.ref = ref;
+        }
+
+        private void setReference(Object ref)
+        {
+            this.ref = ref;
         }
 
         @Override
@@ -339,7 +412,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 existing = new PrimaryKeys();
                 heapAllocations.add(existing.unsharedHeapSize());
             }
-            heapAllocations.add(existing.add(neww));
+            heapAllocations.add(existing.put(neww, ref));
             return existing;
         }
     }
@@ -350,10 +423,16 @@ public class TrieMemoryIndex extends MemoryIndex
     static class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
+        private Object ref;
 
         PrimaryKeysReducer(LongAdder heapAllocations)
         {
             this.heapAllocations = heapAllocations;
+        }
+
+        private void setReference(Object ref)
+        {
+            this.ref = ref;
         }
 
         @Override
@@ -362,7 +441,7 @@ public class TrieMemoryIndex extends MemoryIndex
             if (existing == null)
                 return null;
 
-            heapAllocations.add(existing.remove(neww));
+            heapAllocations.add(existing.removeIfUnique(neww, ref));
             if (existing.isEmpty())
             {
                 heapAllocations.add(-existing.unsharedHeapSize());

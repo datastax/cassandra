@@ -167,18 +167,11 @@ public class TrieMemtableIndex implements MemtableIndex
         if (oldRemaining == 0 && newRemaining == 0)
             return;
 
-        boolean different;
-        if (oldRemaining != newRemaining)
-        {
-            assert oldRemaining == 0 || newRemaining == 0; // one of them is null
-            different = true;
-        }
-        else
-        {
-            different = validator.compare(oldValue, newValue) != 0;
-        }
+        boolean differentByteBuffers = oldRemaining != newRemaining ? true : validator.compare(oldValue, newValue) != 0;
 
-        if (different)
+        // The terms inserted into the index could still be the same in the case of certain analyzer configs.
+        // We don't know yet though, and instead of eagerly determining it, we leave it to the index to handle it.
+        if (differentByteBuffers)
         {
             rangeIndexes[boundaries.getShardForKey(key)].update(key,
                                                                 clustering,
@@ -194,6 +187,27 @@ public class TrieMemtableIndex implements MemtableIndex
                                                                 });
             writeCount.increment();
         }
+    }
+
+    @Override
+    public void update(DecoratedKey key, Clustering clustering, Iterator<ByteBuffer> oldValues, Iterator<ByteBuffer> newValues, Memtable memtable, OpOrder.Group opGroup)
+    {
+        // We defer on comparing old and new values here. Instead, we rely on the index to do the comparison and then
+        // have custom logic in the aggregator to ensure that we properly add/keep new values and remove old values
+        // that are not present in the new values.
+        rangeIndexes[boundaries.getShardForKey(key)].update(key,
+                                                            clustering,
+                                                            oldValues,
+                                                            newValues,
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                            },
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                            });
+        writeCount.increment();
     }
 
     @Override

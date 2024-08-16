@@ -374,9 +374,19 @@ public class IndexContext
         if (target == null)
             return;
 
-        ByteBuffer oldValue = getValueOf(key, oldRow, FBUtilities.nowInSeconds());
-        ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
-        target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
+        if (isNonFrozenCollection())
+        {
+            Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, FBUtilities.nowInSeconds());
+            Iterator<ByteBuffer> newValues = getValuesOf(newRow, FBUtilities.nowInSeconds());
+            if (oldValues != null && newValues != null)
+                target.update(key, oldRow.clustering(), oldValues, newValues, memtable, opGroup);
+        }
+        else
+        {
+            ByteBuffer oldValue = getValueOf(key, oldRow, FBUtilities.nowInSeconds());
+            ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
+            target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
+        }
     }
 
     public void renewMemtable(Memtable renewed)

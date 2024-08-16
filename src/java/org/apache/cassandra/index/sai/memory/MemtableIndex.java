@@ -71,6 +71,7 @@ public interface MemtableIndex extends MemtableOrdering
     void index(DecoratedKey key, Clustering clustering, ByteBuffer value, Memtable memtable, OpOrder.Group opGroup);
 
     void update(DecoratedKey key, Clustering clustering, ByteBuffer oldValue, ByteBuffer newValue, Memtable memtable, OpOrder.Group opGroup);
+    void update(DecoratedKey key, Clustering clustering, Iterator<ByteBuffer> oldValues, Iterator<ByteBuffer> newValues, Memtable memtable, OpOrder.Group opGroup);
 
     RangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit);
     default CloseableIterator<ScoredPrimaryKey> orderBy(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
