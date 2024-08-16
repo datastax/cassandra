@@ -33,6 +33,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
@@ -901,6 +902,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     @Override
     public int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates)
     {
+        Preconditions.checkArgument(limit > 0, "limit must be > 0");
+
         IndexContext context = ordering.context;
         Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
         View queryView = context.getView();
