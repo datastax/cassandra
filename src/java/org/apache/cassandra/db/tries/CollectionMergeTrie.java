@@ -171,10 +171,10 @@ class CollectionMergeTrie<T> extends Trie<T>
 
         /**
          * Apply a non-interfering operation, i.e. one that does not change the cursor state, to all inputs in the heap
-         * that are on equal position to the head.
-         * For interfering operations like advancing the cursors, use {@link #advanceEqualAndRestoreHeap(AdvancingHeapOp)}.
+         * that satisfy the {@link HeapOp#shouldContinueWithChild} condition (by default, being equal to the head).
+         * For interfering operations like advancing the cursors, use {@link #advanceSelectedAndRestoreHeap(AdvancingHeapOp)}.
          */
-        private void applyToEqualOnHeap(HeapOp<T> action)
+        private void applyToSelectedInHeap(HeapOp<T> action)
         {
             applyToSelectedElementsInHeap(action, 0);
         }
@@ -202,10 +202,10 @@ class CollectionMergeTrie<T> extends Trie<T>
 
 
         /**
-         * Advance the state of all inputs in the heap that are on equal position as the head and restore the heap
-         * invariant.
+         * Advance the state of all inputs in the heap that satisfy the {@link HeapOp#shouldContinueWithChild} condition
+         * (by default, being equal to the head) and restore the heap invariant.
          */
-        private void advanceEqualAndRestoreHeap(AdvancingHeapOp<T> action)
+        private void advanceSelectedAndRestoreHeap(AdvancingHeapOp<T> action)
         {
             applyToSelectedElementsInHeap(action, 0);
         }
@@ -289,7 +289,7 @@ class CollectionMergeTrie<T> extends Trie<T>
         @Override
         public int advance()
         {
-            advanceEqualAndRestoreHeap(Cursor::advance);
+            advanceSelectedAndRestoreHeap(Cursor::advance);
             return maybeSwapHead(head.advance());
         }
 
@@ -363,7 +363,7 @@ class CollectionMergeTrie<T> extends Trie<T>
             if (!branchHasMultipleSources())
                 return head.content();
 
-            applyToEqualOnHeap(CollectionMergeCursor::collectContent);
+            applyToSelectedInHeap(CollectionMergeCursor::collectContent);
             collectContent(head, -1);
 
             T toReturn;
@@ -398,7 +398,7 @@ class CollectionMergeTrie<T> extends Trie<T>
 
             List<Trie<T>> inputs = new ArrayList<>(heap.length);
             inputs.add(head.tailTrie());
-            applyToEqualOnHeap((self, cursor, index) -> inputs.add(cursor.tailTrie()));
+            applyToSelectedInHeap((self, cursor, index) -> inputs.add(cursor.tailTrie()));
 
             return new CollectionMergeTrie<>(inputs, resolver);
         }

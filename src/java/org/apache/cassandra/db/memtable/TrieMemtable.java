@@ -108,7 +108,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     }
 
     /**
-     * Force copy checker (see MemtableTrie.ApplyState) ensuring all modifications apply atomically and consistently to
+     * Force copy checker (see InMemoryTrie.ApplyState) ensuring all modifications apply atomically and consistently to
      * the whole partition.
      */
     public static final Predicate<InMemoryTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY = features -> isPartitionBoundary(features.content());
