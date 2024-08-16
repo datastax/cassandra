@@ -79,12 +79,10 @@ class TrieValuesIterator<T> implements Iterator<T>
             while (!gotNext)
             {
                 next = cursor.advanceToContent(null);
-                if (next == null)
-                    return false;
-                gotNext = clazz.isInstance(next);
+                gotNext = next == null || clazz.isInstance(next);
             }
 
-            return true;
+            return next != null;
         }
 
         public U next()
