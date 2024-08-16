@@ -367,6 +367,8 @@ public class V5VectorPostingsWriter<T>
      */
     public static <T> RemappedPostings remapPostings(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
     {
+        assert V5OnDiskFormat.writeV5VectorPostings();
+
         BiMap<Integer, Integer> ordinalMap = HashBiMap.create();
         Int2IntHashMap extraPostings = new Int2IntHashMap(-1);
         int minRow = Integer.MAX_VALUE;
@@ -410,9 +412,8 @@ public class V5VectorPostingsWriter<T>
             structure = extraPostings.isEmpty()
                       ? Structure.ONE_TO_ONE
                       : Structure.ONE_TO_MANY;
-            // override one-to-many to generic if there are too many holes or we are in backwards compatibility mode
-            // (this method is used by V2 writers as well as V5)
-            if (structure == Structure.ONE_TO_MANY && (!V5OnDiskFormat.writeV5VectorPostings() || extraPostings.size() > max(1, GLOBAL_HOLES_ALLOWED * maxRow)))
+            // override one-to-many to generic if there are too many holes
+            if (structure == Structure.ONE_TO_MANY && extraPostings.size() > max(1, GLOBAL_HOLES_ALLOWED * maxRow))
                 structure = Structure.ZERO_OR_ONE_TO_MANY;
         }
 
