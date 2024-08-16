@@ -76,11 +76,10 @@ public interface MemoryAllocationStrategy
     @VisibleForTesting
     IntArrayList indexesInPipeline();
 
-    interface Allocator extends ListAllocator
+    interface Allocator
     {
         int allocate() throws TrieSpaceExhaustedException;
 
-        @Override
         default void allocate(int[] indexList) throws TrieSpaceExhaustedException
         {
             for (int i = indexList.length - 1; i >= 0; --i)
@@ -134,11 +133,6 @@ public interface MemoryAllocationStrategy
         }
     }
 
-    interface ListAllocator
-    {
-        void allocate(int[] indexList) throws TrieSpaceExhaustedException;
-    }
-
     /**
      * Reuse strategy for large, long-lived tries. Recycles indexes when it knows that the mutation recycling
      * them has completed, and all reads started no later than this completion have also completed (signalled by an
@@ -180,7 +174,7 @@ public interface MemoryAllocationStrategy
          * On mutationComplete, any full (in justReleased.nextList) lists get issued a barrier and are moved to
          * awaitingBarrierTail.
          */
-        IndexList justReleased;
+        IndexBlockList justReleased;
 
         /**
          * Tail of the "free and awaiting barrier" queue. This is reachable by following the links from free.
@@ -188,7 +182,7 @@ public interface MemoryAllocationStrategy
          * Full lists are attached to this tail when their barrier is issued.
          * Lists are consumed from the head when free becomes empty if the list at the head has an expired barrier.
          */
-        IndexList awaitingBarrierTail;
+        IndexBlockList awaitingBarrierTail;
 
         /**
          * Current free list, head of the "free and awaiting barrier" queue. Allocations are served from here.
@@ -197,7 +191,7 @@ public interface MemoryAllocationStrategy
          * If expired, update free to point to it (consuming one block from the queue).
          * If not, re-fill the block by allocating a new set of REUSE_BLOCK_SIZE indexes.
          */
-        IndexList free;
+        IndexBlockList free;
 
         /**
          * Called to allocate a new block of indexes to distribute.
@@ -209,8 +203,8 @@ public interface MemoryAllocationStrategy
         {
             this.allocator = allocator;
             this.opOrder = opOrder;
-            justReleased = new IndexList(null);
-            awaitingBarrierTail = free = new IndexList(null);
+            justReleased = new IndexBlockList(null);
+            awaitingBarrierTail = free = new IndexBlockList(null);
             free.count = 0;
         }
 
@@ -219,7 +213,7 @@ public interface MemoryAllocationStrategy
         {
             if (free.count == 0)
             {
-                IndexList awaitingBarrierHead = free.nextList;
+                IndexBlockList awaitingBarrierHead = free.nextList;
                 if (awaitingBarrierHead != null &&
                     (awaitingBarrierHead.barrier == null || awaitingBarrierHead.barrier.allPriorOpsAreFinished()))
                 {
@@ -244,7 +238,7 @@ public interface MemoryAllocationStrategy
             if (justReleased.count == REUSE_BLOCK_SIZE)
             {
                 // Block is full, allocate and attach a new one.
-                justReleased = new IndexList(justReleased);
+                justReleased = new IndexBlockList(justReleased);
             }
 
             justReleased.indexes[justReleased.count++] = index;
@@ -253,7 +247,7 @@ public interface MemoryAllocationStrategy
         @Override
         public void completeMutation()
         {
-            IndexList toProcess = justReleased.nextList;
+            IndexBlockList toProcess = justReleased.nextList;
             if (toProcess == null)
                 return;
 
@@ -268,8 +262,8 @@ public interface MemoryAllocationStrategy
                 barrier.issue();
             }
 
-            IndexList last = null;
-            for (IndexList current = toProcess; current != null; current = current.nextList)
+            IndexBlockList last = null;
+            for (IndexBlockList current = toProcess; current != null; current = current.nextList)
             {
                 current.barrier = barrier;
                 last = current;
@@ -296,9 +290,9 @@ public interface MemoryAllocationStrategy
         public long indexCountInPipeline()
         {
             long count = 0;
-            for (IndexList list = justReleased; list != null; list = list.nextList)
+            for (IndexBlockList list = justReleased; list != null; list = list.nextList)
                 count += list.count;
-            for (IndexList list = free; list != null; list = list.nextList) // includes awaiting barrier
+            for (IndexBlockList list = free; list != null; list = list.nextList) // includes awaiting barrier
                 count += list.count;
             return count;
         }
@@ -307,9 +301,9 @@ public interface MemoryAllocationStrategy
         public IntArrayList indexesInPipeline()
         {
             IntArrayList res = new IntArrayList((int) indexCountInPipeline(), -1);
-            for (IndexList list = justReleased; list != null; list = list.nextList)
+            for (IndexBlockList list = justReleased; list != null; list = list.nextList)
                 res.addAll(new IntArrayList(list.indexes, list.count, -1));
-            for (IndexList list = free; list != null; list = list.nextList) // includes awaiting barrier
+            for (IndexBlockList list = free; list != null; list = list.nextList) // includes awaiting barrier
                 res.addAll(new IntArrayList(list.indexes, list.count, -1));
             return res;
         }
@@ -318,14 +312,14 @@ public interface MemoryAllocationStrategy
 
     static final int REUSE_BLOCK_SIZE = 1024;
 
-    static class IndexList
+    static class IndexBlockList
     {
         final int[] indexes;
         int count;
         OpOrder.Barrier barrier;
-        IndexList nextList;
+        IndexBlockList nextList;
 
-        IndexList(IndexList next)
+        IndexBlockList(IndexBlockList next)
         {
             indexes = new int[REUSE_BLOCK_SIZE];
             nextList = next;
