@@ -227,26 +227,26 @@ public class InMemoryReadTrie<T> extends Trie<T>
     /*
      Buffer, content list and cell management
      */
-    int getChunkIdx(int pos, int minChunkShift, int minChunkSize)
+    int getBufferIdx(int pos, int minBufferShift, int minBufferSize)
     {
-        return 31 - minChunkShift - Integer.numberOfLeadingZeros(pos + minChunkSize);
+        return 31 - minBufferShift - Integer.numberOfLeadingZeros(pos + minBufferSize);
     }
 
-    int inChunkPointer(int pos, int chunkIndex, int minChunkSize)
+    int inBufferOffset(int pos, int bufferIndex, int minBufferSize)
     {
-        return pos + minChunkSize - (minChunkSize << chunkIndex);
+        return pos + minBufferSize - (minBufferSize << bufferIndex);
     }
 
-    UnsafeBuffer getChunk(int pos)
+    UnsafeBuffer getBuffer(int pos)
     {
-        int leadBit = getChunkIdx(pos, BUF_START_SHIFT, BUF_START_SIZE);
+        int leadBit = getBufferIdx(pos, BUF_START_SHIFT, BUF_START_SIZE);
         return buffers[leadBit];
     }
 
-    int inChunkPointer(int pos)
+    int inBufferOffset(int pos)
     {
-        int leadBit = getChunkIdx(pos, BUF_START_SHIFT, BUF_START_SIZE);
-        return inChunkPointer(pos, leadBit, BUF_START_SIZE);
+        int leadBit = getBufferIdx(pos, BUF_START_SHIFT, BUF_START_SIZE);
+        return inBufferOffset(pos, leadBit, BUF_START_SIZE);
     }
 
 
@@ -260,12 +260,12 @@ public class InMemoryReadTrie<T> extends Trie<T>
 
     final int getUnsignedByte(int pos)
     {
-        return getChunk(pos).getByte(inChunkPointer(pos)) & 0xFF;
+        return getBuffer(pos).getByte(inBufferOffset(pos)) & 0xFF;
     }
 
     final int getUnsignedShortVolatile(int pos)
     {
-        return getChunk(pos).getShortVolatile(inChunkPointer(pos)) & 0xFFFF;
+        return getBuffer(pos).getShortVolatile(inBufferOffset(pos)) & 0xFFFF;
     }
 
     /**
@@ -275,7 +275,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
      */
     final int getIntVolatile(int pos)
     {
-        return getChunk(pos).getIntVolatile(inChunkPointer(pos));
+        return getBuffer(pos).getIntVolatile(inBufferOffset(pos));
     }
 
     /**
@@ -286,8 +286,8 @@ public class InMemoryReadTrie<T> extends Trie<T>
      */
     T getContent(int id)
     {
-        int leadBit = getChunkIdx(~id, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inChunkPointer(~id, leadBit, CONTENTS_START_SIZE);
+        int leadBit = getBufferIdx(~id, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+        int ofs = inBufferOffset(~id, leadBit, CONTENTS_START_SIZE);
         AtomicReferenceArray<T> array = contentArrays[leadBit];
         return array.get(ofs);
     }
@@ -579,19 +579,19 @@ public class InMemoryReadTrie<T> extends Trie<T>
                 return advance();
 
             // Jump directly to the chain's child.
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
+            UnsafeBuffer buffer = getBuffer(node);
+            int inBufferNode = inBufferOffset(node);
             int bytesJumped = chainCellLength(node) - 1;   // leave the last byte for incomingTransition
             if (receiver != null && bytesJumped > 0)
-                receiver.addPathBytes(chunk, inChunkNode, bytesJumped);
+                receiver.addPathBytes(buffer, inBufferNode, bytesJumped);
             depth += bytesJumped;    // descendInto will add one
-            inChunkNode += bytesJumped;
+            inBufferNode += bytesJumped;
 
-            // inChunkNode is now positioned on the last byte of the chain.
+            // inBufferNode is now positioned on the last byte of the chain.
             // Consume it to be the new state's incomingTransition.
-            int transition = chunk.getByte(inChunkNode++) & 0xFF;
-            // inChunkNode is now positioned on the child pointer.
-            int child = chunk.getIntVolatile(inChunkNode);
+            int transition = buffer.getByte(inBufferNode++) & 0xFF;
+            // inBufferNode is now positioned on the child pointer.
+            int child = buffer.getIntVolatile(inBufferNode);
             return descendInto(child, transition);
         }
 
@@ -937,16 +937,16 @@ public class InMemoryReadTrie<T> extends Trie<T>
             int index = data % SPARSE_CHILD_COUNT;
             data = data / SPARSE_CHILD_COUNT;
 
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
+            UnsafeBuffer buffer = getBuffer(node);
+            int inBufferNode = inBufferOffset(node);
 
             // If there are remaining transitions, add backtracking entry.
             if (data != exhaustedOrderWord())
                 addBacktrack(node, data, depth);
 
             // Follow the transition.
-            int child = chunk.getIntVolatile(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
-            int transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
+            int child = buffer.getIntVolatile(inBufferNode + SPARSE_CHILDREN_OFFSET + index * 4);
+            int transition = buffer.getByte(inBufferNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
             return descendInto(child, transition);
         }
 
@@ -999,8 +999,8 @@ public class InMemoryReadTrie<T> extends Trie<T>
 
         private int advanceToSparseTransition(int node, int data, int skipTransition)
         {
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
+            UnsafeBuffer buffer = getBuffer(node);
+            int inBufferNode = inBufferOffset(node);
             int index;
             int transition;
             do
@@ -1008,7 +1008,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
                 // Peel off the next index.
                 index = data % SPARSE_CHILD_COUNT;
                 data = data / SPARSE_CHILD_COUNT;
-                transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
+                transition = buffer.getByte(inBufferNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
             }
             while (direction.lt(transition, skipTransition) && data != exhaustedOrderWord());
             if (direction.lt(transition, skipTransition))
@@ -1019,29 +1019,29 @@ public class InMemoryReadTrie<T> extends Trie<T>
                 addBacktrack(node, data, depth);
 
             // Follow the transition.
-            int child = chunk.getIntVolatile(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
+            int child = buffer.getIntVolatile(inBufferNode + SPARSE_CHILDREN_OFFSET + index * 4);
             return descendInto(child, transition);
         }
 
         private int getChainTransition(int node)
         {
             // No backtracking needed.
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
-            int transition = chunk.getByte(inChunkNode) & 0xFF;
+            UnsafeBuffer buffer = getBuffer(node);
+            int inBufferNode = inBufferOffset(node);
+            int transition = buffer.getByte(inBufferNode) & 0xFF;
             int next = node + 1;
             if (offset(next) <= CHAIN_MAX_OFFSET)
                 return descendIntoChain(next, transition);
             else
-                return descendInto(chunk.getIntVolatile(inChunkNode + 1), transition);
+                return descendInto(buffer.getIntVolatile(inBufferNode + 1), transition);
         }
 
         private int advanceToChainTransition(int node, int skipTransition)
         {
             // No backtracking needed.
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
-            int transition = chunk.getByte(inChunkNode) & 0xFF;
+            UnsafeBuffer buffer = getBuffer(node);
+            int inBufferNode = inBufferOffset(node);
+            int transition = buffer.getByte(inBufferNode) & 0xFF;
             if (direction.gt(skipTransition, transition))
                 return -1;
 
@@ -1049,7 +1049,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             if (offset(next) <= CHAIN_MAX_OFFSET)
                 return descendIntoChain(next, transition);
             else
-                return descendInto(chunk.getIntVolatile(inChunkNode + 1), transition);
+                return descendInto(buffer.getIntVolatile(inBufferNode + 1), transition);
         }
 
         int descendInto(int child, int transition)

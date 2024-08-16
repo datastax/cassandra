@@ -164,27 +164,27 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     final void putInt(int pos, int value)
     {
-        getChunk(pos).putInt(inChunkPointer(pos), value);
+        getBuffer(pos).putInt(inBufferOffset(pos), value);
     }
 
     final void putIntVolatile(int pos, int value)
     {
-        getChunk(pos).putIntVolatile(inChunkPointer(pos), value);
+        getBuffer(pos).putIntVolatile(inBufferOffset(pos), value);
     }
 
     final void putShort(int pos, short value)
     {
-        getChunk(pos).putShort(inChunkPointer(pos), value);
+        getBuffer(pos).putShort(inBufferOffset(pos), value);
     }
 
     final void putShortVolatile(int pos, short value)
     {
-        getChunk(pos).putShort(inChunkPointer(pos), value);
+        getBuffer(pos).putShort(inBufferOffset(pos), value);
     }
 
     final void putByte(int pos, byte value)
     {
-        getChunk(pos).putByte(inChunkPointer(pos), value);
+        getBuffer(pos).putByte(inBufferOffset(pos), value);
     }
 
     private int allocateNewCell() throws TrieSpaceExhaustedException
@@ -192,9 +192,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         // Note: If this method is modified, please run InMemoryTrieTest.testOver1GSize to verify it acts correctly
         // close to the 2G limit.
         int v = allocatedPos;
-        if (inChunkPointer(v) == 0)
+        if (inBufferOffset(v) == 0)
         {
-            int leadBit = getChunkIdx(v, BUF_START_SHIFT, BUF_START_SIZE);
+            int leadBit = getBufferIdx(v, BUF_START_SHIFT, BUF_START_SIZE);
             if (leadBit + BUF_START_SHIFT == 31)
                 throw new TrieSpaceExhaustedException();
 
@@ -212,7 +212,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     int allocateCell() throws TrieSpaceExhaustedException
     {
         int cell = cellAllocator.allocate();
-        getChunk(cell).setMemory(inChunkPointer(cell), CELL_SIZE, (byte) 0);
+        getBuffer(cell).setMemory(inBufferOffset(cell), CELL_SIZE, (byte) 0);
         return cell;
     }
 
@@ -224,7 +224,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     public int copyCell(int cell) throws TrieSpaceExhaustedException
     {
         int copy = cellAllocator.allocate();
-        getChunk(copy).putBytes(inChunkPointer(copy), getChunk(cell), inChunkPointer(cell & -CELL_SIZE), CELL_SIZE);
+        getBuffer(copy).putBytes(inBufferOffset(copy), getBuffer(cell), inBufferOffset(cell & -CELL_SIZE), CELL_SIZE);
         recycleCell(cell);
         return copy | (cell & (CELL_SIZE - 1));
     }
@@ -232,11 +232,11 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     private int allocateNewObject()
     {
         int index = contentCount++;
-        int leadBit = getChunkIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+        int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
         AtomicReferenceArray<T> array = contentArrays[leadBit];
         if (array == null)
         {
-            assert inChunkPointer(index, leadBit, CONTENTS_START_SIZE) == 0 : "Error in content arrays configuration.";
+            assert inBufferOffset(index, leadBit, CONTENTS_START_SIZE) == 0 : "Error in content arrays configuration.";
             contentArrays[leadBit] = new AtomicReferenceArray<>(CONTENTS_START_SIZE << leadBit);
         }
         return index;
@@ -252,8 +252,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     private int addContent(T value) throws TrieSpaceExhaustedException
     {
         int index = objectAllocator.allocate();
-        int leadBit = getChunkIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inChunkPointer(index, leadBit, CONTENTS_START_SIZE);
+        int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+        int ofs = inBufferOffset(index, leadBit, CONTENTS_START_SIZE);
         AtomicReferenceArray<T> array = contentArrays[leadBit];
         // no need for a volatile set here; at this point the item is not referenced
         // by any node in the trie, and a volatile set will be made to reference it.
@@ -269,8 +269,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      */
     private void setContent(int id, T value)
     {
-        int leadBit = getChunkIdx(~id, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inChunkPointer(~id, leadBit, CONTENTS_START_SIZE);
+        int leadBit = getBufferIdx(~id, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+        int ofs = inBufferOffset(~id, leadBit, CONTENTS_START_SIZE);
         AtomicReferenceArray<T> array = contentArrays[leadBit];
         array.set(ofs, value);
     }
@@ -1622,9 +1622,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     public long sizeOnHeap()
     {
         return usedObjectSpace() +
-               REFERENCE_ARRAY_ON_HEAP_SIZE * getChunkIdx(contentCount, CONTENTS_START_SHIFT, CONTENTS_START_SIZE) +
+               REFERENCE_ARRAY_ON_HEAP_SIZE * getBufferIdx(contentCount, CONTENTS_START_SHIFT, CONTENTS_START_SIZE) +
                (bufferType == BufferType.ON_HEAP ? usedBufferSpace() + EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP) +
-               REFERENCE_ARRAY_ON_HEAP_SIZE * getChunkIdx(allocatedPos, BUF_START_SHIFT, BUF_START_SIZE);
+               REFERENCE_ARRAY_ON_HEAP_SIZE * getBufferIdx(allocatedPos, BUF_START_SHIFT, BUF_START_SIZE);
     }
 
     private long usedBufferSpace()
@@ -1644,15 +1644,15 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         if (bufferType == BufferType.ON_HEAP)
         {
             int pos = this.allocatedPos;
-            UnsafeBuffer buffer = getChunk(pos);
+            UnsafeBuffer buffer = getBuffer(pos);
             if (buffer != null)
-                bufferOverhead = buffer.capacity() - inChunkPointer(pos);
+                bufferOverhead = buffer.capacity() - inBufferOffset(pos);
             bufferOverhead += cellAllocator.indexCountInPipeline() * CELL_SIZE;
         }
 
         int index = contentCount;
-        int leadBit = getChunkIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inChunkPointer(index, leadBit, CONTENTS_START_SIZE);
+        int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+        int ofs = inBufferOffset(index, leadBit, CONTENTS_START_SIZE);
         AtomicReferenceArray<T> contentArray = contentArrays[leadBit];
         int contentOverhead = ((contentArray != null ? contentArray.length() : 0) - ofs);
         contentOverhead += objectAllocator.indexCountInPipeline();
