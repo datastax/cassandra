@@ -172,7 +172,7 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
 
     private static int randomInt(int maxValueInclusive)
     {
-        return getRandom().nextIntBetween(0, maxValueInclusive + 1);
+        return getRandom().nextIntBetween(0, maxValueInclusive);
     }
 
     private <T> void validate(Structure structure, Map<VectorFloat<?>, VectorPostings<T>> postingsMap, RamAwareVectorValues vectorValues) throws IOException
@@ -280,18 +280,22 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
     {
         Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap = emptyPostingsMap();
 
-        var remainingRowIds = new IntArrayList(vectorValues.size(), IntArrayList.DEFAULT_NULL_VALUE);
+        // generate a list of rowIds that we'll initially assign 1:1 to ordinals,
+        // leaving holes in the rowid sequence if we want ZERO_OR_ONE_TO_MANY
+        var rowIds = new IntArrayList(vectorValues.size(), IntArrayList.DEFAULT_NULL_VALUE);
         IntUnaryOperator populator = structure == Structure.ZERO_OR_ONE_TO_MANY
                                    ? i -> 2 * i
                                    : i -> i;
         for (int i = 0; i < vectorValues.size(); i++)
-            remainingRowIds.add(populator.applyAsInt(i));
+            rowIds.add(populator.applyAsInt(i));
+
+        // assign each ordinal a random rowid, without replacement
         for (int ordinal = 0; ordinal < vectorValues.size(); ordinal++)
         {
             var vector = vectorValues.getVector(ordinal);
-            var rowIdIdx = randomIndex(remainingRowIds);
-            var vp = new VectorPostings<>(remainingRowIds.getInt(rowIdIdx));
-            remainingRowIds.remove(rowIdIdx);
+            var rowIdIdx = randomIndex(rowIds);
+            var vp = new VectorPostings<>(rowIds.getInt(rowIdIdx));
+            rowIds.remove(rowIdIdx);
             vp.setOrdinal(ordinal);
             postingsMap.put(vector, vp);
         }
