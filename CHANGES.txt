@@ -670,6 +670,8 @@ Merged from 3.0:
  * Do not remove SSTables when cause of FSReadError is OutOfMemoryError while using best_effort disk failure policy (CASSANDRA-18336)
  * Do not remove truncated_at entry in system.local while dropping an index (CASSANDRA-18105)
 
+4.0.14
+ * Fix memory leak in BTree.FastBuilder (CASSANDRA-19785)
 
 4.0.9
  * Update zstd-jni library to version 1.5.5 (CASSANDRA-18429)
