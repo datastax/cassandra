@@ -160,7 +160,7 @@ public class CompactionGraph implements Closeable, Accountable
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
                             .withStartOffset(termsOffset)
                             .with(new InlineVectors(dimension))
-                            .withMapper(new OrdinalMapper.IdentityMapper());
+                            .withMapper(new OrdinalMapper.IdentityMapper(maxRowsInGraph));
         if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
         {
             writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getMaximumNodeConnections(), compressor));
