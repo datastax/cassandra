@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Collection;
 import java.util.Optional;
 
 import org.junit.Before;
@@ -29,7 +30,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-public class RequestSensorsTest
+public class ActiveRequestSensorsTest
 {
     private Context context1;
     private Type type1;
@@ -51,9 +52,9 @@ public class RequestSensorsTest
         context2 = new Context("ks2", "t2", "id2");
         type2 = Type.WRITE_BYTES;
 
-        context1Sensors = new RequestSensors(() -> sensorsRegistry);
-        context2Sensors = new RequestSensors(() -> sensorsRegistry);
-        sensors = new RequestSensors(() -> sensorsRegistry);
+        context1Sensors = new ActiveRequestSensors(() -> sensorsRegistry);
+        context2Sensors = new ActiveRequestSensors(() -> sensorsRegistry);
+        sensors = new ActiveRequestSensors(() -> sensorsRegistry);
     }
 
     @Test
@@ -181,6 +182,30 @@ public class RequestSensorsTest
     }
 
     @Test
+    public void testSyncAllWithOneSensorIncrementing()
+    {
+        sensors.registerSensor(context1, type1);
+        sensors.registerSensor(context1, type2);
+
+        sensors.incrementSensor(context1, type1, 1.0);
+        sensors.incrementSensor(context1, type2, 1.0);
+
+        sensors.syncAllSensors();
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type2), eq(1.0));
+
+        sensors.syncAllSensors();
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type2), eq(1.0));
+
+        // only increment one sensor
+        sensors.incrementSensor(context1, type2, 1.0);
+        sensors.syncAllSensors();
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(type1), eq(1.0));
+        verify(sensorsRegistry, times(2)).incrementSensor(eq(context1), eq(type2), eq(1.0));
+    }
+
+    @Test
     public void testGetSensors()
     {
         sensors.registerSensor(context1, type1);
@@ -188,14 +213,17 @@ public class RequestSensorsTest
         sensors.registerSensor(context2, type1);
         sensors.registerSensor(context2, type2);
 
-        assertThat(sensors.getSensors(type1)).hasSize(2);
-        assertThat(sensors.getSensors(type1)).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context2, type1).get());
+        Collection<Sensor> type1Sensors = sensors.getSensors(s -> s.getType() == type1);
+        assertThat(type1Sensors).hasSize(2);
+        assertThat(type1Sensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context2, type1).get());
 
-        assertThat(sensors.getSensors(type2)).hasSize(2);
-        assertThat(sensors.getSensors(type2)).containsExactlyInAnyOrder(sensors.getSensor(context1, type2).get(), sensors.getSensor(context2, type2).get());
+        Collection<Sensor> type2Sensors = sensors.getSensors(s -> s.getType() == type2);
+        assertThat(type2Sensors).hasSize(2);
+        assertThat(type2Sensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type2).get(), sensors.getSensor(context2, type2).get());
 
-        assertThat(sensors.getSensors()).hasSize(4);
-        assertThat(sensors.getSensors()).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context1, type2).get(),
-                                                                        sensors.getSensor(context2, type1).get(), sensors.getSensor(context2, type2).get());
+        Collection<Sensor> allSensors = sensors.getSensors(s -> true);
+        assertThat(allSensors).hasSize(4);
+        assertThat(allSensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context1, type2).get(),
+                                                         sensors.getSensor(context2, type1).get(), sensors.getSensor(context2, type2).get());
     }
 }

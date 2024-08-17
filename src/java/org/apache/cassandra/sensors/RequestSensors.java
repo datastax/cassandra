@@ -18,124 +18,54 @@
 
 package org.apache.cassandra.sensors;
 
-import java.util.HashSet;
-import java.util.Objects;
+import java.util.Collection;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
-
-import org.apache.cassandra.utils.Pair;
+import java.util.function.Predicate;
 
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
- * point to create and modify sensors. More specifically:
- * <ul>
- *     <li>Create a new sensor associated to the request/response via {@link #registerSensor(Context, Type)}.</li>
- *     <li>Increment the sensor value for the request/response via {@link #incrementSensor(Context, Type, double)}.</li>
- *     <li>Sync this request/response sensor value to the {@link SensorsRegistry} via {@link #syncAllSensors()}.</li>
- * </ul>
- * Sensor values related to a given request/response are isolated from other sensors, and the "same" sensor
- * (for a given context and type) registered to different requests/responses will have a different value: in other words,
- * there is no automatic synchronization or coordination across sensor values belonging to different
- * {@link RequestSensors} objects, hence {@link #syncAllSensors()} MUST be invoked to propagate the sensors values
- * at a global level to the {@link SensorsRegistry}.
+ * point to create and modify sensors. Actual implementations can be created via {@link RequestSensorsFactory}.
  */
-public class RequestSensors
+public interface RequestSensors
 {
-    private final Supplier<SensorsRegistry> sensorsRegistry;
-    private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Sensor, Double> latestSyncedValuePerSensor = new ConcurrentHashMap<>();
-    private final ReadWriteLock updateLock = new ReentrantReadWriteLock();
+    /**
+     * Register a new sensor associated to the given context and type. It is up to the implementation to decide the
+     * idempotency of this operation.
+     *
+     * @param context the sensor context associated with the request/response
+     * @param type    the type of the sensor
+     */
+    void registerSensor(Context context, Type type);
 
-    public RequestSensors()
-    {
-        this(() -> SensorsRegistry.instance);
-    }
+    /**
+     * Returns the sensor associated to the given context and type, if any.
+     *
+     * @param context the sensor context associated with the request/response
+     * @param type    the type of the sensor
+     * @return the sensor associated to the given context and type, if any
+     */
+    Optional<Sensor> getSensor(Context context, Type type);
 
-    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
-    {
-        this.sensorsRegistry = sensorsRegistry;
-    }
+    /**
+     * Returns all the sensors that match the given filter
+     *
+     * @param filter a predicate applied to each sensor to decide if it should be included in the returned collection
+     * @return a collection of sensors matching the given predicate
+     */
+    Collection<Sensor> getSensors(Predicate<Sensor> filter);
 
-    public void registerSensor(Context context, Type type)
-    {
-        sensors.putIfAbsent(Pair.create(context, type), new Sensor(context, type));
-    }
+    /**
+     * Increment the sensor value associated to the given context and type by the given value.
+     *
+     * @param context the sensor context associated with the request/response
+     * @param type    the type of the sensor
+     * @param value   the value to increment the sensor by
+     */
+    void incrementSensor(Context context, Type type, double value);
 
-    public Optional<Sensor> getSensor(Context context, Type type)
-    {
-        return Optional.ofNullable(sensors.get(Pair.create(context, type)));
-    }
-
-    public Set<Sensor> getSensors(Type type)
-    {
-        return sensors.values().stream().filter(s -> s.getType() == type).collect(Collectors.toSet());
-    }
-
-    public Set<Sensor> getSensors()
-    {
-        return new HashSet<>(sensors.values());
-    }
-
-    public void incrementSensor(Context context, Type type, double value)
-    {
-        updateLock.readLock().lock();
-        try
-        {
-            Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
-        }
-        finally
-        {
-            updateLock.readLock().unlock();
-        }
-    }
-
-    public void syncAllSensors()
-    {
-        updateLock.writeLock().lock();
-        try
-        {
-            sensors.values().forEach(sensor -> {
-                double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
-                double update = sensor.getValue() - current;
-                if (update == 0d)
-                    return;
-
-                latestSyncedValuePerSensor.put(sensor, sensor.getValue());
-                sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
-            });
-        }
-        finally
-        {
-            updateLock.writeLock().unlock();
-        }
-    }
-
-    @Override
-    public boolean equals(Object o)
-    {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        RequestSensors sensors1 = (RequestSensors) o;
-        return Objects.equals(sensors, sensors1.sensors);
-    }
-
-    @Override
-    public int hashCode()
-    {
-        return Objects.hash(sensors);
-    }
-
-    @Override
-    public String toString()
-    {
-        return "RequestSensors{" +
-               "sensors=" + sensors +
-               '}';
-    }
+    /**
+     * Sync all the sensors values tracked for this request to the global {@link SensorsRegistry}. This method
+     * will be called at least once per request/response so it is recommended to make the implementation idempotent.
+     */
+    void syncAllSensors();
 }

@@ -34,7 +34,7 @@ import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.RequestSensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -42,13 +42,13 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 {
     public static final MutationVerbHandler instance = new MutationVerbHandler();
 
-    private void respond(Message<Mutation> respondTo, InetAddressAndPort respondToAddress)
+    private void respond(RequestSensors requestSensors, Message<Mutation> respondToMessage, InetAddressAndPort respondToAddress)
     {
         Tracing.trace("Enqueuing response to {}", respondToAddress);
 
-        Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
+        Message.Builder<NoPayload> response = respondToMessage.emptyResponseBuilder();
         // no need to calculate outbound internode bytes because the response is NoPayload
-        SensorsCustomParams.addSensorsToResponse(RequestTracker.instance.get(), response);
+        SensorsCustomParams.addSensorsToResponse(requestSensors, response);
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
@@ -76,19 +76,20 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         try
         {
             // Initialize the sensor and set ExecutorLocals
-            Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
-            RequestSensors requestSensors = new RequestSensors();
+            RequestSensors requestSensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
             ExecutorLocals locals = ExecutorLocals.create(requestSensors);
             ExecutorLocals.set(locals);
 
             // Initialize internode bytes with the inbound message size:
-            tables.forEach(tm -> {
+            Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
+            for (TableMetadata tm : tables)
+            {
                 Context context = Context.from(tm);
                 requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
                 requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
-            });
+            }
 
-            message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(message, respondToAddress)).exceptionally(wto -> {
+            message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(requestSensors, message, respondToAddress)).exceptionally(wto -> {
                 failed();
                 return null;
             });

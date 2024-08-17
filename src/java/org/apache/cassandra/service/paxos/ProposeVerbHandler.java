@@ -26,7 +26,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.RequestSensorsFactory;
 import org.apache.cassandra.sensors.Type;
 
 public class ProposeVerbHandler implements IVerbHandler<Commit>
@@ -41,8 +41,9 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
     public void doVerb(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = new RequestSensors();
+        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.update.metadata().keyspace);
         Context context = Context.from(message.payload.update.metadata());
+
         // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
@@ -55,8 +56,8 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
 
         // calculate outbound internode bytes before adding the sensor to the response
         int size = reply.currentPayloadSize(MessagingService.current_version);
-        RequestTracker.instance.get().incrementSensor(context, Type.INTERNODE_BYTES, size);
-        RequestTracker.instance.get().syncAllSensors();
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+        sensors.syncAllSensors();
         SensorsCustomParams.addSensorsToResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }

@@ -21,6 +21,8 @@ package org.apache.cassandra.net;
 import java.nio.ByteBuffer;
 import java.util.Optional;
 
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
@@ -141,7 +143,10 @@ public final class SensorsCustomParams
      */
     public static <T> void addSensorsToResponse(RequestSensors sensors, Message.Builder<T> response)
     {
-        for (Sensor sensor : sensors.getSensors())
+        Preconditions.checkNotNull(sensors);
+        Preconditions.checkNotNull(response);
+
+        for (Sensor sensor : sensors.getSensors(ignored -> true))
         {
             addSensorToResponse(response, sensor);
         }

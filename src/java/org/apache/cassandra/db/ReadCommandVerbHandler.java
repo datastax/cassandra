@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db;
 
-import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,9 +30,9 @@ import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.SensorsCustomParams;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestSensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -57,18 +56,15 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         validateTransientStatus(message);
 
         // Initialize the sensor and set ExecutorLocals
+        RequestSensors requestSensors = RequestSensorsFactory.instance.create(command.metadata().keyspace);
         Context context = Context.from(command);
-        ImmutableSet<TableMetadata> tables = ImmutableSet.of(command.metadata());
-        RequestSensors requestSensors = new RequestSensors();
         requestSensors.registerSensor(context, Type.READ_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
         // Initialize internode bytes with the inbound message size:
-        tables.forEach(tm -> {
-            requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
-        });
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+        requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
         command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
