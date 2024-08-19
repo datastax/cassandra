@@ -25,7 +25,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.cql.VectorTester;
-import org.apache.cassandra.index.sai.disk.v3.V3VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
 import static org.junit.Assert.assertEquals;
@@ -138,7 +138,7 @@ public class VectorCompressionTest extends VectorTester
 
         // open a Searcher for the segment so we can check that its compression is what we expected
         try (var segment = segments.iterator().next();
-             var searcher = (V3VectorIndexSearcher) segment.getIndexSearcher())
+             var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher())
         {
             var vc = searcher.getCompression();
             var msg = String.format("Expected %s but got %s", expectedCompression, vc);
