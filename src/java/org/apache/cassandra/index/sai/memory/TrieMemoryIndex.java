@@ -382,7 +382,10 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         assert term != null;
 
-        // todo these are invalid now... but we should be able to use the trie (except when we do that encoding)
+        // Note that an update to a term could make these inaccurate, but they err in the correct direction.
+        // An alternative solution could use the trie to find the min/max term, but the trie has ByteComparable
+        // objects, not the ByteBuffer, and we would need to implement a custom decoder to undo the encodeForTrie
+        // mapping.
         minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator(), Version.latest());
         maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
     }
