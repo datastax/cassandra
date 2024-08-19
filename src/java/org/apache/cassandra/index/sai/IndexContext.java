@@ -391,8 +391,7 @@ public class IndexContext
         {
             Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, 0);
             Iterator<ByteBuffer> newValues = getValuesOf(newRow, FBUtilities.nowInSeconds());
-            if (oldValues != null && newValues != null)
-                target.update(key, oldRow.clustering(), oldValues, newValues, memtable, opGroup);
+            target.update(key, oldRow.clustering(), oldValues, newValues, memtable, opGroup);
         }
         else
         {
