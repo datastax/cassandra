@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Collection;
 import java.util.Optional;
 
 import org.junit.Before;
@@ -212,10 +213,17 @@ public class ActiveRequestSensorsTest
         sensors.registerSensor(context2, type1);
         sensors.registerSensor(context2, type2);
 
-        assertThat(sensors.getSensors(type1)).hasSize(2);
-        assertThat(sensors.getSensors(type1)).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context2, type1).get());
+        Collection<Sensor> type1Sensors = sensors.getSensors(s -> s.getType() == type1);
+        assertThat(type1Sensors).hasSize(2);
+        assertThat(type1Sensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context2, type1).get());
 
-        assertThat(sensors.getSensors(type2)).hasSize(2);
-        assertThat(sensors.getSensors(type2)).containsExactlyInAnyOrder(sensors.getSensor(context1, type2).get(), sensors.getSensor(context2, type2).get());
+        Collection<Sensor> type2Sensors = sensors.getSensors(s -> s.getType() == type2);
+        assertThat(type2Sensors).hasSize(2);
+        assertThat(type2Sensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type2).get(), sensors.getSensor(context2, type2).get());
+
+        Collection<Sensor> allSensors = sensors.getSensors(s -> true);
+        assertThat(allSensors).hasSize(4);
+        assertThat(allSensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context1, type2).get(),
+                                                         sensors.getSensor(context2, type1).get(), sensors.getSensor(context2, type2).get());
     }
 }
