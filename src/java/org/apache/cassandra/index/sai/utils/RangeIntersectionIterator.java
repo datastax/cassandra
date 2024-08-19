@@ -227,7 +227,7 @@ public class RangeIntersectionIterator extends RangeIterator
         {
             // if the range is disjoint or we have an intersection with an empty set,
             // we can simply return an empty iterator, because it's not going to produce any results.
-            if (statistics.isDisjoint())
+            if (statistics.isEmptyOrDisjoint())
             {
                 // release posting lists
                 FileUtils.closeQuietly(rangeIterators);

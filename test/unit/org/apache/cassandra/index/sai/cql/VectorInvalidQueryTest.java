@@ -112,7 +112,7 @@ public class VectorInvalidQueryTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
-        assertInvalidMessage("Cannot specify more than one ANN ordering",
+        assertInvalidMessage("Cannot specify more than one ordering column when using SAI indexes",
                              "SELECT * FROM %s ORDER BY val1 ann of [2.5, 3.5, 4.5], val2 ann of [2.1, 3.2, 4.0] LIMIT 2");
     }
 
@@ -134,7 +134,7 @@ public class VectorInvalidQueryTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
-        assertInvalidMessage("ANN ordering does not support secondary ordering",
+        assertInvalidMessage("Cannot combine clustering column ordering with non-clustering column ordering",
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5], ck ASC LIMIT 2");
     }
 
@@ -143,10 +143,10 @@ public class VectorInvalidQueryTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
 
-        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_INDEX_MESSAGE,
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"),
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 5");
 
-        assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_INDEX_MESSAGE,
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"),
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 5 ALLOW FILTERING");
     }
 
@@ -171,7 +171,7 @@ public class VectorInvalidQueryTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
-        assertInvalidMessage("Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than 1000. LIMIT was NO LIMIT",
+        assertInvalidMessage("SAI based ORDER BY clause requires a LIMIT that is not greater than 1000. LIMIT was NO LIMIT",
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5]");
 
     }
@@ -236,11 +236,11 @@ public class VectorInvalidQueryTest extends SAITester
         // because the clustering columns are not yet available to restrict the ANN result set.
         assertThatThrownBy(() -> execute("SELECT num FROM %s WHERE pk=3 AND num > 3 ORDER BY v ANN OF [1,1] LIMIT 1"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+        .hasMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
         assertThatThrownBy(() -> execute("SELECT num FROM %s WHERE pk=3 AND num = 4 ORDER BY v ANN OF [1,1] LIMIT 1"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+        .hasMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
         // Cover the alternative code path
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");

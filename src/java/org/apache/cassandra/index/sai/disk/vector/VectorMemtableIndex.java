@@ -28,12 +28,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.PriorityQueue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.Function;
+import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,12 +55,15 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -86,11 +90,19 @@ public class VectorMemtableIndex implements MemtableIndex
     private PrimaryKey maximumKey;
 
     private final NavigableSet<PrimaryKey> primaryKeys = new ConcurrentSkipListSet<>();
+    private final Memtable mt;
 
-    public VectorMemtableIndex(IndexContext indexContext)
+    public VectorMemtableIndex(IndexContext indexContext, Memtable mt)
     {
         this.indexContext = indexContext;
         this.graph = new CassandraOnHeapGraph<>(indexContext, true);
+        this.mt = mt;
+    }
+
+    @Override
+    public Memtable getMemtable()
+    {
+        return mt;
     }
 
     @Override
@@ -179,11 +191,12 @@ public class VectorMemtableIndex implements MemtableIndex
         var qv = vts.createFloatVector(expr.lower.value.vector);
         float threshold = expr.getEuclideanSearchThreshold();
 
-        PriorityQueue<PrimaryKey> keyQueue = new PriorityQueue<>();
+        PriorityQueue<PrimaryKey> keyQueue;
         try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold))
         {
-            while (pkIterator.hasNext())
-                keyQueue.add(pkIterator.next());
+            // Leverage PQ's O(N) complexity for building a PQ from a list.
+            var list = Lists.newArrayList(Iterators.transform(pkIterator, PrimaryKeyWithSortKey::primaryKey));
+            keyQueue = new PriorityQueue<>(list);
         }
 
         if (keyQueue.isEmpty())
@@ -192,20 +205,20 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public CloseableIterator<ScoredPrimaryKey> orderBy(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext context, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
-        assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
+        assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
-        var qv = vts.createFloatVector(expr.lower.value.vector);
+        var qv = vts.createFloatVector(orderer.vector);
 
-        return searchInternal(context, qv, keyRange, limit, 0);
+        return List.of(searchInternal(context, qv, keyRange, limit, 0));
     }
 
-    private CloseableIterator<ScoredPrimaryKey> searchInternal(QueryContext context,
-                                                               VectorFloat<?> queryVector,
-                                                               AbstractBounds<PartitionPosition> keyRange,
-                                                               int limit,
-                                                               float threshold)
+    private CloseableIterator<PrimaryKeyWithSortKey> searchInternal(QueryContext context,
+                                                                  VectorFloat<?> queryVector,
+                                                                  AbstractBounds<PartitionPosition> keyRange,
+                                                                  int limit,
+                                                                  float threshold)
     {
         Bits bits;
         if (RangeUtil.coversFullRing(keyRange))
@@ -252,12 +265,13 @@ public class VectorMemtableIndex implements MemtableIndex
 
 
     @Override
-    public CloseableIterator<ScoredPrimaryKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
     {
         if (minimumKey == null)
             // This case implies maximumKey is empty too.
             return CloseableIterator.emptyIterator();
 
+        assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer;
         // Compute the keys that exist in the current memtable and their corresponding graph ordinals
         var keysInGraph = new HashSet<PrimaryKey>();
         var relevantOrdinals = new IntHashSet();
@@ -279,7 +293,7 @@ public class VectorMemtableIndex implements MemtableIndex
                             relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), limit);
 
         // convert the expression value to query vector
-        var qv = vts.createFloatVector(exp.lower.value.vector);
+        var qv = vts.createFloatVector(orderer.vector);
         // brute force path
         if (keysInGraph.size() <= maxBruteForceRows)
         {
@@ -301,18 +315,18 @@ public class VectorMemtableIndex implements MemtableIndex
      * @param keys the keys to filter
      * @return an iterator over the keys that pass the filter in PK order
      */
-    private CloseableIterator<ScoredPrimaryKey> filterByBruteForce(VectorFloat<?> queryVector, float threshold, NavigableSet<PrimaryKey> keys)
+    private CloseableIterator<PrimaryKeyWithSortKey> filterByBruteForce(VectorFloat<?> queryVector, float threshold, NavigableSet<PrimaryKey> keys)
     {
         // Keys are already ordered in ascending PK order, so just use an ArrayList to collect the results.
-        var results = new ArrayList<ScoredPrimaryKey>(keys.size());
+        var results = new ArrayList<PrimaryKeyWithSortKey>(keys.size());
         scoreKeysAndAddToCollector(queryVector, keys, threshold, results);
         return CloseableIterator.wrap(results.iterator());
     }
 
-    private CloseableIterator<ScoredPrimaryKey> orderByBruteForce(VectorFloat<?> queryVector, Collection<PrimaryKey> keys)
+    private CloseableIterator<PrimaryKeyWithSortKey> orderByBruteForce(VectorFloat<?> queryVector, Collection<PrimaryKey> keys)
     {
         // Use a priority queue because we often don't need to consume the entire iterator
-        var scoredPrimaryKeys = new PriorityQueue<ScoredPrimaryKey>(keys.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+        var scoredPrimaryKeys = new PriorityQueue<PrimaryKeyWithSortKey>(keys.size());
         scoreKeysAndAddToCollector(queryVector, keys, 0, scoredPrimaryKeys);
         return new PriorityQueueIterator<>(scoredPrimaryKeys);
     }
@@ -320,7 +334,7 @@ public class VectorMemtableIndex implements MemtableIndex
     private void scoreKeysAndAddToCollector(VectorFloat<?> queryVector,
                                             Collection<PrimaryKey> keys,
                                             float threshold,
-                                            Collection<ScoredPrimaryKey> collector)
+                                            Collection<PrimaryKeyWithSortKey> collector)
     {
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         for (var key : keys)
@@ -330,7 +344,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 continue;
             var score = similarityFunction.compare(queryVector, vector);
             if (score >= threshold)
-                collector.add(new ScoredPrimaryKey(key, score));
+                collector.add(new PrimaryKeyWithScore(indexContext, mt, key, score));
         }
     }
 
@@ -383,9 +397,10 @@ public class VectorMemtableIndex implements MemtableIndex
         throw new UnsupportedOperationException();
     }
 
-    public Set<Integer> computeDeletedOrdinals(Function<PrimaryKey, Integer> ordinalMapper)
+    /** returns true if the index is non-empty and should be flushed */
+    public boolean preFlush(ToIntFunction<PrimaryKey> ordinalMapper)
     {
-        return graph.computeDeletedOrdinals(ordinalMapper);
+        return graph.preFlush(ordinalMapper);
     }
 
     public int size()
@@ -393,9 +408,9 @@ public class VectorMemtableIndex implements MemtableIndex
         return graph.size();
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
-        return graph.flush(perIndexComponents, deletedOrdinals);
+        return graph.flush(perIndexComponents);
     }
 
     @Override
@@ -487,21 +502,21 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     /**
-     * An iterator over {@link ScoredPrimaryKey} sorted by score descending. The iterator converts ordinals (node ids)
+     * An iterator over {@link PrimaryKeyWithSortKey} sorted by score descending. The iterator converts ordinals (node ids)
      * to {@link PrimaryKey}s and pairs them with the score given by the index.
      */
-    private class NodeScoreToScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimaryKey>
+    private class NodeScoreToScoredPrimaryKeyIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
-        private final Iterator<SearchResult.NodeScore> nodeScores;
-        private Iterator<ScoredPrimaryKey> primaryKeysForNode = Collections.emptyIterator();
+        private final CloseableIterator<SearchResult.NodeScore> nodeScores;
+        private Iterator<PrimaryKeyWithScore> primaryKeysForNode = Collections.emptyIterator();
 
-        NodeScoreToScoredPrimaryKeyIterator(Iterator<SearchResult.NodeScore> nodeScores)
+        NodeScoreToScoredPrimaryKeyIterator(CloseableIterator<SearchResult.NodeScore> nodeScores)
         {
             this.nodeScores = nodeScores;
         }
 
         @Override
-        protected ScoredPrimaryKey computeNext()
+        protected PrimaryKeyWithSortKey computeNext()
         {
             if (primaryKeysForNode.hasNext())
                 return primaryKeysForNode.next();
@@ -511,13 +526,19 @@ public class VectorMemtableIndex implements MemtableIndex
                 SearchResult.NodeScore nodeScore = nodeScores.next();
                 primaryKeysForNode = graph.keysFromOrdinal(nodeScore.node)
                                           .stream()
-                                          .map(pk -> new ScoredPrimaryKey(pk, nodeScore.score))
+                                          .map(pk -> new PrimaryKeyWithScore(indexContext, mt, pk, nodeScore.score))
                                           .iterator();
                 if (primaryKeysForNode.hasNext())
                     return primaryKeysForNode.next();
             }
 
             return endOfData();
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(nodeScores);
         }
     }
 

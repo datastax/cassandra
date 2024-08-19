@@ -605,9 +605,10 @@ public class IndexDescriptor
             @Override
             public FileHandle createFileHandle()
             {
-                try (final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this))
+                try (var builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
-                    return builder.order(byteOrder()).complete();
+                    var b = builder.order(byteOrder());
+                    return b.complete();
                 }
             }
 

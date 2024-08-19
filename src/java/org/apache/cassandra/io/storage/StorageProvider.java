@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.io.storage;
 
+import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -29,6 +32,7 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
@@ -172,6 +176,18 @@ public interface StorageProvider
     FileHandle.Builder fileHandleBuilderFor(IndexComponent.ForRead component);
 
     /**
+     * Creates a new {@link FileChannel} to read the given file, that is suitable for reading the file "at write time",
+     * that is typcally for when we need to access the partially written file to complete checksum.
+     *
+     * @param file the file to be read
+     * @return a new {@link FileChannel} for the provided file
+     */
+    default FileChannel writeTimeReadFileChannelFor(File file) throws IOException
+    {
+        return FileChannel.open(file.toPath(), StandardOpenOption.READ);
+    }
+
+    /**
      * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files),
      * that is suitable for reading the component "at flush time", that is typcally for when we need to access the
      * component to complete the writing of another related component.
@@ -276,7 +292,22 @@ public interface StorageProvider
                 logger.trace(component.parent().logMessage("Opening {} file handle for {} ({})"),
                              file, FBUtilities.prettyPrintMemory(file.length()));
             }
-            return new FileHandle.Builder(file).mmapped(true);
+            var builder = new FileHandle.Builder(file);
+            // Comments on why we don't use adviseRandom for some components where you might expect it:
+            //
+            // KD_TREE: no adviseRandom because we do a large bulk read on startup, queries later may
+            //     benefit from adviseRandom but there's no way to split those apart
+            // POSTINGS_LISTS: for common terms with 1000s of rows, adviseRandom seems likely to
+            //     make it slower; no way to get cardinality at this point in the code
+            //     (and we already have shortcut code for the common 1:1 vector case)
+            //     so we leave it alone here
+            if (component.componentType() == IndexComponentType.TERMS_DATA
+                || component.componentType() == IndexComponentType.VECTOR
+                || component.componentType() == IndexComponentType.PRIMARY_KEY_TRIE)
+            {
+                builder = builder.adviseRandom();
+            }
+            return builder.mmapped(true);
         }
 
         @Override

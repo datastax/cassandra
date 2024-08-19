@@ -72,13 +72,14 @@ public class View implements Iterable<SSTableIndex>
 
     /**
      * Search for a list of {@link SSTableIndex}es that contain values within
-     * the value range requested in the {@link Expression}
+     * the value range requested in the {@link Expression}. Expressions associated with ORDER BY are not
+     * expected, and will throw an exception.
      */
     public Set<SSTableIndex> match(Expression expression)
     {
-        if (expression.getOp() == Expression.Op.ANN
-                || expression.getOp() == Expression.Op.BOUNDED_ANN
-                || expression.getOp().isNonEquality())
+        if (expression.getOp() == Expression.Op.ORDER_BY)
+            throw new IllegalArgumentException("ORDER BY expression is not supported");
+        if (expression.getOp() == Expression.Op.BOUNDED_ANN || expression.getOp().isNonEquality())
             return new HashSet<>(getIndexes());
         return termTree.search(expression);
     }

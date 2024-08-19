@@ -53,6 +53,10 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -60,6 +64,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
@@ -71,15 +76,17 @@ import org.apache.cassandra.index.sai.memory.MemtableRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -239,9 +246,14 @@ public class IndexContext
         return owner;
     }
 
+    public IPartitioner getPartitioner()
+    {
+        return owner.getPartitioner();
+    }
+
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
     {
-        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this));
+        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
 
         long start = System.nanoTime();
 
@@ -428,27 +440,20 @@ public class IndexContext
 
         RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
 
-        for (MemtableIndex index : memtables)
+        try
         {
-            builder.add(index.search(context, e, keyRange, limit));
+            for (MemtableIndex index : memtables)
+            {
+                builder.add(index.search(context, e, keyRange, limit));
+            }
+
+            return builder.build();
         }
-
-        return builder.build();
-    }
-
-    public List<CloseableIterator<ScoredPrimaryKey>> orderMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
-    {
-        Collection<MemtableIndex> memtables = liveMemtables.values();
-
-        if (memtables.isEmpty())
-            return List.of();
-
-        var result = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(memtables.size());
-
-        for (MemtableIndex index : memtables)
-            result.add(index.orderBy(context, e, keyRange, limit));
-
-        return result;
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(builder.ranges());
+            throw ex;
+        }
     }
 
     private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
@@ -461,27 +466,44 @@ public class IndexContext
 
         RangeIterator.Builder builder = RangeUnionIterator.builder(memtables.size());
 
-        for (Memtable memtable : memtables)
+        try
         {
-            RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
-            builder.add(memtableIterator);
+            for (Memtable memtable : memtables)
+            {
+                RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+                builder.add(memtableIterator);
+            }
+
+            return builder.build();
         }
-        return builder.build();
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(builder.ranges());
+            throw ex;
+        }
     }
 
     // Search all memtables for all PrimaryKeys in list.
-    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Orderer orderer, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
             return List.of();
 
-        List<CloseableIterator<ScoredPrimaryKey>> result = new ArrayList<>(memtables.size());
-        for (MemtableIndex index : memtables)
-            result.add(index.orderResultsBy(context, source, e, limit));
+        List<CloseableIterator<PrimaryKeyWithSortKey>> result = new ArrayList<>(memtables.size());
+        try
+        {
+            for (MemtableIndex index : memtables)
+                result.add(index.orderResultsBy(context, source, orderer, limit));
 
-        return result;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            FileUtils.closeQuietly(result);
+            throw ex;
+        }
     }
 
     public long liveMemtableWriteCount()
@@ -620,6 +642,15 @@ public class IndexContext
             return op == Operator.ANN || (op == Operator.BOUNDED_ANN && hasEuclideanSimilarityFunc);
         if (op == Operator.ANN || op == Operator.BOUNDED_ANN)
             return false;
+
+        // Only regular columns can be sorted by SAI (at least for now)
+        if (op == Operator.ORDER_BY_ASC || op == Operator.ORDER_BY_DESC)
+            return !isCollection()
+                   && column.isRegular()
+                   &&  !(column.type instanceof InetAddressType  // Possible, but need to add decoding logic based on
+                                                                 // SAI's TypeUtil.encode method.
+                         || column.type instanceof DecimalType   // Currently truncates to 24 bytes
+                         || column.type instanceof IntegerType); // Currently truncates to 20 bytes
 
         Expression.Op operator = Expression.Op.valueOf(op);
 

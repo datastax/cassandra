@@ -25,6 +25,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.PriorityQueue;
 import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.Nullable;
 
@@ -41,44 +42,60 @@ import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.LazyRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
+import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-import static java.util.function.Function.identity;
-
 public class TrieMemtableIndex implements MemtableIndex
 {
     private final ShardBoundaries boundaries;
     private final MemoryIndex[] rangeIndexes;
+    private final IndexContext indexContext;
     private final AbstractType<?> validator;
     private final LongAdder writeCount = new LongAdder();
     private final LongAdder estimatedOnHeapMemoryUsed = new LongAdder();
     private final LongAdder estimatedOffHeapMemoryUsed = new LongAdder();
 
-    public TrieMemtableIndex(IndexContext indexContext)
+    private final Memtable memtable;
+
+    public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
-        this(indexContext, TrieMemtable.SHARD_COUNT);
+        this(indexContext, memtable, TrieMemtable.SHARD_COUNT);
     }
 
     @VisibleForTesting
-    public TrieMemtableIndex(IndexContext indexContext, int shardCount)
+    public TrieMemtableIndex(IndexContext indexContext, Memtable memtable, int shardCount)
     {
         this.boundaries = indexContext.owner().localRangeSplits(shardCount);
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
+        this.indexContext = indexContext;
         this.validator = indexContext.getValidator();
+        this.memtable = memtable;
         for (int shard = 0; shard < boundaries.shardCount(); shard++)
         {
-            this.rangeIndexes[shard] = new TrieMemoryIndex(indexContext);
+            this.rangeIndexes[shard] = new TrieMemoryIndex(indexContext, memtable, boundaries.getBounds(shard));
         }
+    }
+
+    @Override
+    public Memtable getMemtable()
+    {
+        return memtable;
     }
 
     @VisibleForTesting
@@ -124,7 +141,7 @@ public class TrieMemtableIndex implements MemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMinTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.min(a, b, validator))
+                     .reduce((a, b) -> TypeUtil.min(a, b, validator, Version.latest()))
                      .orElse(null);
     }
 
@@ -141,7 +158,7 @@ public class TrieMemtableIndex implements MemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMaxTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.max(a, b, validator))
+                     .reduce((a, b) -> TypeUtil.max(a, b, validator, Version.latest()))
                      .orElse(null);
     }
 
@@ -224,13 +241,80 @@ public class TrieMemtableIndex implements MemtableIndex
 
         RangeConcatIterator.Builder builder = RangeConcatIterator.builder(endShard - startShard + 1);
 
-        for (int shard  = startShard; shard <= endShard; ++shard)
+        // We want to run the search on the first shard only to get the estimate on the number of matching keys.
+        // But we don't want to run the search on the other shards until the user polls more items from the
+        // result iterator. Therefore, the first shard search is special - we run the search eagerly,
+        // but the rest of the iterators are create lazily in the loop below.
+        assert rangeIndexes[startShard] != null;
+        RangeIterator firstIterator = rangeIndexes[startShard].search(expression, keyRange);
+        var keyCount = firstIterator.getMaxKeys();
+        builder.add(firstIterator);
+
+        // Prepare the search on the remaining shards, but wrap them in LazyRangeIterator, so they don't run
+        // until the user exhaust the results given from the first shard.
+        for (int shard  = startShard + 1; shard <= endShard; ++shard)
         {
             assert rangeIndexes[shard] != null;
-            builder.add(rangeIndexes[shard].search(expression, keyRange));
+            var index = rangeIndexes[shard];
+            var shardRange = boundaries.getBounds(shard);
+            var minKey = index.indexContext.keyFactory().createTokenOnly(shardRange.left.getToken());
+            var maxKey = index.indexContext.keyFactory().createTokenOnly(shardRange.right.getToken());
+            // Assume all shards are the same size, but we must not pass 0 because of some checks in RangeIterator
+            // that assume 0 means empty iterator and could fail.
+            var count = Math.max(1, keyCount);
+            builder.add(new LazyRangeIterator(() -> index.search(expression, keyRange), minKey, maxKey, count));
         }
 
         return builder.build();
+    }
+
+    @Override
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext queryContext, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        int startShard = boundaries.getShardForToken(keyRange.left.getToken());
+        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+
+        var iterators = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(endShard - startShard + 1);
+
+        for (int shard  = startShard; shard <= endShard; ++shard)
+        {
+            assert rangeIndexes[shard] != null;
+            iterators.add(rangeIndexes[shard].orderBy(orderer));
+        }
+
+        return iterators;
+    }
+
+    @Override
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
+    {
+        if (keys.isEmpty())
+            return CloseableIterator.emptyIterator();
+        var pq = new PriorityQueue<PrimaryKeyWithSortKey>(orderer.getComparator());
+        for (PrimaryKey key : keys)
+        {
+            var partition = memtable.getPartition(key.partitionKey());
+            if (partition == null)
+                continue;
+            var row = partition.getRow(key.clustering());
+            if (row == null)
+                continue;
+            var cell = row.getCell(indexContext.getDefinition());
+            if (cell == null)
+                continue;
+
+            // We do two kinds of encoding... it'd be great to make this more straight forward, but this is what
+            // we have for now. I leave it to the reader to inspect the two methods to see the nuanced differences.
+            var encoding = encode(TypeUtil.encode(cell.buffer(), validator));
+            pq.add(new PrimaryKeyWithByteComparable(indexContext, memtable, key, encoding));
+        }
+        return new PriorityQueueIterator<>(pq);
+    }
+
+    private ByteComparable encode(ByteBuffer input)
+    {
+        return indexContext.isLiteral() ? ByteComparable.fixedLength(input)
+                                        : v -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), v);
     }
 
     /**

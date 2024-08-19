@@ -18,14 +18,18 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
+import com.google.common.base.Supplier;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
@@ -36,6 +40,7 @@ import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
+import org.apache.cassandra.cache.CounterCacheKey;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.rows.*;
@@ -56,6 +61,8 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static java.util.concurrent.TimeUnit.*;
+import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_FAIR_LOCK;
+import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_NUM_STRIPES_PER_THREAD;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
@@ -98,10 +105,37 @@ public class CounterMutation implements IMutation
     private static final String LOCK_TIMEOUT_MESSAGE = "Failed to acquire locks for counter mutation on keyspace {} for longer than {} millis, giving up";
     private static final String LOCK_TIMEOUT_TRACE = "Failed to acquire locks for counter mutation for longer than {} millis, giving up";
 
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentCounterWriters() * 1024);
+    private static final Striped<Lock> LOCKS;
 
     private final Mutation mutation;
     private final ConsistencyLevel consistency;
+
+    static
+    {
+        int numStripes = COUNTER_LOCK_NUM_STRIPES_PER_THREAD.getInt() * DatabaseDescriptor.getConcurrentCounterWriters();
+        if (COUNTER_LOCK_FAIR_LOCK.getBoolean())
+        {
+            try
+            {
+                Class<?> stripedClass = Striped.class;
+
+                // Get the custom method Striped.custom
+                Method customMethod = stripedClass.getDeclaredMethod("custom", int.class, Supplier.class);
+                customMethod.setAccessible(true);
+
+                Supplier<Lock> lockSupplier = () -> new ReentrantLock(true);
+                LOCKS = (Striped<Lock>) customMethod.invoke(null, numStripes, lockSupplier);
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+        else
+        {
+            LOCKS = Striped.lock(numStripes);
+        }
+    }
 
     public CounterMutation(Mutation mutation, ConsistencyLevel consistency)
     {
@@ -172,7 +206,7 @@ public class CounterMutation implements IMutation
         Mutation.PartitionUpdateCollector resultBuilder = new Mutation.PartitionUpdateCollector(getKeyspaceName(), key());
         Keyspace keyspace = Keyspace.open(getKeyspaceName());
 
-        List<Lock> locks = new ArrayList<>();
+        ArrayList<Lock> locks = new ArrayList<>();
         Tracing.trace("Acquiring counter locks");
 
         long clock = FBUtilities.timestampMicros();
@@ -190,8 +224,9 @@ public class CounterMutation implements IMutation
         }
         finally
         {
-            for (Lock lock : locks)
-                lock.unlock();
+            // iterate over all locks in reverse order and unlock them
+            for (int i = locks.size() - 1; i >= 0; i--)
+                locks.get(i).unlock();
         }
     }
 
@@ -311,7 +346,9 @@ public class CounterMutation implements IMutation
     {
         ColumnFamilyStore cfs = Keyspace.open(getKeyspaceName()).getColumnFamilyStore(changes.metadata().id);
 
-        List<PartitionUpdate.CounterMark> marks = changes.collectCounterMarks();
+        List<Pair<PartitionUpdate.CounterMark, CounterCacheKey>> marks = changes.collectCounterMarks().stream()
+                                                                                .map(mark -> Pair.create(mark, cacheKeyForMark(cfs, mark)))
+                                                                                .collect(Collectors.toList());
 
         if (CacheService.instance.counterCache.getCapacity() != 0)
         {
@@ -325,38 +362,43 @@ public class CounterMutation implements IMutation
         updateWithCurrentValuesFromCFS(marks, cfs, systemClockMicros, counterId);
 
         // What's remain is new counters
-        for (PartitionUpdate.CounterMark mark : marks)
+        for (Pair<PartitionUpdate.CounterMark, CounterCacheKey> mark : marks)
             updateWithCurrentValue(mark, ClockAndCount.BLANK, cfs, systemClockMicros, counterId);
 
         return changes;
     }
 
-    private void updateWithCurrentValue(PartitionUpdate.CounterMark mark,
+    private CounterCacheKey cacheKeyForMark(ColumnFamilyStore cfs, PartitionUpdate.CounterMark mark)
+    {
+        return CounterCacheKey.create(cfs.metadata(), key().getKey(), mark.clustering(), mark.column(), mark.path());
+    }
+
+    private void updateWithCurrentValue(Pair<PartitionUpdate.CounterMark, CounterCacheKey> mark,
                                         ClockAndCount currentValue,
                                         ColumnFamilyStore cfs,
                                         long systemClockMicros,
                                         CounterId counterId)
     {
         long clock = Math.max(systemClockMicros, currentValue.clock + 1L);
-        long count = currentValue.count + CounterContext.instance().total(mark.value(), ByteBufferAccessor.instance);
+        long count = currentValue.count + CounterContext.instance().total(mark.left.value(), ByteBufferAccessor.instance);
 
-        mark.setValue(CounterContext.instance().createGlobal(counterId, clock, count));
+        mark.left.setValue(CounterContext.instance().createGlobal(counterId, clock, count));
 
         // Cache the newly updated value
-        cfs.putCachedCounter(key().getKey(), mark.clustering(), mark.column(), mark.path(), ClockAndCount.create(clock, count));
+        cfs.putCachedCounter(mark.right, ClockAndCount.create(clock, count));
     }
 
     // Returns the count of cache misses.
-    private void updateWithCurrentValuesFromCache(List<PartitionUpdate.CounterMark> marks,
+    private void updateWithCurrentValuesFromCache(List<Pair<PartitionUpdate.CounterMark, CounterCacheKey>> marks,
                                                   ColumnFamilyStore cfs,
                                                   long systemClockMicros,
                                                   CounterId counterId)
     {
-        Iterator<PartitionUpdate.CounterMark> iter = marks.iterator();
+        Iterator<Pair<PartitionUpdate.CounterMark, CounterCacheKey>> iter = marks.iterator();
         while (iter.hasNext())
         {
-            PartitionUpdate.CounterMark mark = iter.next();
-            ClockAndCount cached = cfs.getCachedCounter(key().getKey(), mark.clustering(), mark.column(), mark.path());
+            Pair<PartitionUpdate.CounterMark, CounterCacheKey> mark = iter.next();
+            ClockAndCount cached = cfs.getCachedCounter(mark.right);
             if (cached != null)
             {
                 updateWithCurrentValue(mark, cached, cfs, systemClockMicros, counterId);
@@ -366,15 +408,16 @@ public class CounterMutation implements IMutation
     }
 
     // Reads the missing current values from the CFS.
-    private void updateWithCurrentValuesFromCFS(List<PartitionUpdate.CounterMark> marks,
+    private void updateWithCurrentValuesFromCFS(List<Pair<PartitionUpdate.CounterMark, CounterCacheKey>> marks,
                                                 ColumnFamilyStore cfs,
                                                 long systemClockMicros,
                                                 CounterId counterId)
     {
         ColumnFilter.Builder builder = ColumnFilter.selectionBuilder();
         BTreeSet.Builder<Clustering<?>> names = BTreeSet.builder(cfs.metadata().comparator);
-        for (PartitionUpdate.CounterMark mark : marks)
+        for (Pair<PartitionUpdate.CounterMark, CounterCacheKey> markAndKey : marks)
         {
+            PartitionUpdate.CounterMark mark = markAndKey.left;
             if (mark.clustering() != Clustering.STATIC_CLUSTERING)
                 names.add(mark.clustering());
             if (mark.path() == null)
@@ -386,7 +429,7 @@ public class CounterMutation implements IMutation
         int nowInSec = FBUtilities.nowInSeconds();
         ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(names.build(), false);
         SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(cfs.metadata(), nowInSec, key(), builder.build(), filter);
-        PeekingIterator<PartitionUpdate.CounterMark> markIter = Iterators.peekingIterator(marks.iterator());
+        PeekingIterator<Pair<PartitionUpdate.CounterMark, CounterCacheKey>> markIter = Iterators.peekingIterator(marks.iterator());
         try (ReadExecutionController controller = cmd.executionController();
              RowIterator partition = UnfilteredRowIterators.filter(cmd.queryMemtableAndDisk(cfs, controller), nowInSec))
         {
@@ -412,7 +455,7 @@ public class CounterMutation implements IMutation
         return cfs.getComparator().compare(c1, c2);
     }
 
-    private void updateForRow(PeekingIterator<PartitionUpdate.CounterMark> markIter,
+    private void updateForRow(PeekingIterator<Pair<PartitionUpdate.CounterMark, CounterCacheKey>> markIter,
                               Row row,
                               ColumnFamilyStore cfs,
                               long systemClockMicros,
@@ -420,7 +463,7 @@ public class CounterMutation implements IMutation
     {
         int cmp = 0;
         // If the mark is before the row, we have no value for this mark, just consume it
-        while (markIter.hasNext() && (cmp = compare(markIter.peek().clustering(), row.clustering(), cfs)) < 0)
+        while (markIter.hasNext() && (cmp = compare(markIter.peek().left().clustering(), row.clustering(), cfs)) < 0)
             markIter.next();
 
         if (!markIter.hasNext())
@@ -428,18 +471,19 @@ public class CounterMutation implements IMutation
 
         while (cmp == 0)
         {
-            PartitionUpdate.CounterMark mark = markIter.next();
+            Pair<PartitionUpdate.CounterMark, CounterCacheKey> markAndKey = markIter.next();
+            PartitionUpdate.CounterMark mark = markAndKey.left;
             Cell<?> cell = mark.path() == null ? row.getCell(mark.column()) : row.getCell(mark.column(), mark.path());
             if (cell != null)
             {
                 ClockAndCount localClockAndCount = CounterContext.instance().getLocalClockAndCount(cell.buffer());
-                updateWithCurrentValue(mark, localClockAndCount, cfs, systemClockMicros, counterId);
+                updateWithCurrentValue(markAndKey, localClockAndCount, cfs, systemClockMicros, counterId);
                 markIter.remove();
             }
             if (!markIter.hasNext())
                 return;
 
-            cmp = compare(markIter.peek().clustering(), row.clustering(), cfs);
+            cmp = compare(markIter.peek().left().clustering(), row.clustering(), cfs);
         }
     }
 

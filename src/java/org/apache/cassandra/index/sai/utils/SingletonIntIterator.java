@@ -16,26 +16,36 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.vector;
+package org.apache.cassandra.index.sai.utils;
 
-public class ScoredRowId
+import java.util.NoSuchElementException;
+import java.util.PrimitiveIterator;
+
+/**
+ * Singleton int iterator used to prevent unnecessary object creation
+ */
+public class SingletonIntIterator implements PrimitiveIterator.OfInt
 {
-    final int segmentRowId;
-    final float score;
+    private final int value;
+    private boolean hasNext = true;
 
-    public ScoredRowId(int segmentRowId, float score)
+    public SingletonIntIterator(int value)
     {
-        this.segmentRowId = segmentRowId;
-        this.score = score;
+        this.value = value;
     }
 
-    public float getScore()
+    @Override
+    public boolean hasNext()
     {
-        return score;
+        return hasNext;
     }
 
-    public int getSegmentRowId()
+    @Override
+    public int nextInt()
     {
-        return segmentRowId;
+        if (!hasNext)
+            throw new NoSuchElementException();
+        hasNext = false;
+        return value;
     }
 }

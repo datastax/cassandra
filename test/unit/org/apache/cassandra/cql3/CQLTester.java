@@ -995,7 +995,7 @@ public abstract class CQLTester
         schemaChange(formattedQuery);
     }
 
-    protected String createIndex(String query)
+    public String createIndex(String query)
     {
         return createIndex(KEYSPACE, query);
     }
@@ -1111,7 +1111,7 @@ public abstract class CQLTester
         QueryProcessor.executeOnceInternal(fullQuery);
     }
 
-    protected void dropIndex(String query) throws Throwable
+    public void dropIndex(String query)
     {
         String fullQuery = String.format(query, KEYSPACE);
         logger.info(fullQuery);
@@ -1496,6 +1496,24 @@ public abstract class CQLTester
 
     public static void assertRows(UntypedResultSet result, Object[]... rows)
     {
+        assertRows(result, false, rows);
+    }
+
+    public static void assertRows(UntypedResultSet result, boolean printAssertedRows, Object[]... rows)
+    {
+        // Useful for manual debugging, but generally unnecessary on
+        if (printAssertedRows)
+        {
+            // Print all the rows
+            for (Object[] row : rows)
+            {
+                System.out.print("Expected row:");
+                for (Object column : row)
+                    System.out.print("  " + column);
+                System.out.println();
+            }
+        }
+
         if (result == null)
         {
             if (rows.length > 0)
@@ -1758,22 +1776,22 @@ public abstract class CQLTester
             throw new AssertionError(String.format("Expected empty result but got %d rows: %s \n", result.size(), makeRowStrings(result)));
     }
 
-    protected void assertInvalid(String query, Object... values) throws Throwable
+    protected void assertInvalid(String query, Object... values)
     {
         assertInvalidMessage(null, query, values);
     }
 
-    protected void assertInvalidMessage(String errorMessage, String query, Object... values) throws Throwable
+    protected void assertInvalidMessage(String errorMessage, String query, Object... values)
     {
         assertInvalidThrowMessage(errorMessage, null, query, values);
     }
 
-    protected void assertInvalidThrow(Class<? extends Throwable> exception, String query, Object... values) throws Throwable
+    protected void assertInvalidThrow(Class<? extends Throwable> exception, String query, Object... values)
     {
         assertInvalidThrowMessage(null, exception, query, values);
     }
 
-    protected void assertInvalidThrowMessage(String errorMessage, Class<? extends Throwable> exception, String query, Object... values) throws Throwable
+    protected void assertInvalidThrowMessage(String errorMessage, Class<? extends Throwable> exception, String query, Object... values)
     {
         assertInvalidThrowMessage(Optional.empty(), errorMessage, exception, query, values);
     }
@@ -1784,7 +1802,7 @@ public abstract class CQLTester
                                              String errorMessage,
                                              Class<? extends Throwable> exception,
                                              String query,
-                                             Object... values) throws Throwable
+                                             Object... values)
     {
         try
         {
@@ -2477,6 +2495,11 @@ public abstract class CQLTester
         public void printSeedOnFailure()
         {
             System.err.println("Randomized test failed. To rerun test use -Dcassandra.test.random.seed=" + seed);
+        }
+
+        public Random getRandom()
+        {
+            return random;
         }
 
         public int nextInt()

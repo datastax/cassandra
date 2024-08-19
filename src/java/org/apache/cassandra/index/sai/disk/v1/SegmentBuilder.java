@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -44,8 +43,9 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
@@ -55,8 +55,9 @@ import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.BytesRefBuilder;
 
 import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 
@@ -114,8 +115,8 @@ public abstract class SegmentBuilder
     private PrimaryKey minKey;
     private PrimaryKey maxKey;
     // in termComparator order
-    private ByteBuffer minTerm;
-    private ByteBuffer maxTerm;
+    protected ByteBuffer minTerm;
+    protected ByteBuffer maxTerm;
 
     protected final AtomicInteger updatesInFlight = new AtomicInteger(0);
     protected final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
@@ -178,16 +179,16 @@ public abstract class SegmentBuilder
     public static class RAMStringSegmentBuilder extends SegmentBuilder
     {
         final RAMStringIndexer ramIndexer;
-
-        final BytesRefBuilder stringBuffer = new BytesRefBuilder();
+        private final ByteComparable.Version byteComparableVersion;
 
         RAMStringSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
-
-            ramIndexer = new RAMStringIndexer(termComparator);
+            this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
+            ramIndexer = new RAMStringIndexer();
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+
         }
 
         public boolean isEmpty()
@@ -197,8 +198,14 @@ public abstract class SegmentBuilder
 
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
-            BytesRefUtil.copyBufferToBytesRef(term, stringBuffer);
-            return ramIndexer.add(stringBuffer.get(), segmentRowId);
+            var encodedTerm = components.version().onDiskFormat().encodeForTrie(term, termComparator);
+            // Use the source term to estimate the length of the array we'll need. This is unlikely to be exact, but
+            // it will hopefully prevent intermediate array creation as ByteSourceInverse consumes the ByteSource.
+            // This 5% addition was added as a guess, and could possibly be improved.
+            var estimatedLength = Math.round(term.remaining() * 1.05f);
+            var bytes = ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(byteComparableVersion), estimatedLength);
+            var bytesRef = new BytesRef(bytes);
+            return ramIndexer.add(bytesRef, segmentRowId);
         }
 
         @Override
@@ -206,7 +213,7 @@ public abstract class SegmentBuilder
         {
             try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
             {
-                return writer.writeAll(ramIndexer.getTermsWithPostings());
+                return writer.writeAll(ramIndexer.getTermsWithPostings(minTerm, maxTerm));
             }
         }
 
@@ -221,12 +228,12 @@ public abstract class SegmentBuilder
     {
         private final CompactionGraph graphIndex;
 
-        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter, ProductQuantization pq, boolean unitVectors)
+        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, ProductQuantization pq, boolean unitVectors, boolean allRowsHaveVectors, NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             try
             {
-                graphIndex = new CompactionGraph(components, pq, unitVectors, keyCount);
+                graphIndex = new CompactionGraph(components, pq, unitVectors, keyCount, allRowsHaveVectors);
             }
             catch (IOException e)
             {
@@ -297,7 +304,9 @@ public abstract class SegmentBuilder
         @Override
         protected SegmentMetadata.ComponentMetadataMap flushInternal() throws IOException
         {
-            return graphIndex.flush(Set.of());
+            if (graphIndex.isEmpty())
+                return null;
+            return graphIndex.flush();
         }
 
         @Override
@@ -385,11 +394,11 @@ public abstract class SegmentBuilder
         @Override
         protected SegmentMetadata.ComponentMetadataMap flushInternal() throws IOException
         {
-            // VSTODO this is a bit of a hack. We call computeDeletedOrdinals to call computeRowIds on each
-            // VectorPostings, which will populate the rowIds field, but if we refactor the code, we could skip that.
-            var deletedOrdinals = graphIndex.computeDeletedOrdinals(p -> p);
-            assert deletedOrdinals.isEmpty() : "Deleted ordinals should be empty when built during compaction";
-            return graphIndex.flush(components, Set.of());
+            var shouldFlush = graphIndex.preFlush(p -> p);
+            // there are no deletes to worry about when building the index during compaction,
+            // and SegmentBuilder::flush checks for the empty index case before calling flushInternal
+            assert shouldFlush;
+            return graphIndex.flush(components);
         }
 
         @Override
@@ -422,8 +431,9 @@ public abstract class SegmentBuilder
         }
 
         SegmentMetadata.ComponentMetadataMap indexMetas = flushInternal();
-
-        return new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
+        return indexMetas == null
+               ? null
+               : new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
     }
 
     public long addAll(ByteBuffer term, AbstractType<?> type, PrimaryKey key, long sstableRowId, AbstractAnalyzer analyzer, IndexContext indexContext)
@@ -453,8 +463,9 @@ public abstract class SegmentBuilder
         minKey = minKey == null ? key : minKey;
         maxKey = key;
 
-        minTerm = TypeUtil.min(term, minTerm, termComparator);
-        maxTerm = TypeUtil.max(term, maxTerm, termComparator);
+        // Note that the min and max terms are not encoded.
+        minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
+        maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
 
         rowCount++;
 

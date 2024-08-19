@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 
 import com.google.common.base.Preconditions;
 
@@ -79,14 +80,14 @@ public class VectorPostings<T>
     /**
      * Compute the rowIds corresponding to the <T> keys in this postings list.
      */
-    public void computeRowIds(Function<T, Integer> postingTransformer)
+    public void computeRowIds(ToIntFunction<T> postingTransformer)
     {
         Preconditions.checkState(rowIds == null);
 
         IntArrayList ids = new IntArrayList(postings.size(), -1);
         for (T key : postings)
         {
-            int rowId = postingTransformer.apply(key);
+            int rowId = postingTransformer.applyAsInt(key);
             // partition deletion and range deletion won't trigger index update. There is no row id for given key during flush
             if (rowId >= 0)
                 ids.add(rowId);

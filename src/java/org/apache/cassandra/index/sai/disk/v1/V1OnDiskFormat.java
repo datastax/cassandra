@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
@@ -32,6 +33,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -56,6 +58,9 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
@@ -168,7 +173,8 @@ public class V1OnDiskFormat implements OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isLiteral())
-            return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
+            // We filter because the CA format wrote maps acording to a different order than their abstract type.
+            return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, Version.AA, true);
         return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
     }
 
@@ -283,6 +289,13 @@ public class V1OnDiskFormat implements OnDiskFormat
     public ByteOrder byteOrderFor(IndexComponentType indexComponentType, IndexContext context)
     {
         return ByteOrder.BIG_ENDIAN;
+    }
+
+    @Override
+    public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type)
+    {
+        return TypeUtil.isLiteral(type) ? ByteComparable.fixedLength(input)
+                                        : TypeUtil.asComparableBytes(input, type);
     }
 
     /** vector data components (that did not have checksums before v3) */

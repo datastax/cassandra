@@ -20,10 +20,10 @@ package org.apache.cassandra.io.compress;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
-import java.nio.file.StandardOpenOption;
 import java.util.Optional;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
@@ -35,6 +35,7 @@ import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.CompressionParams;
@@ -238,6 +239,21 @@ public class CompressedSequentialWriter extends SequentialWriter
     @Override
     public synchronized void resetAndTruncate(DataPosition mark)
     {
+        try
+        {
+            doResetAndTruncate(mark);
+        }
+        catch (Throwable t)
+        {
+            CompressedFileWriterMark realMark = mark instanceof CompressedFileWriterMark ? (CompressedFileWriterMark) mark : null;
+            logger.error("Failed to reset and truncate {} at chunk offset {} because of {}", file.name(),
+                         realMark == null ? -1 : realMark.chunkOffset, t.getMessage());
+            throw t;
+        }
+    }
+
+    private synchronized void doResetAndTruncate(DataPosition mark)
+    {
         assert mark instanceof CompressedFileWriterMark;
 
         CompressedFileWriterMark realMark = (CompressedFileWriterMark) mark;
@@ -265,7 +281,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             compressed = compressor.preferredBufferType().allocate(chunkSize);
         }
 
-        try(FileChannel readChannel = FileChannel.open(getFile().toPath(), StandardOpenOption.READ))
+        try(FileChannel readChannel = StorageProvider.instance.writeTimeReadFileChannelFor(getFile()))
         {
             compressed.clear();
             compressed.limit(chunkSize);
@@ -321,6 +337,8 @@ public class CompressedSequentialWriter extends SequentialWriter
         recomputeChecksum = true;
         truncate(chunkOffset, bufferOffset);
         metadataWriter.resetAndTruncate(realMark.nextChunkIndex - 1);
+
+        logger.info("reset and truncated {} to {}", file, chunkOffset);
     }
 
     private void truncate(long toFileSize, long toBufferOffset)
@@ -437,10 +455,11 @@ public class CompressedSequentialWriter extends SequentialWriter
         if (recomputeChecksum)
         {
             logger.info("Rescanning data file to populate digest into {} because file writer has been reset and truncated", digest);
-            try (RandomAccessReader in = RandomAccessReader.open(file))
+            try (FileChannel fileChannel = StorageProvider.instance.writeTimeReadFileChannelFor(file);
+                 InputStream stream = Channels.newInputStream(fileChannel))
             {
                 CRC32 checksum = new CRC32();
-                try (CheckedInputStream checkedInputStream = new CheckedInputStream(in, checksum))
+                try (CheckedInputStream checkedInputStream = new CheckedInputStream(stream, checksum))
                 {
                     byte[] chunk = new byte[64 * 1024];
                     while (checkedInputStream.read(chunk) >= 0) {}
@@ -453,6 +472,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             {
                 throw new FSWriteError(e, digest);
             }
+            logger.info("Successfully recomputed checksum for {}", digest);
         }
         else
         {

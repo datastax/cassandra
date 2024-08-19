@@ -63,8 +63,8 @@ import static org.junit.Assert.assertThrows;
 public class KDTreeSegmentMergerTest extends SAITester
 {
     private TemporaryFolder temporaryFolder = new TemporaryFolder();
-    private Map<Integer, List<Long>> expected;
-    private Map<Integer, List<Long>> actual;
+    private Map<Integer, List<Integer>> expected;
+    private Map<Integer, List<Integer>> actual;
 
     @BeforeClass
     public static void dbSetup() throws Throwable
@@ -169,7 +169,7 @@ public class KDTreeSegmentMergerTest extends SAITester
                 NumericUtils.intToSortableBytes(value, scratch, 0);
                 buffer.addPackedValue(docID, new BytesRef(scratch));
                 maxSegmentRowId = docID;
-                List<Long> postings;
+                List<Integer> postings;
                 if (expected.containsKey(value))
                     postings = expected.get(value);
                 else
@@ -177,7 +177,7 @@ public class KDTreeSegmentMergerTest extends SAITester
                     postings = new ArrayList<>();
                     expected.put(value, postings);
                 }
-                postings.add((long) docID);
+                postings.add(docID);
                 docID++;
             }
             BKDReader segmentReader = createReader(buffer, maxSegmentRowId, generation);
@@ -191,7 +191,7 @@ public class KDTreeSegmentMergerTest extends SAITester
 
         merger.intersect((rowId, packedValue) -> {
             int value = NumericUtils.sortableBytesToInt(packedValue, 0);
-            List<Long> postings;
+            List<Integer> postings;
             if (actual.containsKey(value))
                 postings = actual.get(value);
             else
@@ -228,7 +228,7 @@ public class KDTreeSegmentMergerTest extends SAITester
                 NumericUtils.intToSortableBytes(value, scratch, 0);
                 buffer.addPackedValue(docID, new BytesRef(scratch));
                 maxSegmentRowId = docID;
-                List<Long> postings;
+                List<Integer> postings;
                 if (expected.containsKey(value))
                     postings = expected.get(value);
                 else
@@ -236,7 +236,7 @@ public class KDTreeSegmentMergerTest extends SAITester
                     postings = new ArrayList<>();
                     expected.put(value, postings);
                 }
-                postings.add((long) docID);
+                postings.add(docID);
                 totalRows++;
                 docID++;
             }
@@ -277,10 +277,10 @@ public class KDTreeSegmentMergerTest extends SAITester
 
                 while (true)
                 {
-                    long rowId = postingList.nextPosting();
+                    int rowId = postingList.nextPosting();
                     if (rowId == PostingList.END_OF_STREAM)
                         break;
-                    List<Long> postings;
+                    List<Integer> postings;
                     if (actual.containsKey(term))
                         postings = actual.get(term);
                     else

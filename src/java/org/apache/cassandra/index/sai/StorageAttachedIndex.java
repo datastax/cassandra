@@ -38,7 +38,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.function.BooleanSupplier;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -47,7 +46,6 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import org.apache.commons.lang3.NotImplementedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +56,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -651,6 +648,18 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
+    {
+        assert restriction instanceof SingleColumnRestriction.OrderRestriction;
+
+        SingleColumnRestriction.OrderRestriction orderRestriction = (SingleColumnRestriction.OrderRestriction) restriction;
+        var typeComparator = orderRestriction.getDirection() == Operator.ORDER_BY_DESC
+                             ? indexContext.getValidator().reversed()
+                             : indexContext.getValidator();
+        return (a, b) -> typeComparator.compare(a.get(columnIndex), b.get(columnIndex));
+    }
+
+    @Override
     public Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
     {
         // For now, only support ANN
@@ -690,7 +699,7 @@ public class StorageAttachedIndex implements Index
 
         // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k
         if (command.limits().isUnlimited() || command.limits().count() > MAX_TOP_K)
-            throw new InvalidRequestException(String.format("Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
+            throw new InvalidRequestException(String.format("SAI based ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
 
         indexContext.validate(command.rowFilter());

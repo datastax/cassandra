@@ -46,14 +46,12 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
-import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
@@ -145,7 +143,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return false;
         }
 
-        SSTableContext existingPerSSTableContext = group.sstableContextManager().getContext(sstable);
         IndexDescriptor indexDescriptor = group.descriptorFor(sstable);
         Set<Component> replacedComponents = new HashSet<>();
 
@@ -215,11 +212,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     long dataPosition = keys.isExhausted() ? sstable.uncompressedLength() : keys.dataPosition();
                     bytesProcessed += dataPosition - previousKeyPosition;
                     previousKeyPosition = dataPosition;
-
-                    // Fail fast if index build has been aborted. Index writer won't throw when it's aborted. Because
-                    // it's used during compaction and we don't want to fail compaction on index error.
-                    if (indexWriter.isAborted())
-                        throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
@@ -323,9 +315,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                                  Set<Component> replacedComponents) throws InterruptedException
     {
         indexWriter.complete(sstable);
-
-        if (indexWriter.isAborted())
-            throw new RuntimeException(String.format("Index build for %s with indexes %s is aborted", sstable.descriptor, indexes));
 
         if (latch != null)
         {
