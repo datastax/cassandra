@@ -59,6 +59,9 @@ nbactions.xml
 # VScode
 .vscode/
 
+# Aider (aider.chat)
+.aider*
+
 # Maven, etc.
 out/
 target/
