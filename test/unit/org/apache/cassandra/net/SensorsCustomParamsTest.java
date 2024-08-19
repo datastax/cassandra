@@ -144,7 +144,7 @@ public class SensorsCustomParamsTest
     @Test
     public void testAddWriteSensorToResponse()
     {
-        testAddSensorToResponse(Type.WRITE_BYTES,
+        testAddSensorsToResponse(Type.WRITE_BYTES,
                                 c -> SensorsCustomParams.encodeTableInWriteBytesRequestParam(c.getTable()),
                                 c -> SensorsCustomParams.encodeTableInWriteBytesTableParam(c.getTable()));
     }
@@ -152,12 +152,12 @@ public class SensorsCustomParamsTest
     @Test
     public void testAddReadSensorToResponse()
     {
-        testAddSensorToResponse(Type.READ_BYTES,
+        testAddSensorsToResponse(Type.READ_BYTES,
                                 ignored -> SensorsCustomParams.READ_BYTES_REQUEST,
                                 ignored -> SensorsCustomParams.READ_BYTES_TABLE);
     }
 
-    private void testAddSensorToResponse(Type sensorType, Function<Context, String> requestParamSupplier, Function<Context, String> tableParamSupplier)
+    private void testAddSensorsToResponse(Type sensorType, Function<Context, String> requestParamSupplier, Function<Context, String> tableParamSupplier)
     {
         RequestSensors sensors = requestSensorsFactory.create("ks1");
         UUID tableId = UUID.randomUUID();
@@ -177,17 +177,7 @@ public class SensorsCustomParamsTest
         Message.builder(Verb._TEST_1, noPayload)
                .withId(1);
 
-        switch (sensorType)
-        {
-            case READ_BYTES:
-                SensorsCustomParams.addReadSensorToResponse(builder, sensors, context);
-                break;
-            case WRITE_BYTES:
-                SensorsCustomParams.addWriteSensorToResponse(builder, sensors, context);
-                break;
-            default:
-                throw new IllegalArgumentException("Unexpected sensor type " + sensorType);
-        }
+        SensorsCustomParams.addSensorsToResponse(sensors, builder);
 
         Message<NoPayload> msg = builder.build();
         assertNotNull(msg.header.customParams());
