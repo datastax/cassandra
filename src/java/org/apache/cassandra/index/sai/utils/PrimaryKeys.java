@@ -54,18 +54,14 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
     /**
      * Removes the specified {@link PrimaryKey} only if the reference associated with the key is different from the
      * specified source.
-     * @param key
-     * @param source
+     * @param key the key to remove
+     * @param source the reference to compare against the current value associated with the key
      * @return
      */
-    public long removeIfUnique(PrimaryKey key, Object source)
+    public long maybeRemove(PrimaryKey key, Object source)
     {
         // If the reference associated with the key is the one that added it, we want to keep the key.
-        var result = keys.compute(key, (k, currentRef) -> {
-            if (currentRef == source)
-                return currentRef;
-            return null;
-        });
+        var result = keys.compute(key, (k, previousSource) -> previousSource == source ? previousSource : null);
         return result == null ? -MAP_ENTRY_OVERHEAD : 0;
     }
 

@@ -31,7 +31,6 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
@@ -75,7 +74,10 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-    private static final Object DUMMY = new Object();
+    // We pass this object to the accumulator and reducer to ensure that we do not remove a new term that was added
+    // by the same update operation. However, for addition ops, we do not worry about removing recently added terms,
+    // so we use this placeholder object to avoid creating a new object for each addition operation.
+    private static final Object PLACEHOLDER = new Object();
 
     private final MemtableTrie<PrimaryKeys> data;
     private final LongAdder heapAllocations;
@@ -148,7 +150,7 @@ public class TrieMemoryIndex extends MemoryIndex
             {
                 // In this case, the oldValue and newValue are comparable and we can determine before
                 // calling applyTransformer whether they are the same.
-                primaryKeysAccumulator.setReference(DUMMY);
+                primaryKeysAccumulator.setReference(PLACEHOLDER);
                 primaryKeysReducer.setReference(null);
             }
 
@@ -160,7 +162,8 @@ public class TrieMemoryIndex extends MemoryIndex
         }
         finally
         {
-            primaryKeysAccumulator.setReference(DUMMY);
+            // Return the accumulator and reducer to their default state.
+            primaryKeysAccumulator.setReference(PLACEHOLDER);
             primaryKeysReducer.setReference(null);
         }
     }
@@ -408,6 +411,12 @@ public class TrieMemoryIndex extends MemoryIndex
             this.ref = ref;
         }
 
+        /**
+         * Set the reference object to be used in the apply method.
+         * Warning: This method is not thread-safe and should only be called from within the synchronized block
+         * of the TrieMemoryIndex class.
+         * @param ref
+         */
         private void setReference(Object ref)
         {
             this.ref = ref;
@@ -439,6 +448,12 @@ public class TrieMemoryIndex extends MemoryIndex
             this.heapAllocations = heapAllocations;
         }
 
+        /**
+         * Set the reference object to be used in the apply method.
+         * Warning: This method is not thread-safe and should only be called from within the synchronized block
+         * of the TrieMemoryIndex class.
+         * @param ref
+         */
         private void setReference(Object ref)
         {
             this.ref = ref;
@@ -450,7 +465,7 @@ public class TrieMemoryIndex extends MemoryIndex
             if (existing == null)
                 return null;
 
-            heapAllocations.add(existing.removeIfUnique(neww, ref));
+            heapAllocations.add(existing.maybeRemove(neww, ref));
             if (existing.isEmpty())
             {
                 heapAllocations.add(-PrimaryKeys.unsharedHeapSize());
