@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiPredicate;
+import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableSet;
 import org.junit.After;
@@ -46,12 +47,19 @@ import org.apache.cassandra.db.ReadCommandVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.CommitVerbHandler;
+import org.apache.cassandra.service.paxos.PrepareVerbHandler;
+import org.apache.cassandra.service.paxos.ProposeVerbHandler;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.UUIDGen;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -191,6 +199,48 @@ public class SensorsInternodeTest
         testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
+    @Test
+    public void testInternodeSensorsForLWTPrepare()
+    {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+        PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
+                                 .add("val", "0")
+                                 .buildUpdate();
+        Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), UUIDGen.getTimeUUID());
+        Message request = Message.builder(Verb.PAXOS_PREPARE_REQ, proposal).build();
+        Runnable handler = () -> PrepareVerbHandler.instance.doVerb(request);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
+    }
+
+    @Test
+    public void testInternodeSensorsForLWTPropose()
+    {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+        PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
+                                 .add("val", "0")
+                                 .buildUpdate();
+        Commit proposal = Commit.newProposal(UUIDGen.getTimeUUID(), update);
+        Message request = Message.builder(Verb.PAXOS_PROPOSE_REQ, proposal).build();
+        Runnable handler = () -> ProposeVerbHandler.instance.doVerb(request);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
+    }
+
+    @Test
+    public void testInternodeSensorsForLWTCommit()
+    {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+        PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
+                                 .add("val", "0")
+                                 .buildUpdate();
+        Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), UUIDGen.getTimeUUID());
+        Message request = Message.builder(Verb.PAXOS_COMMIT_REQ, proposal).build();
+        Runnable handler = () -> CommitVerbHandler.instance.doVerb(request);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
+    }
+
     private void testInternodeSensors(Message request, Runnable handler, Collection<Context> contexts)
     {
         // Run the handler:
@@ -210,6 +260,25 @@ public class SensorsInternodeTest
             Sensor internodeBytesSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_BYTES).get();
             double internodeBytes = internodeBytesSensor.getValue();
             assertThat(internodeBytes).isBetween(requestSizePerTable * 1.0, total * 1.0);
+
+            // assert internode headers are added to the response messages
+            Supplier<String> requestParamSupplier = () -> SensorsCustomParams.encodeTableInInternodeBytesRequestParam(context.getTable());
+            Supplier<String> tableParamSupplier = () -> SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable());
+            assertResponseSensors(response, total, total, requestParamSupplier, tableParamSupplier);
         }
+    }
+
+    private void assertResponseSensors(Message message, double requestValue, double registryValue, Supplier<String> requestParamSupplier, Supplier<String> tableParamSupplier)
+    {
+        assertThat(message.header.customParams()).isNotNull();
+        String expectedRequestParam = requestParamSupplier.get();
+        String expectedTableParam = tableParamSupplier.get();
+
+        assertThat(message.header.customParams()).containsKey(expectedRequestParam);
+        assertThat(message.header.customParams()).containsKey(expectedTableParam);
+        double requestWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
+        double tableWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedTableParam));
+        assertThat(requestWriteBytes).isEqualTo(requestValue);
+        assertThat(tableWriteBytes).isEqualTo(registryValue);
     }
 }

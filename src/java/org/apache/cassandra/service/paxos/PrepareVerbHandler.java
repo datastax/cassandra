@@ -47,12 +47,18 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
         // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
         Message.Builder<PrepareResponse> reply = message.responseWithBuilder(doPrepare(message.payload));
-        SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);
-        SensorsCustomParams.addReadSensorToResponse(reply, sensors, context);
+
+        // calculate outbound internode bytes before adding the sensor to the response
+        int size = reply.currentPayloadSize(MessagingService.current_version);
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+        sensors.syncAllSensors();
+        SensorsCustomParams.addSensorsToResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }
 }

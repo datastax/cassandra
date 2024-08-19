@@ -18,8 +18,6 @@
 package org.apache.cassandra.db;
 
 import java.util.Collection;
-import java.util.Optional;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
@@ -37,8 +35,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestSensorsFactory;
-import org.apache.cassandra.sensors.Sensor;
-import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -51,54 +47,9 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         Tracing.trace("Enqueuing response to {}", respondToAddress);
 
         Message.Builder<NoPayload> response = respondToMessage.emptyResponseBuilder();
-        addSensorsToResponse(requestSensors, response, respondToMessage.payload);
-
+        // no need to calculate outbound internode bytes because the response is NoPayload
+        SensorsCustomParams.addSensorsToResponse(requestSensors, response);
         MessagingService.instance().send(response.build(), respondToAddress);
-    }
-
-    private void addSensorsToResponse(RequestSensors requestSensors, Message.Builder<NoPayload> response, Mutation mutation)
-    {
-        int tables = mutation.getTableIds().size();
-
-        // Add write bytes sensors to the response
-        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
-        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
-        Collection<Sensor> sensors = requestSensors.getSensors(Type.WRITE_BYTES);
-        addSensorsToResponse(sensors, requestParam, tableParam, response);
-
-        // Add index write bytes sensors to the response
-        requestParam = SensorsCustomParams::encodeTableInIndexWriteBytesRequestParam;
-        tableParam = SensorsCustomParams::encodeTableInIndexWriteBytesTableParam;
-        sensors = requestSensors.getSensors(Type.INDEX_WRITE_BYTES);
-        addSensorsToResponse(sensors, requestParam, tableParam, response);
-
-        // Add internode bytes sensors to the response after updating each per-table sensor with the current response
-        // message size: this is missing the sensor values, but it's a good enough approximation
-        int perSensorSize = response.currentPayloadSize(MessagingService.current_version) / tables;
-        sensors = requestSensors.getSensors(Type.INTERNODE_BYTES);
-        sensors.forEach(sensor -> requestSensors.incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
-        requestSensors.syncAllSensors();
-        requestParam = SensorsCustomParams::encodeTableInInternodeBytesRequestParam;
-        tableParam = SensorsCustomParams::encodeTableInInternodeBytesTableParam;
-        addSensorsToResponse(sensors, requestParam, tableParam, response);
-    }
-
-    private void addSensorsToResponse(Collection<Sensor> requestSensors, Function<String, String> requestParamSupplier, Function<String, String> tableParamSupplier, Message.Builder<NoPayload> response)
-    {
-        for (Sensor requestSensor : requestSensors)
-        {
-            String requestBytesParam = requestParamSupplier.apply(requestSensor.getContext().getTable());
-            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue());
-            response.withCustomParam(requestBytesParam, requestBytes);
-
-            // for each table in the mutation, send the global per table write/index bytes as observed by the registry
-            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), requestSensor.getType());
-            registrySensor.ifPresent(sensor -> {
-                String tableBytesParam = tableParamSupplier.apply(sensor.getContext().getTable());
-                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-                response.withCustomParam(tableBytesParam, tableBytes);
-            });
-        }
     }
 
     private void failed()
