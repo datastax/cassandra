@@ -43,13 +43,17 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.update.metadata().keyspace);
         Context context = Context.from(message.payload.update.metadata());
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         RequestTracker.instance.set(sensors);
 
         PaxosState.commitDirect(message.payload, p -> MutatorProvider.getCustomOrDefault().onAppliedProposal(p));
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
-        SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);
+
+        // no need to calculate outbound internode bytes because the response is NoPayload
+        SensorsCustomParams.addSensorsToResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }
 }

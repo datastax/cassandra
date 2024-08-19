@@ -20,6 +20,7 @@ package org.apache.cassandra.sensors;
 
 import java.util.Collection;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
@@ -46,12 +47,12 @@ public interface RequestSensors
     Optional<Sensor> getSensor(Context context, Type type);
 
     /**
-     * Returns all the sensors associated to the given type.
+     * Returns all the sensors that match the given filter
      *
-     * @param type the type of the sensors
-     * @return all the sensors associated to the given type
+     * @param filter a predicate applied to each sensor to decide if it should be included in the returned collection
+     * @return a collection of sensors matching the given predicate
      */
-    Collection<Sensor> getSensors(Type type);
+    Collection<Sensor> getSensors(Predicate<Sensor> filter);
 
     /**
      * Increment the sensor value associated to the given context and type by the given value.

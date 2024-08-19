@@ -44,13 +44,11 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.ActiveRequestSensorsFactory;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
-import org.apache.cassandra.sensors.SensorsTestUtil;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -64,7 +62,8 @@ public class CounterMutationCallbackTest
 {
     private static final String KEYSPACE1 = "CounterMutationCallbackTest";
     private static final String CF_COUTNER = "Counter";
-    private static final double COUNTER_MUTATION_BYTES = 56.0; // mimic a counter mutation of size 56 bytes
+    private static final double COUNTER_MUTATION_WRITE_BYTES = 56.0;
+    private static final double COUNTER_MUTATION_INTERNODE_BYTES = 72.0;
 
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
 
@@ -94,23 +93,23 @@ public class CounterMutationCallbackTest
     {
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).truncateBlocking();
 
-        RequestTracker.instance.set(null);
         SensorsRegistry.instance.clear();
 
         CassandraRelevantProperties.BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(false);
     }
 
     @Parameterized.Parameter()
-    public Pair<Integer, Double> replicaCountAndExpectedSensorValue;
+    public Pair<Integer, Integer> replicaCountAndExpectedSensorValueMultiplier;
 
     @Parameterized.Parameters(name = "{0}")
     public static List<Object> parameters()
     {
+        // pairs of (replica count, expected sensor value multiplier)
         return ImmutableList.of(
-        Pair.create(0, COUNTER_MUTATION_BYTES * 1), // CL.ANY
-        Pair.create(1, COUNTER_MUTATION_BYTES * 1), // CL.ONE
-        Pair.create(2, COUNTER_MUTATION_BYTES * 2),  // CL.TWO
-        Pair.create(3, COUNTER_MUTATION_BYTES * 3)  // CL.THREE
+        Pair.create(0, 1), // CL.ANY
+        Pair.create(1, 1), // CL.ONE
+        Pair.create(2, 2),  // CL.TWO
+        Pair.create(3, 3)  // CL.THREE
         );
     }
 
@@ -129,57 +128,55 @@ public class CounterMutationCallbackTest
                .withFlag(MessageFlag.CALL_BACK_ON_FAILURE)
                .withParam(TRACE_SESSION, UUID.randomUUID())
                .build();
-        int responseSize = msg.emptyResponseBuilder().currentPayloadSize(MessagingService.current_version);
 
-        ActiveRequestSensorsFactory requestSensorsFactory = new ActiveRequestSensorsFactory();
-        RequestSensors requestSensors = requestSensorsFactory.create("ks1");
-        RequestTracker.instance.set(requestSensors);
+        RequestSensors requestSensors = new ActiveRequestSensors();
 
         Context context = Context.from(Keyspace.open(KEYSPACE1).getMetadata().tables.get(CF_COUTNER).get());
         requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
-        requestSensors.incrementSensor(context, Type.WRITE_BYTES, COUNTER_MUTATION_BYTES); // mimic a counter mutation of size 56 bytes on the leader node
+        requestSensors.incrementSensor(context, Type.WRITE_BYTES, COUNTER_MUTATION_WRITE_BYTES); // mimic a counter mutation of size COUNTER_MUTATION_WRITE_BYTES on the leader node
+        requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, COUNTER_MUTATION_INTERNODE_BYTES); // mimic an inter-node payload of size COUNTER_MUTATION_INTERNODE_BYTES on the leader node
         requestSensors.syncAllSensors();
-        CounterMutationCallback callback = new CounterMutationCallback(msg, FBUtilities.getLocalAddressAndPort(), RequestTracker.instance.get());
-        Integer replicaCount = replicaCountAndExpectedSensorValue.left;
+        CounterMutationCallback callback = new CounterMutationCallback(msg, FBUtilities.getLocalAddressAndPort(), requestSensors);
+        Integer replicaCount = replicaCountAndExpectedSensorValueMultiplier.left;
         callback.setReplicaCount(replicaCount);
 
         callback.run();
 
         // Sensor values on the leader should not accommodate for replica sensors
-        Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
-        assertThat(localSensor.getValue()).isEqualTo(COUNTER_MUTATION_BYTES);
+        Sensor localSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        assertThat(localSensor.getValue()).isEqualTo(COUNTER_MUTATION_WRITE_BYTES);
         Sensor registerSensor = SensorsRegistry.instance.getSensor(context, Type.WRITE_BYTES).get();
-        assertThat(registerSensor.getValue()).isEqualTo(COUNTER_MUTATION_BYTES);
-        localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
-        assertThat(localSensor.getValue()).isEqualTo(responseSize);
+        assertThat(registerSensor.getValue()).isEqualTo(COUNTER_MUTATION_WRITE_BYTES);
+        localSensor = requestSensors.getSensor(context, Type.INTERNODE_BYTES).get();
+        assertThat(localSensor.getValue()).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES);
         registerSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_BYTES).get();
-        assertThat(registerSensor.getValue()).isEqualTo(responseSize);
+        assertThat(registerSensor.getValue()).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES);
 
         // verify custom headers have the sensors values adjusted for the replica count
         assertThat(capturedOutboundMessages).size().isEqualTo(1);
         Map<String, byte[]> customParam = capturedOutboundMessages.get(0).header.customParams();
         assertThat(customParam).isNotNull();
-        double expectedSensorValue = replicaCountAndExpectedSensorValue.right;
+        int expectedSensorValueMultiplier = replicaCountAndExpectedSensorValueMultiplier.right;
         assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_REQUEST.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
-                                                       assertThat(actual).isEqualTo(expectedSensorValue);
+                                                       assertThat(actual).isEqualTo(COUNTER_MUTATION_WRITE_BYTES * expectedSensorValueMultiplier);
                                                    });
         assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_TABLE.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
-                                                       assertThat(actual).isEqualTo(expectedSensorValue);
+                                                       assertThat(actual).isEqualTo(COUNTER_MUTATION_WRITE_BYTES * expectedSensorValueMultiplier);
                                                    });
         assertThat(customParam).hasEntrySatisfying("INTERNODE_MSG_BYTES_REQUEST.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
-                                                       assertThat(actual).isEqualTo(responseSize * Math.max(replicaCount, 1));
+                                                       assertThat(actual).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES * expectedSensorValueMultiplier);
                                                    });
         assertThat(customParam).hasEntrySatisfying("INTERNODE_MSG_BYTES_TABLE.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
-                                                       assertThat(actual).isEqualTo(responseSize * Math.max(replicaCount, 1));
+                                                       assertThat(actual).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES * expectedSensorValueMultiplier);
                                                    });
     }
 }
