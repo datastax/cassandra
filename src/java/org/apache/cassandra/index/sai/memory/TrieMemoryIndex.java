@@ -410,7 +410,7 @@ public class TrieMemoryIndex extends MemoryIndex
             if (existing == null)
             {
                 existing = new PrimaryKeys();
-                heapAllocations.add(existing.unsharedHeapSize());
+                heapAllocations.add(PrimaryKeys.unsharedHeapSize());
             }
             heapAllocations.add(existing.put(neww, ref));
             return existing;
@@ -444,7 +444,7 @@ public class TrieMemoryIndex extends MemoryIndex
             heapAllocations.add(existing.removeIfUnique(neww, ref));
             if (existing.isEmpty())
             {
-                heapAllocations.add(-existing.unsharedHeapSize());
+                heapAllocations.add(-PrimaryKeys.unsharedHeapSize());
                 return null;
             }
             return existing;

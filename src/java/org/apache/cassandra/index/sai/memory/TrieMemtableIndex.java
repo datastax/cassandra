@@ -66,7 +66,13 @@ public class TrieMemtableIndex implements MemtableIndex
 
     public TrieMemtableIndex(IndexContext indexContext)
     {
-        this.boundaries = indexContext.owner().localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this(indexContext, TrieMemtable.SHARD_COUNT);
+    }
+
+    @VisibleForTesting
+    public TrieMemtableIndex(IndexContext indexContext, int shardCount)
+    {
+        this.boundaries = indexContext.owner().localRangeSplits(shardCount);
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.validator = indexContext.getValidator();
         for (int shard = 0; shard < boundaries.shardCount(); shard++)

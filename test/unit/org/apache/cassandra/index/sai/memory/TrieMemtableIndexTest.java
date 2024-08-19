@@ -58,6 +58,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
@@ -266,25 +267,59 @@ public class TrieMemtableIndexTest extends SAITester
     @Test
     public void updateCollectionTest()
     {
-        memtableIndex = new TrieMemtableIndex(integerListIndexContext);
+        // Use one shard to test shared keys in the trie
+        memtableIndex = new TrieMemtableIndex(integerListIndexContext, 1);
+        assertEquals(0, memtable.getAllocator().onHeap().owns());
+        assertEquals(0, memtableIndex.estimatedOnHeapMemoryUsed() + memtableIndex.estimatedOffHeapMemoryUsed());
 
         addRowWithCollection(1, 1, 2, 3); // row 1, values 1, 2, 3
         addRowWithCollection(2, 4, 5, 6); // row 2, values 4, 5, 6
         addRowWithCollection(3, 2, 6);    // row 3, values 2, 6
 
+        // 8 total pk entries at 36 bytes, 6 unique trie keys at 4 bytes, 6 PrimaryKeys objects with
+        var expectedOnHeap = 8 * 36 + 6 * 4 + 6 * PrimaryKeys.unsharedHeapSize();
+        assertEquals(expectedOnHeap, memtableIndex.estimatedOnHeapMemoryUsed());
+        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+        // Hard coded cost from trie
+        assertEquals(96, memtableIndex.estimatedOffHeapMemoryUsed());
+
         // Query values
         assertEqualsQuery(2, 1, 3);
         assertEqualsQuery(4, 2);
+        assertEqualsQuery(3, 1);
         assertEqualsQuery(6, 2, 3);
 
-        // Update row 1 to remove 2 and 3, keep 1, add 4 (not we have to manually match the 1,2,3 from above
-        updateRowWithCollection(1, List.of(1, 2, 3).iterator(), List.of(1, 4).iterator());
+        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+
+        // Update row 1 to remove 2 and 3, keep 1, add 7 and 8 (note we have to manually match the 1,2,3 from above)
+        updateRowWithCollection(1, List.of(1, 2, 3).iterator(), List.of(1, 7, 8).iterator());
+
+        // We net 1 new PrimaryKeys object and 2 new trie memtable entries. The current implementation
+        // does not remove trie keys, so those are still present.
+        expectedOnHeap += PrimaryKeys.unsharedHeapSize() + 4 * 2;
+        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+
+        updateRowWithCollection(1, List.of(1, 7, 8).iterator(), List.of(1, 4, 8).iterator());
+
+        // We remove a PrimaryKeys object without adding any new keys to the trie.
+        expectedOnHeap -= PrimaryKeys.unsharedHeapSize();
+        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
 
         // Run additional queries to ensure values
         assertEqualsQuery(1, 1);
         assertEqualsQuery(4, 1, 2);
         assertEqualsQuery(2, 3);
         assertEqualsQuery(3);
+
+        // Show that iteration works as expected and does not include any of the deleted terms.
+        var iter = memtableIndex.iterator(makeKey(cfs.metadata(), 1), makeKey(cfs.metadata(), 3));
+        assertNextEntryInIterator(iter, 1, 1);
+        assertNextEntryInIterator(iter, 2, 3);
+        assertNextEntryInIterator(iter, 4, 1, 2);
+        assertNextEntryInIterator(iter, 5, 2);
+        assertNextEntryInIterator(iter, 6, 2, 3);
+        assertNextEntryInIterator(iter, 8, 1);
+        assertFalse(iter.hasNext());
     }
 
     private void assertEqualsQuery(int value, int... partitionKeys)
@@ -299,6 +334,18 @@ public class TrieMemtableIndexTest extends SAITester
         for (int partitionKey : partitionKeys)
             assertEquals(makeKey(cfs.metadata(), partitionKey), result.next().partitionKey());
         assertFalse(result.hasNext());
+    }
+
+    private void assertNextEntryInIterator(Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iter, int term, int... primaryKeys)
+    {
+        assertTrue(iter.hasNext());
+        Pair<ByteComparable, Iterator<PrimaryKey>> entry = iter.next();
+        assertEquals(term, termFromComparable(entry.left));
+        for (int value : primaryKeys)
+        {
+            assertTrue(entry.right.hasNext());
+            assertEquals(makeKey(cfs.metadata(), value), entry.right.next().partitionKey());
+        }
     }
 
     private Expression generateRandomExpression()

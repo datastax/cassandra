@@ -84,7 +84,7 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
         return keys.isEmpty();
     }
 
-    public long unsharedHeapSize()
+    public static long unsharedHeapSize()
     {
         return EMPTY_SIZE;
     }
