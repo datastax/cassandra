@@ -391,8 +391,8 @@ public class IndexContext
         MemtableIndex target = liveMemtables.get(memtable);
         if (target == null)
             return;
-
-        ByteBuffer oldValue = getValueOf(key, oldRow, FBUtilities.nowInSeconds());
+        // Use 0 for nowInSecs to get the value from the oldRow to ensure we remove the old value from the index.
+        ByteBuffer oldValue = getValueOf(key, oldRow, 0);
         ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
         target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
     }
