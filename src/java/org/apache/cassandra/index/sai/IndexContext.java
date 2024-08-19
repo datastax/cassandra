@@ -386,16 +386,17 @@ public class IndexContext
         if (target == null)
             return;
 
+        // Use 0 for nowInSecs to get the value(s) from the oldRow to ensure we remove the old value(s) from the index.
         if (isNonFrozenCollection())
         {
-            Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, FBUtilities.nowInSeconds());
+            Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, 0);
             Iterator<ByteBuffer> newValues = getValuesOf(newRow, FBUtilities.nowInSeconds());
             if (oldValues != null && newValues != null)
                 target.update(key, oldRow.clustering(), oldValues, newValues, memtable, opGroup);
         }
         else
         {
-            ByteBuffer oldValue = getValueOf(key, oldRow, FBUtilities.nowInSeconds());
+            ByteBuffer oldValue = getValueOf(key, oldRow, 0);
             ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
             target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
         }

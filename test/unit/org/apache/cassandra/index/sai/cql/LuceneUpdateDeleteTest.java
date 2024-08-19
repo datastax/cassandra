@@ -20,14 +20,25 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class LuceneUpdateDeleteTest extends SAITester
 {
@@ -566,26 +577,82 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void testOverwriteThatAddsNewValuesAndRemovesOthersFromIndex() throws Throwable
+    public void testRangeDeletionThenOverwrite() throws Throwable
     {
-        createTable("CREATE TABLE %s (pk int PRIMARY KEY, str_val text, val text)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+        createTable("CREATE TABLE %s (pk int, x int, val text, primary key(pk, x))");
+        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
         waitForIndexQueryable();
 
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'an indexed phrase')");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', 'something random')");
-        // Make assertion on value
-        assertRows(execute("SELECT pk FROM %s WHERE val : 'phrase'"), row(0));
-        assertRows(execute("SELECT pk FROM %s WHERE val : 'indexed'"), row(0));
-        // Insert an update that keeps 'phrase' but gets rid of 'indexed'
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'B', 'a different phrase with some overlap')");
+        execute("INSERT INTO %s (pk, x, val) VALUES (0, 0, 'an indexed phrase')");
+        execute("INSERT INTO %s (pk, x, val) VALUES (0, 1, 'something random')");
+        execute("INSERT INTO %s (pk, x, val) VALUES (1, 1, 'random phrase')");
 
-        beforeAndAfterFlush(() -> {
-            // Validate the exected values
-            assertRows(execute("SELECT pk FROM %s WHERE val : 'phrase'"), row(0));
-            assertRows(execute("SELECT pk FROM %s WHERE val : 'indexed'"));
-        });
+        // Make assertion on value
+        assertRows(execute("SELECT x FROM %s WHERE val : 'phrase'"), row(1), row(0));
+        assertRows(execute("SELECT x FROM %s WHERE val : 'indexed'"), row(0));
+
+        searchMemtable(indexName, "indexed", 0);
+        searchMemtable(indexName, "random", 1, 0);
+
+        // delete range
+        execute("DELETE FROM %s WHERE pk = 0");
+
+        // Still expect both rows to be in the index because range deletion doesn't remove from index
+        searchMemtable(indexName, "indexed", 0);
+        searchMemtable(indexName, "random", 1, 0);
+
+        // Overwrite the value for the first of the 2 rows in partition 0
+        execute("INSERT INTO %s (pk, x, val) VALUES (0, 0, 'random')");
+
+        // Confirm the expected behavior
+        searchMemtable(indexName, "indexed"); // overwritten, and the update removes the value
+        searchMemtable(indexName, "something", 0); // range deleted, but not yet removed
+        searchMemtable(indexName, "random", 1, 0, 0); // random is in all 3 memtable index rows
+        searchMemtable(indexName, "phrase", 1); // was deleted/overwritten in 0, so just in 1 now
+    }
+
+    @Test
+    public void testOverwriteWithTTL() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int primary key, val text)");
+        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, val) VALUES (0, 'an indexed phrase') USING TTL 1");
+        execute("INSERT INTO %s (pk, val) VALUES (1, 'something random')");
+
+        // TTL is not applied in this path, so we get the result
+        searchMemtable(indexName, "indexed", 0);
+
+        // Run update and remove 'indexed' from the trie
+        execute("INSERT INTO %s (pk, val) VALUES (0, 'random')");
+
+        // Validate that we get no results
+        searchMemtable(indexName, "indexed");
+    }
+
+    private void searchMemtable(String indexName, String value, int... expectedResults)
+    {
+
+        var sai = (StorageAttachedIndex) Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).getIndexManager().getIndexByName(indexName);
+        var expression = new Expression(sai.getIndexContext()).add(Operator.ANALYZER_MATCHES,
+                                                                   UTF8Type.instance.decompose(value));
+        var queryContext = new QueryContext();
+        var range = Range.unbounded(sai.getIndexContext().getPartitioner());
+        var builder = RangeUnionIterator.builder();
+        // Because there are many
+        for (var memtableIndex : sai.getIndexContext().getLiveMemtables().values())
+            builder.add(memtableIndex.search(queryContext, expression, range, 10));
+        var rangeIterator = builder.build();
+        for (Integer expectedResult : expectedResults)
+        {
+            assertTrue(rangeIterator.hasNext());
+            var pk = Int32Type.instance.getSerializer().deserialize(rangeIterator.next().partitionKey().getKey());
+            assertEquals(expectedResult, pk);
+        }
+        assertFalse(rangeIterator.hasNext());
     }
 
 }
