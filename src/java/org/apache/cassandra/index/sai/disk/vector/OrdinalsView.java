@@ -21,6 +21,8 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseBits;
 
@@ -31,14 +33,23 @@ public interface OrdinalsView extends AutoCloseable
         void accept(long rowId, int ordinal) throws IOException;
     }
 
+    /** return the vector ordinal associated with the given row, or -1 if no vectors are associated with it */
     int getOrdinalForRowId(int rowId) throws IOException;
 
-    /** iterates over all ordinals in the view.
-     * return true if consumer was called at least once.
-     * */
-    boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException;
+    /**
+     * iterates over all ordinals in the view.  order of iteration is undefined.
+     */
+    @VisibleForTesting
+    void forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException;
 
-    Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException;
+    default Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
+    {
+        var bits = bitsSupplier.get();
+        this.forEachOrdinalInRange(startRowId, endRowId, (segmentRowId, ordinal) -> {
+            bits.set(ordinal);
+        });
+        return bits;
+    }
 
     @Override
     void close();
