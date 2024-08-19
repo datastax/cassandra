@@ -64,20 +64,15 @@ public class CounterMutationCallback implements Runnable
         int replicaMultiplier = replicaCount == 0 ?
                                 1 : // replica count was not explicitly set (default). At the bare minimum, we should send the response accomodating for the local replica (aka. mutation leader) sensor values
                                 replicaCount;
-        addSensorsToResponse(responseBuilder, requestMessage.payload.getMutation(), replicaMultiplier);
+        addSensorsToResponse(responseBuilder, replicaMultiplier);
         MessagingService.instance().send(responseBuilder.build(), respondToAddress);
     }
 
-    private void addSensorsToResponse(Message.Builder<NoPayload> response, Mutation mutation, int replicaMultiplier)
+    private void addSensorsToResponse(Message.Builder<NoPayload> response, int replicaMultiplier)
     {
-        int tables = mutation.getTableIds().size();
-
-        // Add internode bytes sensors to the response after updating each per-table sensor with the current response
-        // message size: this is missing the sensor values, but it's a good enough approximation
-        Collection<Sensor> sensors = this.requestSensors.getSensors(Type.INTERNODE_BYTES);
-        int perSensorSize = response.currentPayloadSize(MessagingService.current_version) / tables;
-        sensors.forEach(sensor -> this.requestSensors.incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
-        this.requestSensors.syncAllSensors();
+        // There is no need to increment INTERNODE_BYTES to accommodate for outbound bytes because the response payload
+        // is of type NoPayload which has zero size
+        Collection<Sensor> sensors = this.requestSensors.getSensors(s -> s.getType() == Type.INTERNODE_BYTES);
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInInternodeBytesRequestParam;
         Function<String, String> tableParam = SensorsCustomParams::encodeTableInInternodeBytesTableParam;
         addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);
@@ -85,7 +80,7 @@ public class CounterMutationCallback implements Runnable
         // Add write bytes sensors to the response
         requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
         tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
-        sensors = this.requestSensors.getSensors(Type.WRITE_BYTES);
+        sensors = this.requestSensors.getSensors(s -> s.getType() == Type.WRITE_BYTES);
         addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);
     }
 
