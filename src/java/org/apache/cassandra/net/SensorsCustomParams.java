@@ -20,15 +20,12 @@ package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
 import java.util.Optional;
-import java.util.function.Function;
 
 import com.google.common.base.Preconditions;
 
-import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
-import org.apache.cassandra.sensors.Type;
 
 /**
  * A utility class that contains the definition of custom params added to the {@link Message} header to propagate {@link Sensor} values from
@@ -137,47 +134,69 @@ public final class SensorsCustomParams
     }
 
     /**
-     * A utility method to encode writer sensor values in the internode response message.
+     * AIterate over all sensors in the {@link RequestSensors} and encodes each sensor values in the internode response message
+     * as custom parameters.
+     *
+     * @param sensors  the collection of sensors to encode in the response
+     * @param response the response message builder to add the sensors to
+     * @param <T>      the response message builder type
      */
-    public static <T> void addWriteSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
+    public static <T> void addSensorsToResponse(RequestSensors sensors, Message.Builder<T> response)
     {
-        Preconditions.checkNotNull(response);
         Preconditions.checkNotNull(sensors);
-        Preconditions.checkNotNull(context);
+        Preconditions.checkNotNull(response);
 
-        addSensorToResponse(response, sensors, context, Type.WRITE_BYTES,
-                            (sensor) -> SensorsCustomParams.encodeTableInWriteBytesRequestParam(sensor.getContext().getTable()),
-                            (sensor) -> SensorsCustomParams.encodeTableInWriteBytesTableParam(sensor.getContext().getTable()));
+        for (Sensor sensor : sensors.getSensors(ignored -> true))
+        {
+            addSensorToResponse(response, sensor);
+        }
     }
 
-    /**
-     * A utility method to encode read sensor values in the internode response message.
-     */
-    public static <T> void addReadSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
+    private static <T> void addSensorToResponse(Message.Builder<T> response, Sensor sensor)
     {
-        Preconditions.checkNotNull(response);
-        Preconditions.checkNotNull(sensors);
-        Preconditions.checkNotNull(context);
+        byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
+        String requestParam = requestParamForSensor(sensor);
+        response.withCustomParam(requestParam, requestBytes);
 
-        addSensorToResponse(response, sensors, context, Type.READ_BYTES,
-                            (ignored) -> SensorsCustomParams.READ_BYTES_REQUEST,
-                            (ignored) -> SensorsCustomParams.READ_BYTES_TABLE);
-    }
-
-    private static <T> void addSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context, Type type,
-                                                Function<Sensor, String> requestParamSupplier,
-                                                Function<Sensor, String> tableParamSupplier)
-    {
-        Optional<Sensor> requestSensor = sensors.getSensor(context, type);
-        requestSensor.ifPresent(sensor -> {
-            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-            response.withCustomParam(requestParamSupplier.apply(sensor), requestBytes);
-
-            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(sensor.getContext(), type);
-            registrySensor.ifPresent(registry -> {
-                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(registry.getValue());
-                response.withCustomParam(tableParamSupplier.apply(registry), tableBytes);
-            });
+        Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(sensor.getContext(), sensor.getType());
+        registrySensor.ifPresent(registry -> {
+            byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(registry.getValue());
+            String tableParam = tableParamForSensor(sensor);
+            response.withCustomParam(tableParam, tableBytes);
         });
+    }
+
+    private static String requestParamForSensor(Sensor sensor)
+    {
+        switch (sensor.getType())
+        {
+            case INTERNODE_BYTES:
+                return SensorsCustomParams.encodeTableInInternodeBytesRequestParam(sensor.getContext().getTable());
+            case INDEX_WRITE_BYTES:
+                return SensorsCustomParams.encodeTableInIndexWriteBytesRequestParam(sensor.getContext().getTable());
+            case WRITE_BYTES:
+                return SensorsCustomParams.encodeTableInWriteBytesRequestParam(sensor.getContext().getTable());
+            case READ_BYTES:
+                return SensorsCustomParams.READ_BYTES_REQUEST;
+            default:
+                throw new IllegalArgumentException("Request param is unknown sensor type: " + sensor.getType().toString());
+        }
+    }
+
+    private static String tableParamForSensor(Sensor sensor)
+    {
+        switch (sensor.getType())
+        {
+            case INTERNODE_BYTES:
+                return SensorsCustomParams.encodeTableInInternodeBytesTableParam(sensor.getContext().getTable());
+            case INDEX_WRITE_BYTES:
+                return SensorsCustomParams.encodeTableInIndexWriteBytesTableParam(sensor.getContext().getTable());
+            case WRITE_BYTES:
+                return SensorsCustomParams.encodeTableInWriteBytesTableParam(sensor.getContext().getTable());
+            case READ_BYTES:
+                return SensorsCustomParams.READ_BYTES_TABLE;
+            default:
+                throw new IllegalArgumentException("Table param is unknown for sensor type: " + sensor.getType().toString());
+        }
     }
 }
