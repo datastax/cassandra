@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -86,9 +87,9 @@ public class ActiveRequestSensors implements RequestSensors
         return Optional.ofNullable(getSensorFast(context, type));
     }
 
-    public synchronized Set<Sensor> getSensors(Type type)
+    public synchronized Set<Sensor> getSensors(Predicate<Sensor> filter)
     {
-        return sensors.values().stream().flatMap(Arrays::stream).filter(Objects::nonNull).filter(s -> s.getType() == type).collect(Collectors.toSet());
+        return sensors.values().stream().flatMap(Arrays::stream).filter(Objects::nonNull).filter(filter).collect(Collectors.toSet());
     }
 
     public synchronized void incrementSensor(Context context, Type type, double value)
