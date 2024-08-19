@@ -39,9 +39,10 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v2.V2OnDiskOrdinalsMap;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.NodeScoreToRowIdWithScoreIterator;
-import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
@@ -60,7 +61,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnDiskHnsw.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
-    private final OnDiskOrdinalsMap ordinalsMap;
+    private final V2OnDiskOrdinalsMap ordinalsMap;
     private final OnDiskHnswGraph hnsw;
     private final VectorSimilarityFunction similarityFunction;
 
@@ -79,11 +80,17 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         long vectorsSegmentOffset = this.componentMetadatas.get(IndexComponentType.VECTOR).offset;
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
-        ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
+        ordinalsMap = new V2OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         hnsw = new OnDiskHnswGraph(indexFiles.termsData(), termsMetadata.offset, termsMetadata.length, OFFSET_CACHE_MIN_BYTES);
         vectors = new OnDiskVectors(vectorsFile, vectorsSegmentOffset);
+    }
+
+    @Override
+    public Structure getPostingsStructure()
+    {
+        return ordinalsMap.getStructure();
     }
 
     @Override
@@ -230,5 +237,11 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         {
             FileUtils.closeQuietly(view);
         }
+    }
+
+    @Override
+    public boolean containsUnitVectors()
+    {
+        throw new UnsupportedOperationException();
     }
 }
