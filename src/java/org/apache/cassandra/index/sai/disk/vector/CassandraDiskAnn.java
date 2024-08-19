@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v3;
+package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -47,15 +47,9 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.PQVersion;
-import org.apache.cassandra.index.sai.disk.vector.GraphSearcherAccessManager;
-import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
-import org.apache.cassandra.index.sai.disk.vector.NodeScoreToRowIdWithScoreIterator;
-import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
-import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -84,7 +78,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
-    public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context) throws IOException
+    public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {
         super(componentMetadatas, indexFiles);
 
@@ -153,9 +147,20 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         }
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
-        ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
+        ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
+    }
+
+    @Override
+    public Structure getPostingsStructure()
+    {
+        return ordinalsMap.getStructure();
+    }
+
+    @FunctionalInterface
+    public interface OrdinalsMapFactory {
+        OnDiskOrdinalsMap create(FileHandle handle, long offset, long length);
     }
 
     public ProductQuantization getPQ()
@@ -318,5 +323,11 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         {
             FileUtils.closeQuietly(view);
         }
+    }
+
+    @Override
+    public boolean containsUnitVectors()
+    {
+        return pqUnitVectors;
     }
 }
