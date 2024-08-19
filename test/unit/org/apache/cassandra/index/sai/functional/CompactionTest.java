@@ -31,6 +31,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -153,6 +154,20 @@ public class CompactionTest extends AbstractMetricsTest
 
         verifySSTableIndexes(v1IndexName, num);
         verifySSTableIndexes(v2IndexName, num);
+    }
+
+    @Test
+    public void testCompactionWithDisabledIndexReads() throws Throwable
+    {
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(true);
+        try
+        {
+            testConcurrentQueryWithCompaction();
+        }
+        finally
+        {
+            CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(false);
+        }
     }
 
     @Test
