@@ -202,17 +202,14 @@ public class MemtableIndexWriter implements PerIndexWriter
     {
         var vectorIndex = (VectorMemtableIndex) memtableIndex;
 
-        // Get comprehensive set of deleted ordinals from the row mapping, and skip writing components to disk
-        // if all ordinals are deleted. This is when we account for range and partition deletions.
-        var deletedOrdinals = vectorIndex.computeDeletedOrdinals(rowMapping::get);
-        if (deletedOrdinals.size() == vectorIndex.size())
+        if (!vectorIndex.preFlush(rowMapping::get))
         {
             logger.debug(perIndexComponents.logMessage("Whole graph is deleted. Skipping index flush for {}."), perIndexComponents.descriptor());
             perIndexComponents.markComplete();
             return;
         }
 
-        SegmentMetadata.ComponentMetadataMap metadataMap = vectorIndex.writeData(perIndexComponents, deletedOrdinals);
+        SegmentMetadata.ComponentMetadataMap metadataMap = vectorIndex.writeData(perIndexComponents);
 
         SegmentMetadata metadata = new SegmentMetadata(0,
                                                        rowMapping.size(), // TODO this isn't the right size metric.

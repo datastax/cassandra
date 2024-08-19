@@ -37,12 +37,15 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
@@ -342,42 +345,17 @@ public class SSTableIndexWriter implements PerIndexWriter
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
             var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
             if (pqi == null && segments.size() > 0)
-            {
-                // No PQ instance available in completed indexes, so check if we just wrote one
-                var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
-                assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
-                try (var fh = pqComponent.createFileHandle();
-                     var reader = fh.createReader())
-                {
-                    var sm = segments.get(segments.size() - 1);
-                    long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;
-                    // close parallel to code in CassandraDiskANN constructor, but different enough
-                    // (we only want the PQ codebook) that it's difficult to extract into a common method
-                    reader.seek(offset);
-                    boolean unitVectors;
-                    if (reader.readInt() == CassandraDiskAnn.PQ_MAGIC)
-                    {
-                        reader.readInt(); // skip over version
-                        unitVectors = reader.readBoolean();
-                    }
-                    else
-                    {
-                        unitVectors = true;
-                        reader.seek(offset);
-                    }
-                    var compressionType = CompressionType.values()[reader.readByte()];
-                    if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
-                    {
-                        var pq = ProductQuantization.load(reader);
-                        pqi = new CassandraOnHeapGraph.PqInfo(pq, Optional.of(unitVectors));
-                    }
-                }
-            }
+                pqi = maybeReadPqFromLastSegment();
 
             if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            {
                 builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+            }
             else
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter, pqi.pq, pqi.unitVectors.get());
+            {
+                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors.get(), allRowsHaveVectors, limiter);
+            }
         }
         else if (indexContext.isLiteral())
         {
@@ -394,5 +372,56 @@ public class SSTableIndexWriter implements PerIndexWriter
                      FBUtilities.prettyPrintMemory(globalBytesUsed));
 
         return builder;
+    }
+
+    private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
+    {
+        int segmentsChecked = 0;
+        for (SSTableIndex index : indexContext.getView().getIndexes())
+        {
+            for (Segment segment : index.getSegments())
+            {
+                segmentsChecked++;
+                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                var structure = searcher.getPostingsStructure();
+                if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
+                    return false;
+            }
+        }
+        return segmentsChecked != 0;
+    }
+
+    private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException
+    {
+        // No PQ instance available in completed indexes, so check if we just wrote one
+        var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
+        assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
+        try (var fh = pqComponent.createFileHandle();
+             var reader = fh.createReader())
+        {
+            var sm = segments.get(segments.size() - 1);
+            long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;
+            // close parallel to code in CassandraDiskANN constructor, but different enough
+            // (we only want the PQ codebook) that it's difficult to extract into a common method
+            reader.seek(offset);
+            boolean unitVectors;
+            if (reader.readInt() == CassandraDiskAnn.PQ_MAGIC)
+            {
+                reader.readInt(); // skip over version
+                unitVectors = reader.readBoolean();
+            }
+            else
+            {
+                unitVectors = true;
+                reader.seek(offset);
+            }
+            var compressionType = CompressionType.values()[reader.readByte()];
+            if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
+            {
+                var pq = ProductQuantization.load(reader);
+                return new CassandraOnHeapGraph.PqInfo(pq, Optional.of(unitVectors));
+            }
+        }
+        return null;
     }
 }

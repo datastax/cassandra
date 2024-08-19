@@ -15,39 +15,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.disk.v3;
+package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
-import java.util.Optional;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v2.V2OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 
 /**
  * Executes ann search against the graph for an individual index segment.
  */
-public class V3VectorIndexSearcher extends V2VectorIndexSearcher
+public class V5VectorIndexSearcher extends V2VectorIndexSearcher
 {
-    public V3VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    public V5VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                                  PerIndexFiles perIndexFiles,
                                  SegmentMetadata segmentMetadata,
                                  IndexContext indexContext) throws IOException
     {
+        // inherits from V2 instead of V3 because the difference between V5 and V3 is the OnDiskOrdinalsMap that they use
         super(primaryKeyMapFactory,
               perIndexFiles,
               segmentMetadata,
               indexContext,
-              new CassandraDiskAnn(segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V2OnDiskOrdinalsMap::new));
-    }
-
-    @Override
-    public Optional<Boolean> containsUnitVectors()
-    {
-        return Optional.of(graph.containsUnitVectors());
+              new CassandraDiskAnn(segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V5OnDiskOrdinalsMap::new));
     }
 }
