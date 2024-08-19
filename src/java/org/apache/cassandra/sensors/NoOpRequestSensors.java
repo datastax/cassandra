@@ -20,6 +20,7 @@ package org.apache.cassandra.sensors;
 
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -43,7 +44,7 @@ public class NoOpRequestSensors implements RequestSensors
     }
 
     @Override
-    public Set<Sensor> getSensors(Type type)
+    public Set<Sensor> getSensors(Predicate<Sensor> filter)
     {
         return ImmutableSet.of();
     }
