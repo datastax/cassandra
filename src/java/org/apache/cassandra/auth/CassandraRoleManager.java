@@ -99,6 +99,12 @@ public class CassandraRoleManager implements IRoleManager
      */
     static final ConsistencyLevel DEFAULT_SUPERUSER_CONSISTENCY_LEVEL = ConsistencyLevel.QUORUM;
 
+    // In some cases we want to avoid creating default super user accounts (for security purposes). For example CNDB
+    // can create roles without requiring default SU account. So we need a flag to tell C* to skip creating this role.
+    // Even though this says SKIP it's actually safer to create the user as non super user with no login creds
+    // and a timestamp of 1 in case a user forgets the flag on another node.
+    private static final boolean SKIP_DEFAULT_ROLE_SETUP = CassandraRelevantProperties.SKIP_DEFAULT_ROLE_SETUP.getBoolean();
+
     // Transform a row in the AuthKeyspace.ROLES to a Role instance
     private static final Function<UntypedResultSet.Row, Role> ROW_TO_ROLE = row ->
     {
@@ -482,11 +488,15 @@ public class CassandraRoleManager implements IRoleManager
     @VisibleForTesting
     public static String createDefaultRoleQuery()
     {
-        return String.format("INSERT INTO %s.%s (role, is_superuser, can_login, salted_hash) VALUES ('%s', true, true, '%s') USING TIMESTAMP 0",
+        return String.format("INSERT INTO %s.%s (role, is_superuser, can_login, salted_hash) " +
+                             "VALUES ('%s', %s, %s, '%s') USING TIMESTAMP %s",
                              SchemaConstants.AUTH_KEYSPACE_NAME,
                              AuthKeyspace.ROLES,
                              DEFAULT_SUPERUSER_NAME,
-                             escape(hashpw(DEFAULT_SUPERUSER_PASSWORD)));
+                             SKIP_DEFAULT_ROLE_SETUP ? "false" : "true",
+                             SKIP_DEFAULT_ROLE_SETUP ? "false" : "true",
+                             SKIP_DEFAULT_ROLE_SETUP ? "" : escape(hashpw(DEFAULT_SUPERUSER_PASSWORD)),
+                             SKIP_DEFAULT_ROLE_SETUP ? "1" : "0");
     }
 
     @VisibleForTesting
