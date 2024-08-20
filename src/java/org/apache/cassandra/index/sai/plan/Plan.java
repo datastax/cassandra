@@ -446,6 +446,11 @@ abstract public class Plan
         final double initCost;
         final double iterCost;
 
+        /**
+         * @param expectedKeys: number of keys expected to be iterated over
+         * @param initCost: cost to set up the iteration
+         * @param iterCost: *total* cost of iterating over the expected number of keys
+         */
         public KeysIterationCost(double expectedKeys, double initCost, double iterCost)
         {
             this.expectedKeys = expectedKeys;
@@ -687,7 +692,7 @@ abstract public class Plan
             // We don't want to have those nodes in the final plan,
             // because currently we have no way to execute it efficiently.
             // In the future we may want to change it, when we have a way to return all rows without using an index.
-            return new KeysIterationCost(access.totalCount(factory.tableMetrics.rows),
+            return new KeysIterationCost(access.expectedAccessCount(factory.tableMetrics.rows),
                                          Double.POSITIVE_INFINITY,
                                          Double.POSITIVE_INFINITY);
         }
@@ -762,7 +767,7 @@ abstract public class Plan
         @Override
         protected final KeysIterationCost estimateCost()
         {
-            double expectedKeys = access.totalCount(matchingKeysCount);
+            double expectedKeys = access.expectedAccessCount(matchingKeysCount);
             double costPerKey = access.unitCost(SAI_KEY_COST, this::estimateCostPerSkip);
             double initCost = SAI_OPEN_COST * factory.tableMetrics.sstables;
             double iterCost = expectedKeys * costPerKey;
@@ -978,7 +983,7 @@ abstract public class Plan
                 initCost += subplan.initCost();
                 iterCost += subplan.iterCost();
             }
-            double expectedKeys = access.totalCount(factory.tableMetrics.rows * selectivity());
+            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows * selectivity());
             return new KeysIterationCost(expectedKeys, initCost, iterCost);
         }
 
@@ -1118,7 +1123,7 @@ abstract public class Plan
                 initCost += subplan.initCost();
                 iterCost += subplan.iterCost();
             }
-            double expectedKeyCount = access.totalCount(factory.tableMetrics.rows * selectivity());
+            double expectedKeyCount = access.expectedAccessCount(factory.tableMetrics.rows * selectivity());
             return new KeysIterationCost(expectedKeyCount, initCost, iterCost);
         }
 
@@ -1197,7 +1202,7 @@ abstract public class Plan
 
         private KeysIterationCost estimateAnnSortCost()
         {
-            double expectedKeys = access.totalCount(source.expectedKeys());
+            double expectedKeys = access.expectedAccessCount(source.expectedKeys());
             double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables
                               + source.fullCost()
                               + source.expectedKeys() * CostCoefficients.ANN_INPUT_KEY_COST;
@@ -1256,7 +1261,7 @@ abstract public class Plan
         @Override
         protected KeysIterationCost estimateCost()
         {
-            double keysCount = access.totalCount(factory.tableMetrics.rows);
+            double keysCount = access.expectedAccessCount(factory.tableMetrics.rows);
             int limit = Math.max(1, (int) Math.ceil(keysCount));
             int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering,
                                                                                limit,
@@ -1379,7 +1384,7 @@ abstract public class Plan
                                   + CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow;
 
             KeysIteration src = source.get();
-            double expectedKeys = access.totalCount(src.expectedKeys());
+            double expectedKeys = access.expectedAccessCount(src.expectedKeys());
             return new RowsIterationCost(expectedKeys,
                                          src.initCost(),
                                          src.iterCost() + expectedKeys * rowFetchCost);
@@ -1454,7 +1459,7 @@ abstract public class Plan
         @Override
         protected RowsIterationCost estimateCost()
         {
-            double expectedRows = access.totalCount(factory.tableMetrics.rows * targetSelectivity);
+            double expectedRows = access.expectedAccessCount(factory.tableMetrics.rows * targetSelectivity);
             return new RowsIterationCost(expectedRows,
                                          source.get().initCost(),
                                          source.get().iterCost());
@@ -1521,7 +1526,7 @@ abstract public class Plan
         protected RowsIterationCost estimateCost()
         {
             RowsIteration src = source.get();
-            double expectedRows = access.totalCount(src.expectedRows());
+            double expectedRows = access.expectedAccessCount(src.expectedRows());
             double iterCost = (limit >= src.expectedRows())
                               ? src.iterCost()
                               : src.iterCost() * limit / src.expectedRows();
@@ -1890,21 +1895,59 @@ abstract public class Plan
     }
 
     /**
-     * Describes the usage pattern of the result of the plan node.
-     * Modelled by the number of accesses and the distribution of skip distances.
-     * Distance = 1.0 means sequential scan over all rows/keys.
+     * Describes the expected distribution of data access patterns for a plan node.
+     * <br>
+     * Each access pattern is represented by a pair of values:
+     * a count (number of expected occurrences) and a distance (skip distance).
+     * For performance, these are split into arrays of primitives.
+     * <br>
+     * For example, given:
+     *     counts = [100, 50, 10]
+     *     distances = [1.0, 2.0, 5.0]
+     * This represents:
+     *     - 100 sequential accesses (distance 1.0)
+     *     - 50 accesses with a skip distance of 2.0
+     *     - 10 accesses with a skip distance of 5.0
+     * <br>
+     * This information is used to optimize query execution plans by predicting
+     * how data will be accessed.
      */
     protected static final class Access
     {
+        /** Represents an empty access pattern. */
         final static Access EMPTY = Access.sequential(0);
 
+        /**
+         * Array of expected occurrence counts for each access pattern.
+         * Each element represents the number of times a particular access pattern
+         * is expected to occur.
+         */
         final double[] counts;
+
+        /**
+         * Array of skip distances for each access pattern.
+         * Each element represents the skip distance for a particular access pattern.
+         * A distance of 1.0 indicates sequential access.  Smaller distances than 1.0 do not makes sense.
+         */
         final double[] distances;
 
+        /**
+         * The total count of expected accesses across all patterns.
+         * This is the sum of all elements in the counts array.
+         */
         final double totalCount;
-        final double totalDistance;
-        final boolean forceSkip;
 
+        /**
+         * The total weighted distance of all access patterns.
+         * Calculated as the sum of (count * distance) for all patterns.
+         */
+        final double totalDistance;
+
+        /**
+         * Flag indicating whether to force the use of skip operations.
+         * When true, skip operations are used even for small distances (1.0).
+         */
+        final boolean forceSkip;
 
         private Access(double[] count, double[] distance, boolean forceSkip)
         {
@@ -1970,7 +2013,9 @@ abstract public class Plan
         }
 
         /**
-         * Multiplicates each access at the last level to count accesses with given skip distance.
+         * Returns a new Access pattern derived by applying a repeated access pattern to the current one,
+         * to represent the effect of intersecting with another predicate.  That is, given "x intersect y,"
+         * we apply `convolute` to y's Access pattern to account for the skips introduced by x.
          * <p>
          * Example (a star denotes a single access):
          * <pre>
@@ -2009,7 +2054,7 @@ abstract public class Plan
         }
 
         /** Returns the total expected number of items (rows or keys) to be retrieved from the node */
-        double totalCount(double availableCount)
+        double expectedAccessCount(double availableCount)
         {
             return totalCount == 0 || totalDistance <= availableCount
                    ? totalCount
