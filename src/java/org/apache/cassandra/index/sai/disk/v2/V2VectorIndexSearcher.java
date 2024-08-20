@@ -62,6 +62,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.plan.Plan;
+import org.apache.cassandra.index.sai.plan.Plan.CostCoefficients;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
@@ -280,9 +281,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     {
         // If we use compressed vectors, we still have to order rerankK results using full resolution similarity
         // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
-        double twoPassCost = segmentRowIds.size() * Plan.CostCoefficients.ANN_SIMILARITY_COST
-                             + rerankK * hrs(Plan.CostCoefficients.ANN_SCORED_KEY_COST);
-        double onePassCost = segmentRowIds.size() * hrs(Plan.CostCoefficients.ANN_SCORED_KEY_COST);
+        double twoPassCost = segmentRowIds.size() * CostCoefficients.ANN_SIMILARITY_COST
+                             + rerankK * hrs(CostCoefficients.ANN_SCORED_KEY_COST);
+        double onePassCost = segmentRowIds.size() * hrs(CostCoefficients.ANN_SCORED_KEY_COST);
         if (graph.getCompressedVectors() != null && twoPassCost < onePassCost)
             return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentRowIds, limit, rerankK);
         return orderByBruteForce(queryVector, segmentRowIds);
@@ -411,12 +412,20 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             if (candidates > GLOBAL_BRUTE_FORCE_ROWS)
                 return false;
-            return bruteForceCost() <= expectedNodesVisited;
+            return bruteForceCost() <= indexScanCost();
         }
 
-        private int bruteForceCost()
+        private double indexScanCost()
         {
-            return (int) (candidates * BRUTE_FORCE_EXPENSE_FACTOR);
+            return expectedNodesVisited * (CostCoefficients.ANN_SIMILARITY_COST + hrs(CostCoefficients.ANN_EDGELIST_COST) / CostCoefficients.ANN_DEGREE);
+        }
+
+        private double bruteForceCost()
+        {
+            // VSTODO we don't have rerankK available here, so we only calculate the two pass cost
+            // out of the options in orderByBruteForce.  (The rerank cost is roughly equal for both
+            // indexScanCost and bruteForceCost so we can leave it out of both.)
+            return candidates * CostCoefficients.ANN_SIMILARITY_COST;
         }
 
         public void updateStatistics(int actualNodesVisited)
@@ -432,7 +441,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         @Override
         public String toString()
         {
-            return String.format("{brute force: %d, index scan: %d}", bruteForceCost(), expectedNodesVisited);
+            return String.format("{brute force(%d) = %.2f, index scan(%d) = %.2f}",
+                                 candidates, bruteForceCost(), expectedNodesVisited, indexScanCost());
         }
     }
 
