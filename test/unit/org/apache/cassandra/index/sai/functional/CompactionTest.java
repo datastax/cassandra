@@ -43,6 +43,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
@@ -166,7 +167,6 @@ public class CompactionTest extends AbstractMetricsTest
             createTable(CREATE_TABLE_TEMPLATE);
             String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
             String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-            waitForIndexQueryable();
 
             int num = 10;
             for (int i = 0; i < num; i++)
@@ -183,10 +183,8 @@ public class CompactionTest extends AbstractMetricsTest
             verifySSTableIndexes(v1IndexName, 1);
             verifySSTableIndexes(v2IndexName, 1);
 
-            // However, queries should not work correctly since index reads are disabled, and we should get an empty
-            // result.
-            assertNumRows(0, "SELECT id1 FROM %%s WHERE v1>=0");
-            assertNumRows(0, "SELECT id1 FROM %%s WHERE v2='0'");
+            // But index queries should not be allowed.
+            assertThrows(IndexNotAvailableException.class, () -> execute("SELECT id1 FROM %s WHERE v1>=0"));
         }
         finally
         {
