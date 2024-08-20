@@ -186,8 +186,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     /**
-     * Return bit set to configure a graph search; otherwise return posting list or ScoredRowIdIterator to bypass
-     * graph search and use brute force to order matching rows.
+     * Find the closest `limit` neighbors to the given query vector, using a coarse search pass for `rerankK`
+     * candidates.  May decide to use brute force instead of the index.
      * @param keyRange the key range to search
      * @param context the query context
      * @param queryVector the query vector
