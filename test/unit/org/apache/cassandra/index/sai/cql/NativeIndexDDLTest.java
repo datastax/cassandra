@@ -129,7 +129,7 @@ public class NativeIndexDDLTest extends SAITester
     @BeforeClass
     public static void init()
     {
-        CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR.setBoolean(true);
+        CassandraRelevantProperties.SAI_VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.setBoolean(true);
     }
 
     @Before
