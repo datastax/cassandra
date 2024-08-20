@@ -300,8 +300,8 @@ abstract public class Plan
     {
         String description = description();
         return (description.isEmpty())
-            ? String.format("%s (%s)", getClass().getSimpleName(), cost())
-            : String.format("%s %s (%s)", getClass().getSimpleName(), description, cost());
+               ? String.format("%s (%s)", getClass().getSimpleName(), cost())
+               : String.format("%s %s (%s)", getClass().getSimpleName(), description, cost());
     }
 
     /**
@@ -384,8 +384,8 @@ abstract public class Plan
         // because a query with no filter expression returns all rows
         // (removing restrictions should widen the result set)
         return (this.id == id)
-                ? factory.everything
-                : withUpdatedSubplans(subplan -> subplan.remove(id));
+               ? factory.everything
+               : withUpdatedSubplans(subplan -> subplan.remove(id));
     }
 
     /**
@@ -838,8 +838,8 @@ abstract public class Plan
         {
             assert predicate != null ^ ordering != null;
             return (ordering != null)
-                ? executor.getTopKRows(softLimit)
-                : executor.getKeysFromIndex(predicate);
+                   ? executor.getTopKRows(softLimit)
+                   : executor.getKeysFromIndex(predicate);
         }
     }
     /**
@@ -966,8 +966,8 @@ abstract public class Plan
         protected Union withAccess(Access access)
         {
             return Objects.equals(access, this.access)
-                ? this
-                : new Union(factory, id, subplansSupplier.orig, access);
+                   ? this
+                   : new Union(factory, id, subplansSupplier.orig, access);
         }
 
         @Override
@@ -1099,8 +1099,8 @@ abstract public class Plan
         protected Intersection withAccess(Access access)
         {
             return Objects.equals(access, this.access)
-                ? this
-                : new Intersection(factory, id, subplansSupplier.orig, access);
+                   ? this
+                   : new Intersection(factory, id, subplansSupplier.orig, access);
         }
 
         @Nullable
@@ -1157,6 +1157,12 @@ abstract public class Plan
         }
     }
 
+    private static double annSearchCost(int estimatedNodesVisited, int limit)
+    {
+        return estimatedNodesVisited * (ANN_SIMILARITY_COST + hrs(ANN_EDGELIST_COST) / ANN_DEGREE)
+               + limit * hrs(CostCoefficients.ANN_SCORED_KEY_COST);
+    }
+
     /**
      * Sorts keys in ANN order.
      * Must fetch all keys from the source before sorting, so it has a high initial cost.
@@ -1195,20 +1201,22 @@ abstract public class Plan
         protected KeysIterationCost estimateCost()
         {
             return ordering.isANN()
-                ? estimateAnnSortCost()
-                : estimateGlobalSortCost();
+                   ? estimateAnnSortCost()
+                   : estimateGlobalSortCost();
 
         }
 
         private KeysIterationCost estimateAnnSortCost()
         {
             double expectedKeys = access.expectedAccessCount(source.expectedKeys());
+            int expectedKeysInt = max(1, (int) Math.ceil(expectedKeys));
             double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables
                               + source.fullCost()
                               + source.expectedKeys() * CostCoefficients.ANN_INPUT_KEY_COST;
-            return new KeysIterationCost(expectedKeys,
-                                         initCost,
-                                         expectedKeys * hrs(CostCoefficients.ANN_SCORED_KEY_COST));
+            int estimatedNodes = factory.costEstimator.estimateAnnNodesVisited(ordering,
+                                                                               expectedKeysInt,
+                                                                               Math.max(1, (int) Math.ceil(source.expectedKeys())));
+            return new KeysIterationCost(expectedKeys, initCost, annSearchCost(estimatedNodes, expectedKeysInt));
         }
 
         private KeysIterationCost estimateGlobalSortCost()
@@ -1239,8 +1247,8 @@ abstract public class Plan
         protected KeysSort withAccess(Access access)
         {
             return Objects.equals(access, this.access)
-                ? this
-                : new KeysSort(factory, id, source, access, ordering);
+                   ? this
+                   : new KeysSort(factory, id, source, access, ordering);
         }
     }
 
@@ -1261,15 +1269,14 @@ abstract public class Plan
         @Override
         protected KeysIterationCost estimateCost()
         {
-            double keysCount = access.expectedAccessCount(factory.tableMetrics.rows);
-            int limit = Math.max(1, (int) Math.ceil(keysCount));
-            int initNodesCount = factory.costEstimator.estimateAnnNodesVisited(ordering,
-                                                                               limit,
+            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows);
+            int expectedKeysInt = Math.max(1, (int) Math.ceil(expectedKeys));
+            int estimatedNodes = factory.costEstimator.estimateAnnNodesVisited(ordering,
+                                                                               expectedKeysInt,
                                                                                factory.tableMetrics.rows);
-            double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables + initNodesCount * (ANN_SIMILARITY_COST + hrs(ANN_EDGELIST_COST) / ANN_DEGREE);
-            return new KeysIterationCost(keysCount,
-                                         initCost,
-                                         keysCount * hrs(CostCoefficients.ANN_SCORED_KEY_COST));
+            double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables;
+            double scanCost = annSearchCost(estimatedNodes, expectedKeysInt);
+            return new KeysIterationCost(expectedKeys, initCost, scanCost);
         }
 
         @Nullable
@@ -1394,8 +1401,8 @@ abstract public class Plan
         protected Fetch withAccess(Access access)
         {
             return Objects.equals(access, this.access)
-                ? this
-                : new Fetch(factory, id, source.orig, access);
+                   ? this
+                   : new Fetch(factory, id, source.orig, access);
         }
     }
 
@@ -1469,8 +1476,8 @@ abstract public class Plan
         protected Filter withAccess(Access access)
         {
             return Objects.equals(access, this.access)
-                ? this
-                : new Filter(factory, id, filter, source.orig, targetSelectivity, access);
+                   ? this
+                   : new Filter(factory, id, filter, source.orig, targetSelectivity, access);
         }
 
         @Override
@@ -1981,8 +1988,8 @@ abstract public class Plan
                 totalCount += counts[i];
 
             return limit > totalCount
-               ? this
-               : this.scaleCount(limit / totalCount);
+                   ? this
+                   : this.scaleCount(limit / totalCount);
         }
 
         /** Multiplies all counts by a constant without changing the distribution */
