@@ -29,6 +29,7 @@ import org.junit.Test;
 import com.datastax.driver.core.PlainTextAuthProvider;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
+import com.datastax.driver.core.exceptions.AuthenticationException;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
@@ -36,17 +37,23 @@ import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.IMessageFilters.Filter;
+import org.apache.cassandra.distributed.api.SimpleQueryResult;
 import org.apache.cassandra.distributed.api.TokenSupplier;
-import org.apache.cassandra.distributed.util.Auth;
 import org.apache.cassandra.locator.SimpleSeedProvider;
 import org.apache.cassandra.service.StorageService;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_DEFAULT_ROLE_SETUP;
+import static org.apache.cassandra.distributed.action.GossipHelper.withProperty;
+import static org.apache.cassandra.distributed.api.ConsistencyLevel.ONE;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.apache.cassandra.distributed.util.Auth.waitForExistingRoles;
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class AuthTest extends TestBaseImpl
@@ -82,7 +89,7 @@ public class AuthTest extends TestBaseImpl
                                                                     .set("authenticator", "PasswordAuthenticator"))
                                         .start())
         {
-            Auth.waitForExistingRoles(cluster.get(1));
+            waitForExistingRoles(cluster.get(1));
 
             long writeTime = getPasswordWritetime(cluster.coordinator(1));
             // TIMESTAMP 0 in action
@@ -101,7 +108,7 @@ public class AuthTest extends TestBaseImpl
             Filter from = cluster.filters().allVerbs().outbound().drop();
 
             secondNode.startup();
-            Auth.waitForExistingRoles(secondNode);
+            waitForExistingRoles(secondNode);
 
             long passwordWritetimeOnSecondNode = getPasswordWritetime(cluster.coordinator(2));
 
@@ -152,6 +159,42 @@ public class AuthTest extends TestBaseImpl
             doWithSession("127.0.0.1",
                           "datacenter1",
                           "newpassword", session -> session.execute("select * from system.local"));
+        }
+    }
+
+    @Test
+    public void testSkipDefaultRoleCreation() throws Exception
+    {
+        try (Cluster cluster = builder().withDCs(1)
+                                        .withNodes(1)
+                                        .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(1, 1))
+                                        .withConfig(config -> config.with(NETWORK, GOSSIP, NATIVE_PROTOCOL)
+                                                                    .with()
+                                                                    .set("authenticator", "PasswordAuthenticator"))
+                                        .createWithoutStarting()) // don't start the cluster yet as we need to set the skip_default_role_setup property first
+        {
+            withProperty(SKIP_DEFAULT_ROLE_SETUP, true,
+                         cluster::startup);
+
+            waitForExistingRoles(cluster.get(1));
+
+            long writeTime = getPasswordWritetime(cluster.coordinator(1));
+            // TIMESTAMP 1 when skip_default_role_setup is true
+            assertEquals(1, writeTime);
+
+            String defaultRoleQuery = "select is_superuser, can_login, salted_hash from system_auth.roles where role = 'cassandra'";
+            SimpleQueryResult result = cluster.coordinator(1).executeWithResult(defaultRoleQuery, ONE);
+            assertTrue(result.hasNext());
+            org.apache.cassandra.distributed.api.Row row = result.next();
+            assertFalse(row.get("is_superuser"));
+            assertFalse(row.get("can_login"));
+            assertEquals("", row.get("salted_hash"));
+
+            // make sure SU cannot really login
+            assertThrows(AuthenticationException.class, () -> doWithSession("127.0.0.1",
+                                                                            "datacenter1",
+                                                                            "cassandra",
+                                                                            session -> session.execute(defaultRoleQuery)));
         }
     }
 
