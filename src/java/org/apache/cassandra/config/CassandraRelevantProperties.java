@@ -479,8 +479,8 @@ public enum CassandraRelevantProperties
     DURATION_IN_MAPS_COMPATIBILITY_MODE("cassandra.types.map.duration_in_map_compatibility_mode", "false"),
 
     /**
-     * If true, the searcher object created when opening a SAI index will be replaced by a dummy object that throws
-     * if a search is attempted. This is obviously usually undesirable, but can be used if the node only compact
+     * If true, the searcher object created when opening a SAI index will be replaced by a dummy object that always
+     * return empty results. This is obviously usually undesirable, but can be used if the node only compact
      * sstables to avoid loading heavy index data structures in memory that are not used.
      */
     SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false");

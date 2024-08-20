@@ -91,19 +91,8 @@ public class SSTableIndex
     {
         if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
         {
-            logger.info("Creating dummy index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
-            return new EmptyIndex()
-            {
-                @Override
-                public RangeIterator search(Expression expression,
-                                            AbstractBounds<PartitionPosition> keyRange,
-                                            QueryContext context,
-                                            boolean defer,
-                                            int limit) throws IOException
-                {
-                    throw new UnsupportedOperationException("SAI index reads are disabled (see '" + CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getKey() + "' property)");
-                }
-            };
+            logger.info("Creating dummy (empty) index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
+            return new EmptyIndex();
         }
 
         return perIndexComponents.version().onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);

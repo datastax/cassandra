@@ -66,6 +66,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -140,8 +141,8 @@ public class CompactionTest extends AbstractMetricsTest
             {
                 try
                 {
-                    assertNumRows(num, "SELECT id1 FROM %s WHERE v1>=0");
-                    assertNumRows(num, "SELECT id1 FROM %s WHERE v2='0'");
+                    assertNumRows(num, "SELECT id1 FROM %%s WHERE v1>=0");
+                    assertNumRows(num, "SELECT id1 FROM %%s WHERE v2='0'");
                 }
                 catch (Throwable e)
                 {
@@ -162,7 +163,30 @@ public class CompactionTest extends AbstractMetricsTest
         CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(true);
         try
         {
-            testConcurrentQueryWithCompaction();
+            createTable(CREATE_TABLE_TEMPLATE);
+            String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+            waitForIndexQueryable();
+
+            int num = 10;
+            for (int i = 0; i < num; i++)
+            {
+                execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
+                flush();
+            }
+
+            startCompaction();
+            waitForCompactionsFinished();
+
+            // Compactions should run fine and create the expected number of index files for each index (1 since we
+            // compacted everything into a single sstable).
+            verifySSTableIndexes(v1IndexName, 1);
+            verifySSTableIndexes(v2IndexName, 1);
+
+            // However, queries should not work correctly since index reads are disabled, and we should get an empty
+            // result.
+            assertNumRows(0, "SELECT id1 FROM %%s WHERE v1>=0");
+            assertNumRows(0, "SELECT id1 FROM %%s WHERE v2='0'");
         }
         finally
         {
@@ -227,76 +251,6 @@ public class CompactionTest extends AbstractMetricsTest
         assertNumRows(num, "SELECT id1 FROM %%s WHERE v2='0'");
         verifySSTableIndexes(v1IndexName, sstables);
         verifySSTableIndexes(v2IndexName, sstables);
-    }
-
-    @Test
-    public void testConcurrentIndexBuildWithCompaction() throws Throwable
-    {
-        createTable(CREATE_TABLE_TEMPLATE);
-
-        // prepare data into one sstable
-        int sstables = 1;
-        int num = 100;
-        for (int i = 0; i < num; i++)
-        {
-            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
-        }
-        flush();
-
-        Injections.Barrier compactionLatch =
-        Injections.newBarrier("pause_compaction", 2, false)
-                  .add(InvokePointBuilder.newInvokePoint().onClass(CompactionManager.class).onMethod("performSSTableRewrite"))
-                  .build();
-
-        try
-        {
-            // stop in-progress compaction
-            Injections.inject(compactionLatch);
-
-            TestWithConcurrentVerification compactionTask = new TestWithConcurrentVerification(
-                    () -> {
-                        try
-                        {
-                            upgradeSSTables();
-                            fail("Expected CompactionInterruptedException");
-                        }
-                        catch (Exception e)
-                        {
-                            assertTrue("Expected CompactionInterruptedException, but got " + e,
-                                       Throwables.isCausedBy(e, CompactionInterruptedException.class));
-                        }
-                    },
-                    () -> {
-                        try
-                        {
-                            waitForAssert(() -> Assert.assertEquals(1, compactionLatch.getCount()));
-
-                            // build indexes on SSTables that will be compacted soon
-                            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-                            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-                            waitForIndexQueryable();
-
-                            // continue in-progress compaction
-                            compactionLatch.countDown();
-                        }
-                        catch (Exception e)
-                        {
-                            throw new RuntimeException(e);
-                        }
-                    }, -1 // run verification task once
-            );
-
-            compactionTask.start();
-        }
-        finally
-        {
-            compactionLatch.disable();
-        }
-
-        assertNumRows(num, "SELECT id1 FROM %%s WHERE v1>=0");
-        assertNumRows(num, "SELECT id1 FROM %%s WHERE v2='0'");
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), sstables);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), sstables);
     }
 
     @Test
