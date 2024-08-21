@@ -70,7 +70,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -90,7 +89,6 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -1858,9 +1856,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     public void makeIndexQueryable(Index index, Index.Status status)
     {
-        if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
-            return;
-
         String name = index.getIndexMetadata().name;
         if (indexes.get(name) == index)
         {

@@ -256,7 +256,7 @@ public class CompactionTest extends AbstractMetricsTest
     // This test probably never worked, but initially `TestWithConcurrentVerification` was also not working properly
     // and was ignoring errors throw during the `verificationTask`, hidding the problem with this test.
     // `TestWithConcurrentVerification` was fixed, leading to this failing, and it's not immediately clear what the
-    // right fix, so for not it is ignored, but it should eventually be fixed.
+    // right fix should be, so for now it is ignored, but it should eventually be fixed.
     @Ignore
     public void testConcurrentIndexBuildWithCompaction() throws Throwable
     {

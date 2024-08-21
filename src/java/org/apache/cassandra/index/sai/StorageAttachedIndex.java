@@ -52,6 +52,7 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
@@ -714,7 +715,8 @@ public class StorageAttachedIndex implements Index
     @Override
     public boolean isQueryable(Status status)
     {
-        return status == Status.BUILD_SUCCEEDED || status == Status.UNKNOWN;
+        return !CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean()
+            && (status == Status.BUILD_SUCCEEDED || status == Status.UNKNOWN);
     }
 
     @Override
