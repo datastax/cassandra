@@ -173,7 +173,7 @@ public class FileHandle extends SharedCloseableImpl
         Rebufferer.BufferHolder bufferHolder = position > 0
                                                ? Rebufferer.emptyBufferHolderAt(position)
                                                : Rebufferer.EMPTY;
-        return new RandomAccessReader(instantiateRebufferer(limiter), bufferHolder, order);
+        return new RandomAccessReader(instantiateRebufferer(limiter), order, bufferHolder);
     }
 
     /**
