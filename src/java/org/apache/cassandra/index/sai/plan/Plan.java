@@ -769,7 +769,9 @@ abstract public class Plan
         {
             double expectedKeys = access.expectedAccessCount(matchingKeysCount);
             double costPerKey = access.unitCost(SAI_KEY_COST, this::estimateCostPerSkip);
-            double initCost = SAI_OPEN_COST * factory.tableMetrics.sstables;
+            // we hit-rate-scale the open cost, but not the per-key cost, under the assumption that
+            // readahead against the postings file will mostly amortize the penalty when hitting disk per key
+            double initCost = hrs(SAI_OPEN_COST) * factory.tableMetrics.sstables;
             double iterCost = expectedKeys * costPerKey;
             return new KeysIterationCost(expectedKeys, initCost, iterCost);
         }
@@ -1159,6 +1161,7 @@ abstract public class Plan
 
     private static double annSearchCost(int estimatedNodesVisited, int limit)
     {
+        // VSTODO this should use rerankK instead of limit
         return estimatedNodesVisited * (ANN_SIMILARITY_COST + hrs(ANN_EDGELIST_COST) / ANN_DEGREE)
                + limit * hrs(CostCoefficients.ANN_SCORED_KEY_COST);
     }
@@ -1210,9 +1213,9 @@ abstract public class Plan
         {
             double expectedKeys = access.expectedAccessCount(source.expectedKeys());
             int expectedKeysInt = max(1, (int) Math.ceil(expectedKeys));
-            double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables
+            double initCost = ANN_SORT_OPEN_COST * factory.tableMetrics.sstables
                               + source.fullCost()
-                              + source.expectedKeys() * CostCoefficients.ANN_INPUT_KEY_COST;
+                              + source.expectedKeys() * CostCoefficients.ANN_SORT_KEY_COST;
             int estimatedNodes = factory.costEstimator.estimateAnnNodesVisited(ordering,
                                                                                expectedKeysInt,
                                                                                Math.max(1, (int) Math.ceil(source.expectedKeys())));
@@ -1274,7 +1277,7 @@ abstract public class Plan
             int estimatedNodes = factory.costEstimator.estimateAnnNodesVisited(ordering,
                                                                                expectedKeysInt,
                                                                                factory.tableMetrics.rows);
-            double initCost = ANN_OPEN_COST * factory.tableMetrics.sstables;
+            double initCost = 0; // negligible
             double scanCost = annSearchCost(estimatedNodes, expectedKeysInt);
             return new KeysIterationCost(expectedKeys, initCost, scanCost);
         }
@@ -1826,17 +1829,17 @@ abstract public class Plan
         public final static double POINT_LOOKUP_SKIP_COST_DISTANCE_FACTOR = 0.1;
         public final static double POINT_LOOKUP_SKIP_COST_DISTANCE_EXPONENT = 0.5;
 
-        /** Cost to open the per-sstable index, read metadata and obtain the iterators. */
-        public final static double SAI_OPEN_COST = 10.0;
+        /** Cost to open the per-sstable index, read metadata and obtain the iterators.  Affected by cache hit rate. */
+        public final static double SAI_OPEN_COST = 1500.0;
 
         /** Cost to advance the index iterator to the next key and load the key. Common for literal and numeric indexes. */
-        public final static double SAI_KEY_COST = 1.0;
+        public final static double SAI_KEY_COST = 0.1;
 
-        /** Cost to open the vector index and get ready for the search */
-        public final static double ANN_OPEN_COST = 1.0;
+        /** Cost to begin processing rows into index ordrinals for estimateAnnSortCost */
+        public final static double ANN_SORT_OPEN_COST = 5500.0;
 
-        /** Additional overhead needed by processing each input key fed to the ANN index searcher */
-        public final static double ANN_INPUT_KEY_COST = 0.5;
+        /** Additional overhead needed to process each input key fed to the ANN index searcher */
+        public final static double ANN_SORT_KEY_COST = 0.17;
 
         /** Cost to get a scored key from DiskANN (~rerank cost). Affected by cache hit rate */
         public final static double ANN_SCORED_KEY_COST = 50.0;
@@ -1851,7 +1854,7 @@ abstract public class Plan
         public final static int ANN_DEGREE = 2 * IndexWriterConfig.DEFAULT_MAXIMUM_NODE_CONNECTIONS;
 
         /** Cost to fetch one row from storage. Affected by cache hit rate */
-        public final static double ROW_COST = 200.0;
+        public final static double ROW_COST = 100.0;
 
         /** Additional cost added to row fetch cost per each row cell */
         public final static double ROW_CELL_COST = 0.4;
