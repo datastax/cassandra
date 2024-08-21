@@ -36,6 +36,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -936,6 +937,7 @@ public class SAITester extends CQLTester
 
         public void start()
         {
+            AtomicReference<RuntimeException> verificationExeption = new AtomicReference<>();
             Thread verificationThread = new Thread(() -> {
                 verificationStarted.countDown();
 
@@ -950,7 +952,8 @@ public class SAITester extends CQLTester
                     }
                     catch (Throwable e)
                     {
-                        throw Throwables.unchecked(e);
+                        verificationExeption.set(Throwables.unchecked(e));
+                        return;
                     }
                 }
             });
@@ -964,6 +967,9 @@ public class SAITester extends CQLTester
                 taskCompleted.countDown();
 
                 verificationThread.join(verificationMaxInMs);
+                RuntimeException rte = verificationExeption.get();
+                if (rte != null)
+                    throw rte;
             }
             catch (InterruptedException e)
             {
