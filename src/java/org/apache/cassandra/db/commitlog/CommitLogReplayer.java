@@ -374,7 +374,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
             };
             return Stage.MUTATION.submit(runnable, serializedSize).exceptionally( ex ->
                              {
-                                 noSpamLogger.warn("failed applying mutation for keyspace {}", mutation.getKeyspaceName(), ex);
+                                 noSpamLogger.warn("Failed applying mutation for keyspace {}", mutation.getKeyspaceName(), ex);
                                  onFailedMutation(mutation.getKeyspaceName(), mutation.getTableIds());
                                  commitLogReplayer.segmentsWithFailedMutations.add(desc.fileName());
                                  throw Throwables.throwAsUncheckedException(ex.getCause());
