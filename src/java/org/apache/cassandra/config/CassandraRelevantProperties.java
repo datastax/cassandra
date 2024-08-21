@@ -480,7 +480,14 @@ public enum CassandraRelevantProperties
      * maps. When the check is disabled, Cassandra will refuse to load the data with such maps and won't start if
      * the schema contains them.
      */
-    DURATION_IN_MAPS_COMPATIBILITY_MODE("cassandra.types.map.duration_in_map_compatibility_mode", "false");
+    DURATION_IN_MAPS_COMPATIBILITY_MODE("cassandra.types.map.duration_in_map_compatibility_mode", "false"),
+
+    /**
+     * If true, the searcher object created when opening a SAI index will be replaced by a dummy object and index
+     * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
+     * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
+     */
+    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
