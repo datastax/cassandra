@@ -577,6 +577,13 @@ public enum CassandraRelevantProperties
     /** Controls the hnsw vector cache size, in bytes, per index segment. 0 to disable */
     SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
 
+    /**
+     * If true, the searcher object created when opening a SAI index will be replaced by a dummy object and index
+     * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
+     * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
+     */
+    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
+
     /** Controls the maximum number of index query intersections that will take part in a query */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
 
