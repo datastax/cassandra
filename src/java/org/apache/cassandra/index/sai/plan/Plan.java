@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
@@ -1161,7 +1162,6 @@ abstract public class Plan
 
     private static double annSearchCost(int estimatedNodesVisited, int limit)
     {
-        // VSTODO this should use rerankK instead of limit
         return estimatedNodesVisited * (ANN_SIMILARITY_COST + hrs(ANN_EDGELIST_COST) / ANN_DEGREE)
                + limit * hrs(CostCoefficients.ANN_SCORED_KEY_COST);
     }
@@ -1835,20 +1835,24 @@ abstract public class Plan
         /** Cost to advance the index iterator to the next key and load the key. Common for literal and numeric indexes. */
         public final static double SAI_KEY_COST = 0.1;
 
-        /** Cost to begin processing rows into index ordrinals for estimateAnnSortCost */
-        public final static double ANN_SORT_OPEN_COST = 5500.0;
+        /** Cost to begin processing PKs into index ordinals for estimateAnnSortCost */
+        // DC introduced the one-to-many ordinal mapping optimization
+        public final static double ANN_SORT_OPEN_COST = Version.latest().onOrAfter(Version.DC) ? 370 : 4200;
 
         /** Additional overhead needed to process each input key fed to the ANN index searcher */
-        public final static double ANN_SORT_KEY_COST = 0.17;
+        // DC introduced the one-to-many ordinal mapping optimization
+        public final static double ANN_SORT_KEY_COST = Version.latest().onOrAfter(Version.DC) ? 0.03 : 0.2;
 
         /** Cost to get a scored key from DiskANN (~rerank cost). Affected by cache hit rate */
-        public final static double ANN_SCORED_KEY_COST = 50.0;
+        // NB: the actual cost per rerank op is close to 15, but we've doubled it here to make up for
+        // our planning using LIMIT instead of rerankK
+        public final static double ANN_SCORED_KEY_COST = 30;
 
         /** Cost to perform a coarse (PQ or BQ) in-memory similarity computation */
-        public final static double ANN_SIMILARITY_COST = 4.0;
+        public final static double ANN_SIMILARITY_COST = 0.5;
 
         /** Cost to load the neighbor list for a DiskANN node. Affected by cache hit rate */
-        public final static double ANN_EDGELIST_COST = 10.0;
+        public final static double ANN_EDGELIST_COST = 20.0;
 
         /** assume all graphs have this degree, for now */
         public final static int ANN_DEGREE = 2 * IndexWriterConfig.DEFAULT_MAXIMUM_NODE_CONNECTIONS;
