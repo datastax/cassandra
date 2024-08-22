@@ -21,8 +21,6 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 import java.util.function.Supplier;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseBits;
 
@@ -30,16 +28,16 @@ public interface OrdinalsView extends AutoCloseable
 {
     interface OrdinalConsumer
     {
-        void accept(long rowId, int ordinal) throws IOException;
+        void accept(int rowId, int ordinal) throws IOException;
     }
 
     /** return the vector ordinal associated with the given row, or -1 if no vectors are associated with it */
     int getOrdinalForRowId(int rowId) throws IOException;
 
     /**
-     * iterates over all ordinals in the view.  order of iteration is undefined.
+     * iterates over all ordinals in the view.  order of iteration is undefined. Only calls consumer for valid mappings
+     * from row id to ordinal.
      */
-    @VisibleForTesting
     void forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException;
 
     default Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
