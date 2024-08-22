@@ -169,9 +169,13 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
     }
 
+    /**
+     * @return the ordinal of the vector in the graph, or -1 if the vector is not in the graph
+     */
     public int getOrdinal(VectorFloat<?> vector)
     {
-        return postingsMap.get(vector).getOrdinal();
+        VectorPostings<T> postings = postingsMap.get(vector);
+        return postings == null ? -1 : postings.getOrdinal();
     }
 
     /**
