@@ -26,6 +26,7 @@ import java.util.UUID;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.io.FSDiskFullWriteError;
@@ -39,6 +40,10 @@ import static com.google.common.base.Throwables.propagate;
 
 public abstract class AbstractCompactionTask extends WrappedRunnable
 {
+    // See CNDB-10549
+    static final boolean SKIP_REPAIR_STATE_CHECKING =
+        CassandraRelevantProperties.COMPACTION_SKIP_REPAIR_STATE_CHECKING.getBoolean();
+
     protected final CompactionRealm realm;
     protected LifecycleTransaction transaction;
     protected boolean isUserDefined;
@@ -79,7 +84,10 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
      */
     private void validateSSTables(Set<SSTableReader> sstables)
     {
-        // do not allow  to be compacted together
+        if (SKIP_REPAIR_STATE_CHECKING)
+            return;
+
+        // do not allow sstables in different repair states to be compacted together
         if (!sstables.isEmpty())
         {
             Iterator<SSTableReader> iter = sstables.iterator();
