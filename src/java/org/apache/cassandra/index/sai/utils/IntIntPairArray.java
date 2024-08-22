@@ -52,7 +52,7 @@ public class IntIntPairArray
     public void add(int x, int y)
     {
         if (size == capacity)
-            throw new IllegalStateException("Array is full");
+            throw new IndexOutOfBoundsException(size);
         array[size * 2] = x;
         array[size * 2 + 1] = y;
         size++;

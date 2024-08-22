@@ -48,7 +48,7 @@ public class IntIntPairArrayTest
         assertEquals(10, accumulator.get());
     }
 
-    @Test(expected = IllegalStateException.class)
+    @Test(expected = IndexOutOfBoundsException.class)
     public void testAddToFullArray()
     {
         IntIntPairArray array = new IntIntPairArray(1);
