@@ -177,7 +177,7 @@ public class Descriptor
         return new File(directory.toPath().resolve(tmpFilenameForStreaming(component)));
     }
 
-    private String filenameFor(Component component)
+    public String filenameFor(Component component)
     {
         return prefix + separator + component.name();
     }
