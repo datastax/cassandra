@@ -238,18 +238,18 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             if (initialCostEstimate.shouldUseBruteForce())
             {
                 var maxSize = endSegmentRowId - startSegmentRowId + 1;
-                var segmentToOrdinalMap = new IntIntPairArray(maxSize);
+                var segmentOrdinalPairs = new IntIntPairArray(maxSize);
                 try (var ordinalsView = graph.getOrdinalsView())
                 {
-                    ordinalsView.forEachOrdinalInRange(startSegmentRowId, endSegmentRowId, segmentToOrdinalMap::add);
+                    ordinalsView.forEachOrdinalInRange(startSegmentRowId, endSegmentRowId, segmentOrdinalPairs::add);
                 }
 
                 // When we have a threshold, we only need to filter the results, not order them, because it means we're
                 // evaluating a boolean predicate in the SAI pipeline that wants to collate by PK
                 if (threshold > 0)
-                    return filterByBruteForce(queryVector, segmentToOrdinalMap, threshold);
+                    return filterByBruteForce(queryVector, segmentOrdinalPairs, threshold);
                 else
-                    return orderByBruteForce(queryVector, segmentToOrdinalMap, limit, rerankK);
+                    return orderByBruteForce(queryVector, segmentOrdinalPairs, limit, rerankK);
             }
 
             // create a bitset of ordinals corresponding to the rows in the given key range
@@ -278,13 +278,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
     }
 
-    private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, IntIntPairArray segmentToOrdinalMap, int limit, int rerankK) throws IOException
+    private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, IntIntPairArray segmentOrdinalPairs, int limit, int rerankK) throws IOException
     {
         // If we use compressed vectors, we still have to order rerankK results using full resolution similarity
         // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
-        if (graph.getCompressedVectors() != null && segmentToOrdinalMap.size() - rerankK > Plan.memoryToDiskFactor() * segmentToOrdinalMap.size())
-            return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentToOrdinalMap, limit, rerankK);
-        return orderByBruteForce(queryVector, segmentToOrdinalMap);
+        if (graph.getCompressedVectors() != null && segmentOrdinalPairs.size() - rerankK > Plan.memoryToDiskFactor() * segmentOrdinalPairs.size())
+            return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentOrdinalPairs, limit, rerankK);
+        return orderByBruteForce(queryVector, segmentOrdinalPairs);
     }
 
     /**
@@ -294,15 +294,15 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      */
     private CloseableIterator<RowIdWithScore> orderByBruteForce(CompressedVectors cv,
                                                                 VectorFloat<?> queryVector,
-                                                                IntIntPairArray segmentToOrdinalMap,
+                                                                IntIntPairArray segmentOrdinalPairs,
                                                                 int limit,
                                                                 int rerankK) throws IOException
     {
-        var approximateScores = new ArrayList<BruteForceRowIdIterator.RowWithApproximateScore>(segmentToOrdinalMap.size());
+        var approximateScores = new ArrayList<BruteForceRowIdIterator.RowWithApproximateScore>(segmentOrdinalPairs.size());
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.precomputedScoreFunctionFor(queryVector, similarityFunction);
 
-        segmentToOrdinalMap.forEachIntPair((segmentRowId, ordinal) -> {
+        segmentOrdinalPairs.forEachIntPair((segmentRowId, ordinal) -> {
             var score = scoreFunction.similarityTo(ordinal);
             approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
         });
@@ -317,10 +317,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      * vectors, read all vectors and put them into a priority queue to rank them lazily. It is assumed that the whole
      * PQ will often not be needed.
      */
-    private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, IntIntPairArray segmentToOrdinalMap) throws IOException
+    private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, IntIntPairArray segmentOrdinalPairs) throws IOException
     {
-        var scoredRowIds = new ArrayList<RowIdWithScore>(segmentToOrdinalMap.size());
-        addScoredRowIdsToCollector(queryVector, segmentToOrdinalMap, 0, scoredRowIds);
+        var scoredRowIds = new ArrayList<RowIdWithScore>(segmentOrdinalPairs.size());
+        addScoredRowIdsToCollector(queryVector, segmentOrdinalPairs, 0, scoredRowIds);
         return new PriorityQueueIterator<>(new PriorityQueue<>(scoredRowIds));
     }
 
@@ -330,16 +330,16 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      * NOTE: because the threshold is not used for ordering, the result is returned in PK order, not score order.
      */
     private CloseableIterator<RowIdWithScore> filterByBruteForce(VectorFloat<?> queryVector,
-                                                                 IntIntPairArray segmentToOrdinalMap,
+                                                                 IntIntPairArray segmentOrdinalPairs,
                                                                  float threshold) throws IOException
     {
-        var results = new ArrayList<RowIdWithScore>(segmentToOrdinalMap.size());
-        addScoredRowIdsToCollector(queryVector, segmentToOrdinalMap, threshold, results);
+        var results = new ArrayList<RowIdWithScore>(segmentOrdinalPairs.size());
+        addScoredRowIdsToCollector(queryVector, segmentOrdinalPairs, threshold, results);
         return CloseableIterator.wrap(results.iterator());
     }
 
     private void addScoredRowIdsToCollector(VectorFloat<?> queryVector,
-                                            IntIntPairArray segmentToOrdinalMap,
+                                            IntIntPairArray segmentOrdinalPairs,
                                             float threshold,
                                             Collection<RowIdWithScore> collector) throws IOException
     {
@@ -347,7 +347,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         try (var vectorsView = graph.getVectorSupplier())
         {
             var esf = vectorsView.getScoreFunction(queryVector, similarityFunction);
-            segmentToOrdinalMap.forEachIntPair((segmentRowId, ordinal) -> {
+            segmentOrdinalPairs.forEachIntPair((segmentRowId, ordinal) -> {
                 var score = esf.similarityTo(ordinal);
                 if (score >= threshold)
                     collector.add(new RowIdWithScore(segmentRowId, score));
@@ -463,8 +463,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
         // Convert PKs to segment row ids and map to ordinals, skipping any that don't exist in this segment
-        var segmentToOrdinalMap = flatmapPrimaryKeysToBitsAndRows(keys);
-        var numRows = segmentToOrdinalMap.size();
+        var segmentOrdinalPairs = flatmapPrimaryKeysToBitsAndRows(keys);
+        var numRows = segmentOrdinalPairs.size();
         final CostEstimate cost = estimateCost(rerankK, numRows);
         Tracing.logAndTrace(logger, "{} relevant rows out of {} in range in index of {} nodes; estimate for LIMIT {} is {}",
                             numRows, keys.size(), graph.size(), limit, cost);
@@ -475,11 +475,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
             var queryVector = vts.createFloatVector(orderer.vector);
-            return toMetaSortedIterator(this.orderByBruteForce(queryVector, segmentToOrdinalMap, limit, rerankK), context);
+            return toMetaSortedIterator(this.orderByBruteForce(queryVector, segmentOrdinalPairs, limit, rerankK), context);
         }
         // Create bits from the mapping
         var bits = bitSetForSearch();
-        segmentToOrdinalMap.forEachRightInt(bits::set);
+        segmentOrdinalPairs.forEachRightInt(bits::set);
         // else ask the index to perform a search limited to the bits we created
         var queryVector = vts.createFloatVector(orderer.vector);
         var results = graph.search(queryVector, limit, rerankK, 0, bits, context, cost::updateStatistics);
@@ -496,7 +496,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      */
     private IntIntPairArray flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
     {
-        var segmentToOrdinalMap = new IntIntPairArray(keysInRange.size());
+        var segmentOrdinalPairs = new IntIntPairArray(keysInRange.size());
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
         {
@@ -580,10 +580,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 int segmentRowId = metadata.toSegmentRowId(sstableRowId);
                 int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
                 if (ordinal >= 0)
-                    segmentToOrdinalMap.add(segmentRowId, ordinal);
+                    segmentOrdinalPairs.add(segmentRowId, ordinal);
             }
         }
-        return segmentToOrdinalMap;
+        return segmentOrdinalPairs;
     }
 
     public static double logBase2(double number) {
