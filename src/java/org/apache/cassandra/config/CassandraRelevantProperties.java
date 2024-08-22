@@ -578,6 +578,14 @@ public enum CassandraRelevantProperties
     SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
 
     /**
+     * If this is true, compaction will not verify that sstables selected for compaction are in the same repair
+     * state. This check is done to ensure that incremental repair is not improperly carried out (potentially causing
+     * data loss) if a node has somehow entered an invalid state. The flag should only be used to recover from
+     * situations where sstables are brought in from outside and carry over stale and unapplicable repair state.
+     */
+    COMPACTION_SKIP_REPAIR_STATE_CHECKING("cassandra.compaction.skip_repair_state_checking", "false"),
+
+    /**
      * If true, the searcher object created when opening a SAI index will be replaced by a dummy object and index
      * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
      * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
