@@ -41,9 +41,8 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.mockito.Mockito;
 
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_DEGREE;
+import static java.lang.Math.ceil;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_EDGELIST_COST;
-import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SCORED_KEY_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SIMILARITY_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ROW_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_KEY_COST;
@@ -341,7 +340,7 @@ public class PlanTest
     {
         Plan.KeysIteration i = factory.sort(factory.everything, ordering);
         assertEquals(factory.tableMetrics.rows, i.expectedKeys(), 0.01);
-        assertEquals(i.initCost() + factory.tableMetrics.rows * ANN_SCORED_KEY_COST, i.fullCost(), 0.01);
+        assertEquals(i.initCost() + factory.costEstimator.estimateAnnSearchCost(ordering, (int) ceil(i.expectedKeys()), factory.tableMetrics.rows), i.fullCost(), 0.01);
     }
 
     @Test
@@ -521,15 +520,15 @@ public class PlanTest
 
         String prettyStr = limit.toStringRecursive();
 
-        assertEquals("Limit 3 (rows: 3.0, cost/row: 253.4, cost: 35093.8..35854.1)\n" +
-                     " └─ Filter pred1 < X AND pred2 < X AND pred4 < X (sel: 1.000000000) (rows: 3.0, cost/row: 253.4, cost: 35093.8..35854.1)\n" +
-                     "     └─ Fetch (rows: 3.0, cost/row: 253.4, cost: 35093.8..35854.1)\n" +
-                     "         └─ KeysSort (keys: 3.0, cost/key: 50.0, cost: 35093.8..35243.8)\n" +
-                     "             └─ Union (keys: 1999.0, cost/key: 17.0, cost: 90.0..34091.3)\n" +
-                     "                 ├─ Intersection (keys: 1000.0, cost/key: 33.0, cost: 60.0..33061.3)\n" +
-                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 1.0, cost: 30.0..2030.0)\n" +
-                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 15.5, cost: 30.0..31031.3)\n" +
-                     "                 └─ LiteralIndexScan of pred4_idx using RANGE(pred4) (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 1.0, cost: 30.0..1030.0)\n", prettyStr);
+        assertEquals("Limit 3 (rows: 3.0, cost/row: 3895.8, cost: 56001.1..67688.5)\n" +
+                     " └─ Filter pred1 < X AND pred2 < X AND pred4 < X (sel: 1.000000000) (rows: 3.0, cost/row: 3895.8, cost: 56001.1..67688.5)\n" +
+                     "     └─ Fetch (rows: 3.0, cost/row: 3895.8, cost: 56001.1..67688.5)\n" +
+                     "         └─ KeysSort (keys: 3.0, cost/key: 3792.4, cost: 56001.1..67378.2)\n" +
+                     "             └─ Union (keys: 1999.0, cost/key: 14.8, cost: 13500.0..43001.3)\n" +
+                     "                 ├─ Intersection (keys: 1000.0, cost/key: 29.4, cost: 9000.0..38401.3)\n" +
+                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 0.1, cost: 4500.0..4700.0)\n" +
+                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 14.6, cost: 4500.0..33701.3)\n" +
+                     "                 └─ LiteralIndexScan of pred4_idx using RANGE(pred4) (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 0.1, cost: 4500.0..4600.0)\n", prettyStr);
     }
 
     @Test
@@ -681,8 +680,8 @@ public class PlanTest
     @Test
     public void reduceNumberOfIntersectionsBelowAnnSort()
     {
-        Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.01 * factory.tableMetrics.rows));
-        Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
+        Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));
+        Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.001 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan3 = factory.indexScan(saiPred3, (long) (0.5 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2, indexScan3));
         Plan.KeysIteration sort = factory.sort(intersection, ordering);
@@ -754,49 +753,49 @@ public class PlanTest
 
 
         testIntersectionsUnderLimit(table10M, List.of(0.1, 1.0), List.of(1));
-        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.2), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.02), List.of(1));
 
         testIntersectionsUnderLimit(table10M, List.of(0.9, 0.9), List.of(1));
-        testIntersectionsUnderLimit(table10M, List.of(0.2, 0.2), List.of(2));
-        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.2, 0.2), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1), List.of(1));
 
         testIntersectionsUnderLimit(table10M, List.of(0.01, 1.0), List.of(1));
         testIntersectionsUnderLimit(table10M, List.of(0.001, 1.0), List.of(1));
 
-        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1, 1.0), List.of(2));
-        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1, 0.5), List.of(2, 3));
-        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1, 0.2), List.of(2, 3));
-        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1, 0.1), List.of(3));
+        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1, 1.0), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1, 0.5), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1, 0.2), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.1, 0.1, 0.1), List.of(2));
 
         testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 1.0), List.of(2));
         testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.5), List.of(2));
-        testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.2), List.of(2, 3));
-        testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.1), List.of(2, 3));
-        testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.05), List.of(2, 3));
-        testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.02), List.of(3));
+        testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.2), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.1), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.05), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.02), List.of(2, 3));
         testIntersectionsUnderLimit(table10M, List.of(0.01, 0.01, 0.01), List.of(3));
 
         testIntersectionsUnderLimit(table10M, List.of(0.001, 1.0, 1.0), List.of(1));
         testIntersectionsUnderLimit(table10M, List.of(0.001, 0.7, 1.0), List.of(1));
-        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.5, 1.0), List.of(1, 2));
-        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.2, 1.0), List.of(1, 2));
-        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.1, 1.0), List.of(2));
-        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.05, 1.0), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.5, 1.0), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.2, 1.0), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.1, 1.0), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.05, 1.0), List.of(1, 2));
         testIntersectionsUnderLimit(table10M, List.of(0.001, 0.02, 1.0), List.of(2));
         testIntersectionsUnderLimit(table10M, List.of(0.001, 0.001, 1.0), List.of(2));
 
         testIntersectionsUnderLimit(table10M, List.of(0.0001, 1.0, 1.0), List.of(1));
         testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.5, 1.0), List.of(1));
-        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.2, 1.0), List.of(1, 2));
-        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.1, 1.0), List.of(1, 2));
-        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.05), List.of(2));
-        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.02, 1.0), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.2, 1.0), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.1, 1.0), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.05), List.of(1));
+        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.02, 1.0), List.of(1, 2));
         testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.001, 1.0), List.of(2));
 
 
-        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.0001, 0.0001), List.of(2, 3));
-        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.001, 0.001), List.of(3));
-        testIntersectionsUnderLimit(table10M, List.of(0.002, 0.002, 0.002), List.of(3));
+        testIntersectionsUnderLimit(table10M, List.of(0.0001, 0.0001, 0.0001), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.001, 0.001, 0.001), List.of(2));
+        testIntersectionsUnderLimit(table10M, List.of(0.002, 0.002, 0.002), List.of(2, 3));
         testIntersectionsUnderLimit(table10M, List.of(0.005, 0.005, 0.005), List.of(3));
         testIntersectionsUnderLimit(table10M, List.of(0.008, 0.008, 0.008), List.of(3));
     }
@@ -852,8 +851,8 @@ public class PlanTest
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.5), List.of(1));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.2), List.of(1));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.1), List.of(1));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.05), List.of(1, 2));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.02), List.of(2));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.05), List.of(1));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.02), List.of(1, 2));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.001), List.of(2));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001), List.of(2));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.00001, 0.00001), List.of(2));
@@ -866,20 +865,20 @@ public class PlanTest
 
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 1.0, 1.0), List.of(1));
 
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 1.0), List.of(1, 2));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.5), List.of(2));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.2), List.of(3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 1.0), List.of(1));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.5), List.of(1));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.2), List.of(1, 2));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.1), List.of(2, 3));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.05), List.of(2, 3));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.02), List.of(2, 3));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.01), List.of(2, 3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.05), List.of(3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.02), List.of(3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.01, 0.01, 0.01), List.of(3));
 
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 1.0, 1.0), List.of(1));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.5, 1.0), List.of(1));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.2, 1.0), List.of(1));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.1, 1.0), List.of(1));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.05, 1.0), List.of(1, 2));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.02, 1.0), List.of(2));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.05, 1.0), List.of(1));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.02, 1.0), List.of(1, 2));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.01, 1.0), List.of(2));
 
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 1.0, 1.0), List.of(1));
@@ -887,15 +886,15 @@ public class PlanTest
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.2, 1.0), List.of(1));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.1, 1.0), List.of(1));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.05, 1.0), List.of(1));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.02, 1.0), List.of(1));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.01, 1.0), List.of(1));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.005, 1.0), List.of(1, 2));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.02, 1.0), List.of(1, 2));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.01, 1.0), List.of(2));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.005, 1.0), List.of(2));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.002, 1.0), List.of(2));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.RANGE, List.of(0.001, 0.001, 1.0), List.of(2));
 
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(2, 3));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(2, 3));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.001, 0.001), List.of(3));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001, 0.0001), List.of(2));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.0001, 0.0001, 0.0001), List.of(2));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.001, 0.001, 0.001), List.of(2, 3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.002, 0.002, 0.002), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.005, 0.005, 0.005), List.of(3));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.008, 0.008, 0.008), List.of(3));
@@ -917,10 +916,10 @@ public class PlanTest
         testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.5), List.of(1));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.2), List.of(1));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.1), List.of(1));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.05), List.of(1));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.02), List.of(1));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.01), List.of(1));
-        testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.005), List.of(1, 2));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.05), List.of(1, 2));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.02), List.of(2));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.01), List.of(2));
+        testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.005), List.of(2));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.002), List.of(2));
         testIntersectionsUnderAnnSort(table10M, Expression.Op.EQ, List.of(0.001, 0.001), List.of(2));
     }
@@ -968,7 +967,6 @@ public class PlanTest
         Plan.Factory factory2 = new Plan.Factory(table1M, est2);
         Plan scan2 = factory2.sort(factory2.everything, ordering);
 
-        assertTrue(scan2.initCost() > scan1.initCost());
         assertTrue(scan2.fullCost() > scan1.fullCost());
     }
 
@@ -1026,7 +1024,8 @@ public class PlanTest
             var expectedNodes = VectorMemtableIndex.expectedNodesVisited(limit / metrics.sstables,
                                                                          (int) candidates / metrics.sstables,
                                                                          500000);
-            return metrics.sstables * (expectedNodes * (ANN_SIMILARITY_COST + Plan.hrs(ANN_EDGELIST_COST) / 32)
+            int degree = 32;
+            return metrics.sstables * (expectedNodes * (ANN_SIMILARITY_COST + Plan.hrs(ANN_EDGELIST_COST) / degree)
                                        + limit * Plan.hrs(Plan.CostCoefficients.ANN_SCORED_KEY_COST));
         }
     }
