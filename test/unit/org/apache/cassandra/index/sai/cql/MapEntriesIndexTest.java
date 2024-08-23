@@ -124,6 +124,32 @@ public class MapEntriesIndexTest extends SAITester
     }
 
     @Test
+    public void basicIntegerEntriesNeqTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // We intentionally use apple, banana, and orange to deal with multiple keys in the trie.
+        // We then search against banana to show that we only get results for banana
+        execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 100, 'banana': 1, 'orange': 2})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (4, {'apple': -10, 'banana': 3, 'orange': 2})");
+        flush();
+        execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 50, 'banana': 2, 'orange': 1})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 10, 'banana': 1, 'orange': 3})");
+
+        // Test range over both sstable and memtable, then over two sstables
+        beforeAndAfterFlush(this::assertIntNeqQueries);
+    }
+
+    private void assertIntNeqQueries()
+    {
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['banana'] != 1"), row(2), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['banana'] != 2 AND item_cost['banana'] != 3"), row(1), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['banana'] != 1 OR item_cost['apple'] >= 20"), row(1), row(2), row(4));
+    }
+
+    @Test
     public void queryMissingKeyTest()
     {
         createTable("CREATE TABLE %s (partition int primary key, coordinates map<text, int>)");
