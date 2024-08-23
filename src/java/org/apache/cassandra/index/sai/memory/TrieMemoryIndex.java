@@ -82,7 +82,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private final MemtableTrie<PrimaryKeys> data;
     private final LongAdder heapAllocations;
     private final PrimaryKeysAccumulator primaryKeysAccumulator;
-    private final PrimaryKeysReducer primaryKeysReducer;
+    private final PrimaryKeysRemover primaryKeysRemover;
     private final boolean analyzerTransformsValue;
 
     private final Memtable memtable;
@@ -111,8 +111,8 @@ public class TrieMemoryIndex extends MemoryIndex
         this.keyBounds = keyBounds;
         this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
         this.heapAllocations = new LongAdder();
-        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations, DUMMY);
-        this.primaryKeysReducer = new PrimaryKeysReducer(heapAllocations);
+        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations, PLACEHOLDER);
+        this.primaryKeysRemover = new PrimaryKeysRemover(heapAllocations);
         this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
         this.memtable = memtable;
     }
@@ -144,27 +144,27 @@ public class TrieMemoryIndex extends MemoryIndex
                 // this update call. Note that we're within the synchronized block on this class.
                 var ref = new Object();
                 primaryKeysAccumulator.setReference(ref);
-                primaryKeysReducer.setReference(ref);
+                primaryKeysRemover.setReference(ref);
             }
             else
             {
                 // In this case, the oldValue and newValue are comparable and we can determine before
                 // calling applyTransformer whether they are the same.
                 primaryKeysAccumulator.setReference(PLACEHOLDER);
-                primaryKeysReducer.setReference(null);
+                primaryKeysRemover.setReference(null);
             }
 
             // Add before removing to prevent a period where the value is not available in the index
             if (newValue != null && newValue.hasRemaining())
                 applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
             if (oldValue != null && oldValue.hasRemaining())
-                applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysReducer);
+                applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysRemover);
         }
         finally
         {
             // Return the accumulator and reducer to their default state.
             primaryKeysAccumulator.setReference(PLACEHOLDER);
-            primaryKeysReducer.setReference(null);
+            primaryKeysRemover.setReference(null);
         }
     }
 
@@ -183,7 +183,7 @@ public class TrieMemoryIndex extends MemoryIndex
             // this update call. Note that we're within the synchronized block on this class.
             var ref = new Object();
             primaryKeysAccumulator.setReference(ref);
-            primaryKeysReducer.setReference(ref);
+            primaryKeysRemover.setReference(ref);
 
             // Add before removing to prevent a period where the values are not available in the index
             while (newValues != null && newValues.hasNext())
@@ -197,13 +197,13 @@ public class TrieMemoryIndex extends MemoryIndex
             {
                 ByteBuffer oldValue = oldValues.next();
                 if (oldValue != null && oldValue.hasRemaining())
-                    applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysReducer);
+                    applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysRemover);
             }
         }
         finally
         {
-            primaryKeysAccumulator.setReference(DUMMY);
-            primaryKeysReducer.setReference(null);
+            primaryKeysAccumulator.setReference(PLACEHOLDER);
+            primaryKeysRemover.setReference(null);
         }
     }
 
@@ -447,14 +447,14 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     /**
-     * Reducer that removes a primary key from the primary keys set, if present.
+     * Transformer that removes a primary key from the primary keys set, if present.
      */
-    static class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    static class PrimaryKeysRemover implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
         private Object ref;
 
-        PrimaryKeysReducer(LongAdder heapAllocations)
+        PrimaryKeysRemover(LongAdder heapAllocations)
         {
             this.heapAllocations = heapAllocations;
         }
