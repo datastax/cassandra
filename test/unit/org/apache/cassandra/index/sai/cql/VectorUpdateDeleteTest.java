@@ -28,13 +28,17 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
 
 @RunWith(Parameterized.class)
 public class VectorUpdateDeleteTest extends VectorTester
@@ -973,5 +977,32 @@ public class VectorUpdateDeleteTest extends VectorTester
         flush();
 
         verifySSTableIndexes(indexName, 1);
+    }
+
+    @Test
+    public void testTTLOverwriteHasCorrectOnDiskRowCount() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int primary key, val vector<float, 3>)");
+        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0, 3.0]) USING TTL 1");
+
+        // Let the ttl expire
+        Thread.sleep(1000);
+
+        execute("INSERT INTO %s (pk, val) VALUES (0, [2, 3, 4])");
+
+        var sai = (StorageAttachedIndex) Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).getIndexManager().getIndexByName(indexName);
+        var indexes = sai.getIndexContext().getLiveMemtables().values();
+        assertEquals("Expect just one memtable index", 1, indexes.size());
+        var vectorIndex = (VectorMemtableIndex) indexes.iterator().next();
+        assertEquals("We dont' remove vectors, so we're still stuck with it", 2, vectorIndex.size());
+
+        // Flush to build the on disk graph (before the fix, flush failed due to a row having two vectors)
+        flush();
+
+        // Ensure that we only have one vector
+        assertEquals("The TTL'd row is overwritten and removed during flush.", 1, sai.getIndexContext().getCellCount());
     }
 }
