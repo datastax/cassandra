@@ -283,6 +283,10 @@ public class VectorMemtableIndex implements MemtableIndex
             if (v == null)
                 return;
             var i = graph.getOrdinal(v);
+            if (i < 0)
+                // might happen if the vector and/or its postings have been removed in the meantime between getting the
+                // vector and getting the ordinal (graph#vectorForKey and graph#getOrdinal are not synchronized)
+                return;
             keysInGraph.add(k);
             relevantOrdinals.add(i);
         });
