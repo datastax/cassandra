@@ -19,7 +19,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.Iterator;
 import java.util.SortedSet;
-import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 
 import org.apache.cassandra.utils.ObjectSizes;
 
@@ -35,39 +35,33 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
     // from https://github.com/gaul/java-collection-overhead
     private static final long MAP_ENTRY_OVERHEAD = 36;
 
-    // We store a mapping from PrimaryKey to an Object to allow for put-first semantics with a subsequent remove
-    // that only removes the key if the object reference is different from the one that was put. This is used
-    // to simplify updates to collection columns and to analyzed text columns.
-    private final ConcurrentSkipListMap<PrimaryKey, Object> keys = new ConcurrentSkipListMap<>();
+    private final ConcurrentSkipListSet<PrimaryKey> keys = new ConcurrentSkipListSet<>();
 
     /**
      * Adds the specified {@link PrimaryKey}.
      *
      * @param key a primary key
      */
-    public long put(PrimaryKey key, Object source)
+    public long add(PrimaryKey key)
     {
         // Store the latest reference associated with the key.
-        return keys.put(key, source) == null ? MAP_ENTRY_OVERHEAD : 0;
+        return keys.add(key) ? MAP_ENTRY_OVERHEAD : 0;
     }
 
     /**
-     * Removes the specified {@link PrimaryKey} only if the reference associated with the key is different from the
-     * specified source.
+     * Removes the specified {@link PrimaryKey}.
+     *
      * @param key the key to remove
-     * @param source the reference to compare against the current value associated with the key
      * @return
      */
-    public long maybeRemove(PrimaryKey key, Object source)
+    public long remove(PrimaryKey key)
     {
-        // If the reference associated with the key is the one that added it, we want to keep the key.
-        var result = keys.compute(key, (k, previousSource) -> previousSource == source ? previousSource : null);
-        return result == null ? -MAP_ENTRY_OVERHEAD : 0;
+        return keys.remove(key) ? -MAP_ENTRY_OVERHEAD : 0;
     }
 
     public SortedSet<PrimaryKey> keys()
     {
-        return keys.keySet();
+        return keys;
     }
 
     public int size()
@@ -88,6 +82,6 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
     @Override
     public Iterator<PrimaryKey> iterator()
     {
-        return keys.keySet().iterator();
+        return keys.iterator();
     }
 }

@@ -28,11 +28,14 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 
 import javax.annotation.Nullable;
@@ -74,11 +77,6 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-    // We pass this object to the accumulator and reducer to ensure that we do not remove a new term that was added
-    // by the same update operation. However, for addition ops, we do not worry about removing recently added terms,
-    // so we use this placeholder object to avoid creating a new object for each addition operation.
-    private static final Object PLACEHOLDER = new Object();
-
     private final MemtableTrie<PrimaryKeys> data;
     private final LongAdder heapAllocations;
     private final PrimaryKeysAccumulator primaryKeysAccumulator;
@@ -111,7 +109,7 @@ public class TrieMemoryIndex extends MemoryIndex
         this.keyBounds = keyBounds;
         this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
         this.heapAllocations = new LongAdder();
-        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations, PLACEHOLDER);
+        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations);
         this.primaryKeysRemover = new PrimaryKeysRemover(heapAllocations);
         this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
         this.memtable = memtable;
@@ -139,19 +137,12 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             if (analyzerTransformsValue)
             {
-                // In this case, we use this object reference to pass the accumulator and reducer to the transformer.
-                // We then use reference equality to ensure that we do not remove a new term that was added as part of
-                // this update call. Note that we're within the synchronized block on this class.
-                var ref = new Object();
-                primaryKeysAccumulator.setReference(ref);
-                primaryKeysRemover.setReference(ref);
-            }
-            else
-            {
-                // In this case, the oldValue and newValue are comparable and we can determine before
-                // calling applyTransformer whether they are the same.
-                primaryKeysAccumulator.setReference(PLACEHOLDER);
-                primaryKeysRemover.setReference(null);
+                // Because an update can add and remove the same term, we collect the set of the modified PrimaryKeys
+                // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
+                // the PrimaryKeys object if it was updated during the add part of this update.
+                var modifiedPrimaryKeys = new HashSet<PrimaryKeys>();
+                primaryKeysAccumulator.setPrimaryKeysConsumer(modifiedPrimaryKeys::add);
+                primaryKeysRemover.setModifiedPrimaryKeys(modifiedPrimaryKeys);
             }
 
             // Add before removing to prevent a period where the value is not available in the index
@@ -162,9 +153,9 @@ public class TrieMemoryIndex extends MemoryIndex
         }
         finally
         {
-            // Return the accumulator and reducer to their default state.
-            primaryKeysAccumulator.setReference(PLACEHOLDER);
-            primaryKeysRemover.setReference(null);
+            // Return the accumulator and remover to their default state.
+            primaryKeysAccumulator.setPrimaryKeysConsumer(null);
+            primaryKeysRemover.setModifiedPrimaryKeys(null);
         }
     }
 
@@ -178,12 +169,12 @@ public class TrieMemoryIndex extends MemoryIndex
         final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
         try
         {
-            // In this case, we use this object reference to pass the accumulator and reducer to the transformer.
-            // We then use reference equality to ensure that we do not remove a new term that was added as part of
-            // this update call. Note that we're within the synchronized block on this class.
-            var ref = new Object();
-            primaryKeysAccumulator.setReference(ref);
-            primaryKeysRemover.setReference(ref);
+            // Because an update can add and remove the same term, we collect the set of the modified PrimaryKeys
+            // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
+            // the PrimaryKeys object if it was updated during the add part of this update.
+            var modifiedPrimaryKeys = new HashSet<PrimaryKeys>();
+            primaryKeysAccumulator.setPrimaryKeysConsumer(modifiedPrimaryKeys::add);
+            primaryKeysRemover.setModifiedPrimaryKeys(modifiedPrimaryKeys);
 
             // Add before removing to prevent a period where the values are not available in the index
             while (newValues != null && newValues.hasNext())
@@ -202,8 +193,9 @@ public class TrieMemoryIndex extends MemoryIndex
         }
         finally
         {
-            primaryKeysAccumulator.setReference(PLACEHOLDER);
-            primaryKeysRemover.setReference(null);
+            // Return the accumulator and remover to their default state.
+            primaryKeysAccumulator.setPrimaryKeysConsumer(null);
+            primaryKeysRemover.setModifiedPrimaryKeys(null);
         }
     }
 
@@ -414,23 +406,22 @@ public class TrieMemoryIndex extends MemoryIndex
     static class PrimaryKeysAccumulator implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
-        private Object ref;
+        private Consumer<PrimaryKeys> consumer;
 
-        PrimaryKeysAccumulator(LongAdder heapAllocations, Object ref)
+        PrimaryKeysAccumulator(LongAdder heapAllocations)
         {
             this.heapAllocations = heapAllocations;
-            this.ref = ref;
         }
 
         /**
-         * Set the reference object to be used in the apply method.
+         * Set the PrimaryKeys consumer to call for each PrimaryKeys object updated by this transformer.
          * Warning: This method is not thread-safe and should only be called from within the synchronized block
          * of the TrieMemoryIndex class.
-         * @param ref
+         * @param consumer the consumer to call
          */
-        private void setReference(Object ref)
+        private void setPrimaryKeysConsumer(Consumer<PrimaryKeys> consumer)
         {
-            this.ref = ref;
+            this.consumer = consumer;
         }
 
         @Override
@@ -441,7 +432,9 @@ public class TrieMemoryIndex extends MemoryIndex
                 existing = new PrimaryKeys();
                 heapAllocations.add(PrimaryKeys.unsharedHeapSize());
             }
-            heapAllocations.add(existing.put(neww, ref));
+            heapAllocations.add(existing.add(neww));
+            if (consumer != null)
+                consumer.accept(existing);
             return existing;
         }
     }
@@ -452,7 +445,7 @@ public class TrieMemoryIndex extends MemoryIndex
     static class PrimaryKeysRemover implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
-        private Object ref;
+        private Set<PrimaryKeys> modifiedPrimaryKeys;
 
         PrimaryKeysRemover(LongAdder heapAllocations)
         {
@@ -460,14 +453,14 @@ public class TrieMemoryIndex extends MemoryIndex
         }
 
         /**
-         * Set the reference object to be used in the apply method.
+         * Set the set of modifiedPrimaryKeys.
          * Warning: This method is not thread-safe and should only be called from within the synchronized block
          * of the TrieMemoryIndex class.
-         * @param ref
+         * @param modifiedPrimaryKeys
          */
-        private void setReference(Object ref)
+        private void setModifiedPrimaryKeys(Set<PrimaryKeys> modifiedPrimaryKeys)
         {
-            this.ref = ref;
+            this.modifiedPrimaryKeys = modifiedPrimaryKeys;
         }
 
         @Override
@@ -476,13 +469,17 @@ public class TrieMemoryIndex extends MemoryIndex
             if (existing == null)
                 return null;
 
-            heapAllocations.add(existing.maybeRemove(neww, ref));
-            if (existing.isEmpty())
-            {
-                heapAllocations.add(-PrimaryKeys.unsharedHeapSize());
-                return null;
-            }
-            return existing;
+            // This PrimaryKeys object was updated during the add part of this update,
+            // so we skip removing the PrimaryKey from the PrimaryKeys class.
+            if (modifiedPrimaryKeys.contains(existing))
+                return existing;
+
+            heapAllocations.add(existing.remove(neww));
+            if (!existing.isEmpty())
+                return existing;
+
+            heapAllocations.add(-PrimaryKeys.unsharedHeapSize());
+            return null;
         }
     }
 
