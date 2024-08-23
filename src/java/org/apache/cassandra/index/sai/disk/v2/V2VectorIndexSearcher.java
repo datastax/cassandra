@@ -207,7 +207,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // not restricted
             if (RangeUtil.coversFullRing(keyRange))
-                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
+            {
+                var estimate = estimateCost(rerankK, graph.size());
+                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, visited -> {
+                    estimate.updateStatistics(visited);
+                    context.addAnnNodesVisited(visited);
+                });
+            }
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
