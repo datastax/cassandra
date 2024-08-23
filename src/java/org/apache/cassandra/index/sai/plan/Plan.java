@@ -1208,12 +1208,13 @@ abstract public class Plan
         {
             double expectedKeys = access.expectedAccessCount(source.expectedKeys());
             int expectedKeysInt = max(1, (int) Math.ceil(expectedKeys));
+            int expectedSourceKeysInt = max(1, (int) Math.ceil(source.expectedKeys()));
             double initCost = ANN_SORT_OPEN_COST * factory.tableMetrics.sstables
                               + source.fullCost()
                               + source.expectedKeys() * CostCoefficients.ANN_SORT_KEY_COST;
             double searchCost = factory.costEstimator.estimateAnnSearchCost(ordering,
                                                                             expectedKeysInt,
-                                                                            factory.tableMetrics.rows);
+                                                                            expectedSourceKeysInt);
             return new KeysIterationCost(expectedKeys, initCost, searchCost);
         }
 
