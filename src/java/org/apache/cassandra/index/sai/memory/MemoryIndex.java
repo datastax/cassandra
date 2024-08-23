@@ -65,7 +65,7 @@ public abstract class MemoryIndex
                                 LongConsumer onHeapAllocationsTracker,
                                 LongConsumer offHeapAllocationsTracker);
 
-    public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer);
+    public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice);
 
     public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 

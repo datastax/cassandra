@@ -386,7 +386,10 @@ public class IndexContext
         if (target == null)
             return;
 
-        // Use 0 for nowInSecs to get the value(s) from the oldRow to ensure we remove the old value(s) from the index.
+        // Use 0 for nowInSecs to get the value(s) from the oldRow regardless of its liveness status. To get to this point,
+        // C* has already determined this is the current represntation of the oldRow in the memtable, and that means
+        // we need to add the newValue to the index and remove the oldValue from it, even if it has already expired via
+        // TTL.
         if (isNonFrozenCollection())
         {
             Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, 0);

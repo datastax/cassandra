@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -345,7 +344,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  makeFilter(key));
     }
 
-    private Plan buildPlan()
+    Plan buildPlan()
     {
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
         Plan.RowsIteration rowsIteration = planFactory.fetch(keysIterationPlan);
@@ -398,11 +397,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return keysIterationPlan;
     }
 
-    public Iterator<? extends PrimaryKey> buildIterator()
+    public Iterator<? extends PrimaryKey> buildIterator(Plan plan)
     {
         try
         {
-            Plan plan = buildPlan();
             Plan.KeysIteration keysIteration = plan.firstNodeOfType(Plan.KeysIteration.class);
             assert keysIteration != null : "No index scan found";
 
@@ -533,15 +531,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Use the configured {@link Orderer} to create an iterator that sorts the whole table by a specific column.
      */
     @Override
-    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(int softLimit)
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(Expression predicate, int softLimit)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
         try
         {
             for (MemtableIndex index : queryContext.view.memtableIndexes)
-                memtableResults.addAll(index.orderBy(queryContext, orderer, mergeRange, softLimit));
+                memtableResults.addAll(index.orderBy(queryContext, orderer, predicate, mergeRange, softLimit));
 
-            var sstableResults = orderSstables(queryContext.view, Collections.emptyList(), softLimit);
+            var totalRows = queryContext.view.getTotalSStableRows();
+            SSTableSearcher searcher = index -> index.orderBy(orderer, predicate, mergeRange, queryContext, softLimit, totalRows);
+            var sstableResults = searchSSTables(queryContext.view, searcher);
             sstableResults.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableResults, orderer.getComparator());
         }
@@ -584,11 +584,20 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
         var memtableResults = queryContext.view.memtableIndexes.stream()
-                                                               .map(index -> index.orderResultsBy(queryContext, sourceKeys, orderer, softLimit))
+                                                               .map(index -> index.orderResultsBy(queryContext,
+                                                                                                  sourceKeys,
+                                                                                                  orderer,
+                                                                                                  softLimit))
                                                                .collect(Collectors.toList());
         try
         {
-            var sstableScoredPrimaryKeyIterators = orderSstables(queryContext.view, sourceKeys, softLimit);
+            var totalRows = queryContext.view.getTotalSStableRows();
+            SSTableSearcher ssTableSearcher = index -> index.orderResultsBy(queryContext,
+                                                                            sourceKeys,
+                                                                            orderer,
+                                                                            softLimit,
+                                                                            totalRows);
+            var sstableScoredPrimaryKeyIterators = searchSSTables(queryContext.view, ssTableSearcher);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableScoredPrimaryKeyIterators, orderer.getComparator());
         }
@@ -600,22 +609,26 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     }
 
+
+    @FunctionalInterface
+    interface SSTableSearcher
+    {
+        List<CloseableIterator<PrimaryKeyWithSortKey>> search(SSTableIndex index) throws Exception;
+    }
+
     /**
      * Create the list of iterators over {@link PrimaryKeyWithSortKey} from the given {@link QueryViewBuilder.QueryView}.
      * @param queryView The view to use to create the iterators.
-     * @param sourceKeys The source keys to use to create the iterators. Use an empty list to search all keys.
      * @return The list of iterators over {@link PrimaryKeyWithSortKey}.
      */
-    private List<CloseableIterator<PrimaryKeyWithSortKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys, int softLimit)
+    private List<CloseableIterator<PrimaryKeyWithSortKey>> searchSSTables(QueryViewBuilder.QueryView queryView, SSTableSearcher searcher)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> results = new ArrayList<>();
-        long totalRows = queryView.view.sstables.stream().mapToLong(SSTableReader::getTotalRows).sum();
         for (var index : queryView.referencedIndexes)
         {
             try
             {
-                var iterators = sourceKeys.isEmpty() ? index.orderBy(orderer, mergeRange, queryContext, softLimit, totalRows)
-                                                     : index.orderResultsBy(queryContext, sourceKeys, orderer, softLimit, totalRows);
+                var iterators = searcher.search(index);
                 results.addAll(iterators);
             }
             catch (Throwable ex)

@@ -377,7 +377,7 @@ public class PlanTest
         Plan.KeysIteration s2 = factory.indexScan(saiPred2, 30);
         Plan.KeysIteration s3 = factory.indexScan(saiPred3, 50);
         Plan.KeysIteration plan1 = factory.intersection(Lists.newArrayList(s1, s2, s3));
-        Plan plan2 = plan1.remove(s2.id);
+        Plan plan2 = plan1.removeRestriction(s2.id);
 
         assertNotSame(plan1, plan2);
         assertEquals(plan1.id, plan2.id);  // although the result plan is different object, the nodes must retain their ids
@@ -385,10 +385,10 @@ public class PlanTest
         assertEquals(Lists.newArrayList(s1.id, s3.id), ids(plan2.subplans()));
         assertNotEquals(plan1.cost(), plan2.cost());
 
-        Plan plan3 = plan2.remove(s1.id);
+        Plan plan3 = plan2.removeRestriction(s1.id);
         assertEquals(s3.id, plan3.id);
 
-        Plan plan4 = plan3.remove(s3.id);
+        Plan plan4 = plan3.removeRestriction(s3.id);
         assertTrue(plan4 instanceof Plan.Everything);
     }
 
@@ -403,7 +403,7 @@ public class PlanTest
         Plan.KeysIteration sub1 = factory.intersection(Lists.newArrayList(s1, s2));
         Plan.KeysIteration sub2 = factory.intersection(Lists.newArrayList(s3, s4));
         Plan.KeysIteration plan1 = factory.union(Lists.newArrayList(sub1, sub2));
-        Plan plan2 = plan1.remove(s2.id).remove(s3.id);
+        Plan plan2 = plan1.removeRestriction(s2.id).removeRestriction(s3.id);
 
         Plan reference = factory.union(Lists.newArrayList(s1, s4));
 
@@ -463,7 +463,7 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<? extends PrimaryKey> getTopKRows(int softLimit)
+            public Iterator<? extends PrimaryKey> getTopKRows(Expression predicate, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
@@ -517,9 +517,12 @@ public class PlanTest
                      "         └─ KeysSort (keys: 3.0, cost/key: 10.0, cost: 40118.3..40148.3)\n" +
                      "             └─ Union (keys: 1999.0, cost/key: 17.0, cost: 90.0..34091.3)\n" +
                      "                 ├─ Intersection (keys: 1000.0, cost/key: 33.0, cost: 60.0..33061.3)\n" +
-                     "                 │   ├─ NumericIndexScan of pred2_idx using RANGE(pred2) (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 1.0, cost: 30.0..2030.0)\n" +
-                     "                 │   └─ NumericIndexScan of pred1_idx using RANGE(pred1) (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 15.5, cost: 30.0..31031.3)\n" +
-                     "                 └─ LiteralIndexScan of pred4_idx using RANGE(pred4) (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 1.0, cost: 30.0..1030.0)\n", prettyStr);
+                     "                 │   ├─ NumericIndexScan of pred2_idx (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 1.0, cost: 30.0..2030.0)\n" +
+                     "                 │   │  predicate: RANGE(pred2)\n" +
+                     "                 │   └─ NumericIndexScan of pred1_idx (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 15.5, cost: 30.0..31031.3)\n" +
+                     "                 │      predicate: RANGE(pred1)\n" +
+                     "                 └─ LiteralIndexScan of pred4_idx (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 1.0, cost: 30.0..1030.0)\n" +
+                     "                    predicate: RANGE(pred4)\n", prettyStr);
     }
 
     @Test
@@ -981,7 +984,7 @@ public class PlanTest
         Mockito.when(indexScan1.withAccess(Mockito.any())).thenReturn(indexScan1);
         Mockito.when(indexScan1.estimateCost()).thenReturn(new Plan.KeysIterationCost(20,0.0, 0.5));
         Mockito.when(indexScan1.estimateSelectivity()).thenReturn(0.001);
-        Mockito.when(indexScan1.description()).thenReturn("");
+        Mockito.when(indexScan1.title()).thenReturn("");
 
         Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan3 = factory.indexScan(saiPred3, (long) (0.5 * factory.tableMetrics.rows));
