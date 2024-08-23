@@ -23,9 +23,13 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -46,6 +50,8 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.TracingTestImpl;
@@ -1215,5 +1221,46 @@ public class VectorTypeTest extends VectorTester
 
         // Confirm we can query the data
         assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
+    }
+
+    /**
+     * Tests a filter-then-sort query with a concurrent vector deletion. See CNDB-10536 for details.
+     */
+    @Test
+    public void testFilterThenSortQueryWithConcurrentVectorDeletion() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>, c int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+
+        // write into memtable
+        execute("INSERT INTO %s (k, v, c) VALUES (1, [1, 1], 1)");
+        execute("INSERT INTO %s (k, v, c) VALUES (2, [2, 2], 1)");
+
+        // inject a barrier to block CassandraOnHeapGraph#getOrdinal
+        Injections.Barrier barrier = Injections.newBarrier("block_get_ordinal", 2, false)
+                                               .add(InvokePointBuilder.newInvokePoint()
+                                                                      .onClass(CassandraOnHeapGraph.class)
+                                                                      .onMethod("getOrdinal")
+                                                                      .atEntry())
+                                               .build();
+        Injections.inject(barrier);
+
+        // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
+        ExecutorService executor = Executors.newFixedThreadPool(1);
+        String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
+        Future<UntypedResultSet> future = executor.submit(() -> execute(select));
+
+        // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
+        waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
+        execute("DELETE v FROM %s WHERE k = 1");
+        flush();
+
+        // release the barrier to resume the query, which should succeed
+        barrier.countDown();
+        assertRows(future.get(), row(2));
+
+        assertEquals(0, executor.shutdownNow().size());
     }
 }
