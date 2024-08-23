@@ -1237,7 +1237,7 @@ public class VectorTypeTest extends VectorTester
         execute("INSERT INTO %s (k, v, c) VALUES (1, [1, 1], 1)");
         execute("INSERT INTO %s (k, v, c) VALUES (2, [2, 2], 1)");
 
-        // prepare an injected barrier to block CassandraOnHeapGraph#getOrdinal
+        // inject a barrier to block CassandraOnHeapGraph#getOrdinal
         Injections.Barrier barrier = Injections.newBarrier("block_get_ordinal", 2, false)
                                                .add(InvokePointBuilder.newInvokePoint()
                                                                       .onClass(CassandraOnHeapGraph.class)
@@ -1259,5 +1259,7 @@ public class VectorTypeTest extends VectorTester
         // release the barrier to resume the query, which should succeed
         barrier.countDown();
         assertRows(future.get(), row(2));
+
+        assertEquals(0, executor.shutdownNow().size());
     }
 }
