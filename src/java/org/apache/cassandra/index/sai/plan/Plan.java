@@ -48,6 +48,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
 
 /**
@@ -1867,9 +1868,6 @@ abstract public class Plan
 
         /** Additional cost added to row fetch cost per each serialized byte of the row */
         public final static double ROW_BYTE_COST = 0.005;
-
-        /** Cost to hit disk instead of cache */
-        public final static double DISK_ACCESS_COST = 1000.0;
     }
 
     /** Convenience builder for building intersection and union nodes */
@@ -1907,7 +1905,8 @@ abstract public class Plan
     /** hit-rate-scale the raw cost */
     public static double hrs(double raw)
     {
-        return raw + DISK_ACCESS_COST * (1 - hitRateSupplier.getAsDouble());
+        double multiplier = min(1000.0, 1 / hitRateSupplier.getAsDouble());
+        return raw * multiplier;
     }
 
     /**
