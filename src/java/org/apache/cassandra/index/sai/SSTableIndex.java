@@ -28,6 +28,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
@@ -55,6 +60,8 @@ import org.apache.cassandra.utils.CloseableIterator;
  */
 public class SSTableIndex
 {
+    private static final Logger logger = LoggerFactory.getLogger(SSTableIndex.class);
+
     // sort sstable index by first key then last key
     public static final Comparator<SSTableIndex> COMPARATOR = Comparator.comparing((SSTableIndex s) -> s.getSSTable().first)
                                                                         .thenComparing(s -> s.getSSTable().last)
@@ -73,11 +80,22 @@ public class SSTableIndex
     {
         assert perIndexComponents.context().getValidator() != null;
         this.perIndexComponents = perIndexComponents;
-        this.searchableIndex = perIndexComponents.version().onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
+        this.searchableIndex = createSearchableIndex(sstableContext, perIndexComponents);
 
         this.sstableContext = sstableContext.sharedCopy(); // this line must not be before any code that may throw
         this.indexContext = perIndexComponents.context();
         this.sstable = sstableContext.sstable;
+    }
+
+    private static SearchableIndex createSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
+    {
+        if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
+        {
+            logger.info("Creating dummy (empty) index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
+            return new EmptyIndex();
+        }
+
+        return perIndexComponents.version().onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
     }
 
     public IndexContext getIndexContext()
@@ -195,12 +213,13 @@ public class SSTableIndex
     }
 
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                  Expression predicate,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   QueryContext context,
                                                                   int limit,
                                                                   long totalRows) throws IOException
     {
-        return searchableIndex.orderBy(orderer, keyRange, context, limit, totalRows);
+        return searchableIndex.orderBy(orderer, predicate, keyRange, context, limit, totalRows);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)

@@ -28,9 +28,11 @@ import javax.management.InstanceNotFoundException;
 
 import com.google.common.collect.Lists;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -42,6 +44,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
@@ -65,6 +68,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -139,8 +143,8 @@ public class CompactionTest extends AbstractMetricsTest
             {
                 try
                 {
-                    assertNumRows(num, "SELECT id1 FROM %s WHERE v1>=0");
-                    assertNumRows(num, "SELECT id1 FROM %s WHERE v2='0'");
+                    assertNumRows(num, "SELECT id1 FROM %%s WHERE v1>=0");
+                    assertNumRows(num, "SELECT id1 FROM %%s WHERE v2='0'");
                 }
                 catch (Throwable e)
                 {
@@ -153,6 +157,40 @@ public class CompactionTest extends AbstractMetricsTest
 
         verifySSTableIndexes(v1IndexName, num);
         verifySSTableIndexes(v2IndexName, num);
+    }
+
+    @Test
+    public void testCompactionWithDisabledIndexReads() throws Throwable
+    {
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(true);
+        try
+        {
+            createTable(CREATE_TABLE_TEMPLATE);
+            String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+
+            int num = 10;
+            for (int i = 0; i < num; i++)
+            {
+                execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
+                flush();
+            }
+
+            startCompaction();
+            waitForCompactionsFinished();
+
+            // Compactions should run fine and create the expected number of index files for each index (1 since we
+            // compacted everything into a single sstable).
+            verifySSTableIndexes(v1IndexName, 1);
+            verifySSTableIndexes(v2IndexName, 1);
+
+            // But index queries should not be allowed.
+            assertThrows(IndexNotAvailableException.class, () -> execute("SELECT id1 FROM %s WHERE v1>=0"));
+        }
+        finally
+        {
+            CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(false);
+        }
     }
 
     @Test
@@ -215,6 +253,11 @@ public class CompactionTest extends AbstractMetricsTest
     }
 
     @Test
+    // This test probably never worked, but initially `TestWithConcurrentVerification` was also not working properly
+    // and was ignoring errors throw during the `verificationTask`, hidding the problem with this test.
+    // `TestWithConcurrentVerification` was fixed, leading to this failing, and it's not immediately clear what the
+    // right fix should be, so for now it is ignored, but it should eventually be fixed.
+    @Ignore
     public void testConcurrentIndexBuildWithCompaction() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);

@@ -52,6 +52,7 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
@@ -108,7 +109,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
 import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K;
 
 public class StorageAttachedIndex implements Index
@@ -116,7 +117,7 @@ public class StorageAttachedIndex implements Index
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
-    private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
+    private static final boolean VALIDATE_TERMS_AT_COORDINATOR = VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getBoolean();
 
     private static class StorageAttachedIndexBuildingSupport implements IndexBuildingSupport
     {
@@ -714,7 +715,8 @@ public class StorageAttachedIndex implements Index
     @Override
     public boolean isQueryable(Status status)
     {
-        return status == Status.BUILD_SUCCEEDED || status == Status.UNKNOWN;
+        return !CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean()
+            && (status == Status.BUILD_SUCCEEDED || status == Status.UNKNOWN);
     }
 
     @Override

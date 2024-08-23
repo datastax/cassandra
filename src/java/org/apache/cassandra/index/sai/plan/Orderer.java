@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.stream.Collectors;
@@ -105,4 +106,12 @@ public class Orderer
         return ORDER_BY_OPERATORS.contains(expression.operator());
     }
 
+    @Override
+    public String toString()
+    {
+        String direction = isAscending() ? "ASC" : "DESC";
+        return isANN()
+               ? context.getColumnName() + " ANN OF " + Arrays.toString(vector) + ' ' + direction
+               : context.getColumnName() + ' ' + direction;
+    }
 }
