@@ -32,7 +32,6 @@ import com.google.common.collect.Lists;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
@@ -42,7 +41,10 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.mockito.Mockito;
 
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_DEGREE;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_EDGELIST_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SCORED_KEY_COST;
+import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SIMILARITY_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ROW_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_KEY_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_OPEN_COST;
@@ -956,9 +958,9 @@ public class PlanTest
     public void testExternalCostEstimator()
     {
         Plan.CostEstimator est1 = Mockito.mock(Plan.CostEstimator.class);
-        Mockito.when(est1.estimateAnnNodesVisited(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(1);
+        Mockito.when(est1.estimateAnnSearchCost(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(1.0);
         Plan.CostEstimator est2 = Mockito.mock(Plan.CostEstimator.class);
-        Mockito.when(est2.estimateAnnNodesVisited(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(1000);
+        Mockito.when(est2.estimateAnnSearchCost(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(100.0);
 
         Plan.Factory factory1 = new Plan.Factory(table1M, est1);
         Plan scan1 = factory1.sort(factory1.everything, ordering);
@@ -1017,15 +1019,15 @@ public class PlanTest
             this.metrics = metrics;
         }
 
-
         @Override
-        public int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates)
+        public double estimateAnnSearchCost(Orderer ordering, int limit, long candidates)
         {
             Preconditions.checkArgument(limit > 0, "limit must be > 0");
-            return metrics.sstables * VectorMemtableIndex.expectedNodesVisited(
-            limit / metrics.sstables,
-            (int) candidates / metrics.sstables,
-            500000);  // taken from a sample database with 10M 16-dimensional vectors
+            var expectedNodes = VectorMemtableIndex.expectedNodesVisited(limit / metrics.sstables,
+                                                                         (int) candidates / metrics.sstables,
+                                                                         500000);
+            return metrics.sstables * (expectedNodes * (ANN_SIMILARITY_COST + Plan.hrs(ANN_EDGELIST_COST) / ANN_DEGREE)
+                                       + limit * Plan.hrs(Plan.CostCoefficients.ANN_SCORED_KEY_COST));
         }
     }
 

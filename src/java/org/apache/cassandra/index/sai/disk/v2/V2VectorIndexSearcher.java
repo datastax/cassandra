@@ -443,11 +443,19 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return String.format("{brute force(%d) = %.2f, index scan(%d) = %.2f}",
                                  candidates, bruteForceCost(), expectedNodesVisited, indexScanCost());
         }
+
+        public double cost()
+        {
+            return min(bruteForceCost(), indexScanCost());
+        }
     }
 
-    public int estimateNodesVisited(int limit, int candidates)
+    public double estimateAnnSearchCost(int limit, int candidates)
     {
-        return estimateCost(limit, candidates).expectedNodesVisited;
+        var estimate = estimateCost(limit, candidates);
+        Tracing.logAndTrace(logger, "Estimating {} nodes visited for LIMIT {} with {} candidates in graph sized {}; cost is {}",
+                            estimate.expectedNodesVisited, limit, candidates, graph.size(), estimate);
+        return estimate.cost();
     }
 
     private CostEstimate estimateCost(int limit, int candidates)

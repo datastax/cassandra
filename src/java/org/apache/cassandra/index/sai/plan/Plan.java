@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.max;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
@@ -1160,12 +1161,6 @@ abstract public class Plan
         }
     }
 
-    private static double annSearchCost(int estimatedNodesVisited, int limit)
-    {
-        return estimatedNodesVisited * (ANN_SIMILARITY_COST + hrs(ANN_EDGELIST_COST) / ANN_DEGREE)
-               + limit * hrs(CostCoefficients.ANN_SCORED_KEY_COST);
-    }
-
     /**
      * Sorts keys in ANN order.
      * Must fetch all keys from the source before sorting, so it has a high initial cost.
@@ -1216,10 +1211,10 @@ abstract public class Plan
             double initCost = ANN_SORT_OPEN_COST * factory.tableMetrics.sstables
                               + source.fullCost()
                               + source.expectedKeys() * CostCoefficients.ANN_SORT_KEY_COST;
-            int estimatedNodes = factory.costEstimator.estimateAnnNodesVisited(ordering,
-                                                                               expectedKeysInt,
-                                                                               Math.max(1, (int) Math.ceil(source.expectedKeys())));
-            return new KeysIterationCost(expectedKeys, initCost, annSearchCost(estimatedNodes, expectedKeysInt));
+            double searchCost = factory.costEstimator.estimateAnnSearchCost(ordering,
+                                                                            expectedKeysInt,
+                                                                            factory.tableMetrics.rows);
+            return new KeysIterationCost(expectedKeys, initCost, searchCost);
         }
 
         private KeysIterationCost estimateGlobalSortCost()
@@ -1274,12 +1269,11 @@ abstract public class Plan
         {
             double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows);
             int expectedKeysInt = Math.max(1, (int) Math.ceil(expectedKeys));
-            int estimatedNodes = factory.costEstimator.estimateAnnNodesVisited(ordering,
-                                                                               expectedKeysInt,
-                                                                               factory.tableMetrics.rows);
+            double searchCost = factory.costEstimator.estimateAnnSearchCost(ordering,
+                                                                            expectedKeysInt,
+                                                                            factory.tableMetrics.rows);
             double initCost = 0; // negligible
-            double scanCost = annSearchCost(estimatedNodes, expectedKeysInt);
-            return new KeysIterationCost(expectedKeys, initCost, scanCost);
+            return new KeysIterationCost(expectedKeys, initCost, searchCost);
         }
 
         @Nullable
@@ -1389,9 +1383,18 @@ abstract public class Plan
         @Override
         protected RowsIterationCost estimateCost()
         {
+            // VSTODO this assumes we will need to deserialize the entire row for any fetch.
+            // For vector rows where we need to check a non-vector field for a predicate,
+            // this is a very pessimistic assumption since the vectors (that we don't read)
+            // are by far the majority of the row size.
             double rowFetchCost = hrs(CostCoefficients.ROW_COST)
                                   + CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow
                                   + CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow;
+            Tracing.logAndTrace(logger, "Row fetch cost: {} + {} + {} = {}",
+                                hrs(CostCoefficients.ROW_COST),
+                                CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow,
+                                CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow,
+                                rowFetchCost);
 
             KeysIteration src = source.get();
             double expectedKeys = access.expectedAccessCount(src.expectedKeys());
@@ -1802,7 +1805,7 @@ abstract public class Plan
          * @param limit      number of rows to fetch; must be > 0
          * @param candidates number of candidate rows that satisfy the expression predicates
          */
-        int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates);
+        double estimateAnnSearchCost(Orderer ordering, int limit, long candidates);
     }
 
     /**
@@ -1844,9 +1847,7 @@ abstract public class Plan
         public final static double ANN_SORT_KEY_COST = Version.latest().onOrAfter(Version.DC) ? 0.03 : 0.2;
 
         /** Cost to get a scored key from DiskANN (~rerank cost). Affected by cache hit rate */
-        // NB: the actual cost per rerank op is close to 15, but we've doubled it here to make up for
-        // our planning using LIMIT instead of rerankK
-        public final static double ANN_SCORED_KEY_COST = 30;
+        public final static double ANN_SCORED_KEY_COST = 15;
 
         /** Cost to perform a coarse (PQ or BQ) in-memory similarity computation */
         public final static double ANN_SIMILARITY_COST = 0.5;

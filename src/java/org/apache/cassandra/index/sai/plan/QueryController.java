@@ -900,7 +900,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     @Override
-    public int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates)
+    public double estimateAnnSearchCost(Orderer ordering, int limit, long candidates)
     {
         Preconditions.checkArgument(limit > 0, "limit must be > 0");
 
@@ -908,12 +908,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
         View queryView = context.getView();
 
-        int annNodesCount = 0;
+        double cost = 0;
         for (MemtableIndex index : memtables)
         {
-            // TODO: maybe limit and candidates should be scaled proportionally by the size of the memtable?
+            // FIXME convert nodes visited to search cost
             int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
-            annNodesCount += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
+            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
         }
 
         long totalRows = 0;
@@ -928,9 +928,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     continue;
                 int segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                 int segmentCandidates = max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
-                annNodesCount += segment.estimateAnnNodesVisited(segmentLimit, segmentCandidates);
+                cost += segment.estimateAnnSearchCost(segmentLimit, segmentCandidates);
             }
         }
-        return annNodesCount;
+        return cost;
     }
 }
