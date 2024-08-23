@@ -395,8 +395,11 @@ public class IndexContext
         MemtableIndex target = liveMemtables.get(memtable);
         if (target == null)
             return;
-
-        ByteBuffer oldValue = getValueOf(key, oldRow, FBUtilities.nowInSeconds());
+        // Use 0 for nowInSecs to get the value from the oldRow regardless of its liveness status. To get to this point,
+        // C* has already determined this is the current represntation of the oldRow in the memtable, and that means
+        // we need to add the newValue to the index and remove the oldValue from it, even if it has already expired via
+        // TTL.
+        ByteBuffer oldValue = getValueOf(key, oldRow, 0);
         ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
         target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
     }
