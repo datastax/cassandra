@@ -44,7 +44,6 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
      */
     public long add(PrimaryKey key)
     {
-        // Store the latest reference associated with the key.
         return keys.add(key) ? MAP_ENTRY_OVERHEAD : 0;
     }
 
