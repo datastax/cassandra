@@ -1147,7 +1147,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return userLimit;
     }
 
-    private int getOffset(QueryOptions options)
+    public int getOffset(QueryOptions options)
     {
         int userOffset = NO_OFFSET;
 
