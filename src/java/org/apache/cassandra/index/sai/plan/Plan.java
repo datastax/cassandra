@@ -1857,9 +1857,6 @@ abstract public class Plan
         /** Cost to load the neighbor list for a DiskANN node. Affected by cache hit rate */
         public final static double ANN_EDGELIST_COST = 20.0;
 
-        /** assume all graphs have this degree, for now */
-        public final static int ANN_DEGREE = 2 * IndexWriterConfig.DEFAULT_MAXIMUM_NODE_CONNECTIONS;
-
         /** Cost to fetch one row from storage. Affected by cache hit rate */
         public final static double ROW_COST = 100.0;
 

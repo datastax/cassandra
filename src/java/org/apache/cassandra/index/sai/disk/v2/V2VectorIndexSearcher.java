@@ -422,7 +422,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         private double indexScanCost()
         {
-            return expectedNodesVisited * (CostCoefficients.ANN_SIMILARITY_COST + hrs(CostCoefficients.ANN_EDGELIST_COST) / CostCoefficients.ANN_DEGREE);
+            return expectedNodesVisited
+                   * (CostCoefficients.ANN_SIMILARITY_COST + hrs(CostCoefficients.ANN_EDGELIST_COST) / graph.maxDegree());
         }
 
         private double bruteForceCost()

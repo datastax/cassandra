@@ -1026,7 +1026,7 @@ public class PlanTest
             var expectedNodes = VectorMemtableIndex.expectedNodesVisited(limit / metrics.sstables,
                                                                          (int) candidates / metrics.sstables,
                                                                          500000);
-            return metrics.sstables * (expectedNodes * (ANN_SIMILARITY_COST + Plan.hrs(ANN_EDGELIST_COST) / ANN_DEGREE)
+            return metrics.sstables * (expectedNodes * (ANN_SIMILARITY_COST + Plan.hrs(ANN_EDGELIST_COST) / 32)
                                        + limit * Plan.hrs(Plan.CostCoefficients.ANN_SCORED_KEY_COST));
         }
     }
