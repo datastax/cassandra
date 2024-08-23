@@ -382,10 +382,10 @@ public class VectorMemtableIndex implements MemtableIndex
         return ensureSaneEstimate(raw, limit, graphSize);
     }
 
-    public static int ensureSaneEstimate(int rawEstimate, int limit, int graphSize)
+    public static int ensureSaneEstimate(int rawEstimate, int rerankK, int graphSize)
     {
-        // we will always visit at least min(limit, graphSize) nodes, and we can't visit more nodes than exist in the graph
-        return min(max(rawEstimate, min(limit, graphSize)), graphSize);
+        // we will always visit at least min(rerankK, graphSize) nodes, and we can't visit more nodes than exist in the graph
+        return min(max(rawEstimate, min(rerankK, graphSize)), graphSize);
     }
 
     @Override

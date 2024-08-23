@@ -205,7 +205,6 @@ public class Segment implements Closeable
     public double estimateAnnSearchCost(int limit, int candidates)
     {
         IndexSearcher searcher = getIndexSearcher();
-        assert searcher instanceof V2VectorIndexSearcher : searcher;
         return ((V2VectorIndexSearcher) searcher).estimateAnnSearchCost(limit, candidates);
     }
 

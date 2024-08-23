@@ -452,15 +452,16 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     public double estimateAnnSearchCost(int limit, int candidates)
     {
-        var estimate = estimateCost(limit, candidates);
+        int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
+        var estimate = estimateCost(rerankK, candidates);
         Tracing.logAndTrace(logger, "Estimating {} nodes visited for LIMIT {} with {} candidates in graph sized {}; cost is {}",
                             estimate.expectedNodesVisited, limit, candidates, graph.size(), estimate);
         return estimate.cost();
     }
 
-    private CostEstimate estimateCost(int limit, int candidates)
+    private CostEstimate estimateCost(int rerankK, int candidates)
     {
-        int rawExpectedNodes = getRawExpectedNodes(limit, candidates);
+        int rawExpectedNodes = getRawExpectedNodes(rerankK, candidates);
         // update the raw expected value with a linear interpolation based on observed data
         var observedValues = expectedActualNodesVisited.getSnapshot().values;
         int expectedNodes;
@@ -474,7 +475,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             expectedNodes = rawExpectedNodes;
         }
 
-        int sanitizedEstimate = VectorMemtableIndex.ensureSaneEstimate(expectedNodes, limit, graph.size());
+        int sanitizedEstimate = VectorMemtableIndex.ensureSaneEstimate(expectedNodes, rerankK, graph.size());
         return new CostEstimate(candidates, rawExpectedNodes, sanitizedEstimate);
     }
 
