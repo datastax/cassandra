@@ -38,7 +38,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -1751,7 +1750,6 @@ abstract public class Plan
          */
         public RowsIteration filter(@Nonnull RowFilter filter, @Nonnull RowsIteration source, double targetSelectivity)
         {
-            RowsIterationCost sourceCost = source.cost();
             Preconditions.checkArgument(targetSelectivity >= 0.0, "selectivity must not be negative");
             Preconditions.checkArgument(targetSelectivity <= source.selectivity(), "selectivity must not exceed source selectivity of " + source.selectivity());
             return new Filter(this, nextId++, filter, source, targetSelectivity, defaultAccess);
