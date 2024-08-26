@@ -106,7 +106,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     /**
      * Controls whether we optimize query plans.
-     * 0 disables the optimizer.
+     * 0 disables the optimizer. As a side effect, hybrid ANN queries will default to FilterSortOrder.SCAN_THEN_FILTER.
      * 1 enables the optimizer and tells the optimizer to respect the intersection clause limit.
      * Higher values enable the optimizer and disable the hard intersection clause limit.
      * Note: the config is not final to simplify testing.
@@ -361,9 +361,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                         : optimizedPlan;
 
         if (optimizedPlan.contains(node -> node instanceof Plan.AnnIndexScan))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SORT_THEN_FILTER);
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
         if (optimizedPlan.contains(node -> node instanceof Plan.KeysSort))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THEN_SORT);
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
 
         if (logger.isTraceEnabled())
             logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
@@ -900,7 +900,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     @Override
-    public int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates)
+    public double estimateAnnSearchCost(Orderer ordering, int limit, long candidates)
     {
         Preconditions.checkArgument(limit > 0, "limit must be > 0");
 
@@ -908,12 +908,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
         View queryView = context.getView();
 
-        int annNodesCount = 0;
+        double cost = 0;
         for (MemtableIndex index : memtables)
         {
-            // TODO: maybe limit and candidates should be scaled proportionally by the size of the memtable?
+            // FIXME convert nodes visited to search cost
             int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
-            annNodesCount += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
+            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
         }
 
         long totalRows = 0;
@@ -928,9 +928,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     continue;
                 int segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                 int segmentCandidates = max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
-                annNodesCount += segment.estimateAnnNodesVisited(segmentLimit, segmentCandidates);
+                cost += segment.estimateAnnSearchCost(segmentLimit, segmentCandidates);
             }
         }
-        return annNodesCount;
+        return cost;
     }
 }
