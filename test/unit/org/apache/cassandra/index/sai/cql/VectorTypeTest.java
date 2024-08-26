@@ -50,6 +50,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.service.ClientState;
@@ -1247,19 +1248,27 @@ public class VectorTypeTest extends VectorTester
         Injections.inject(barrier);
 
         // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
-        ExecutorService executor = Executors.newFixedThreadPool(1);
-        String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
-        Future<UntypedResultSet> future = executor.submit(() -> execute(select));
+        QueryController.QUERY_OPT_LEVEL = 0;
+        try
+        {
+            ExecutorService executor = Executors.newFixedThreadPool(1);
+            String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
+            Future<UntypedResultSet> future = executor.submit(() -> execute(select));
 
-        // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
-        waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
-        execute("DELETE v FROM %s WHERE k = 1");
-        flush();
+            // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
+            waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
+            execute("DELETE v FROM %s WHERE k = 1");
+            flush();
 
-        // release the barrier to resume the query, which should succeed
-        barrier.countDown();
-        assertRows(future.get(), row(2));
+            // release the barrier to resume the query, which should succeed
+            barrier.countDown();
+            assertRows(future.get(), row(2));
 
-        assertEquals(0, executor.shutdownNow().size());
+            assertEquals(0, executor.shutdownNow().size());
+        }
+        finally
+        {
+            QueryController.QUERY_OPT_LEVEL = 1;
+        }
     }
 }
