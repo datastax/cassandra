@@ -611,6 +611,8 @@ public enum CassandraRelevantProperties
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
 
     /** Whether to validate terms that will be SAI indexed at the coordinator */
+    SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
+    /** Whether to validate terms that will be SAI indexed at the coordinator */
     SAI_VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
 
     /**
