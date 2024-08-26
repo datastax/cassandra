@@ -51,7 +51,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         Tracing.trace("Enqueuing response to {}", respondToAddress);
 
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
-        addSensorsToResponse(response, respondTo.payload);
+        //addSensorsToResponse(response, respondTo.payload);
 
         MessagingService.instance().send(response.build(), respondToAddress);
     }
