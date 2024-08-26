@@ -905,6 +905,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Preconditions.checkArgument(limit > 0, "limit must be > 0");
 
         var queryView = queryContext.view;
+        assert queryView != null;
 
         int annNodesCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
