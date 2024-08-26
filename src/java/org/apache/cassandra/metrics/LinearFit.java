@@ -47,6 +47,11 @@ public class LinearFit
             variance += dX * dX;
         }
 
+        // if all points have the same X value, return the Y:X ratio.  this does the right thing
+        // for `estimateCost`
+        if (variance == 0)
+            return Pair.create(0.0, yMean / xMean);
+
         double slope = covariance / variance;
         double intercept = yMean - slope * xMean;
         return Pair.create(intercept, slope);
