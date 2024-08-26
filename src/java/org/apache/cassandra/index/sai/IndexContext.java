@@ -98,6 +98,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_AN
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_FROZEN_TERM_SIZE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_STRING_TERM_SIZE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_VECTOR_TERM_SIZE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 /**
@@ -757,7 +758,8 @@ public class IndexContext
     public void validate(DecoratedKey key, Row row)
     {
         // Validate the size of the inserted term.
-        validateMaxTermSizeForRow(key, row);
+        if (SAI_VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getBoolean())
+            validateMaxTermSizeForRow(key, row);
 
         // Verify vector is valid.
         if (isVector())
