@@ -76,6 +76,8 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
 
     public abstract boolean containsUnitVectors();
 
+    public abstract int maxDegree();
+
     public static interface VectorSupplier extends AutoCloseable
     {
         /**

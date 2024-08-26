@@ -56,7 +56,6 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
@@ -354,8 +353,7 @@ public class VectorMemtableIndex implements MemtableIndex
     private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)
     {
         int expectedNodesVisited = expectedNodesVisited(limit, nPermittedOrdinals, graphSize);
-        int expectedComparisons = indexContext.getIndexWriterConfig().getAnnMaxDegree() * expectedNodesVisited;
-        return (int) min(max(limit, Plan.memoryToDiskFactor() * expectedComparisons), GLOBAL_BRUTE_FORCE_ROWS);
+        return min(max(limit, expectedNodesVisited), GLOBAL_BRUTE_FORCE_ROWS);
     }
 
     public int estimateAnnNodesVisited(int limit, int nPermittedOrdinals)
@@ -365,6 +363,12 @@ public class VectorMemtableIndex implements MemtableIndex
 
     /**
      * All parameters must be greater than zero.  nPermittedOrdinals may be larger than graphSize.
+     * <p>
+     * Returns the expected number of nodes visited by an ANN search.
+     * !!!
+     * !!! "Visted" means we compute the coarse similarity with the query vector.  This is
+     * !!! roughly `degree` times larger than the number of nodes whose edge lists we load!
+     * !!!
      */
     public static int expectedNodesVisited(int limit, int nPermittedOrdinals, int graphSize)
     {
@@ -386,10 +390,10 @@ public class VectorMemtableIndex implements MemtableIndex
         return ensureSaneEstimate(raw, limit, graphSize);
     }
 
-    public static int ensureSaneEstimate(int rawEstimate, int limit, int graphSize)
+    public static int ensureSaneEstimate(int rawEstimate, int rerankK, int graphSize)
     {
-        // we will always visit at least min(limit, graphSize) nodes, and we can't visit more nodes than exist in the graph
-        return min(max(rawEstimate, min(limit, graphSize)), graphSize);
+        // we will always visit at least min(rerankK, graphSize) nodes, and we can't visit more nodes than exist in the graph
+        return min(max(rawEstimate, min(rerankK, graphSize)), graphSize);
     }
 
     @Override

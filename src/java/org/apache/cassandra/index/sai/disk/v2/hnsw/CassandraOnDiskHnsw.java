@@ -244,4 +244,10 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
+    public int maxDegree()
+    {
+        return 32; // not actually exposed by hnsw code, but we know this is how we constructed it
+    }
 }
