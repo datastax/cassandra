@@ -24,7 +24,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
@@ -50,7 +49,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogArchiver;
-import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogReplayer;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.rows.*;
@@ -348,18 +346,18 @@ public class RecoveryManagerTest
         final Semaphore blocked = new Semaphore(0);
 
         @Override
-        protected CompletableFuture<Integer> initiateMutation(final Mutation mutation,
-                                                              final CommitLogDescriptor desc,
-                                                              final int serializedSize,
-                                                              final int entryLocation,
-                                                              final CommitLogReplayer clr)
+        protected Future<Integer> initiateMutation(final Mutation mutation,
+                final long segmentId,
+                final int serializedSize,
+                final int entryLocation,
+                final CommitLogReplayer clr)
         {
-            final CompletableFuture<Integer> toWrap = super.initiateMutation(mutation,
-                                                                  desc,
+            final Future<Integer> toWrap = super.initiateMutation(mutation,
+                                                                  segmentId,
                                                                   serializedSize,
                                                                   entryLocation,
                                                                   clr);
-            return new CompletableFuture<>()
+            return new Future<Integer>()
             {
 
                 @Override

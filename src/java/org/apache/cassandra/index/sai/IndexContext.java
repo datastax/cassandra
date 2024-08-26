@@ -95,6 +95,8 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
+
 /**
  * Manage metadata for each column index.
  */
@@ -753,7 +755,8 @@ public class IndexContext
     public void validate(DecoratedKey key, Row row)
     {
         // Validate the size of the inserted term.
-        validateMaxTermSizeForRow(key, row);
+        if (VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getBoolean())
+            validateMaxTermSizeForRow(key, row);
 
         // Verify vector is valid.
         if (isVector())
