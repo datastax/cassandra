@@ -97,4 +97,17 @@ public class LinearFitTest
         assertEquals(1.31, pair.right, 0.01);
         assertEquals(1412.35, pair.left, 0.01);
     }
+
+    @Test
+    public void testDuplicateX()
+    {
+        var values = new IntIntPair[] {
+            new IntIntPair(1, 1),
+            new IntIntPair(1, 2),
+            new IntIntPair(1, 3),
+        };
+        var pair = LinearFit.interceptSlopeFor(values);
+        assertEquals(0.0, pair.left, 0.01);
+        assertEquals(2.0, pair.right, 0.01);
+    }
 }
