@@ -148,11 +148,14 @@ public class PlanTest
     public void intersectionWithEmpty()
     {
         Plan.KeysIteration a1 = factory.indexScan(saiPred1, 0);
-        Plan.KeysIteration a2 = factory.indexScan(saiPred2, (long)(0.01 * factory.tableMetrics.rows));
+        Plan.KeysIteration a2 = factory.indexScan(saiPred2, (long)(0.5 * factory.tableMetrics.rows));
         Plan.KeysIteration plan = factory.intersection(Lists.newArrayList(a1, a2));
         assertEquals(0.0, plan.selectivity(), 0.0001);
         assertEquals(0.0, plan.expectedKeys(), 0.0001);
-        assertTrue(plan.fullCost() <= 2 * factory.tableMetrics.sstables * SAI_OPEN_COST + SAI_KEY_COST * 2);
+
+        // There should be no cost of iterating the iterator a2,
+        // because there are no keyst to match on the left side (a1) and the intersection loop would exit early
+        assertEquals(plan.fullCost(), 2 * factory.tableMetrics.sstables * SAI_OPEN_COST, 0.0001);
     }
 
     @Test
