@@ -173,14 +173,14 @@ public class TableQueryMetrics extends AbstractMetrics
             this.rowsFiltered.update(rowsFiltered);
             totalRowsFiltered.inc(rowsFiltered);
 
-            if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
+            if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SCAN_THEN_FILTER)
                 sortThenFilterQueriesCompleted.inc();
-            else if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.FILTER_THEN_SORT)
+            else if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SEARCH_THEN_ORDER)
                 filterThenSortQueriesCompleted.inc();
 
             if (Tracing.isTracing())
             {
-                if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.FILTER_THEN_SORT)
+                if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SEARCH_THEN_ORDER)
                 {
                     Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, post-filtered {} in {}, and took {} microseconds.",
                                   pluralize(ssTablesHit, "SSTable index", "es"),

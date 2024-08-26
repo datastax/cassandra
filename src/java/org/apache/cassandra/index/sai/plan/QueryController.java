@@ -83,7 +83,6 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -105,7 +104,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     /**
      * Controls whether we optimize query plans.
-     * 0 disables the optimizer.
+     * 0 disables the optimizer. As a side effect, hybrid ANN queries will default to FilterSortOrder.SCAN_THEN_FILTER.
      * 1 enables the optimizer and tells the optimizer to respect the intersection clause limit.
      * Higher values enable the optimizer and disable the hard intersection clause limit.
      * Note: the config is not final to simplify testing.
@@ -360,9 +359,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                         : optimizedPlan;
 
         if (optimizedPlan.contains(node -> node instanceof Plan.AnnIndexScan))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SORT_THEN_FILTER);
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
         if (optimizedPlan.contains(node -> node instanceof Plan.KeysSort))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THEN_SORT);
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
 
         if (logger.isTraceEnabled())
             logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
