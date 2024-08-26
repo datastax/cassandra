@@ -25,6 +25,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
@@ -40,6 +41,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.mockito.Mockito;
 
+import static java.lang.Math.round;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ANN_SCORED_KEY_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.ROW_COST;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.SAI_KEY_COST;
@@ -66,14 +68,14 @@ public class PlanTest
     private static final  Expression saiPred2 = saiPred("pred2", Expression.Op.RANGE, false);
     private static final  Expression saiPred3 = saiPred("pred3", Expression.Op.RANGE, false);
     private static final  Expression saiPred4 = saiPred("pred4", Expression.Op.RANGE, true);
-    
+
     private static final RowFilter rowFilter1 = RowFilter.builder().add(pred1).build();
     private static final RowFilter rowFilter12 = RowFilter.builder().add(pred1).add(pred2).build();
     private static final RowFilter rowFilter123 = RowFilter.builder().add(pred1).add(pred2).add(pred3).build();
 
     private final Plan.TableMetrics table1M = new Plan.TableMetrics(1_000_000, 7, 128, 3);
     private final Plan.TableMetrics table10M = new Plan.TableMetrics(10_000_000, 7, 128, 8);
-    
+
     private final Plan.Factory factory = new Plan.Factory(table1M, new CostEstimator(table1M));
 
 
@@ -327,11 +329,48 @@ public class PlanTest
     }
 
     @Test
+    public void annSortFilterLimit()
+    {
+        int limit = 10;
+        double selectivity = 0.2;
+
+        Plan.KeysIteration i = factory.indexScan(saiPred1, (long) (selectivity * factory.tableMetrics.rows));
+        Plan.KeysIteration s = factory.sort(i, ordering);
+        Plan.RowsIteration fetch = factory.fetch(s);
+        Plan.RowsIteration f = factory.filter(rowFilter1, fetch, selectivity);
+        Plan.RowsIteration plan = factory.limit(f, limit);
+
+        // getTopKRows limit must be set to the same as the query limit
+        // because we're getting top of the rows already prefiltered by the index:
+        Plan.Executor executor = Mockito.mock(Plan.Executor.class);
+        Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
+        Mockito.verify(executor, Mockito.times(1)).getTopKRows((RangeIterator) Mockito.any(), Mockito.eq(limit));
+    }
+
+    @Test
     public void annScan()
     {
         Plan.KeysIteration i = factory.sort(factory.everything, ordering);
         assertEquals(factory.tableMetrics.rows, i.expectedKeys(), 0.01);
         assertEquals(i.initCost() + factory.tableMetrics.rows * ANN_SCORED_KEY_COST, i.fullCost(), 0.01);
+    }
+
+    @Test
+    public void annScanFilterLimit()
+    {
+        int limit = 10;
+        double selectivity = 0.2;
+
+        Plan.KeysIteration s = factory.sort(factory.everything, ordering);
+        Plan.RowsIteration fetch = factory.fetch(s);
+        Plan.RowsIteration f = factory.filter(rowFilter1, fetch, selectivity);
+        Plan.RowsIteration plan = factory.limit(f, limit);
+
+        // getTopKRows limit must be adjusted by dividing by predicate selectivity, because we're postfiltering,
+        // and the postfilter will reject many rows:
+        Plan.Executor executor = Mockito.mock(Plan.Executor.class);
+        Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
+        Mockito.verify(executor, Mockito.times(1)).getTopKRows((Expression) Mockito.any(), Mockito.eq((int) round(limit / selectivity)));
     }
 
     @Test
@@ -475,7 +514,7 @@ public class PlanTest
             }
         };
 
-        RangeIterator iterator = (RangeIterator) plan.execute(executor, Integer.MAX_VALUE);
+        RangeIterator iterator = (RangeIterator) plan.execute(executor);
         assertEquals(LongIterator.convert(1L, 2L, 100L), LongIterator.convert(iterator));
     }
 

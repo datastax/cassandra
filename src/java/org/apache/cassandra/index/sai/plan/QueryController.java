@@ -403,24 +403,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             Plan.KeysIteration keysIteration = plan.firstNodeOfType(Plan.KeysIteration.class);
             assert keysIteration != null : "No index scan found";
-
-            // We need to estimate how many keys we'll be fetching for better performance.
-            // Some indexes may make a good use of knowing the number of requested keys in advance,
-            // because incremental re-requesting for more keys may be more expensive than getting them
-            // all at once.
-            Plan.Limit limit = plan.firstNodeOfType(Plan.Limit.class);
-            int hardLimit = limit != null ? limit.limit : Integer.MAX_VALUE;
-
-            // If there is filtering in the plan, we may need to fetch more keys
-            // from the index, so we need to reflect that in the limit.
-            // (In general, it costs more to over-fetch than under-fetch, because resume is cheap, so we don't
-            // need to use a high confidenceLevel.)
-            Plan.Filter filter = plan.firstNodeOfType(Plan.Filter.class);
-            int softLimit = (filter != null)
-                          ? SoftLimitUtil.softLimit(hardLimit, 0.5, filter.selectivity())
-                          : hardLimit;
-
-            return keysIteration.execute(this, softLimit);
+            return keysIteration.execute(this);
         }
         finally
         {
