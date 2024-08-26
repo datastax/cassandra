@@ -202,11 +202,10 @@ public class Segment implements Closeable
      * the number of candidates, the more nodes we expect to visit just to find
      * results that are in that set.)
      */
-    public int estimateAnnNodesVisited(int limit, int candidates)
+    public double estimateAnnSearchCost(int limit, int candidates)
     {
         IndexSearcher searcher = getIndexSearcher();
-        assert searcher instanceof V2VectorIndexSearcher : searcher;
-        return ((V2VectorIndexSearcher) searcher).estimateNodesVisited(limit, candidates);
+        return ((V2VectorIndexSearcher) searcher).estimateAnnSearchCost(limit, candidates);
     }
 
     /**
