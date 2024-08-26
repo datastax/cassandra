@@ -1432,11 +1432,6 @@ abstract public class Plan
             double rowFetchCost = hrs(CostCoefficients.ROW_COST)
                                   + CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow
                                   + CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow;
-            Tracing.logAndTrace(logger, "Row fetch cost: {} + {} + {} = {}",
-                                hrs(CostCoefficients.ROW_COST),
-                                CostCoefficients.ROW_CELL_COST * factory.tableMetrics.avgCellsPerRow,
-                                CostCoefficients.ROW_BYTE_COST * factory.tableMetrics.avgBytesPerRow,
-                                rowFetchCost);
 
             KeysIteration src = source.get();
             double expectedKeys = access.expectedAccessCount(src.expectedKeys());

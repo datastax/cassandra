@@ -448,8 +448,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     {
         int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
         var estimate = estimateCost(rerankK, candidates);
-        Tracing.logAndTrace(logger, "Estimating {} nodes visited for LIMIT {} with {} candidates in graph sized {}; cost is {}",
-                            estimate.expectedNodesVisited, limit, candidates, graph.size(), estimate);
         return estimate.cost();
     }
 
