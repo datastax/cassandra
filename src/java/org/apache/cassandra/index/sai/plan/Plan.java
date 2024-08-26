@@ -1071,9 +1071,12 @@ abstract public class Plan
         private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
             double loops = isEffectivelyZero(selectivity()) ? 1.0 : subplans.get(0).selectivity() / selectivity();
-
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
-            newSubplans.add(subplans.get(0).withAccess(access.scaleDistance(loops).convolute(loops, 1.0)));
+            KeysIteration s0 = subplans.get(0).withAccess(access.scaleDistance(loops).convolute(loops, 1.0));
+            newSubplans.add(s0);
+
+            // We may run out of keys while iterating the first iterator, and then we just break the loop early
+            loops = Math.min(s0.expectedKeys(), loops);
 
             double matchProbability = 1.0;
             for (int i = 1; i < subplans.size(); i++)
