@@ -52,6 +52,7 @@ import org.apache.cassandra.io.util.SimpleCachedBufferPool;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
@@ -417,9 +418,9 @@ public abstract class AbstractCommitLogSegmentManager
         handleReplayedSegment(file, false);
     }
 
-    void handleReplayedSegment(final File file, boolean hasInvalidOrFailedMutations)
+    void handleReplayedSegment(final File file, boolean hasInvalidMutations)
     {
-        if (!hasInvalidOrFailedMutations)
+        if (!hasInvalidMutations)
         {
             // (don't decrease managed size, since this was never a "live" segment)
             logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);
@@ -427,7 +428,7 @@ public abstract class AbstractCommitLogSegmentManager
         }
         else
         {
-            logger.debug("File {} should not be deleted as it contains invalid or failed mutations", file.name());
+            logger.debug("File {} should not be deleted as it contains invalid mutations", file.name());
         }
     }
 
