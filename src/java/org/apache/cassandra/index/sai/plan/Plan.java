@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static java.lang.Math.max;
+import static java.lang.Math.round;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
 
 /**
@@ -585,11 +586,9 @@ abstract public class Plan
          * The node itself isn't supposed for doing the actual work, but rather serves as a director which
          * delegates the work to the query controller through the passed Executor.
          *
-         * @param executor  does all the hard work like fetching keys from the indexes or ANN sort
-         * @param softLimit the number of keys likely to be requested from the returned iterator;
-         *                  this is a hint only - it does not change the result set, but may change performance
+         * @param executor does all the hard work like fetching keys from the indexes or ANN sort
          */
-        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit);
+        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor);
 
         protected abstract KeysIteration withAccess(Access patterns);
 
@@ -661,7 +660,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor, int softLimit)
+        protected RangeIterator execute(Executor executor)
         {
             return RangeIterator.empty();
         }
@@ -713,7 +712,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor, int softLimit)
+        protected RangeIterator execute(Executor executor)
         {
             // Not supported because it doesn't make a lot of sense.
             // A direct scan of table data would be certainly faster.
@@ -858,10 +857,10 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
             return (ordering != null)
-                ? executor.getTopKRows(predicate, softLimit)
+                ? executor.getTopKRows(predicate, max(1, round((float) access.totalCount(factory.tableMetrics.rows))))
                 : executor.getKeysFromIndex(predicate);
         }
 
@@ -1024,13 +1023,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor, int softLimit)
+        protected RangeIterator execute(Executor executor)
         {
             RangeIterator.Builder builder = RangeUnionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((RangeIterator) plan.execute(executor, softLimit));
+                    builder.add((RangeIterator) plan.execute(executor));
                 return builder.build();
             }
             catch (Throwable t)
@@ -1157,13 +1156,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor, int softLimit)
+        protected RangeIterator execute(Executor executor)
         {
             RangeIterator.Builder builder = RangeIntersectionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((RangeIterator) plan.execute(executor, softLimit));
+                    builder.add((RangeIterator) plan.execute(executor));
 
                 return builder.build();
             }
@@ -1256,11 +1255,10 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
-            // soft limit for fetching the keys from source is MAX_VALUE because we need to know
-            // all keys from which to pick the top K.
-            RangeIterator sourceIterator = (RangeIterator) source.execute(executor, Integer.MAX_VALUE);
+            RangeIterator sourceIterator = (RangeIterator) source.execute(executor);
+            int softLimit = max(1, round((float) access.totalCount(factory.tableMetrics.rows)));
             return executor.getTopKRows(sourceIterator, softLimit);
         }
 
@@ -1309,13 +1307,10 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor, int softLimit)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
-            // Divide soft limit by 2, so we can terminate search earlier if it
-            // occurs that we collected enough rows. keysCount() gives us the
-            // average expected number of rows that will be needed but
-            // many queries will need fewer than that.
-            return executor.getTopKRows((Expression) null, max(1, softLimit / 2));
+            int softLimit = max(1, round((float) access.totalCount(factory.tableMetrics.rows)));
+            return executor.getTopKRows((Expression) null, softLimit);
         }
 
         @Override
