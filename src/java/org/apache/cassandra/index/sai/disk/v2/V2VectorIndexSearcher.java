@@ -60,7 +60,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.plan.Plan;
+import org.apache.cassandra.index.sai.plan.Plan.CostCoefficients;
 import org.apache.cassandra.index.sai.utils.IntIntPairArray;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
@@ -78,6 +78,7 @@ import org.apache.cassandra.utils.CloseableIterator;
 
 import static java.lang.Math.ceil;
 import static java.lang.Math.min;
+import static org.apache.cassandra.index.sai.plan.Plan.hrs;
 
 /**
  * Executes ann search against the graph for an individual index segment.
@@ -184,8 +185,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     /**
-     * Return bit set to configure a graph search; otherwise return posting list or ScoredRowIdIterator to bypass
-     * graph search and use brute force to order matching rows.
+     * Find the closest `limit` neighbors to the given query vector, using a coarse search pass for `rerankK`
+     * candidates.  May decide to use brute force instead of the index.
      * @param keyRange the key range to search
      * @param context the query context
      * @param queryVector the query vector
@@ -205,7 +206,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // not restricted
             if (RangeUtil.coversFullRing(keyRange))
-                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
+            {
+                var estimate = estimateCost(rerankK, graph.size());
+                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, visited -> {
+                    estimate.updateStatistics(visited);
+                    context.addAnnNodesVisited(visited);
+                });
+            }
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
@@ -281,7 +288,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     {
         // If we use compressed vectors, we still have to order rerankK results using full resolution similarity
         // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
-        if (graph.getCompressedVectors() != null && segmentOrdinalPairs.size() - rerankK > Plan.memoryToDiskFactor() * segmentOrdinalPairs.size())
+        double twoPassCost = segmentOrdinalPairs.size() * CostCoefficients.ANN_SIMILARITY_COST
+                             + rerankK * hrs(CostCoefficients.ANN_SCORED_KEY_COST);
+        double onePassCost = segmentOrdinalPairs.size() * hrs(CostCoefficients.ANN_SCORED_KEY_COST);
+        if (graph.getCompressedVectors() != null && twoPassCost < onePassCost)
             return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentOrdinalPairs, limit, rerankK);
         return orderByBruteForce(queryVector, segmentOrdinalPairs);
     }
@@ -393,12 +403,21 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             if (candidates > GLOBAL_BRUTE_FORCE_ROWS)
                 return false;
-            return bruteForceCost() <= expectedNodesVisited;
+            return bruteForceCost() <= indexScanCost();
         }
 
-        private int bruteForceCost()
+        private double indexScanCost()
         {
-            return (int) (candidates * BRUTE_FORCE_EXPENSE_FACTOR);
+            return expectedNodesVisited
+                   * (CostCoefficients.ANN_SIMILARITY_COST + hrs(CostCoefficients.ANN_EDGELIST_COST) / graph.maxDegree());
+        }
+
+        private double bruteForceCost()
+        {
+            // VSTODO we don't have rerankK available here, so we only calculate the two pass cost
+            // out of the options in orderByBruteForce.  (The rerank cost is roughly equal for both
+            // indexScanCost and bruteForceCost so we can leave it out of both.)
+            return candidates * CostCoefficients.ANN_SIMILARITY_COST;
         }
 
         public void updateStatistics(int actualNodesVisited)
@@ -407,25 +426,33 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             expectedActualNodesVisited.update(rawExpectedNodesVisited, actualNodesVisited);
 
             if (actualNodesVisited >= 1000 && (actualNodesVisited > 2 * expectedNodesVisited || actualNodesVisited < 0.5 * expectedNodesVisited))
-                Tracing.logAndTrace(logger, "Predicted visiting {} nodes, but actually visited {}",
-                                    expectedNodesVisited, actualNodesVisited);
+                Tracing.logAndTrace(logger, "Predicted visiting {} nodes ({} raw), but actually visited {}",
+                                    expectedNodesVisited, rawExpectedNodesVisited, actualNodesVisited);
         }
 
         @Override
         public String toString()
         {
-            return String.format("{brute force: %d, index scan: %d}", bruteForceCost(), expectedNodesVisited);
+            return String.format("{brute force(%d) = %.2f, index scan(%d) = %.2f}",
+                                 candidates, bruteForceCost(), expectedNodesVisited, indexScanCost());
+        }
+
+        public double cost()
+        {
+            return min(bruteForceCost(), indexScanCost());
         }
     }
 
-    public int estimateNodesVisited(int limit, int candidates)
+    public double estimateAnnSearchCost(int limit, int candidates)
     {
-        return estimateCost(limit, candidates).expectedNodesVisited;
+        int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
+        var estimate = estimateCost(rerankK, candidates);
+        return estimate.cost();
     }
 
-    private CostEstimate estimateCost(int limit, int candidates)
+    private CostEstimate estimateCost(int rerankK, int candidates)
     {
-        int rawExpectedNodes = getRawExpectedNodes(limit, candidates);
+        int rawExpectedNodes = getRawExpectedNodes(rerankK, candidates);
         // update the raw expected value with a linear interpolation based on observed data
         var observedValues = expectedActualNodesVisited.getSnapshot().values;
         int expectedNodes;
@@ -439,7 +466,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             expectedNodes = rawExpectedNodes;
         }
 
-        int sanitizedEstimate = VectorMemtableIndex.ensureSaneEstimate(expectedNodes, limit, graph.size());
+        int sanitizedEstimate = VectorMemtableIndex.ensureSaneEstimate(expectedNodes, rerankK, graph.size());
         return new CostEstimate(candidates, rawExpectedNodes, sanitizedEstimate);
     }
 

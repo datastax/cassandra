@@ -330,4 +330,10 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     {
         return pqUnitVectors;
     }
+
+    @Override
+    public int maxDegree()
+    {
+        return graph.maxDegree();
+    }
 }
