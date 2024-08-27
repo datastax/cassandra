@@ -294,6 +294,16 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource
     }
 
     /**
+     * Estimates the total number of rows stored in the memtable.
+     * It is optimized for speed, not for accuracy.
+     */
+    static long estimateRowCount(Memtable memtable)
+    {
+        long rowSize = memtable.getEstimatedAverageRowSize();
+        return rowSize > 0 ? memtable.getLiveDataSize() / rowSize : 0;
+    }
+
+    /**
      * Returns the amount of on-heap memory that has been allocated for this memtable but is not yet used.
      * This is not counted in the memory usage to have a better flushing decision behaviour -- we do not want to flush
      * immediately after allocating a new buffer but when we have actually used the space provided.
@@ -304,7 +314,6 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource
     {
         return 0;
     }
-
 
     @NotThreadSafe
     class MemoryUsage
