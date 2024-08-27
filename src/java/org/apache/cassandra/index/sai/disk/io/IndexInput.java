@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 /**
@@ -41,4 +42,13 @@ public abstract class IndexInput extends org.apache.lucene.store.IndexInput
 
     @Override
     public abstract IndexInput slice(String sliceDescription, long offset, long length) throws IOException;
+
+
+    public final ByteBuffer readBytes() throws IOException
+    {
+        int len = readVInt();
+        byte[] bytes = new byte[len];
+        readBytes(bytes, 0, len);
+        return ByteBuffer.wrap(bytes);
+    }
 }

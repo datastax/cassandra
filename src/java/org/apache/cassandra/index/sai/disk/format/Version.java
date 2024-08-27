@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -55,10 +56,12 @@ public class Version
     public static final Version DB = new Version("db", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g,"db"));
     // revamps vector postings lists to cause fewer reads from disk
     public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
+    // histograms in index metadata
+    public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
