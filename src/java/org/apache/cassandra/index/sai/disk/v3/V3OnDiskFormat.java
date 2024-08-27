@@ -74,6 +74,12 @@ public class V3OnDiskFormat extends V2OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean hasTermsHistogram()
+        {
+            return false;
+        }
     };
 
     @Override

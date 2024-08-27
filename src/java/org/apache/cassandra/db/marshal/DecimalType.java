@@ -225,7 +225,7 @@ public class DecimalType extends NumberType<BigDecimal>
         // but when decoding we don't need that property on the transient mantissa value.
         BigInteger mantissa = BigInteger.ZERO;
         int curr = comparableBytes.next();
-        while (curr != DECIMAL_LAST_BYTE)
+        while (curr > DECIMAL_LAST_BYTE)
         {
             // The mantissa value is constructed by a standard positional notation value calculation.
             // The value of the next digit is the next most-significant mantissa byte as an unsigned integer,
@@ -348,7 +348,7 @@ public class DecimalType extends NumberType<BigDecimal>
     }
 
     @Override
-    protected BigDecimal toBigDecimal(ByteBuffer value)
+    public BigDecimal toBigDecimal(ByteBuffer value)
     {
         return compose(value);
     }

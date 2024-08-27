@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 public class V4OnDiskFormat extends V3OnDiskFormat
 {
@@ -55,5 +56,13 @@ public class V4OnDiskFormat extends V3OnDiskFormat
         return TypeUtil.isLiteral(type) && !TypeUtil.isComposite(type)
                ? v -> ByteSource.preencoded(input)
                : TypeUtil.asComparableBytes(input, type);
+    }
+
+    @Override
+    public ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type)
+    {
+        return TypeUtil.isLiteral(type) && !TypeUtil.isComposite(type)
+               ? ByteBuffer.wrap(ByteSourceInverse.readBytes(value.asComparableBytes(ByteComparable.Version.OSS41)))
+               : TypeUtil.fromComparableBytes(value, type, ByteComparable.Version.OSS41);
     }
 }
