@@ -21,9 +21,9 @@ package org.apache.cassandra.io.sstable.format;
 import java.io.FileNotFoundException;
 import java.io.IOError;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -31,6 +31,7 @@ import java.util.TreeSet;
 
 import com.google.common.collect.Collections2;
 import com.google.common.collect.Sets;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,11 +40,11 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 
-import static java.nio.file.StandardOpenOption.CREATE;
-import static java.nio.file.StandardOpenOption.SYNC;
-import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
+import static org.apache.cassandra.io.util.File.WriteMode.APPEND;
+import static org.apache.cassandra.io.util.File.WriteMode.OVERWRITE;
 
 public class TOCComponent
 {
@@ -100,16 +101,35 @@ public class TOCComponent
 
         if (tocFile.exists())
             componentNames.addAll(FileUtils.readLines(tocFile));
+    }
 
-        try
+    /**
+     * Write TOC file with given components and write mode
+     */
+    public static void writeTOC(File tocFile, Collection<Component> components, File.WriteMode writeMode)
+    {
+        try (FileOutputStreamPlus out = tocFile.newOutputStream(writeMode);
+             PrintWriter w = new PrintWriter(out))
         {
-            FileUtils.write(tocFile, new ArrayList<>(componentNames), CREATE, TRUNCATE_EXISTING, SYNC);
+            for (Component component : components)
+                w.println(component.name);
+            w.flush();
+            out.sync();
         }
-        catch (RuntimeException ex)
+        catch (IOException e)
         {
-            throw new RuntimeException("Exception occurred while writing to " + tocFile,
-                                       ex.getCause() != null ? ex.getCause() : ex);
+            throw new FSWriteError(e, tocFile);
         }
+    }
+
+    /**
+     * Appends new component names to the TOC component.
+     */
+    @SuppressWarnings("resource")
+    public static void appendTOC(Descriptor descriptor, Collection<Component> components)
+    {
+        File tocFile = descriptor.fileFor(Components.TOC);
+        writeTOC(tocFile, components, APPEND);
     }
 
     /**
@@ -150,9 +170,7 @@ public class TOCComponent
     public static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Components.TOC);
-        if (!tocFile.tryDelete())
-            logger.error("Failed to delete TOC component for {}", descriptor);
-        updateTOC(descriptor, components);
+        writeTOC(tocFile, components, OVERWRITE);
     }
 
     public static void maybeAdd(Descriptor descriptor, Component component) throws IOException

@@ -54,13 +54,13 @@ public interface IndexComponent
 
         /**
          * Opens a file handle for the provided index component similarly to {@link #createFileHandle()},
-         * but this method shoud be called instead of the aforemented one if the access is done "as part of flushing", that is
+         * but this method shoud be called instead of the aforemented one if the access is done during index building, that is
          * before the full index that this is a part of has been finalized.
          * <p>
          * The use of this method can allow specific storage providers, typically tiered storage ones, to distinguish accesses
-         * that happen "at flush time" from other accesses, as the related file may be in different tier of storage.
+         * that happen "at index building time" from other accesses, as the related file may be in different tier of storage.
          */
-        FileHandle createFlushTimeFileHandle();
+        FileHandle createIndexBuildTimeFileHandle();
 
         IndexInput openInput();
 
