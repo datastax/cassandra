@@ -40,6 +40,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 
 import static org.apache.cassandra.io.util.File.WriteMode.APPEND;
+import static org.apache.cassandra.io.util.File.WriteMode.OVERWRITE;
 
 public class TOCComponent
 {
@@ -78,12 +79,11 @@ public class TOCComponent
     }
 
     /**
-     * Appends new component names to the TOC component.
+     * Write TOC file with given components and write mode
      */
-    public static void appendTOC(Descriptor descriptor, Collection<Component> components)
+    public static void writeTOC(File tocFile, Collection<Component> components, File.WriteMode writeMode)
     {
-        File tocFile = descriptor.fileFor(Components.TOC);
-        try (FileOutputStreamPlus out = tocFile.newOutputStream(APPEND);
+        try (FileOutputStreamPlus out = tocFile.newOutputStream(writeMode);
              PrintWriter w = new PrintWriter(out))
         {
             for (Component component : components)
@@ -95,6 +95,16 @@ public class TOCComponent
         {
             throw new FSWriteError(e, tocFile);
         }
+    }
+
+    /**
+     * Appends new component names to the TOC component.
+     */
+    @SuppressWarnings("resource")
+    public static void appendTOC(Descriptor descriptor, Collection<Component> components)
+    {
+        File tocFile = descriptor.fileFor(Components.TOC);
+        writeTOC(tocFile, components, APPEND);
     }
 
     public static Set<Component> loadOrCreate(Descriptor descriptor)
@@ -128,9 +138,7 @@ public class TOCComponent
     public static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Components.TOC);
-        if (!tocFile.tryDelete())
-            logger.error("Failed to delete TOC component for " + descriptor);
-        appendTOC(descriptor, components);
+        writeTOC(tocFile, components, OVERWRITE);
     }
 
     public static void maybeAdd(Descriptor descriptor, Component component) throws IOException
