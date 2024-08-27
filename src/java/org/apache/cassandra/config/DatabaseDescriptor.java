@@ -310,10 +310,10 @@ public class DatabaseDescriptor
         daemonInitialized = true;
 
         setConfig(config.get());
-        // SnapshotLoader requires created directories
-        // GuardrailsOptions.validateDataDiskUsageMaxDiskSize requires created directories
-        createAllDirectories();
         applyAll();
+
+        // FIXME: CNDB-10296 StorageService.instance->SnapshotManager->SnapshotLoader requires created directories
+        createAllDirectories();
 
         applyGuardrails(); // GuardrailsOptions.validateDataDiskUsageMaxDiskSize requires created directories
 
