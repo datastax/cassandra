@@ -54,6 +54,13 @@ public class KeyRangeTermIterator extends KeyRangeIterator
         this.union = union;
         this.referencedIndexes = referencedIndexes;
         this.context = queryContext;
+
+        for (SSTableIndex index : referencedIndexes)
+        {
+            boolean success = index.reference();
+            // Won't happen, because the indexes we get here must be already referenced by the query view
+            assert success : "Failed to reference the index " + index;
+        }
     }
 
 
@@ -79,8 +86,6 @@ public class KeyRangeTermIterator extends KeyRangeIterator
                 queryContext.checkpoint();
                 queryContext.addSstablesHit(1);
                 assert !index.isReleased();
-
-
 
                 KeyRangeIterator keyIterator = index.search(e, keyRange, queryContext, defer, limit);
 
@@ -132,7 +137,6 @@ public class KeyRangeTermIterator extends KeyRangeIterator
     {
         FileUtils.closeQuietly(union);
         referencedIndexes.forEach(KeyRangeTermIterator::releaseQuietly);
-        referencedIndexes.clear();
     }
 
     private static void releaseQuietly(SSTableIndex index)

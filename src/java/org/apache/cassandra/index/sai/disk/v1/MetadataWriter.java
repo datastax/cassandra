@@ -26,6 +26,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -34,11 +35,13 @@ import org.apache.lucene.util.BytesRef;
 @NotThreadSafe
 public class MetadataWriter implements Closeable
 {
+    private final Version version;
     private final IndexOutput output;
     private final Map<String, BytesRef> map = new HashMap<>();
 
     public MetadataWriter(IndexComponents.ForWrite components) throws IOException
     {
+        this.version = components.version();
         this.output = components.addOrGet(components.metadataComponent()).openOutput();
     }
 
@@ -87,5 +90,10 @@ public class MetadataWriter implements Closeable
         {
             output.close();
         }
+    }
+
+    public Version version()
+    {
+        return version;
     }
 }

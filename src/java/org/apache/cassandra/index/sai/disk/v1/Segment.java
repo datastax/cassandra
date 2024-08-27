@@ -230,4 +230,9 @@ public class Segment implements Closeable
         assert proportionalLimit >= 1 : proportionalLimit;
         return proportionalLimit;
     }
+
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return metadata.estimateNumRowsMatching(predicate);
+    }
 }
