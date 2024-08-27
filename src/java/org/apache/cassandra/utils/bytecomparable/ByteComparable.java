@@ -20,6 +20,8 @@ package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.utils.FastByteOperations;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
@@ -170,7 +172,7 @@ public interface ByteComparable
     }
 
     /**
-     * Compare two byte-comparable values by their byte-comparable representation. Used for tests.
+     * Compare two byte-comparable values by their byte-comparable representation.
      *
      * @return the result of the lexicographic unsigned byte comparison of the byte-comparable representations of the
      *         two arguments
@@ -193,6 +195,14 @@ public interface ByteComparable
             if (b1 == ByteSource.END_OF_STREAM)
                 return 0;
         }
+    }
+
+    /**
+     * Compares two bytecomparable encodings lexicographically
+     */
+    static int compare(ByteBuffer value1, ByteBuffer value2)
+    {
+        return FastByteOperations.compareUnsigned(value1, value2);
     }
 
     /**
