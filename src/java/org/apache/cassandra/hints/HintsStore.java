@@ -18,7 +18,11 @@
 package org.apache.cassandra.hints;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Deque;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -26,12 +30,12 @@ import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.utils.SyncUtil;
 
 /**
@@ -159,6 +163,16 @@ final class HintsStore
     {
         return Stream.concat(dispatchDequeue.stream(), corruptedFiles.stream())
                      .mapToLong(HintsDescriptor::getDataSize).sum();
+    }
+
+    public int getTotalFilesNum()
+    {
+        return dispatchDequeue.size() + corruptedFiles.size();
+    }
+
+    public int getCorruptedFilesNum()
+    {
+        return corruptedFiles.size();
     }
 
     void cleanUp(HintsDescriptor descriptor)

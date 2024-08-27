@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.google.common.collect.ImmutableMap;
@@ -110,8 +111,8 @@ public class HintsDescriptorTest
             try (HintsWriter ignored = HintsWriter.create(directory, expected))
             {
             }
-            HintsDescriptor actual = HintsDescriptor.readFromFile(new File(directory, expected.fileName()));
-            assertEquals(expected, actual);
+            Optional<HintsDescriptor> actual = HintsDescriptor.readFromFileQuietly(new File(directory, expected.fileName()).toPath());
+            assertEquals(Optional.of(expected), actual);
         }
         finally
         {

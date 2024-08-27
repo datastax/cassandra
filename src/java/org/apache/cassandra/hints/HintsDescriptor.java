@@ -34,7 +34,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,7 +43,6 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.net.MessagingService;
@@ -290,20 +288,6 @@ final class HintsDescriptor
         catch (IOException ex)
         {
             logger.error("Error handling corrupt hints file {}", path.toString(), ex);
-        }
-    }
-
-    static HintsDescriptor readFromFile(File path)
-    {
-        try (FileInputStreamPlus raf = new FileInputStreamPlus(path))
-        {
-            HintsDescriptor descriptor = deserialize(raf);
-            descriptor.setDataSize(path.length());
-            return descriptor;
-        }
-        catch (IOException e)
-        {
-            throw new FSReadError(e, path);
         }
     }
 

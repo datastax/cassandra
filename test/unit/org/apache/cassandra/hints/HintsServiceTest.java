@@ -59,6 +59,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_REWRI
 import static org.apache.cassandra.net.Verb.HINT_REQ;
 import static org.apache.cassandra.net.Verb.HINT_RSP;
 import static org.apache.cassandra.net.MockMessagingService.verb;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -249,6 +250,8 @@ public class HintsServiceTest
         assertTrue(storeToDeleteHints.hasFiles());
         HintsStore anotherStore = writeAndFlushHints(anotherHostId, numHints);
         assertTrue(anotherStore.hasFiles());
+        assertThat(HintsService.instance.getTotalFilesNum()).isEqualTo(2);
+        assertThat(HintsService.instance.getCorruptedFilesNum()).isEqualTo(0);
 
         HintsService.instance.deleteAllHintsForEndpoint(endpointToDeleteHints);
         assertFalse(storeToDeleteHints.hasFiles());
