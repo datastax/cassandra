@@ -85,4 +85,6 @@ public interface SearchableIndex extends Closeable
     List<Segment> getSegments();
 
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
+
+    long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange);
 }

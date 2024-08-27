@@ -126,7 +126,6 @@ public class MemtableIndexWriter implements PerIndexWriter
             else
             {
                 final Iterator<Pair<ByteComparable, IntArrayList>> iterator = rowMapping.merge(memtableIndex);
-
                 try (MemtableTermsIterator terms = new MemtableTermsIterator(memtableIndex.getMinTerm(), memtableIndex.getMaxTerm(), iterator))
                 {
                     long cellCount = flush(minKey, maxKey, indexContext().getValidator(), terms, rowMapping.maxSegmentRowId);
@@ -147,13 +146,13 @@ public class MemtableIndexWriter implements PerIndexWriter
     private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, int maxSegmentRowId) throws IOException
     {
         long numRows;
+        SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, perIndexComponents);
         SegmentMetadata.ComponentMetadataMap indexMetas;
-
         if (TypeUtil.isLiteral(termComparator))
         {
             try (InvertedIndexWriter writer = new InvertedIndexWriter(perIndexComponents))
             {
-                indexMetas = writer.writeAll(terms);
+                indexMetas = writer.writeAll(metadataBuilder.intercept(terms));
                 numRows = writer.getPostingsCount();
             }
         }
@@ -166,7 +165,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                                     Integer.MAX_VALUE,
                                                                     indexContext().getIndexWriterConfig()))
             {
-                indexMetas = writer.writeAll(ImmutableOneDimPointValues.fromTermEnum(terms, termComparator));
+                ImmutableOneDimPointValues values = ImmutableOneDimPointValues.fromTermEnum(terms, termComparator);
+                indexMetas = writer.writeAll(metadataBuilder.intercept(values));
                 numRows = writer.getPointCount();
             }
         }
@@ -179,16 +179,11 @@ public class MemtableIndexWriter implements PerIndexWriter
             return 0;
         }
 
-        // During index memtable flush, the data is sorted based on terms.
-        SegmentMetadata metadata = new SegmentMetadata(0,
-                                                       numRows,
-                                                       terms.getMinSSTableRowId(),
-                                                       terms.getMaxSSTableRowId(),
-                                                       pkFactory.createPartitionKeyOnly(minKey),
-                                                       pkFactory.createPartitionKeyOnly(maxKey),
-                                                       terms.getMinTerm(),
-                                                       terms.getMaxTerm(),
-                                                       indexMetas);
+        metadataBuilder.setKeyRange(pkFactory.createPartitionKeyOnly(minKey), pkFactory.createPartitionKeyOnly(maxKey));
+        metadataBuilder.setRowIdRange(terms.getMinSSTableRowId(), terms.getMaxSSTableRowId());
+        metadataBuilder.setTermRange(terms.getMinTerm(), terms.getMaxTerm());
+        metadataBuilder.setComponentsMetadata(indexMetas);
+        SegmentMetadata metadata = metadataBuilder.build();
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))
         {
@@ -219,6 +214,7 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                        pkFactory.createPartitionKeyOnly(maxKey),
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
+                                                       null,
                                                        metadataMap);
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))

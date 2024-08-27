@@ -176,7 +176,7 @@ public class SegmentFlushTest
         MetadataSource source = MetadataSource.loadMetadata(components);
 
         // verify segment count
-        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexContext.keyFactory());
+        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexContext);
         assertEquals(segments, segmentMetadatas.size());
 
         // verify segment metadata
