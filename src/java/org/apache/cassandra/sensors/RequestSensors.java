@@ -89,27 +89,30 @@ public class RequestSensors
     {
         Sensor sensor = getSensorFast(context, type);
         if (sensor != null)
+        {
             sensor.increment(value);
+            sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), value);
+        }
     }
 
     public synchronized void syncAllSensors()
     {
-        sensors.values().forEach(types -> {
-            for (int i = 0; i < types.length; i++)
-            {
-                if (types[i] != null)
-                {
-                    Sensor sensor = types[i];
-                    double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
-                    double update = sensor.getValue() - current;
-                    if (update == 0d)
-                        continue;
-
-                    latestSyncedValuePerSensor.put(sensor, sensor.getValue());
-                    sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
-                }
-            }
-        });
+//        sensors.values().forEach(types -> {
+//            for (int i = 0; i < types.length; i++)
+//            {
+//                if (types[i] != null)
+//                {
+//                    Sensor sensor = types[i];
+//                    double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
+//                    double update = sensor.getValue() - current;
+//                    if (update == 0d)
+//                        continue;
+//
+//                    latestSyncedValuePerSensor.put(sensor, sensor.getValue());
+//                    sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
+//                }
+//            }
+//        });
     }
 
     /**
