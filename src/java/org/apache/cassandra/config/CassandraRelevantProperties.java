@@ -173,6 +173,13 @@ public enum CassandraRelevantProperties
     COMPACTION_HISTORY_ENABLED("cassandra.compaction_history_enabled", "true"),
     COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB("compaction_rate_limit_granularity_in_kb"),
 
+    /**
+     * If this is true, compaction will not verify that sstables selected for compaction are in the same repair
+     * state. This check is done to ensure that incremental repair is not improperly carried out (potentially causing
+     * data loss) if a node has somehow entered an invalid state. The flag should only be used to recover from
+     * situations where sstables are brought in from outside and carry over stale and unapplicable repair state.
+     */
+    COMPACTION_SKIP_REPAIR_STATE_CHECKING("cassandra.compaction.skip_repair_state_checking", "false"),
 
     /**
      * This property indicates the location for the access file. If com.sun.management.jmxremote.authenticate is false,
@@ -576,14 +583,6 @@ public enum CassandraRelevantProperties
 
     /** Controls the hnsw vector cache size, in bytes, per index segment. 0 to disable */
     SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
-
-    /**
-     * If this is true, compaction will not verify that sstables selected for compaction are in the same repair
-     * state. This check is done to ensure that incremental repair is not improperly carried out (potentially causing
-     * data loss) if a node has somehow entered an invalid state. The flag should only be used to recover from
-     * situations where sstables are brought in from outside and carry over stale and unapplicable repair state.
-     */
-    COMPACTION_SKIP_REPAIR_STATE_CHECKING("cassandra.compaction.skip_repair_state_checking", "false"),
 
     /**
      * If true, the searcher object created when opening a SAI index will be replaced by a dummy object and index
