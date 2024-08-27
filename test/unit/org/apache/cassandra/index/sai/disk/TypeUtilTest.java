@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.disk;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -35,6 +36,7 @@ import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.ListType;
@@ -288,5 +290,66 @@ public class TypeUtilTest extends SaiRandomizedTest
         }
     }
 
+    @Test
+    public void testEncodeBigInteger()
+    {
+        testBigInteger(BigInteger.valueOf(0));
+        testBigInteger(BigInteger.valueOf(1));
+        testBigInteger(BigInteger.valueOf(-1));
+        testBigInteger(BigInteger.valueOf(2));
+        testBigInteger(BigInteger.valueOf(-2));
+        testBigInteger(BigInteger.valueOf(17));
+        testBigInteger(BigInteger.valueOf(-17));
+        testBigInteger(BigInteger.valueOf(123456789));
+        testBigInteger(BigInteger.valueOf(-123456789));
+        testBigInteger(BigInteger.valueOf(1000000000000L));
+        testBigInteger(BigInteger.valueOf(-1000000000000L));
+        testBigInteger(BigInteger.valueOf(13).pow(1000));
+        testBigInteger(BigInteger.valueOf(13).pow(1000).negate());
 
+        testBigInteger(new BigInteger("123456789012345678901234567890123456789012345678901234567890"));
+        testBigInteger(new BigInteger("-123456789012345678901234567890123456789012345678901234567890"));
+    }
+
+    private static void testBigInteger(BigInteger value)
+    {
+        var raw = IntegerType.instance.decompose(value);
+        var raw2 = TypeUtil.decodeBigInteger(TypeUtil.encodeBigInteger(raw));
+        var value2 = IntegerType.instance.compose(raw2);
+        // this cannot be exact comparison, because `encode` truncates value and loses some precision
+        assertEquals(value.doubleValue(), value2.doubleValue(), value.doubleValue() * 1.0e-15);
+    }
+
+    @Test
+    public void testEncodeDecimal()
+    {
+        testDecimal(BigDecimal.valueOf(0));
+        testDecimal(BigDecimal.valueOf(1));
+        testDecimal(BigDecimal.valueOf(-1));
+        testDecimal(BigDecimal.valueOf(12345678.9));
+        testDecimal(BigDecimal.valueOf(-12345678.9));
+        testDecimal(BigDecimal.valueOf(0.000005));
+        testDecimal(BigDecimal.valueOf(-0.000005));
+        testDecimal(BigDecimal.valueOf(0.1111111111111111));
+        testDecimal(BigDecimal.valueOf(-0.1111111111111111));
+
+        // test very large and very small values
+        testDecimal(BigDecimal.valueOf(123456789, -10000));
+        testDecimal(BigDecimal.valueOf(-123456789, -10000));
+        testDecimal(BigDecimal.valueOf(123456789, 10000));
+        testDecimal(BigDecimal.valueOf(-123456789, 10000));
+
+        // test truncated values
+        testDecimal(new BigDecimal("1234567890.1234567890123456789012345678901234567890"));
+        testDecimal(new BigDecimal("-1234567890.1234567890123456789012345678901234567890"));
+    }
+
+    private static void testDecimal(BigDecimal value)
+    {
+        var raw = DecimalType.instance.decompose(value);
+        var raw2 = TypeUtil.decodeDecimal(TypeUtil.encodeDecimal(raw));
+        var value2 = DecimalType.instance.compose(raw2);
+        // this cannot be exact comparison, because `encode` truncates value and loses some precision
+        assertEquals(value.doubleValue(), value2.doubleValue(), value.doubleValue() * 1.0e-15);
+    }
 }

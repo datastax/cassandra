@@ -37,7 +37,6 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
@@ -68,7 +67,6 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext indexContext;
     private final long nowInSec = FBUtilities.nowInSeconds();
-    private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexValid;
     private final long keyCount;
@@ -84,7 +82,6 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.perIndexComponents = perIndexComponents;
         this.indexContext = perIndexComponents.context();
         Preconditions.checkNotNull(indexContext, "Provided components %s are the per-sstable ones, expected per-index ones", perIndexComponents);
-        this.analyzer = indexContext.getAnalyzerFactory().create();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
         this.keyCount = keyCount;
@@ -238,7 +235,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (term.remaining() == 0 && !indexContext.getValidator().allowsEmpty())
             return;
 
-        long allocated = currentBuilder.addAll(term, type, key, sstableRowId, analyzer, indexContext);
+        long allocated = currentBuilder.addAll(term, type, key, sstableRowId);
         limiter.increment(allocated);
     }
 
