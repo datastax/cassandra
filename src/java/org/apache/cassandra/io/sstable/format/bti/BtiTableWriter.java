@@ -172,9 +172,9 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         {
             super(b);
             rowIndexWriter = new SequentialWriter(descriptor.fileFor(Components.ROW_INDEX), b.getIOOptions().writerOptions);
-            rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b).withMmappedRegionsCache(b.getMmappedRegionsCache());
+            rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType).withMmappedRegionsCache(b.getMmappedRegionsCache());
             partitionIndexWriter = new SequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), b.getIOOptions().writerOptions);
-            partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b).withMmappedRegionsCache(b.getMmappedRegionsCache());
+            partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType).withMmappedRegionsCache(b.getMmappedRegionsCache());
             partitionIndex = new PartitionIndexBuilder(partitionIndexWriter, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
             // register listeners to be alerted when the data files are flushed
             partitionIndexWriter.setPostFlushListener(partitionIndex::markPartitionIndexSynced);
