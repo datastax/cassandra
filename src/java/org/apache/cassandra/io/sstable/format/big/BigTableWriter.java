@@ -251,7 +251,7 @@ public class BigTableWriter extends SortedTableWriter<BigFormatPartitionWriter, 
             super(b);
             this.rowIndexEntrySerializer = b.getRowIndexEntrySerializer();
             writer = new SequentialWriter(b.descriptor.fileFor(Components.PRIMARY_INDEX), b.getIOOptions().writerOptions);
-            builder = IndexComponent.fileBuilder(Components.PRIMARY_INDEX, b).withMmappedRegionsCache(b.getMmappedRegionsCache());
+            builder = IndexComponent.fileBuilder(Components.PRIMARY_INDEX, b, b.operationType).withMmappedRegionsCache(b.getMmappedRegionsCache());
             summary = new IndexSummaryBuilder(b.getKeyCount(), b.getTableMetadataRef().getLocal().params.minIndexInterval, Downsampling.BASE_SAMPLING_LEVEL);
             // register listeners to be alerted when the data files are flushed
             writer.setPostFlushListener(summary::markIndexSynced);
