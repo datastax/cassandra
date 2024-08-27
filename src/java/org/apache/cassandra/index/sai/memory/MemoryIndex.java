@@ -55,6 +55,8 @@ public abstract class MemoryIndex
 
     public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
+    public abstract long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange);
+
     public abstract ByteBuffer getMinTerm();
 
     public abstract ByteBuffer getMaxTerm();
