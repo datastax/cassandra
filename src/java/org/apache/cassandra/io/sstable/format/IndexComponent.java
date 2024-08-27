@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.sstable.format;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.IOOptions;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -38,7 +39,7 @@ public class IndexComponent
         return fileBuilder(ssTable.descriptor.fileFor(component), ssTable.ioOptions, ssTable.chunkCache);
     }
 
-    public static FileHandle.Builder fileBuilder(Component component, SSTable.Builder<?, ?> builder)
+    public static FileHandle.Builder fileBuilder(Component component, SSTable.Builder<?, ?> builder, OperationType operationType)
     {
         return fileBuilder(builder.descriptor.fileFor(component), builder.getIOOptions(), builder.getChunkCache());
     }
