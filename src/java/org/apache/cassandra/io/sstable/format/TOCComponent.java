@@ -31,6 +31,7 @@ import java.util.TreeSet;
 
 import com.google.common.collect.Collections2;
 import com.google.common.collect.Sets;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -140,7 +141,7 @@ public class TOCComponent
             return components; // sstable doesn't exist yet
 
         components.add(Components.TOC);
-        TOCComponent.updateTOC(descriptor, components);
+        updateTOC(descriptor, components);
         return components;
     }
 
@@ -149,16 +150,38 @@ public class TOCComponent
      */
     public static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
+        if (components.isEmpty())
+            return;
+
         File tocFile = descriptor.fileFor(Components.TOC);
-        if (!tocFile.tryDelete())
-            logger.error("Failed to delete TOC component for {}", descriptor);
-        updateTOC(descriptor, components);
+        // As this method *re*-write the TOC (and is currently only called by "unregisterComponents"), it should only
+        // be called in contexts where the TOC is expected to exist. If it doesn't, there is probably something
+        // unexpected happening, so we log relevant information to help diagnose a potential earlier problem.
+        // But in principle, this isn't a big deal for this method, and we still end up with the TOC in the state we
+        // expect.
+        if (!tocFile.exists())
+        {
+            // Note: we pass a dummy runtime exception as a simple way to get a stack-trace. Knowing from where this
+            // is called in this case is likely useful information.
+            logger.warn("Was asked to 'rewrite' TOC file {} for sstable {}, but it does not exists. The file will be created but this is unexpected. The components to 'overwrite' are: {}", tocFile, descriptor, components, new RuntimeException());
+        }
+
+        Set<String> componentNames = new TreeSet<>(Collections2.transform(components, Component::name));
+        try
+        {
+            FileUtils.write(tocFile, new ArrayList<>(componentNames), CREATE, TRUNCATE_EXISTING, SYNC);
+        }
+        catch (RuntimeException ex)
+        {
+            throw new RuntimeException("Exception occurred while writing to " + tocFile,
+                                       ex.getCause() != null ? ex.getCause() : ex);
+        }
     }
 
     public static void maybeAdd(Descriptor descriptor, Component component) throws IOException
     {
-        Set<Component> toc = TOCComponent.loadOrCreate(descriptor);
+        Set<Component> toc = loadOrCreate(descriptor);
         if (!toc.isEmpty() && toc.add(component))
-            TOCComponent.rewriteTOC(descriptor, toc);
+            rewriteTOC(descriptor, toc);
     }
 }
