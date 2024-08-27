@@ -43,20 +43,35 @@ public interface IndexFeatureSet
     boolean hasVectorIndexChecksum();
 
     /**
-     * The {@code Accumulator} is used to accumulate the {@code IndexFeatureSet} responses from
+     * @return true if index metadata contains term histograms for fast cardinality estimation
+     */
+    boolean hasTermsHistogram();
+
+    /**
+     * The {@code Accumulator} is used to accumulate the {@link IndexFeatureSet} responses from
      * multiple sources. This will include all the SSTables included in a query and all the indexes
-     * attached to those SSTables.
-     *
+     * attached to those SSTables, added using {@link Accumulator#accumulate}.
+     * <p>
+     * The feature set of the latest version denoted by {@link Version#latest()}
+     * is implicitly added, so the result feature set will include only the features supported by the
+     * latest version.
+     * <p>
      * The {@code Accumulator} creates an {@code IndexFeatureSet} this contains the features from
-     * all the associated feature sets where {@code false} is highest priority. This means if any
+     * all the associated feature sets where {@code false} is the highest priority. This means if any
      * on-disk format on any SSTable doesn't support a feature then that feature isn't supported
      * by the query.
      */
-    public static class Accumulator
+    class Accumulator
     {
         boolean isRowAware = true;
         boolean hasVectorIndexChecksum = true;
+        boolean hasTermsHistogram = true;
         boolean complete = false;
+
+        public Accumulator()
+        {
+            accumulate(Version.latest().onDiskFormat().indexFeatureSet());
+        }
 
         /**
          * Add another {@code IndexFeatureSet} to the accumulation
@@ -70,18 +85,39 @@ public interface IndexFeatureSet
                 isRowAware = false;
             if (!indexFeatureSet.hasVectorIndexChecksum())
                 hasVectorIndexChecksum = false;
+            if (!indexFeatureSet.hasTermsHistogram())
+                hasTermsHistogram = false;
         }
 
         /**
          * Complete the accumulation of feature sets and return the
          * result of the accumulation.
          *
-         * @return an {@IndexFeatureSet} containing the accumulated feature set
+         * @return an {@link IndexFeatureSet} containing the accumulated feature set
          */
         public IndexFeatureSet complete()
         {
             complete = true;
-            return Version.latest().onDiskFormat().indexFeatureSet();
+            return new IndexFeatureSet()
+            {
+                @Override
+                public boolean isRowAware()
+                {
+                    return isRowAware;
+                }
+
+                @Override
+                public boolean hasVectorIndexChecksum()
+                {
+                    return hasVectorIndexChecksum;
+                }
+
+                @Override
+                public boolean hasTermsHistogram()
+                {
+                    return hasTermsHistogram;
+                }
+            };
         }
     }
 }

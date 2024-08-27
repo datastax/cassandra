@@ -289,10 +289,7 @@ public class CassandraDiskAnn
 
     public void close() throws IOException
     {
-        ordinalsMap.close();
-        FileUtils.closeQuietly(searchers);
-        graph.close();
-        graphHandle.close();
+        FileUtils.close(ordinalsMap, searchers, graph, graphHandle);
     }
 
     public OrdinalsView getOrdinalsView()

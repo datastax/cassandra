@@ -150,7 +150,9 @@ public class Expression
     private float searchRadiusMeters = 0;
     private float searchRadiusDegreesSquared = 0;
     public int topK;
-    public boolean upperInclusive, lowerInclusive;
+    // These variables are only meant to be used for final validation of the range search. They are not
+    // meant to be used when searching the index. See the 'add' method below for additional explanation.
+    private boolean upperInclusive, lowerInclusive;
 
     final List<ByteBuffer> exclusions = new ArrayList<>();
 

@@ -87,7 +87,7 @@ public class V1SearchableIndex implements SearchableIndex
 
             final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
-            metadatas = SegmentMetadata.load(source, sstableContext.primaryKeyFactory());
+            metadatas = SegmentMetadata.load(source, indexContext);
 
             for (SegmentMetadata metadata : metadatas)
             {
@@ -272,6 +272,19 @@ public class V1SearchableIndex implements SearchableIndex
                    .column(MAX_TERM, maxTerm)
                    .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());
         }
+    }
+
+    @Override
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        long rowCount = 0;
+        for (Segment segment: segments)
+        {
+            long c = segment.estimateMatchingRowsCount(predicate, keyRange);
+            assert c >= 0 : "Estimated row count must not be negative: " + c + " (predicate: " + predicate + ')';
+            rowCount += c;
+        }
+        return rowCount;
     }
 
     /** Create a sublist of the keys within (inclusive) the segment's bounds */
