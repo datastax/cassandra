@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sasi.disk.PerSSTableIndexWriter;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -78,6 +79,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
             SSTableReader sstable = e.getKey();
             Map<ColumnMetadata, ColumnIndex> indexes = e.getValue();
 
+            SSTableWatcher.instance.onIndexBuild(sstable);
             try (RandomAccessReader dataFile = sstable.openDataReader())
             {
                 PerSSTableIndexWriter indexWriter = SASIIndex.newWriter(keyValidator, sstable.descriptor, indexes, OperationType.COMPACTION);
