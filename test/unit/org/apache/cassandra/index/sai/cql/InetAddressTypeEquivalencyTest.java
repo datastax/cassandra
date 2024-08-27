@@ -18,12 +18,18 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.net.InetAddress;
+import java.nio.ByteBuffer;
 
+import org.apache.commons.codec.binary.Hex;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.types.InetTest;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 /**
  * This is testing that we can query ipv4 addresses using ipv6 equivalent addresses.

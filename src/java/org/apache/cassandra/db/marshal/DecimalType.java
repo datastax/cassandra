@@ -348,7 +348,7 @@ public class DecimalType extends NumberType<BigDecimal>
     }
 
     @Override
-    protected BigDecimal toBigDecimal(ByteBuffer value)
+    public BigDecimal toBigDecimal(ByteBuffer value)
     {
         return compose(value);
     }

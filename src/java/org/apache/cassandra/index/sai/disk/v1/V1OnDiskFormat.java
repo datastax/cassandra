@@ -134,6 +134,12 @@ public class V1OnDiskFormat implements OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean hasTermsHistogram()
+        {
+            return false;
+        }
     };
 
     protected V1OnDiskFormat()
@@ -295,6 +301,14 @@ public class V1OnDiskFormat implements OnDiskFormat
     {
         return TypeUtil.isLiteral(type) ? v -> ByteSource.preencoded(input)
                                         : TypeUtil.asComparableBytes(input, type);
+    }
+
+    @Override
+    public ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type)
+    {
+        return TypeUtil.isLiteral(type)
+               ? ByteBuffer.wrap(ByteSourceInverse.readBytes(value.asComparableBytes(ByteComparable.Version.OSS41)))
+               : type.fromComparableBytes(value.asPeekableBytes(ByteComparable.Version.OSS41), ByteComparable.Version.OSS41);
     }
 
     /** vector data components (that did not have checksums before v3) */

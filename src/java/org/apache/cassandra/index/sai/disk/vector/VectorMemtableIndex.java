@@ -199,6 +199,13 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        // TODO: this is a stub, we need to compute the correct fraction
+        return primaryKeys.size();
+    }
+
+    @Override
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext context,
                                                                   Orderer orderer,
                                                                   Expression slice,

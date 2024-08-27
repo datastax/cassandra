@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
@@ -39,6 +40,7 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -578,4 +580,29 @@ public class TypeUtil
         bs.nextBytes(data); // reads up to the number of bytes in the array, leaving 0s in the remaining bytes
         return ByteBuffer.wrap(data);
     }
+
+
+
+    /**
+     * Converts the term to a BigDecimal in a way that it keeps the sort order
+     * (so terms comparing larger yield larger numbers). If the term represents a number,
+     * the conversion is linear and lossless, because we use the method provided by the concrete
+     * termType. For non-number types, we reinterpret the bytecomparable representation as a number.
+     */
+    public static BigDecimal toBigDecimal(ByteBuffer value, AbstractType<?> valueType)
+    {
+        if (value == null)
+            return null;
+
+        if (valueType instanceof NumberType)
+        {
+            var numberType = (NumberType<?>) valueType;
+            return numberType.toBigDecimal(value);
+        }
+
+        byte[] origBytes = ByteSourceInverse.readBytes(valueType.asComparableBytes(value, ByteComparable.Version.OSS41));
+        byte[] fixedLengthBytes = Arrays.copyOf(origBytes, 20);
+        return new BigDecimal(new BigInteger(fixedLengthBytes));
+    }
+
 }

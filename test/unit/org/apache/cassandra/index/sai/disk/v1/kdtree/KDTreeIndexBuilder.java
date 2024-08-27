@@ -54,6 +54,7 @@ import org.apache.cassandra.index.sai.disk.v1.KDTreeIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadataBuilder;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -154,17 +155,15 @@ public class KDTreeIndexBuilder
                                                                 size,
                                                                 IndexWriterConfig.defaultConfig("test")))
         {
-            final SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(pointValues);
-            metadata = new SegmentMetadata(0,
-                                           size,
-                                           minSegmentRowId,
-                                           maxSegmentRowId,
-                                           // min/max is unused for now
-                                           SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
-                                           SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()),
-                                           UTF8Type.instance.fromString("c"),
-                                           UTF8Type.instance.fromString("d"),
-                                           indexMetas);
+            SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, components);
+            final SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(pointValues));
+            metadataBuilder.setComponentsMetadata(indexMetas);
+            metadataBuilder.setRowIdRange(minSegmentRowId, maxSegmentRowId);
+            metadataBuilder.setTermRange(UTF8Type.instance.fromString("c"),
+                                         UTF8Type.instance.fromString("d"));
+            metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
+                                        SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()));
+            metadata = metadataBuilder.build();
         }
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(components))

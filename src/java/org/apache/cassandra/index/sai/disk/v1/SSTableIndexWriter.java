@@ -66,7 +66,6 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext indexContext;
     private final int nowInSec = FBUtilities.nowInSeconds();
-    private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexValid;
     private final long keyCount;
@@ -82,7 +81,6 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.perIndexComponents = perIndexComponents;
         this.indexContext = perIndexComponents.context();
         Preconditions.checkNotNull(indexContext, "Provided components %s are the per-sstable ones, expected per-index ones", perIndexComponents);
-        this.analyzer = indexContext.getAnalyzerFactory().create();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
         this.keyCount = keyCount;
@@ -236,7 +234,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (term.remaining() == 0 && !indexContext.getValidator().allowsEmpty())
             return;
 
-        long allocated = currentBuilder.addAll(term, type, key, sstableRowId, analyzer, indexContext);
+        long allocated = currentBuilder.addAll(term, type, key, sstableRowId);
         limiter.increment(allocated);
     }
 

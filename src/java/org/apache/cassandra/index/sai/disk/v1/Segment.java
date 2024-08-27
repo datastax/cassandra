@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -229,5 +230,28 @@ public class Segment implements Closeable
         int proportionalLimit = (int) Math.ceil(limit * ((double) segmentRows / totalRows));
         assert proportionalLimit >= 1 : proportionalLimit;
         return proportionalLimit;
+    }
+
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        switch (predicate.getOp())
+        {
+            case MATCH:
+            case EQ:
+            case CONTAINS_KEY:
+            case CONTAINS_VALUE:
+                return metadata.estimateNumRowsMatchingExact(predicate.lower.value.raw);
+            case NOT_EQ:
+            case NOT_CONTAINS_KEY:
+            case NOT_CONTAINS_VALUE:
+                return metadata.numRows - metadata.estimateNumRowsMatchingExact(predicate.lower.value.raw);
+            case RANGE:
+                ByteBuffer lower = predicate.lower != null ? predicate.lower.value.raw : null;
+                ByteBuffer upper = predicate.upper != null ? predicate.upper.value.raw : null;
+                return metadata.estimateNumRowsMatchingRange(lower, predicate.lowerInclusive, upper, predicate.upperInclusive);
+            default:
+                throw new IllegalArgumentException("Unsupported expression: " + predicate);
+        }
+
     }
 }
