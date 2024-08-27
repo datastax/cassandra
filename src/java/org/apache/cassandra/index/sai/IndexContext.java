@@ -33,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
@@ -138,7 +137,7 @@ public class IndexContext
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;
     private final AbstractType<?> validator;
-    private final ColumnFamilyStore owner;
+    private final ColumnFamilyStore cfs;
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
     private final IndexMetadata config;
@@ -166,7 +165,7 @@ public class IndexContext
                         @Nonnull ColumnMetadata column,
                         @Nonnull IndexTarget.Type indexType,
                         IndexMetadata config,
-                        @Nonnull ColumnFamilyStore owner)
+                        @Nonnull ColumnFamilyStore cfs)
     {
         this.keyspace = keyspace;
         this.table = table;
@@ -179,7 +178,7 @@ public class IndexContext
         this.viewManager = new IndexViewManager(this);
         this.indexMetrics = new IndexMetrics(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
-        this.owner = owner;
+        this.cfs = cfs;
 
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                               : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
@@ -255,14 +254,14 @@ public class IndexContext
         return tableId;
     }
 
-    public Memtable.Owner owner()
+    public ColumnFamilyStore columnFamilyStore()
     {
-        return owner;
+        return cfs;
     }
 
     public IPartitioner getPartitioner()
     {
-        return owner.getPartitioner();
+        return cfs.getPartitioner();
     }
 
     public void index(DecoratedKey key, Row row, Memtable mt, OpOrder.Group opGroup)
@@ -577,6 +576,23 @@ public class IndexContext
         return this.config == null ? null : config.name;
     }
 
+    public int getIntOption(String name, int defaultValue)
+    {
+        String value = this.config.options.get(name);
+        if (value == null)
+            return defaultValue;
+
+        try
+        {
+            return Integer.parseInt(value);
+        }
+        catch (NumberFormatException e)
+        {
+            logger.error("Failed to parse index configuration " + name + " = " + value + " as integer");
+            return defaultValue;
+        }
+    }
+
     public AbstractAnalyzer.AnalyzerFactory getAnalyzerFactory()
     {
         return analyzerFactory;
@@ -643,7 +659,6 @@ public class IndexContext
         }
     }
 
-    @VisibleForTesting
     public ConcurrentMap<Memtable, MemtableIndex> getLiveMemtables()
     {
         return liveMemtables;
@@ -873,7 +888,7 @@ public class IndexContext
             {
                 if (validate)
                 {
-                    if (!perIndexComponents.validateComponents(context.sstable, owner.getTracker(), true, false))
+                    if (!perIndexComponents.validateComponents(context.sstable, cfs.getTracker(), false, false))
                     {
                         // Note that a precise warning is already logged by the validation if there is an issue.
                         invalid.add(context);
