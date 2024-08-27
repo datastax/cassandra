@@ -163,12 +163,12 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Override
     public void unload()
     {
-        contextManager.clear();
+        baseCfs.getTracker().unsubscribe(this);
 
+        contextManager.clear();
         queryMetrics.release();
         groupMetrics.release();
         stateMetrics.release();
-        baseCfs.getTracker().unsubscribe(this);
     }
 
     @Override

@@ -18,7 +18,11 @@
 
 package org.apache.cassandra.index.sai.disk.io;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * A subclass of {@link org.apache.lucene.store.IndexOutput} that provides access to the byte order of the underlying data.
@@ -37,5 +41,12 @@ public abstract class IndexOutput extends org.apache.lucene.store.IndexOutput
     public ByteOrder order()
     {
         return order;
+    }
+
+    public final void writeBytes(ByteBuffer buf) throws IOException
+    {
+        byte[] bytes = ByteBufferUtil.getArray(buf);
+        writeVInt(bytes.length);
+        writeBytes(bytes, 0, bytes.length);
     }
 }
