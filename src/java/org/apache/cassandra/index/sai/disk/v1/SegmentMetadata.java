@@ -32,12 +32,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
+import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.store.IndexOutput;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Multiple {@link SegmentMetadata} are stored in {@link IndexComponentType#META} file, each corresponds to an on-disk
@@ -46,6 +54,8 @@ import org.apache.lucene.store.IndexOutput;
 public class SegmentMetadata implements Comparable<SegmentMetadata>
 {
     private static final String NAME = "SegmentMetadata";
+
+    public final Version version;
 
     /**
      * Used to retrieve sstableRowId which equals to offset plus segmentRowId.
@@ -78,6 +88,12 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     public final ByteBuffer minTerm;
     public final ByteBuffer maxTerm;
 
+
+    /**
+     * Statistical distribution of term values, useful for estimating selectivity of queries against this segment.
+     */
+    public final TermsDistribution termsDistribution;
+
     /**
      * Root, offset, length for each index structure in the segment.
      *
@@ -85,15 +101,16 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
      */
     public final ComponentMetadataMap componentMetadatas;
 
-    public SegmentMetadata(long segmentRowIdOffset,
-                           long numRows,
-                           long minSSTableRowId,
-                           long maxSSTableRowId,
-                           PrimaryKey minKey,
-                           PrimaryKey maxKey,
-                           ByteBuffer minTerm,
-                           ByteBuffer maxTerm,
-                           ComponentMetadataMap componentMetadatas)
+    SegmentMetadata(long segmentRowIdOffset,
+                    long numRows,
+                    long minSSTableRowId,
+                    long maxSSTableRowId,
+                    PrimaryKey minKey,
+                    PrimaryKey maxKey,
+                    ByteBuffer minTerm,
+                    ByteBuffer maxTerm,
+                    TermsDistribution termsDistribution,
+                    ComponentMetadataMap componentMetadatas)
     {
         // numRows can exceed Integer.MAX_VALUE because it is the count of unique term and segmentRowId pairs.
         Objects.requireNonNull(minKey);
@@ -101,6 +118,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         Objects.requireNonNull(minTerm);
         Objects.requireNonNull(maxTerm);
 
+        this.version = Version.latest();
         this.segmentRowIdOffset = segmentRowIdOffset;
         this.minSSTableRowId = minSSTableRowId;
         this.maxSSTableRowId = maxSSTableRowId;
@@ -109,14 +127,19 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.maxKey = maxKey;
         this.minTerm = minTerm;
         this.maxTerm = maxTerm;
+        this.termsDistribution = termsDistribution;
         this.componentMetadatas = componentMetadatas;
     }
 
     private static final Logger logger = LoggerFactory.getLogger(SegmentMetadata.class);
 
     @SuppressWarnings("resource")
-    private SegmentMetadata(IndexInput input, PrimaryKey.Factory primaryKeyFactory) throws IOException
+    private SegmentMetadata(IndexInput input, IndexContext context, Version version) throws IOException
     {
+        PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
+        AbstractType<?> termsType = context.getValidator();
+
+        this.version = version;
         this.segmentRowIdOffset = input.readLong();
         this.numRows = input.readLong();
         this.minSSTableRowId = input.readLong();
@@ -125,12 +148,25 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
         this.minTerm = readBytes(input);
         this.maxTerm = readBytes(input);
+        TermsDistribution td = null;
+        if (version.onOrAfter(Version.EB))
+        {
+            int len = input.readInt();
+            long fp = input.getFilePointer();
+            if (len > 0)
+            {
+                td = TermsDistribution.read(input, termsType);
+                input.seek(fp + len);
+            }
+        }
+        this.termsDistribution = td;
         this.componentMetadatas = new SegmentMetadata.ComponentMetadataMap(input);
     }
 
     @SuppressWarnings("resource")
-    public static List<SegmentMetadata> load(MetadataSource source, PrimaryKey.Factory primaryKeyFactory) throws IOException
+    public static List<SegmentMetadata> load(MetadataSource source, IndexContext context) throws IOException
     {
+
         IndexInput input = source.get(NAME);
 
         int segmentCount = input.readVInt();
@@ -139,7 +175,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
         for (int i = 0; i < segmentCount; i++)
         {
-            segmentMetadata.add(new SegmentMetadata(input, primaryKeyFactory));
+            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion()));
         }
 
         return segmentMetadata;
@@ -166,6 +202,22 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                           metadata.maxKey.partitionKey().getKey(),
                           metadata.minTerm, metadata.maxTerm).forEach(bb -> writeBytes(bb, output));
 
+                if (writer.version().onOrAfter(Version.EB))
+                {
+                    if (metadata.termsDistribution != null)
+                    {
+                        var tmp = new ModernResettableByteBuffersIndexOutput(1024, "");
+                        metadata.termsDistribution.write(tmp);
+                        output.writeInt(tmp.intSize());
+                        tmp.copyTo(output);
+                    }
+                    else
+                    {
+                        // some indexes, e.g. vector may have no terms distribution
+                        output.writeInt(0);
+                    }
+                }
+
                 metadata.componentMetadatas.write(output);
             }
         }
@@ -189,6 +241,52 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                '}';
     }
 
+    public long estimateNumRowsMatching(Expression predicate)
+    {
+        if (termsDistribution == null)
+            throw new IllegalStateException("Terms distribution not available for " + this);
+
+
+        switch (predicate.getOp())
+        {
+            case MATCH:
+            case EQ:
+            case CONTAINS_KEY:
+            case CONTAINS_VALUE:
+            {
+                var value = asByteComparable(predicate.lower.value.encoded, predicate.validator);
+                return termsDistribution.estimateNumRowsMatchingExact(value);
+            }
+            case NOT_EQ:
+            case NOT_CONTAINS_KEY:
+            case NOT_CONTAINS_VALUE:
+            {
+                var value = asByteComparable(predicate.lower.value.encoded, predicate.validator);
+                return numRows - termsDistribution.estimateNumRowsMatchingExact(value);
+            }
+            case RANGE:
+            {
+                var lower = predicate.lower != null ? asByteComparable(predicate.lower.value.encoded, predicate.validator) : null;
+                var upper = predicate.upper != null ? asByteComparable(predicate.upper.value.encoded, predicate.validator) : null;
+                boolean lowerInclusive = predicate.lower != null && predicate.lower.inclusive;
+                boolean upperInclusive = predicate.upper != null && predicate.upper.inclusive;
+                return termsDistribution.estimateNumRowsInRange(lower, lowerInclusive, upper, upperInclusive);
+            }
+            default:
+                throw new IllegalArgumentException("Unsupported expression: " + predicate);
+        }
+    }
+
+    private ByteComparable asByteComparable(ByteBuffer value, AbstractType<?> type)
+    {
+        if (TypeUtil.isLiteral(type))
+            return version.onDiskFormat().encodeForTrie(value, type);
+
+        byte[] buffer = new byte[TypeUtil.fixedSizeOf(type)];
+        TypeUtil.toComparableBytes(value, type, buffer);
+        return ByteComparable.preencoded(termsDistribution.byteComparableVersion, buffer);
+    }
+
     private static ByteBuffer readBytes(IndexInput input) throws IOException
     {
         int len = input.readVInt();
@@ -197,7 +295,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         return ByteBuffer.wrap(bytes);
     }
 
-    private static void writeBytes(ByteBuffer buf, IndexOutput out)
+    static void writeBytes(ByteBuffer buf, IndexOutput out)
     {
         try
         {
