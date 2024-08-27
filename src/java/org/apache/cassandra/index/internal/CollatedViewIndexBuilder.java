@@ -28,6 +28,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.TimeUUID;
@@ -68,6 +69,9 @@ public class CollatedViewIndexBuilder extends SecondaryIndexBuilder
     {
         try
         {
+            for (SSTableReader sstable : sstables)
+                SSTableWatcher.instance.onIndexBuild(sstable);
+
             PageSize pageSize = cfs.indexManager.calculateIndexingPageSize();
             RegularAndStaticColumns targetPartitionColumns = extractIndexedColumns();
 

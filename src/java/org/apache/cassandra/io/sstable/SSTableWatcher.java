@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.Set;
 
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_SSTABLE_WATCHER;
@@ -52,5 +53,12 @@ public interface SSTableWatcher
     default Set<Component> discoverComponents(Descriptor descriptor, Set<Component> existing)
     {
         return existing;
+    }
+
+    /**
+     * Called before executing index build on existing sstable
+     */
+    default void onIndexBuild(SSTableReader sstable)
+    {
     }
 }
