@@ -50,6 +50,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
@@ -71,7 +72,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final QueryController controller;
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
-    private final ColumnFamilyStore cfs;
 
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
@@ -81,7 +81,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                         long executionQuotaMs)
     {
         this.command = command;
-        this.cfs = cfs;
         this.queryContext = new QueryContext(executionQuotaMs);
         this.controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext);
         this.tableQueryMetrics = tableQueryMetrics;
@@ -118,33 +117,31 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @SuppressWarnings("unchecked")
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
-        FilterTree filterTree = analyzeFilter();
-        Plan plan = controller.buildPlan();
-
-        // Can't check for `command.isTopK()` because the planner could optimize sorting out
-        if (plan.ordering() != null)
+        try
         {
-            // TopK queries require a consistent view of the sstables and memtables in order to validate overwritten
-            // rows. Acquire the view before building any of the iterators.
-            try (var queryView = new QueryViewBuilder(cfs, controller.getOrderer(), controller.mergeRange(), queryContext).build())
-            {
-                controller.maybeTriggerReferencedIndexesGuardrail(queryView.referencedIndexes.size());
+            FilterTree filterTree = analyzeFilter();
+            Plan plan = controller.buildPlan();
+            Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
-                // TODO this is a bit of a hack, but we need to get the view from the queryView. Find better way to
-                // thread this through.
-                queryContext.view = queryView;
-                Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
+            // Can't check for `command.isTopK()` because the planner could optimize sorting out
+            Orderer ordering = plan.ordering();
+            if (ordering != null)
+            {
                 assert !(keysIterator instanceof KeyRangeIterator);
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-                var result = new ScoreOrderedResultRetriever(queryView.view, scoredKeysIterator, filterTree, executionController);
+                var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController);
                 return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
             }
+            else
+            {
+                assert keysIterator instanceof KeyRangeIterator;
+                return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
+            }
         }
-        else
+        catch (Throwable t)
         {
-            Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
-            assert keysIterator instanceof KeyRangeIterator;
-            return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
+            controller.abort();
+            throw t;
         }
     }
 
@@ -445,6 +442,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public void close()
         {
             FileUtils.closeQuietly(operation);
+            controller.finish();
             if (tableQueryMetrics != null)
                 tableQueryMetrics.record(queryContext);
         }
@@ -462,12 +460,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final HashSet<PrimaryKey> keysSeen;
         private final HashSet<PrimaryKey> updatedKeys;
 
-        private ScoreOrderedResultRetriever(ColumnFamilyStore.RefViewFragment view,
-                                            CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
+        private ScoreOrderedResultRetriever(CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
                                             ReadExecutionController executionController)
         {
-            this.view = view;
+            IndexContext context = controller.getOrderer().context;
+            this.view = controller.getQueryView(context).view;
             this.keyRanges = controller.dataRanges().stream().map(DataRange::keyRange).collect(Collectors.toList());
             this.coversFullRing = keyRanges.size() == 1 && RangeUtil.coversFullRing(keyRanges.get(0));
 
@@ -623,6 +621,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public void close()
         {
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
+            controller.finish();
             if (tableQueryMetrics != null)
                 tableQueryMetrics.record(queryContext);
         }

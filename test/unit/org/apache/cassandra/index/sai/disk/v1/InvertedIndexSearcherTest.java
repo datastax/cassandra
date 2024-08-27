@@ -173,23 +173,23 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         final String index = newIndex();
         final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
 
-        SegmentMetadata.ComponentMetadataMap indexMetas;
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, components);
+        metadataBuilder.setRowIdRange(0, Long.MAX_VALUE);
+        metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
+                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()));
+        metadataBuilder.setTermRange(termsEnum.get(0).originalTermBytes,
+                                     termsEnum.get(terms - 1).originalTermBytes);
+
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
             var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).iterator();
-            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter));
+            MemtableTermsIterator termsIterator = new MemtableTermsIterator(null, null, iter);
+            SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(termsIterator));
+            metadataBuilder.setComponentsMetadata(indexMetas);
         }
 
-        final SegmentMetadata segmentMetadata = new SegmentMetadata(0,
-                                                                    size,
-                                                                    0,
-                                                                    Long.MAX_VALUE,
-                                                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
-                                                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()),
-                                                                    termsEnum.get(0).originalTermBytes,
-                                                                    termsEnum.get(terms - 1).originalTermBytes,
-                                                                    indexMetas);
+        final SegmentMetadata segmentMetadata = metadataBuilder.build();
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(components))
         {
