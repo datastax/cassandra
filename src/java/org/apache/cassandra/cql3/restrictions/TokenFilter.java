@@ -179,12 +179,12 @@ abstract class TokenFilter implements PartitionKeyRestrictions
     }
 
     @Override
-    public PartitionKeyRestrictions mergeWith(Restriction restriction) throws InvalidRequestException
+    public PartitionKeyRestrictions mergeWith(Restriction restriction, IndexRegistry indexRegistry) throws InvalidRequestException
     {
         if (restriction.isOnToken())
-            return TokenFilter.create(restrictions, (TokenRestriction) tokenRestriction.mergeWith(restriction));
+            return TokenFilter.create(restrictions, (TokenRestriction) tokenRestriction.mergeWith(restriction, indexRegistry));
 
-        return TokenFilter.create(restrictions.mergeWith(restriction), tokenRestriction);
+        return TokenFilter.create(restrictions.mergeWith(restriction, indexRegistry), tokenRestriction);
     }
 
     /**
