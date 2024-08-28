@@ -261,6 +261,7 @@ public abstract class CQLTester
     private List<String> types = new ArrayList<>();
     private List<String> functions = new ArrayList<>();
     private List<String> aggregates = new ArrayList<>();
+    private List<String> indexes = new ArrayList<>();
     private User user;
 
     // We don't use USE_PREPARED_VALUES in the code below so some test can foce value preparation (if the result
@@ -789,6 +790,13 @@ public abstract class CQLTester
         return keyspaces.get(keyspaces.size() - 1);
     }
 
+    protected String currentIndex()
+    {
+        if (indexes.isEmpty())
+            return null;
+        return indexes.get(indexes.size() - 1);
+    }
+
     protected Collection<String> currentTables()
     {
         if (tables == null || tables.isEmpty())
@@ -1010,6 +1018,7 @@ public abstract class CQLTester
     {
         logger.info(formattedQuery);
         String indexName = getCreateIndexName(formattedQuery);
+        indexes.add(indexName);
         schemaChange(formattedQuery);
         return indexName;
     }

@@ -18,13 +18,19 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Arrays;
+
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
+import org.assertj.core.api.Assertions;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -483,17 +489,34 @@ public class LuceneAnalyzerTest extends SAITester
         execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
 
         beforeAndAfterFlush(() -> {
+            // match (:)
             assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL0133AU'").size());
             assertEquals(1, execute("SELECT val FROM %s WHERE val : 'WFS2684AU'").size());
             assertEquals(0, execute("SELECT val FROM %s WHERE val : ''").size());
             assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val : 'WFS2684AU'").size());
             assertEquals(1, execute("SELECT val FROM %s WHERE val : '' OR val : 'WFS2684AU'").size());
             assertEquals(0, execute("SELECT val FROM %s WHERE val : '' AND val : 'WFS2684AU'").size());
+
+            // equals (=)
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = 'MAL0133AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = 'WFS2684AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val = ''").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val = 'MAL0133AU' OR val = 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = '' OR val = 'WFS2684AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val = '' AND val = 'WFS2684AU'").size());
+
+            // mixed match (:) and equals (=)
+            assertEquals(2, execute("SELECT val FROM %s WHERE val = 'MAL0133AU' OR val : 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = '' OR val : 'WFS2684AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val = '' AND val : 'WFS2684AU'").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val = 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : '' OR val = 'WFS2684AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val : '' AND val = 'WFS2684AU'").size());
         });
     }
 
     @Test
-    public void testNgramFilterWithOR()
+    public void testNgramFilterWithOR() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -513,13 +536,35 @@ public class LuceneAnalyzerTest extends SAITester
         execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
         execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
 
-        flush();
+        beforeAndAfterFlush(() -> {
+            // match (:)
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL0133AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : '268'").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val : 'WFS2684AU'").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val : '133' OR val : 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL' AND val : 'AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val : 'XYZ' AND val : 'AU'").size());
 
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL0133AU'").size());
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : 'WFS2684AU'").size());
-        assertEquals(1, execute("SELECT val FROM %s WHERE val : '268'").size());
-        assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val : 'WFS2684AU'").size());
-        assertEquals(2, execute("SELECT val FROM %s WHERE val : '133' OR val : 'WFS2684AU'").size());
+            // equals (=)
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = 'MAL0133AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = '268'").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val = 'MAL0133AU' OR val = 'WFS2684AU'").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val = '133' OR val = 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = 'MAL' AND val = 'AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val = 'XYZ' AND val = 'AU'").size());
+
+            // mixed match (:) and equals (=)
+            assertEquals(2, execute("SELECT val FROM %s WHERE val : 'MAL0133AU' OR val = 'WFS2684AU'").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val : '133' OR val = 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val : 'MAL' AND val = 'AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val : 'XYZ' AND val = 'AU'").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val = 'MAL0133AU' OR val : 'WFS2684AU'").size());
+            assertEquals(2, execute("SELECT val FROM %s WHERE val = '133' OR val : 'WFS2684AU'").size());
+            assertEquals(1, execute("SELECT val FROM %s WHERE val = 'MAL' AND val : 'AU'").size());
+            assertEquals(0, execute("SELECT val FROM %s WHERE val = 'XYZ' AND val : 'AU'").size());
+        });
     }
     @Test
     public void testWhitespace() throws Throwable
@@ -584,22 +629,67 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testAnalyzerMatchesAndEqualityFailForConjunction() throws Throwable
+    public void testMixedAnalyzerMatchesAndEquality() // there are more detailed tests in AnalyzerEqOperatorSupportTest
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
-                    "\t{\"tokenizer\":{\"name\":\"whitespace\"}," +
-                    "\t\"filters\":[{\"name\":\"porterstem\"}]}'}");
-
+        String createIndexQuery = "CREATE CUSTOM INDEX ON %%s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                                  "'index_analyzer':'{\n" +
+                                  "   \"tokenizer\":{\"name\":\"whitespace\"}," +
+                                  "   \"filters\":[{\"name\":\"porterstem\"}]" +
+                                  "}'," +
+                                  "'equals_behaviour_when_analyzed': '%s'}";
+        createIndex(String.format(createIndexQuery, AnalyzerEqOperatorSupport.Value.MATCH));
         waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the queries test')");
 
-        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val : 'queries' AND val : 'the' AND val = 'the queries test'"))
-        .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val : 'queries' AND val : 'the' AND val = 'the queries test' ALLOW FILTERING"))
-        .isInstanceOf(UnsupportedOperationException.class);
+        // we'll test AND and OR, with both MATCH and EQ and the first operator in the mix
+        final String conjunctionQueryMatchEq = "SELECT id FROM %s WHERE val : 'queries' AND val : 'the' AND val = 'the queries test'";
+        final String conjunctionQueryEqMatch = "SELECT id FROM %s WHERE val = 'queries' AND val = 'the' AND val : 'the queries test'";
+        final String disjunctionQueryMatchEq = "SELECT id FROM %s WHERE val : 'queries' OR val : 'the' OR val = 'blah, blah, blah'";
+        final String disjunctionQueryEqMatch = "SELECT id FROM %s WHERE val = 'queries' OR val = 'the' OR val : 'blah, blah, blah'";
+
+        // if the index supports EQ, the mixed queries should work as the operators are considered the same
+        for (String query : Arrays.asList(conjunctionQueryMatchEq, conjunctionQueryEqMatch, disjunctionQueryMatchEq, disjunctionQueryEqMatch))
+        {
+            assertRows(execute(query), row("1"));
+            assertRows(execute(query + "ALLOW FILTERING"), row("1"));
+        }
+
+        // recreate the index with 'equals_behaviour_when_analyzed': 'UNSUPPORTED'
+        dropIndex("DROP INDEX %s." + currentIndex());
+        createIndex(String.format(createIndexQuery, AnalyzerEqOperatorSupport.Value.UNSUPPORTED));
+        waitForIndexQueryable();
+
+        // If the index does not support EQ, the mixed queries should fail.
+        // The error message will slightly change depending on whether EQ or MATCH are before in the query.
+
+        Assertions.assertThatThrownBy(() -> execute(conjunctionQueryMatchEq))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(String.format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_MERGED_ERROR, "val"));
+        Assertions.assertThatThrownBy(() -> execute(conjunctionQueryMatchEq + "ALLOW FILTERING"))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(String.format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_MERGED_ERROR, "val"));
+
+        Assertions.assertThatThrownBy(() -> execute(conjunctionQueryEqMatch))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(String.format(SingleColumnRestriction.EQRestriction.CANNOT_BE_MERGED_ERROR, "val"));
+        Assertions.assertThatThrownBy(() -> execute(conjunctionQueryEqMatch + "ALLOW FILTERING"))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(String.format(SingleColumnRestriction.EQRestriction.CANNOT_BE_MERGED_ERROR, "val"));
+
+        Assertions.assertThatThrownBy(() -> execute(disjunctionQueryMatchEq))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+        // TODO: this last test is affected by CNDB-10731. We should enable it once that is fixed.
+        // assertRows(execute(disjunctionQueryMatchEq + "ALLOW FILTERING"), row("1"));
+
+        Assertions.assertThatThrownBy(() -> execute(disjunctionQueryEqMatch))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+        // TODO: this last test is affected by CNDB-10731. We should enable it once that is fixed.
+        // assertRows(execute(disjunctionQueryEqMatch + "ALLOW FILTERING"), row("1"));
     }
 
     @Test

@@ -604,6 +604,14 @@ public class IndexContext
     }
 
     /**
+     * @return whether the column is analyzed, meaning it uses an analyzer that isn't no-op.
+     */
+    public boolean isAnalyzed()
+    {
+        return isAnalyzed;
+    }
+
+    /**
      * Called when index is dropped. Mark all {@link SSTableIndex} as released and per-column index files
      * will be removed when in-flight queries completed and {@code obsolete} is true.
      *
@@ -635,6 +643,10 @@ public class IndexContext
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operator is ANALYZER_MATCHES.
         if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;
+
+        // If the column is analyzed and the operator is EQ, we need to check if the analyzer supports it.
+        if (op == Operator.EQ && isAnalyzed && !analyzerFactory.supportsEquals())
+            return false;
 
         // ANN is only supported against vectors.
         // BOUNDED_ANN is only supported against vectors with a Euclidean similarity function.
