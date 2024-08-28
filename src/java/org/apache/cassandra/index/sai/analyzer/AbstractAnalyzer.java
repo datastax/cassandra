@@ -103,6 +103,14 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
     {
         AbstractAnalyzer create();
 
+        /**
+         * @return true if the analyzer supports EQ queries (see {@link AnalyzerEqOperatorSupport})
+         */
+        default boolean supportsEquals()
+        {
+            return true;
+        }
+
         default void close()
         {
         }
@@ -137,6 +145,12 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
                 {
                     return new LuceneAnalyzer(type, analyzer, options);
                 }
+
+                @Override
+                public boolean supportsEquals()
+                {
+                    return AnalyzerEqOperatorSupport.supportsEqualsFromOptions(options);
+                }
             };
         }
         catch (InvalidRequestException ex)
@@ -157,6 +171,7 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
     {
         boolean containsIndexAnalyzer = options.containsKey(LuceneAnalyzer.INDEX_ANALYZER);
         boolean containsNonTokenizingOptions = NonTokenizingOptions.hasNonDefaultOptions(options);
+        boolean supportsEquals = AnalyzerEqOperatorSupport.supportsEqualsFromOptions(options);
         if (containsIndexAnalyzer && containsNonTokenizingOptions)
         {
             logger.warn("Invalid combination of options for index_analyzer: {}", options);
@@ -185,7 +200,21 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
                 NonTokenizingAnalyzer a = new NonTokenizingAnalyzer(type, options);
                 a.end();
                 Map<String, String> finalOptions = options;
-                return () -> new NonTokenizingAnalyzer(type, finalOptions);
+
+                return new AnalyzerFactory()
+                {
+                    @Override
+                    public AbstractAnalyzer create()
+                    {
+                        return new NonTokenizingAnalyzer(type, finalOptions);
+                    }
+
+                    @Override
+                    public boolean supportsEquals()
+                    {
+                        return supportsEquals;
+                    }
+                };
             }
             else
             {

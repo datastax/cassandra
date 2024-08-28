@@ -33,8 +33,10 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 
@@ -193,6 +195,16 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     public boolean shouldEstimateInitialConcurrency()
     {
         return false;
+    }
+
+    @Override
+    public void validate(ReadCommand command) throws InvalidRequestException
+    {
+        // Maybe warn about EQ restrictions on analyzed columns
+        AnalyzerEqOperatorSupport.maybeWarn(command.rowFilter(), indexes);
+
+        // Validate index by index
+        Index.QueryPlan.super.validate(command);
     }
 
     @Override
