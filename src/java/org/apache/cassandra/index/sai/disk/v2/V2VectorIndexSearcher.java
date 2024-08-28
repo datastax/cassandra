@@ -51,7 +51,6 @@ import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
-import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
@@ -60,7 +59,6 @@ import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.plan.Plan.CostCoefficients;
 import org.apache.cassandra.index.sai.utils.IntIntPairArray;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -106,18 +104,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private final PrimaryKey.Factory keyFactory;
     private final PairedSlidingWindowReservoir expectedActualNodesVisited = new PairedSlidingWindowReservoir(20);
     private final ThreadLocal<SparseBits> cachedBits;
-
-    public V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
-                                 PerIndexFiles perIndexFiles,
-                                 SegmentMetadata segmentMetadata,
-                                 IndexContext indexContext) throws IOException
-    {
-        this(primaryKeyMapFactory,
-             perIndexFiles,
-             segmentMetadata,
-             indexContext,
-             new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
-    }
 
     protected V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                                     PerIndexFiles perIndexFiles,
