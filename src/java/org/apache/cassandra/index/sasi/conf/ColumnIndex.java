@@ -222,6 +222,9 @@ public class ColumnIndex
         if (op == Operator.LIKE)
             return isLiteral();
 
+        if (op == Operator.ANALYZER_MATCHES)
+            return false;
+
         Op operator = Op.valueOf(op);
         return !(isTokenized && operator == Op.EQ) // EQ is only applicable to non-tokenized indexes
                && operator != Op.IN // IN operator is not supported
