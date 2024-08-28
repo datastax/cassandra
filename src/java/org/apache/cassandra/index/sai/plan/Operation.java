@@ -102,9 +102,11 @@ public class Operation
                 switch (e.operator())
                 {
                     case EQ:
-                        // EQ operator will always be a multiple expression because it is being used by
-                        // map entries
+                        // EQ operator will always be a multiple expression because it is being used by map entries
                         isMultiExpression = indexContext.isNonFrozenCollection();
+
+                        // EQ wil behave like ANALYZER_MATCHES for analyzed columns if the analyzer supports EQ queries
+                        isMultiExpression |= indexContext.isAnalyzed() && analyzerFactory.supportsEquals();
                         break;
                     case CONTAINS:
                     case CONTAINS_KEY:
@@ -278,22 +280,22 @@ public class Operation
 
         abstract Plan.KeysIteration plan(QueryController controller);
 
-        static Node buildTree(List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
+        static Node buildTree(QueryController controller, List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
             OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
             for (RowFilter.Expression expression : expressions)
-                node.add(buildExpression(expression, isDisjunction));
+                node.add(buildExpression(controller, expression, isDisjunction));
             for (RowFilter.FilterElement child : children)
-                node.add(buildTree(child));
+                node.add(buildTree(controller, child));
             return node;
         }
 
-        static Node buildTree(RowFilter.FilterElement filterOperation)
+        static Node buildTree(QueryController controller, RowFilter.FilterElement filterOperation)
         {
-            return buildTree(filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
+            return buildTree(controller, filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
         }
 
-        static Node buildExpression(RowFilter.Expression expression, boolean isDisjunction)
+        static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
             if (expression.operator() == Operator.IN)
             {
@@ -315,7 +317,8 @@ public class Operation
                     return new EmptyNode();
                 return node;
             }
-            else if (expression.operator() == Operator.ANALYZER_MATCHES && isDisjunction)
+            else if (isDisjunction && (expression.operator() == Operator.ANALYZER_MATCHES ||
+                                       expression.operator() == Operator.EQ && controller.getContext(expression).isAnalyzed()))
             {
                 OperatorNode node = new AndNode();
                 node.add(new ExpressionNode(expression));
