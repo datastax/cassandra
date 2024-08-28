@@ -32,7 +32,6 @@ import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.disk.CachingGraphIndex;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
-import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.CompressedVectors;
@@ -58,11 +57,13 @@ import org.apache.cassandra.utils.CloseableIterator;
 
 import static java.lang.Math.min;
 
-public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
+public class CassandraDiskAnn
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraDiskAnn.class.getName());
 
     public static final int PQ_MAGIC = 0xB011A61C; // PQ_MAGIC, with a lot of liberties taken
+    protected final PerIndexFiles indexFiles;
+    protected final SegmentMetadata.ComponentMetadataMap componentMetadatas;
 
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
@@ -80,7 +81,8 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
     public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {
-        super(componentMetadatas, indexFiles);
+        this.componentMetadatas = componentMetadatas;
+        this.indexFiles = indexFiles;
 
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
@@ -152,7 +154,6 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
     }
 
-    @Override
     public Structure getPostingsStructure()
     {
         return ordinalsMap.getStructure();
@@ -191,13 +192,11 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         return (int)Math.floor(Math.log(val) / Math.log(base));
     }
 
-    @Override
     public long ramBytesUsed()
     {
         return graph.ramBytesUsed();
     }
 
-    @Override
     public int size()
     {
         return graph.size();
@@ -214,7 +213,6 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
      * @return Iterator of Row IDs associated with the vectors near the query. If a threshold is specified, only vectors
      * with a similarity score >= threshold will be returned.
      */
-    @Override
     public CloseableIterator<RowIdWithScore> search(VectorFloat<?> queryVector,
                                                     int limit,
                                                     int rerankK,
@@ -270,19 +268,16 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         }
     }
 
-    @Override
     public VectorCompression getCompression()
     {
         return compression;
     }
 
-    @Override
     public CompressedVectors getCompressedVectors()
     {
         return compressedVectors;
     }
 
-    @Override
     public void close() throws IOException
     {
         ordinalsMap.close();
@@ -291,47 +286,21 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         graphHandle.close();
     }
 
-    @Override
     public OrdinalsView getOrdinalsView()
     {
         return ordinalsMap.getOrdinalsView();
     }
 
-    @Override
-    public VectorSupplier getVectorSupplier()
+    public GraphIndex.ScoringView getView()
     {
-        return new ANNVectorSupplier((GraphIndex.ScoringView) graph.getView());
+        return (GraphIndex.ScoringView) graph.getView();
     }
 
-    private static class ANNVectorSupplier implements VectorSupplier
-    {
-        private final GraphIndex.ScoringView view;
-
-        private ANNVectorSupplier(GraphIndex.ScoringView view)
-        {
-            this.view = view;
-        }
-
-        @Override
-        public ScoreFunction.ExactScoreFunction getScoreFunction(VectorFloat<?> queryVector, VectorSimilarityFunction similarityFunction)
-        {
-            return view.rerankerFor(queryVector, similarityFunction);
-        }
-
-        @Override
-        public void close()
-        {
-            FileUtils.closeQuietly(view);
-        }
-    }
-
-    @Override
     public boolean containsUnitVectors()
     {
         return pqUnitVectors;
     }
 
-    @Override
     public int maxDegree()
     {
         return graph.maxDegree();

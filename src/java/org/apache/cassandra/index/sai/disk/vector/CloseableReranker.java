@@ -20,23 +20,24 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.Closeable;
 
+import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * An ExactScoreFunction that closes the underlying {@link JVectorLuceneOnDiskGraph.VectorSupplier} when closed.
+ * An ExactScoreFunction that closes the underlying {@link GraphIndex.ScoringView} when closed.
  */
 public class CloseableReranker implements ScoreFunction.ExactScoreFunction, Closeable
 {
-    private final JVectorLuceneOnDiskGraph.VectorSupplier vectorSupplier;
+    private final GraphIndex.ScoringView view;
     private final ExactScoreFunction scoreFunction;
 
-    public CloseableReranker(VectorSimilarityFunction similarityFunction, VectorFloat<?> queryVector, JVectorLuceneOnDiskGraph.VectorSupplier supplier)
+    public CloseableReranker(VectorSimilarityFunction similarityFunction, VectorFloat<?> queryVector, GraphIndex.ScoringView view)
     {
-        this.vectorSupplier = supplier;
-        this.scoreFunction = supplier.getScoreFunction(queryVector, similarityFunction);
+        this.view = view;
+        this.scoreFunction = view.rerankerFor(queryVector, similarityFunction);
     }
 
     @Override
@@ -48,6 +49,6 @@ public class CloseableReranker implements ScoreFunction.ExactScoreFunction, Clos
     @Override
     public void close()
     {
-        FileUtils.closeQuietly(vectorSupplier);
+        FileUtils.closeQuietly(view);
     }
 }
