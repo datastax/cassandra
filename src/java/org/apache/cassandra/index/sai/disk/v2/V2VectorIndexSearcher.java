@@ -622,8 +622,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         graph.close();
     }
 
-    public Optional<Boolean> containsUnitVectors()
+    public boolean containsUnitVectors()
     {
-        return Optional.empty();
+        return graph.containsUnitVectors();
     }
 }

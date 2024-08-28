@@ -44,10 +44,4 @@ public class V3VectorIndexSearcher extends V2VectorIndexSearcher
               indexContext,
               new CassandraDiskAnn(segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V2OnDiskOrdinalsMap::new));
     }
-
-    @Override
-    public Optional<Boolean> containsUnitVectors()
-    {
-        return Optional.of(graph.containsUnitVectors());
-    }
 }
