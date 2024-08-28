@@ -47,7 +47,7 @@ public class BruteForceRowIdIteratorTest
 
         // Should work for an empty pq
         var view = new TestVectorSupplier();
-        JVectorLuceneOnDiskGraph.CloseableReranker reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
+        CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
         var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);

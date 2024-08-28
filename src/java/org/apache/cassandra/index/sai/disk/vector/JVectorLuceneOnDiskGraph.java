@@ -91,31 +91,4 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
         @Override
         void close();
     }
-
-    /**
-     * An ExactScoreFunction that closes the underlying {@link VectorSupplier} when closed.
-     */
-    public static class CloseableReranker implements ScoreFunction.ExactScoreFunction, Closeable
-    {
-        private final VectorSupplier vectorSupplier;
-        private final ExactScoreFunction scoreFunction;
-
-        public CloseableReranker(VectorSimilarityFunction similarityFunction, VectorFloat<?> queryVector, VectorSupplier supplier)
-        {
-            this.vectorSupplier = supplier;
-            this.scoreFunction = supplier.getScoreFunction(queryVector, similarityFunction);
-        }
-
-        @Override
-        public float similarityTo(int i)
-        {
-            return scoreFunction.similarityTo(i);
-        }
-
-        @Override
-        public void close()
-        {
-            FileUtils.closeQuietly(vectorSupplier);
-        }
-    }
 }

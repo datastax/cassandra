@@ -54,6 +54,7 @@ import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
+import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
@@ -304,7 +305,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         });
         // Leverage PQ's O(N) heapify time complexity
         var approximateScoresQueue = new PriorityQueue<>(approximateScores);
-        var reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(similarityFunction, queryVector, graph.getVectorSupplier());
+        var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getVectorSupplier());
         return new BruteForceRowIdIterator(approximateScoresQueue, reranker, limit, rerankK);
     }
 
