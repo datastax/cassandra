@@ -72,9 +72,8 @@ public class VerifyTest extends CQLTester
         "                [(-u <username> | --username <username>)] verify\n" +
         "                [(-c | --check-version)] [(-d | --dfp)] [(-e | --extended-verify)]\n" +
         "                [(-f | --force)] [(-q | --quick)] [(-r | --rsc)] [(-t | --check-tokens)]\n" +
-        "                [--] [<keyspace> <tables>...]\n" +
+        "                [(-v | --validate-all-rows)] [--] [<keyspace> <tables>...]\n" +
         "\n" +
-
         "OPTIONS\n" +
         "        -c, --check-version\n" +
         "            Also check that all sstables are the latest version\n" +
@@ -83,7 +82,7 @@ public class VerifyTest extends CQLTester
         "            Invoke the disk failure policy if a corrupt sstable is found\n" +
         "\n" +
         "        -e, --extended-verify\n" +
-        "            Verify each cell data, beyond simply checking sstable checksums\n" +
+        "            Verify each partition data, beyond simply checking sstable checksums\n" +
         "\n" +
         "        -f, --force\n" +
         "            Override disabling of verify tool - see CASSANDRA-9947 for caveats\n" +
@@ -114,6 +113,10 @@ public class VerifyTest extends CQLTester
         "\n" +
         "        -u <username>, --username <username>\n" +
         "            Remote jmx agent username\n" +
+        "\n" +
+        "        -v, --validate-all-rows\n" +
+        "            Verify each row and cell data in the partition, beyond checking\n" +
+        "            partition key. Must be enabled with extended verification\n" +
         "\n" +
         "        --\n" +
         "            This option can be used to separate command-line options from the\n" +
