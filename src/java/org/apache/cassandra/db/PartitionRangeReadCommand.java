@@ -298,7 +298,9 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                 Memtable.MemtableUnfilteredPartitionIterator iter = memtable.makePartitionIterator(columnFilter(), dataRange());
                 if (useMinLocalDeletionTime)
                     controller.updateMinOldestUnrepairedTombstone(iter.getMinLocalDeletionTime());
-                inputCollector.addMemtableIterator(RTBoundValidator.validate(iter, RTBoundValidator.Stage.MEMTABLE, false));
+
+                UnfilteredPartitionIterator partitions = controller.observer().observeUnmergedPartitions(iter);
+                inputCollector.addMemtableIterator(RTBoundValidator.validate(partitions, RTBoundValidator.Stage.MEMTABLE, false));
             }
 
             SSTableReadsListener readCountUpdater = newReadCountUpdater();
@@ -306,6 +308,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
             {
                 @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
                 UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange(), readCountUpdater);
+                iter = controller.observer().observeUnmergedPartitions(iter);
+
                 inputCollector.addSSTableIterator(sstable, RTBoundValidator.validate(iter, RTBoundValidator.Stage.SSTABLE, false));
 
                 if (!sstable.isRepaired())

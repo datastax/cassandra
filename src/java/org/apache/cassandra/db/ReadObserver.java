@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.db;
 
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 
 /**
  * An interface that allows to capture what local data has been read
@@ -30,29 +30,40 @@ public interface ReadObserver
     ReadObserver NO_OP = new ReadObserver() {};
 
     /**
-     * Called on every partition read
-     *
-     * @param partitionKey the partition key
-     * @param deletionTime partition deletion time
+     * Observes the provided unmerged partitions.
+     * <p>
+     * This method allows tracking of the partitions from individual sstable or memtable
      */
-    default void onPartition(DecoratedKey partitionKey, DeletionTime deletionTime) {}
+    default UnfilteredPartitionIterator observeUnmergedPartitions(UnfilteredPartitionIterator partitions)
+    {
+        return partitions;
+    }
 
     /**
-     * Called on every static row read.
-     *
-     * @param staticRow static row of the partition
+     * Observes the provided unmerged partition.
+     * <p>
+     * This method allows tracking of the partition from individual sstable or memtable
      */
-    default void onStaticRow(Row staticRow) {}
+    default UnfilteredRowIterator observeUnmergedPartition(UnfilteredRowIterator partition)
+    {
+        return partition;
+    }
 
     /**
-     * Called on every unfiltered read.
-     *
-     * @param unfiltered either row or range tombstone.
+     * Observes the provided merged partitions.
+     * <p>
+     * This method allows tracking of partitions after they have been merged from multiple sstables and memtable.
      */
-    default void onUnfiltered(Unfiltered unfiltered) {}
+    default UnfilteredPartitionIterator observeMergedPartitions(UnfilteredPartitionIterator partitions)
+    {
+        return partitions;
+    }
 
     /**
      * Called on read request completion
+     * <p>
+     * This method is used to signify that a read request has completed, allowing any necessary
+     * final tracking or cleanup.
      */
     default void onComplete() {}
 }

@@ -17,12 +17,13 @@
  */
 package org.apache.cassandra.db;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_READ_OBSERVER_FACTORY;
-
 
 /**
  * Provides custom factory that creates a {@link ReadObserver} instance per read request
@@ -33,7 +34,7 @@ public interface ReadObserverFactory
                                    new ReadObserverFactory() {} :
                                    FBUtilities.construct(CassandraRelevantProperties.CUSTOM_READ_OBSERVER_FACTORY.getString(), "custom read observer factory");
 
-    default ReadObserver create(TableMetadata table)
+    default ReadObserver create(@Nullable TableMetadata table)
     {
         return ReadObserver.NO_OP;
     }

@@ -54,6 +54,8 @@ public class ReadExecutionController implements AutoCloseable
 
     public final Histogram sstablesScannedPerRowRead;
 
+    private final ReadObserver readObserver;
+
     ReadExecutionController(ReadCommand command,
                             OpOrder.Group baseOp,
                             TableMetadata baseMetadata,
@@ -71,6 +73,8 @@ public class ReadExecutionController implements AutoCloseable
         this.writeContext = writeContext;
         this.command = command;
         this.createdAtNanos = createdAtNanos;
+
+        this.readObserver = ReadObserverFactory.instance.create(baseMetadata);
 
         this.sstablesScannedPerRowRead = new Histogram(new DecayingEstimatedHistogramReservoir(true));
 
@@ -99,6 +103,11 @@ public class ReadExecutionController implements AutoCloseable
     public ReadExecutionController indexReadController()
     {
         return indexController;
+    }
+
+    public ReadObserver observer()
+    {
+        return readObserver;
     }
 
     public WriteContext getWriteContext()
@@ -216,6 +225,8 @@ public class ReadExecutionController implements AutoCloseable
                 }
             }
         }
+
+        readObserver.onComplete();
 
         if (createdAtNanos != NO_SAMPLING)
             addSample();
