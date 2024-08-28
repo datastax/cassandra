@@ -28,6 +28,8 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 
@@ -419,7 +421,7 @@ public abstract class RestrictionSet implements Restrictions
         {
         }
 
-        public void addRestriction(SingleRestriction restriction, boolean isDisjunction)
+        public void addRestriction(SingleRestriction restriction, boolean isDisjunction, IndexRegistry indexRegistry)
         {
             List<ColumnMetadata> columnDefs = restriction.getColumnDefs();
 
@@ -428,24 +430,42 @@ public abstract class RestrictionSet implements Restrictions
                 // If this restriction is part of a disjunction query then we don't want
                 // to merge the restrictions (if that is possible), we just add the
                 // restriction to the set of restrictions for the column.
-                addRestrictionForColumns(columnDefs, restriction, false);
+                addRestrictionForColumns(columnDefs, restriction, null);
             }
             else
             {
+                // In some special cases such as EQ in analyzed index we need to skip merging the restriction,
+                // so we can send multiple EQ restrictions to the index.
+                if (restriction.skipMerge(indexRegistry))
+                {
+                    addRestrictionForColumns(columnDefs, restriction, null);
+                    return;
+                }
+
                 // If this restriction isn't part of a disjunction then we need to get
                 // the set of existing restrictions for the column and merge them with the
                 // new restriction
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
                 SingleRestriction merged = restriction;
-                for (SingleRestriction existing : existingRestrictions)
-                    merged = existing.mergeWith(merged);
+                Set<SingleRestriction> replacedRestrictions = new HashSet<>();
 
-                addRestrictionForColumns(merged.getColumnDefs(), merged, true);
+                for (SingleRestriction existing : existingRestrictions)
+                {
+                    if (!existing.skipMerge(indexRegistry))
+                    {
+                        merged = existing.mergeWith(merged);
+                        replacedRestrictions.add(existing);
+                    }
+                }
+
+                addRestrictionForColumns(merged.getColumnDefs(), merged, replacedRestrictions);
             }
         }
 
-        private void addRestrictionForColumns(List<ColumnMetadata> columnDefs, SingleRestriction restriction, boolean replace)
+        private void addRestrictionForColumns(List<ColumnMetadata> columnDefs,
+                                              SingleRestriction restriction,
+                                              @Nullable Set<SingleRestriction> replacedRestrictions)
         {
             for (int i = 0; i < columnDefs.size(); i++)
             {
@@ -455,8 +475,14 @@ public abstract class RestrictionSet implements Restrictions
                     lastRestrictionColumn = column;
                     lastRestriction = restriction;
                 }
-                if (replace)
-                    newRestrictions.removeAll(column);
+                // If the restriction is a merger of new restriction and existing restrictions then
+                // we need to remove the existing restrictions for the column before adding it
+                if (replacedRestrictions != null)
+                {
+                    for (SingleRestriction r : replacedRestrictions)
+                        newRestrictions.remove(column, r);
+                }
+
                 newRestrictions.put(column, restriction);
             }
 
