@@ -145,6 +145,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static final class EQRestriction extends SingleColumnRestriction
     {
+        public static final String CANNOT_BE_MERGED_ERROR = "%s cannot be restricted by more than one relation if it includes an Equal";
+
         private final Term term;
 
         public EQRestriction(ColumnMetadata columnDef, Term term)
@@ -196,9 +198,27 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
+        public boolean skipMerge(IndexRegistry indexRegistry)
+        {
+            // We should skip merging this EQ if there is an analyzed index for this column that supports EQ,
+            // so there can be multiple EQs for the same column.
+
+            if (indexRegistry == null)
+                return false;
+
+            for (Index index : indexRegistry.listIndexes())
+            {
+                if (index.supportsExpression(columnDef, Operator.ANALYZER_MATCHES) &&
+                    index.supportsExpression(columnDef, Operator.EQ))
+                    return true;
+            }
+            return false;
+        }
+
+        @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes an Equal", columnDef.name);
+            throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
         }
 
         @Override
@@ -894,12 +914,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public boolean isEQ()
-        {
-            return false;
-        }
-
-        @Override
         public boolean isLIKE()
         {
             return true;
@@ -1266,6 +1280,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static final class AnalyzerMatchesRestriction extends SingleColumnRestriction
     {
+        public static final String CANNOT_BE_MERGED_ERROR = "%s cannot be restricted by other operators if it includes analyzer match (:)";
         private final List<Term> values;
 
         public AnalyzerMatchesRestriction(ColumnMetadata columnDef, Term value)
@@ -1278,6 +1293,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         {
             super(columnDef);
             this.values = values;
+        }
+
+        @Override
+        public boolean isAnalyzerMatches()
+        {
+            return true;
         }
 
         List<Term> getValues()
@@ -1329,15 +1350,15 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            if (!(otherRestriction instanceof AnalyzerMatchesRestriction))
-                throw new UnsupportedOperationException();
+            if (!(otherRestriction.isAnalyzerMatches()))
+                throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
+
             List<Term> otherValues = ((AnalyzerMatchesRestriction) otherRestriction).getValues();
             List<Term> newValues = new ArrayList<>(values.size() + otherValues.size());
             newValues.addAll(values);
             newValues.addAll(otherValues);
             return new AnalyzerMatchesRestriction(columnDef, newValues);
         }
-
 
         @Override
         protected boolean isSupportedBy(Index index)
