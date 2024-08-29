@@ -23,7 +23,10 @@ import java.util.PriorityQueue;
 
 import org.junit.Test;
 
+import io.github.jbellis.jvector.graph.GraphIndex;
+import io.github.jbellis.jvector.graph.NodesIterator;
 import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
+import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
@@ -46,8 +49,8 @@ public class BruteForceRowIdIteratorTest
         var limit = 10;
 
         // Should work for an empty pq
-        var view = new TestVectorSupplier();
-        JVectorLuceneOnDiskGraph.CloseableReranker reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
+        var view = new TestView();
+        CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
         var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
@@ -56,22 +59,54 @@ public class BruteForceRowIdIteratorTest
         assertTrue(view.isClosed);
     }
 
-    private static class TestVectorSupplier implements JVectorLuceneOnDiskGraph.VectorSupplier
+    private static class TestView implements GraphIndex.ScoringView
     {
         private boolean isClosed = false;
 
         @Override
-        public ScoreFunction.ExactScoreFunction getScoreFunction(VectorFloat<?> queryVector, VectorSimilarityFunction similarityFunction)
+        public ScoreFunction.ExactScoreFunction rerankerFor(VectorFloat<?> queryVector, VectorSimilarityFunction vsf)
         {
-            return ordinal -> {
-                return similarityFunction.compare(queryVector, vts.createFloatVector(new float[] { ordinal }));
-            };
+            return ordinal -> vsf.compare(queryVector, vts.createFloatVector(new float[] { ordinal }));
         }
 
         @Override
         public void close()
         {
             isClosed = true;
+        }
+
+        //
+        // unused by BruteForceRowIdIterator
+        //
+
+        @Override
+        public ScoreFunction.ApproximateScoreFunction approximateScoreFunctionFor(VectorFloat<?> vectorFloat, VectorSimilarityFunction vectorSimilarityFunction)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public NodesIterator getNeighborsIterator(int i)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public int size()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public int entryNode()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Bits liveNodes()
+        {
+            throw new UnsupportedOperationException();
         }
     }
 }
