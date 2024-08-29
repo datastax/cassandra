@@ -106,9 +106,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     static
     {
-        InMemoryTrie<Object> empty = new InMemoryTrie<>(BufferType.ON_HEAP, ExpectedLifetime.SHORT, null);
+        // Measuring the empty size of long-lived tries, because these are the ones for which we want to track size.
+        InMemoryTrie<Object> empty = new InMemoryTrie<>(BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
         EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
-        empty = new InMemoryTrie<>(BufferType.OFF_HEAP, ExpectedLifetime.SHORT, null);
+        empty = new InMemoryTrie<>(BufferType.OFF_HEAP, ExpectedLifetime.LONG, null);
         EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);
     }
 
@@ -162,31 +163,35 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     // Buffer, content list and cell management
 
-    final void putInt(int pos, int value)
+    private void putInt(int pos, int value)
     {
         getBuffer(pos).putInt(inBufferOffset(pos), value);
     }
 
-    final void putIntVolatile(int pos, int value)
+    private void putIntVolatile(int pos, int value)
     {
         getBuffer(pos).putIntVolatile(inBufferOffset(pos), value);
     }
 
-    final void putShort(int pos, short value)
+    private void putShort(int pos, short value)
     {
         getBuffer(pos).putShort(inBufferOffset(pos), value);
     }
 
-    final void putShortVolatile(int pos, short value)
+    private void putShortVolatile(int pos, short value)
     {
         getBuffer(pos).putShort(inBufferOffset(pos), value);
     }
 
-    final void putByte(int pos, byte value)
+    private void putByte(int pos, byte value)
     {
         getBuffer(pos).putByte(inBufferOffset(pos), value);
     }
 
+    /**
+     * Allocate a new cell in the data buffers. This is called by the memory allocation strategy when it runs out of
+     * free cells to reuse.
+     */
     private int allocateNewCell() throws TrieSpaceExhaustedException
     {
         // Note: If this method is modified, please run InMemoryTrieTest.testOver1GSize to verify it acts correctly
@@ -209,19 +214,28 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return v;
     }
 
-    int allocateCell() throws TrieSpaceExhaustedException
+    /**
+     * Allocate a cell to use for storing data. This uses the memory allocation strategy to reuse cells if any are
+     * available, or to allocate new cells using {@link #allocateNewCell}. Because some node types rely on cells being
+     * filled with 0 as initial state, any cell we get through the allocator must also be cleaned.
+     */
+    private int allocateCell() throws TrieSpaceExhaustedException
     {
         int cell = cellAllocator.allocate();
         getBuffer(cell).setMemory(inBufferOffset(cell), CELL_SIZE, (byte) 0);
         return cell;
     }
 
-    void recycleCell(int cell)
+    private void recycleCell(int cell)
     {
         cellAllocator.recycle(cell & -CELL_SIZE);
     }
 
-    public int copyCell(int cell) throws TrieSpaceExhaustedException
+    /**
+     * Creates a copy of a given cell and marks the original for recycling. Used when a mutation needs to force-copy
+     * paths to ensure earlier states are still available for concurrent readers.
+     */
+    private int copyCell(int cell) throws TrieSpaceExhaustedException
     {
         int copy = cellAllocator.allocate();
         getBuffer(copy).putBytes(inBufferOffset(copy), getBuffer(cell), inBufferOffset(cell & -CELL_SIZE), CELL_SIZE);
@@ -229,6 +243,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return copy | (cell & (CELL_SIZE - 1));
     }
 
+    /**
+     * Allocate a new position in the object array. Used by the memory allocation strategy to allocate a content spot
+     * when it runs out of recycled positions.
+     */
     private int allocateNewObject()
     {
         int index = contentCount++;
@@ -246,7 +264,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     /**
      * Add a new content value.
      *
-     * @return A content pointer that can be used to reference the content, encoded as ~index where index is the
+     * @return A content id that can be used to reference the content, encoded as ~index where index is the
      *         position of the value in the content array.
      */
     private int addContent(T value) throws TrieSpaceExhaustedException
@@ -262,9 +280,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     }
 
     /**
-     * Change the content associated with a given content pointer.
+     * Change the content associated with a given content id.
      *
-     * @param id content pointer, encoded as ~index where index is the position in the content array
+     * @param id content id, encoded as ~index where index is the position in the content array
      * @param value new content value to store
      */
     private void setContent(int id, T value)
@@ -275,11 +293,14 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         array.set(ofs, value);
     }
 
-    void releaseContent(int id)
+    private void releaseContent(int id)
     {
         objectAllocator.recycle(~id);
     }
 
+    /**
+     * Called to clean up all buffers when the trie is known to no longer be needed.
+     */
     public void discardBuffers()
     {
         if (bufferType == BufferType.ON_HEAP)
@@ -443,7 +464,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * Non-volatile version of attachChildToSplit. Used when the split node is not reachable yet (during the conversion
      * from sparse).
      */
-    int attachChildToSplitNonVolatile(int node, int trans, int newChild) throws TrieSpaceExhaustedException
+    private int attachChildToSplitNonVolatile(int node, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         assert offset(node) == SPLIT_OFFSET : "Invalid split node in trie";
         int midPos = splitCellPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
@@ -871,7 +892,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return updatePrefixNodeChild(existingPreContentNode, updatedPostContentNode, forcedCopy);
     }
 
-    final ApplyState applyState = new ApplyState();
+    private final ApplyState applyState = new ApplyState();
 
     /**
      * Represents the state for an {@link #apply} operation. Contains a stack of all nodes we descended through
@@ -881,7 +902,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * and we reuse the same object. The latter is safe because memtable tries cannot be mutated in parallel by multiple
      * writers.
      */
-    class ApplyState implements KeyProducer<T>
+    private class ApplyState implements KeyProducer<T>
     {
         int[] data = new int[16 * 5];
         int currentDepth = -1;
@@ -946,7 +967,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
 
         /**
-         * The compiled content index. Needed because we can only access a cursor's content on the way down but we can't
+         * The compiled content id. Needed because we can only access a cursor's content on the way down but we can't
          * attach it until we ascend from the node.
          */
         int contentId()
@@ -1339,7 +1360,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         T content();
     }
 
-    static class Mutation<T, U> implements NodeFeatures<U>
+    private static class Mutation<T, U> implements NodeFeatures<U>
     {
         final UpsertTransformerWithKeyProducer<T, U> transformer;
         final Predicate<NodeFeatures<U>> needsForcedCopy;
@@ -1612,13 +1633,27 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return allocatedPos;
     }
 
-    /** Returns the off heap size of the memtable trie itself, not counting any space taken by referenced content. */
+    /**
+     * Returns the off heap size of the memtable trie itself, not counting any space taken by referenced content, or
+     * any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
+     * The latter means we are undercounting the actual usage, but the purpose of this reporting is to decide when
+     * to flush out e.g. a memtable and if we include the unused space we would almost always end up flushing out
+     * immediately after allocating a large buffer and not having a chance to use it. Counting only used space makes it
+     * possible to flush out before making these large allocations.
+     */
     public long sizeOffHeap()
     {
         return bufferType == BufferType.ON_HEAP ? 0 : usedBufferSpace();
     }
 
-    /** Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content. */
+    /**
+     * Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content, or
+     * any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
+     * The latter means we are undercounting the actual usage, but the purpose of this reporting is to decide when
+     * to flush out e.g. a memtable and if we include the unused space we would almost always end up flushing out
+     * immediately after allocating a large buffer and not having a chance to use it. Counting only used space makes it
+     * possible to flush out before making these large allocations.
+     */
     public long sizeOnHeap()
     {
         return usedObjectSpace() +
@@ -1637,6 +1672,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return (contentCount - objectAllocator.indexCountInPipeline()) * MemoryLayoutSpecification.SPEC.getReferenceSize();
     }
 
+    /**
+     * Returns the amount of memory that has been allocated for various buffers but isn't currently in use.
+     * The total on-heap space used by the trie is {@code sizeOnHeap() + unusedReservedOnHeapMemory()}.
+     */
     @VisibleForTesting
     public long unusedReservedOnHeapMemory()
     {
@@ -1664,7 +1703,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     /**
      * Release all recycled content references, including the ones waiting in still incomplete recycling lists.
      * This is a test method and can cause null pointer exceptions if used on a live trie.
-     *
+     * <p>
      * If similar functionality is required for non-test purposes, a version of this should be developed that only
      * releases references on barrier-complete lists.
      */

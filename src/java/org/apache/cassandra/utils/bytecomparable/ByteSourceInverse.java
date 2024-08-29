@@ -25,6 +25,7 @@ import java.util.List;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.db.marshal.ValueAccessor;
+import org.apache.cassandra.utils.ByteArrayUtil;
 
 /**
  * Contains inverse transformation utilities for {@link ByteSource}s.
@@ -365,7 +366,7 @@ public final class ByteSourceInverse
             return ((ByteSource.ConvertableToArray) byteSource).remainingBytesToArray();
 
         if (byteSource == null)
-            return new byte[0];
+            return ByteArrayUtil.EMPTY_BYTE_ARRAY;
 
         int step = 232;    // size chosen so that new byte[step] fits into 256 bytes
         byte[] last = new byte[step];

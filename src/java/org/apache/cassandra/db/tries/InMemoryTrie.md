@@ -867,7 +867,7 @@ The allocation strategy implements this by maintaining several lists:
   awaiting the barrier to expire
 - reusable cells, moved from the list above after their barrier has expired
 
-For efficiency the allocation strategy does not work with individual cells, but rather in blocks of 1024. Newly
+For efficiency the allocation strategy does not work with individual cells, but rather in blocks of ~250. Newly
 allocated cells are taken from a `free` block. When a mutation releases cells, they are put in a `justReleased` block,
 and if the block is filled, another one is created and linked to form a queue. At mutation completion we do nothing if
 no block is yet completed; if one is, we issue a barrier and give it to the block (and any other completed blocks in

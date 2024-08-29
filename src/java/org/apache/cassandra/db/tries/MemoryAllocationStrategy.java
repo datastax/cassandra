@@ -219,7 +219,12 @@ public interface MemoryAllocationStrategy
                 {
                     // A block is ready for reuse. Switch to it.
                     free = awaitingBarrierHead;
-                    // Maybe recycle the "free" IndexList?
+                    // Index blocks only enter these lists when the justReleased block is filled. Sanity check that
+                    // the block is still full.
+                    assert free.count == free.indexes.length;
+                    // We could recycle/pool the IndexBlockList object that free was pointing to before this.
+                    // As the trie will create and drop many times more objects to end up filling one of these, the
+                    // potential impact does not appear to justify the extra complexity.
                 }
                 else
                 {
@@ -310,7 +315,7 @@ public interface MemoryAllocationStrategy
     }
 
 
-    static final int REUSE_BLOCK_SIZE = 1024;
+    static final int REUSE_BLOCK_SIZE = 252; // array fits into 1k bytes
 
     static class IndexBlockList
     {

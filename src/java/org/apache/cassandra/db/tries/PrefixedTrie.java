@@ -43,40 +43,40 @@ public class PrefixedTrie<T> extends Trie<T>
 
     private static class Cursor<T> implements Trie.Cursor<T>
     {
-        final Trie.Cursor<T> source;
+        final Trie.Cursor<T> tail;
         ByteSource prefixBytes;
-        int nextByte;
-        int currentByte;
+        int nextPrefixByte;
+        int incomingTransition;
         int depthOfPrefix;
 
-        Cursor(ByteSource prefix, Trie.Cursor<T> source)
+        Cursor(ByteSource prefix, Trie.Cursor<T> tail)
         {
-            this.source = source;
+            this.tail = tail;
             prefixBytes = prefix;
-            currentByte = -1;
-            nextByte = prefixBytes.next();
+            incomingTransition = -1;
+            nextPrefixByte = prefixBytes.next();
             depthOfPrefix = 0;
         }
 
-        int addPrefixDepthAndCheckDone(int depthInBranch)
+        int completeAdvanceInTail(int depthInTail)
         {
-            currentByte = source.incomingTransition();
-            if (depthInBranch < 0)
-                depthOfPrefix = 0;
+            if (depthInTail < 0)
+                return exhausted();
 
-            return depthInBranch + depthOfPrefix;
+            incomingTransition = tail.incomingTransition();
+            return depthInTail + depthOfPrefix;
         }
 
         boolean prefixDone()
         {
-            return nextByte == ByteSource.END_OF_STREAM;
+            return nextPrefixByte == ByteSource.END_OF_STREAM;
         }
 
         @Override
         public int depth()
         {
             if (prefixDone())
-                return source.depth() + depthOfPrefix;
+                return tail.depth() + depthOfPrefix;
             else
                 return depthOfPrefix;
         }
@@ -84,18 +84,18 @@ public class PrefixedTrie<T> extends Trie<T>
         @Override
         public int incomingTransition()
         {
-            return currentByte;
+            return incomingTransition;
         }
 
         @Override
         public int advance()
         {
             if (prefixDone())
-                return addPrefixDepthAndCheckDone(source.advance());
+                return completeAdvanceInTail(tail.advance());
 
             ++depthOfPrefix;
-            currentByte = nextByte;
-            nextByte = prefixBytes.next();
+            incomingTransition = nextPrefixByte;
+            nextPrefixByte = prefixBytes.next();
             return depthOfPrefix;
         }
 
@@ -103,14 +103,14 @@ public class PrefixedTrie<T> extends Trie<T>
         public int advanceMultiple(Trie.TransitionsReceiver receiver)
         {
             if (prefixDone())
-                return addPrefixDepthAndCheckDone(source.advanceMultiple(receiver));
+                return completeAdvanceInTail(tail.advanceMultiple(receiver));
 
             while (!prefixDone())
             {
-                receiver.addPathByte(currentByte);
+                receiver.addPathByte(incomingTransition);
                 ++depthOfPrefix;
-                currentByte = nextByte;
-                nextByte = prefixBytes.next();
+                incomingTransition = nextPrefixByte;
+                nextPrefixByte = prefixBytes.next();
             }
             return depthOfPrefix;
         }
@@ -122,43 +122,45 @@ public class PrefixedTrie<T> extends Trie<T>
             if (skipDepth <= depthOfPrefix)
                 return exhausted();
             if (prefixDone())
-                return addPrefixDepthAndCheckDone(source.skipTo(skipDepth - depthOfPrefix, skipTransition));
-            if (skipDepth == depthOfPrefix + 1 && source.direction().gt(skipTransition, nextByte))
+                return completeAdvanceInTail(tail.skipTo(skipDepth - depthOfPrefix, skipTransition));
+            assert skipDepth == depthOfPrefix + 1 : "Invalid advance request to depth " + skipDepth + " to cursor at depth " + depthOfPrefix;
+            if (tail.direction().gt(skipTransition, nextPrefixByte))
                 return exhausted();
             return advance();
         }
 
         private int exhausted()
         {
-            currentByte = -1;
-            nextByte = ByteSource.END_OF_STREAM;
+            incomingTransition = -1;
             depthOfPrefix = -1;
+            nextPrefixByte = 0; // to make prefixDone() false so incomingTransition/depth/content are -1/-1/null
             return depthOfPrefix;
         }
 
         public Direction direction()
         {
-            return source.direction();
+            return tail.direction();
         }
 
         @Override
         public T content()
         {
-            return prefixDone() ? source.content() : null;
+            return prefixDone() ? tail.content() : null;
         }
 
         @Override
         public Trie<T> tailTrie()
         {
             if (prefixDone())
-                return source.tailTrie();
+                return tail.tailTrie();
             else
             {
+                assert depthOfPrefix >= 0 : "tailTrie called on exhausted cursor";
                 if (!(prefixBytes instanceof ByteSource.Duplicatable))
                     prefixBytes = ByteSource.duplicatable(prefixBytes);
                 ByteSource.Duplicatable duplicatableSource = (ByteSource.Duplicatable) prefixBytes;
 
-                return new PrefixedTrie<>(v -> duplicatableSource.duplicate(), source.tailTrie());
+                return new PrefixedTrie<>(v -> duplicatableSource.duplicate(), tail.tailTrie());
             }
         }
     }

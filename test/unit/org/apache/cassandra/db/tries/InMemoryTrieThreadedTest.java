@@ -481,10 +481,10 @@ public class InMemoryTrieThreadedTest
                                                                         (i / PER_MUTATION / pkeys.length) * PER_MUTATION + j));
 
                             if (cprefix != null)
-                                row = row.prefix(cprefix);
+                                row = row.prefixedBy(cprefix);
 
                             row = withRootMetadata(row, partitionMarker);
-                            row = row.prefix(b);
+                            row = row.prefixedBy(b);
                             sources.add(row);
                         }
 

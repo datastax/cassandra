@@ -626,7 +626,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
                         return advancedDepth;
                 }
             }
-            return depth = -1;
+            return exhausted();
         }
 
         @Override
@@ -656,13 +656,24 @@ public class InMemoryReadTrie<T> extends Trie<T>
         @Override
         public Trie<T> tailTrie()
         {
+            assert depth >= 0 : "tailTrie called on exhausted cursor";
             return new InMemoryReadTrie<>(buffers, contentArrays, currentFullNode);
+        }
+
+        private int exhausted()
+        {
+            depth = -1;
+            incomingTransition = -1;
+            currentFullNode = NONE;
+            currentNode = NONE;
+            content = null;
+            return -1;
         }
 
         private int backtrack()
         {
             if (--backtrackDepth < 0)
-                return depth = -1;
+                return exhausted();
 
             depth = depth(backtrackDepth);
             return advanceToNextChild(node(backtrackDepth), data(backtrackDepth));

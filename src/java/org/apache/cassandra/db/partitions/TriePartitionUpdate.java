@@ -29,7 +29,6 @@ import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
@@ -260,7 +259,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
     public static Trie<Object> asMergableTrie(PartitionUpdate update)
     {
-        return asTrieUpdate(update).trie.prefix(update.partitionKey());
+        return asTrieUpdate(update).trie.prefixedBy(update.partitionKey());
     }
 
     /**

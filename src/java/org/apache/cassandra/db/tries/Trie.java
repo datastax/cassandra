@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 import com.google.common.collect.ImmutableList;
 
@@ -88,8 +87,10 @@ public abstract class Trie<T>
      * ({@code oldDepth + 1 - newDepth}). When following a path down, the cursor will stop on all prefixes.
      * <p>
      * When it is created the cursor is placed on the root node with {@code depth() = 0}, {@code incomingTransition() = -1}.
-     * Since tries can have mappings for empty, content() can possibly be non-null. It is not allowed for a cursor to start
-     * in exhausted state (i.e. with {@code depth() = -1}).
+     * Since tries can have mappings for empty, content() can possibly be non-null. The cursor is exhausted when it
+     * returns a depth of -1 (the operations that advance a cursor return the depth, and {@code depth()} will also
+     * return -1 if queried afterwards). It is not allowed for a cursor to start in exhausted state; once a cursor is
+     * exhausted, calling any of the advance methods or {@code tailTrie} is an error.
      * <p>
      * For example, the following trie:<br/>
      * <pre>
@@ -272,8 +273,10 @@ public abstract class Trie<T>
         }
 
         /**
-         * Returns a tail trie, i.e. a trie whose root is the current position. Walking tail trie will list all
+         * Returns a tail trie, i.e. a trie whose root is the current position. Walking a tail trie will list all
          * descendants of the current position with depth adjusted by the current depth.
+         * <p>
+         * It is an error to call tailTrie on an exhausted cursor.
          */
         Trie<T> tailTrie();
     }
@@ -810,6 +813,7 @@ public abstract class Trie<T>
                 @Override
                 public Trie<Object> tailTrie()
                 {
+                    assert depth == 0 : "tailTrie called on exhausted cursor";
                     return EMPTY;
                 }
 
@@ -841,7 +845,7 @@ public abstract class Trie<T>
     /**
      * Returns a Trie that is a view of this one, where the given prefix is prepended before the root.
      */
-    public Trie<T> prefix(ByteComparable prefix)
+    public Trie<T> prefixedBy(ByteComparable prefix)
     {
         return new PrefixedTrie(prefix, this);
     }
@@ -858,9 +862,9 @@ public abstract class Trie<T>
     /**
      * Returns a trie that corresponds to the branch of this trie rooted at the given prefix.
      * <p>
-     * The result will include the same values as {@code subtrie(prefix, nextBranch(prefix))}, but the keys in the resulting
-     * trie will not include the prefix. In other words,
-     *   {@code tailTrie(prefix).prefix(prefix) = subtrie(prefix, nextBranch(prefix))}
+     * The result will include the same values as {@code subtrie(prefix, nextBranch(prefix))}, but the keys in the
+     * resulting trie will not include the prefix. In other words,
+     *   {@code tailTrie(prefix).prefixedBy(prefix) = subtrie(prefix, nextBranch(prefix))}
      * where nextBranch stands for the key adjusted by adding one at the last position.
      */
     public Trie<T> tailTrie(ByteComparable prefix)

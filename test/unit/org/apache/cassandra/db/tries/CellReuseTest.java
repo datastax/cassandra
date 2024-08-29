@@ -272,7 +272,7 @@ public class CellReuseTest
             ByteBuffer v = ByteBufferUtil.bytes(payload);
             Trie<Object> update = Trie.singleton(b, v);
             update = InMemoryTrieThreadedTest.withRootMetadata(update, Boolean.TRUE);
-            update = update.prefix(source("prefix"));
+            update = update.prefixedBy(source("prefix"));
             applyUpdating(trie, update, forceCopyPredicate);
         }
     }
@@ -294,9 +294,9 @@ public class CellReuseTest
         // Abort processing on the lower metadata, where the new branch is not attached yet (so as not to affect the
         // contents).
         update = InMemoryTrieThreadedTest.withRootMetadata(update, Boolean.FALSE);
-        update = update.prefix(source("fix"));
+        update = update.prefixedBy(source("fix"));
         update = InMemoryTrieThreadedTest.withRootMetadata(update, Boolean.TRUE);
-        update = update.prefix(source("pre"));
+        update = update.prefixedBy(source("pre"));
 
         trie.apply(update,
                    (existing, upd) ->

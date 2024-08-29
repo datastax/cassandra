@@ -650,8 +650,11 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                 try
                 {
                     indexer.start();
-                    long onHeap = data.sizeOnHeap();
-                    long offHeap = data.sizeOffHeap();
+                    // Add the initial trie size on the first operation. This technically isn't correct (other shards
+                    // do take their memory share even if they are empty) but doing it during construction may cause
+                    // the allocator to block while we are trying to flush a memtable and become a deadlock.
+                    long onHeap = data.isEmpty() ? 0 : data.sizeOnHeap();
+                    long offHeap = data.isEmpty() ? 0 : data.sizeOffHeap();
                     // Use the fast recursive put if we know the key is small enough to not cause a stack overflow.
                     try
                     {

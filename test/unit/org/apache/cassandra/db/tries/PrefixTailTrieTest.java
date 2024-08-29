@@ -254,7 +254,7 @@ public class PrefixTailTrieTest
                 allContent.putAll(content);
                 tail.putRecursive(ByteComparable.EMPTY, t, THROWING_UPSERT);
 //            System.out.println(tail.dump(CONTENT_TO_STRING));
-                tries[k].apply(tail.prefix(prefixes[i]), THROWING_UPSERT, Predicates.alwaysFalse());
+                tries[k].apply(tail.prefixedBy(prefixes[i]), THROWING_UPSERT, Predicates.alwaysFalse());
             }
             Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), allContent);
             data.put(ByteComparable.fixedLength(t.prefix), t);
@@ -281,7 +281,7 @@ public class PrefixTailTrieTest
             Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), content);
             tail.putRecursive(ByteComparable.EMPTY, t, THROWING_UPSERT);
 //            System.out.println(tail.dump(CONTENT_TO_STRING));
-            tries[trieIndex].apply(tail.prefix(prefixes[i]), THROWING_UPSERT, Predicates.alwaysFalse());
+            tries[trieIndex].apply(tail.prefixedBy(prefixes[i]), THROWING_UPSERT, Predicates.alwaysFalse());
 
             data.put(ByteComparable.fixedLength(t.prefix), t);
             trieIndex = (trieIndex + 1) % splits;
@@ -306,7 +306,7 @@ public class PrefixTailTrieTest
             addToInMemoryTrie(src, content, tail, true);
 //                        System.out.println(tail.dump(CONTENT_TO_STRING));
             tail.putRecursive(ByteComparable.EMPTY, 1, THROWING_UPSERT);
-            trie.apply(tail.prefix(prefix),
+            trie.apply(tail.prefixedBy(prefix),
                        (x, y) -> x instanceof Integer ? (Integer) x + (Integer) y : y,
                        Predicates.alwaysFalse());
         }

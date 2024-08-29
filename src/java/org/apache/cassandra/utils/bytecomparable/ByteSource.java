@@ -41,10 +41,10 @@ public interface ByteSource
     int next();
 
     /**
-     * Fill in the next bytes of the source in the given array.
+     * Consume the next bytes of the source and transfer them to the given array.
      *
      * @return The number of bytes transferred. If equal to the size of the destination, the source may have further
-     *         bytes to consume. Otherwise the source has been fully consumed and it would be an error to call this
+     *         bytes to consume. Otherwise, the source has been fully consumed, and it would be an error to call this
      *         method (or next()) again.
      */
     default int nextBytes(byte[] dest)
