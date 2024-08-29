@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 
 import net.openhft.chronicle.core.util.ThrowingFunction;
 import org.apache.cassandra.db.Clustering;
@@ -43,6 +45,7 @@ import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -140,13 +143,6 @@ public interface PartitionUpdate extends Partition
 
     PartitionUpdate withUpdatedTimestamps(long timestamp);
 
-    /**
-     * Merge the provided updates into a single update. `this` is ignored, it is only used as an indicator of the
-     * desired type of partition update to return. The method must also work (possibly inefficiently) when the given
-     * updates do not match that type.
-     */
-    PartitionUpdate merge(List<? extends PartitionUpdate> updates);
-
     static Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity)
     {
         return metadata.partitionUpdateFactory().builder(metadata, partitionKey, columns, initialRowCapacity);
@@ -180,6 +176,12 @@ public interface PartitionUpdate extends Partition
     static PartitionUpdate fromIterator(UnfilteredRowIterator partition, ColumnFilter filter)
     {
         return partition.metadata().partitionUpdateFactory().fromIterator(partition, filter);
+    }
+
+    static PartitionUpdate merge(List<? extends PartitionUpdate> updates)
+    {
+        assert !updates.isEmpty();
+        return updates.get(0).metadata().partitionUpdateFactory().merge(updates);
     }
 
     /**
@@ -527,6 +529,7 @@ public interface PartitionUpdate extends Partition
 
         DeletionTime partitionLevelDeletion();
     }
+
     interface Factory
     {
         Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity);
@@ -535,5 +538,24 @@ public interface PartitionUpdate extends Partition
         PartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, int nowInSec);
         PartitionUpdate fromIterator(UnfilteredRowIterator iterator);
         PartitionUpdate fromIterator(UnfilteredRowIterator iterator, ColumnFilter filter);
+
+        /**
+         * Merge the provided updates into a single update. The method must also work (possibly inefficiently) when the
+         * given updates do not match the type of this factory.
+         */
+        default PartitionUpdate merge(List<? extends PartitionUpdate> updates)
+        {
+            assert !updates.isEmpty();
+            final int size = updates.size();
+
+            if (size == 1)
+                return Iterables.getOnlyElement(updates);
+
+            List<UnfilteredRowIterator> asIterators = Lists.transform(updates, Partition::unfilteredIterator);
+            try (UnfilteredRowIterator merge = UnfilteredRowIterators.merge(asIterators))
+            {
+                return fromIterator(merge);
+            }
+        }
     }
 }

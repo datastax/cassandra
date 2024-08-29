@@ -50,18 +50,7 @@ import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
 
 /**
- * Stores updates made on a partition.
- * <p>
- * A PartitionUpdate object requires that all writes/additions are performed before we
- * try to read the updates (attempts to write to the PartitionUpdate after a read method
- * has been called will result in an exception being thrown). In other words, a Partition
- * is mutable while it's written but becomes immutable as soon as it is read.
- * <p>
- * A typical usage is to create a new update ({@code new PartitionUpdate(metadata, key, columns, capacity)})
- * and then add rows and range tombstones through the {@code add()} methods (the partition
- * level deletion time can also be set with {@code addPartitionDeletion()}). However, there
- * is also a few static helper constructor methods for special cases ({@code emptyUpdate()},
- * {@code fullPartitionDelete} and {@code singleRowUpdate}).
+ * Implementation of PartitionUpdate using a BTree of rows.
  */
 public class BTreePartitionUpdate extends AbstractBTreePartition implements PartitionUpdate
 {
@@ -238,28 +227,6 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
         }
     }
 
-    /**
-     * Merges the provided updates, yielding a new update that incorporates all those updates.
-     *
-     * @param updates the collection of updates to merge. This shouldn't be empty.
-     *
-     * @return a partition update that include (merge) all the updates from {@code updates}.
-     */
-    public PartitionUpdate merge(List<? extends PartitionUpdate> updates)
-    {
-        assert !updates.isEmpty();
-        final int size = updates.size();
-
-        if (size == 1)
-            return Iterables.getOnlyElement(updates);
-
-        List<UnfilteredRowIterator> asIterators = Lists.transform(updates, Partition::unfilteredIterator);
-        try (UnfilteredRowIterator merge = UnfilteredRowIterators.merge(asIterators))
-        {
-            return fromIterator(merge, ColumnFilter.all(updates.get(0).metadata()));
-        }
-    }
-
     // We override this, because the version in the super-class calls holder(), which build the update preventing
     // further updates, but that's not necessary here and being able to check at least the partition deletion without
     // "locking" the update is nice (and used in DataResolver.RepairMergeListener.MergeListener).
@@ -318,21 +285,6 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
     public EncodingStats stats()
     {
         return holder().stats;
-    }
-
-    /**
-     * Validates the data contained in this update.
-     *
-     * @throws org.apache.cassandra.serializers.MarshalException if some of the data contained in this update is corrupted.
-     */
-    public void validate()
-    {
-        for (Row row : rows())
-        {
-            metadata().comparator.validate(row.clustering());
-            for (ColumnData cd : row)
-                cd.validate();
-        }
     }
 
     /**

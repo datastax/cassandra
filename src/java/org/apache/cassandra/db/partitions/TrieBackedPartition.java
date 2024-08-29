@@ -75,13 +75,12 @@ import org.apache.cassandra.utils.memory.EnsureOnHeap;
  *
  * Currently all descendants and instances of this class are immutable (even tail tries from mutable memtables are
  * guaranteed to not change as we use forced copying below the partition level), though this may change in the future.
- *
- * @typeparam D The actual deletion info type stored in the trie. Typically just DeletionInfo.
  */
 public class TrieBackedPartition implements Partition
 {
     /**
-     * If keys is below this length, we will use a recursive procedure for inserting data in the memtable trie.
+     * If keys are below this length, we will use a recursive procedure for inserting data when building the backing
+     * trie.
      */
     @VisibleForTesting
     public static final int MAX_RECURSIVE_KEY_LENGTH = 128;
@@ -307,11 +306,6 @@ public class TrieBackedPartition implements Partition
         return deletionInfo().getPartitionDeletion();
     }
 
-    protected boolean canHaveShadowedData()
-    {
-        return canHaveShadowedData;
-    }
-
     public RegularAndStaticColumns columns()
     {
         return columns;
@@ -349,16 +343,12 @@ public class TrieBackedPartition implements Partition
 
     public boolean isEmpty()
     {
-        Iterator<Object> it = trie.valueIterator(Direction.FORWARD);
-        assert it.hasNext(); // root metadata must be present
-        DeletionInfo info = (DeletionInfo) it.next();
-        // If empty the trie only contains the root metadata which is a live deletion time.
-        return !it.hasNext() && info.isLive();
+        return rowCount == 0 && deletionInfo().isLive() && trie.get(path(Clustering.STATIC_CLUSTERING)) == null;
     }
 
     public boolean hasRows()
     {
-        return rowIterator(nonStaticSubtrie(), Direction.FORWARD).hasNext();
+        return rowCount > 0;
     }
 
     /**
@@ -404,15 +394,19 @@ public class TrieBackedPartition implements Partition
         // The trie only contains rows, so it doesn't allow to directly account for deletion that should apply to row
         // (the partition deletion or the deletion of a range tombstone that covers it). So if needs be, reuse the row
         // deletion to carry the proper deletion on the row.
-        DeletionTime activeDeletion = deletionInfo.getPartitionDeletion();
+        DeletionTime partitionDeletion = deletionInfo.getPartitionDeletion();
+        DeletionTime activeDeletion = partitionDeletion;
         if (rt != null && rt.deletionTime().supersedes(activeDeletion))
             activeDeletion = rt.deletionTime();
 
         if (data == null)
         {
-            return activeDeletion.isLive()
-                   ? null
-                   : BTreeRow.emptyDeletedRow(clustering, Row.Deletion.regular(activeDeletion));
+            // this means our partition level deletion supersedes all other deletions and we don't have to keep the row deletions
+            if (activeDeletion == partitionDeletion)
+                return null;
+            // no need to check activeDeletion.isLive here - if anything superseedes the partitionDeletion
+            // it must be non-live
+            return BTreeRow.emptyDeletedRow(clustering, Row.Deletion.regular(activeDeletion));
         }
 
         Row row = toRow(data, clustering);
@@ -507,7 +501,7 @@ public class TrieBackedPartition implements Partition
     {
         return new RowAndDeletionMergeIterator(metadata(), partitionKey(), deletionInfo().getPartitionDeletion(),
                                                selection, staticRow, reversed, stats(),
-                                               rowIter, deleteIter, canHaveShadowedData());
+                                               rowIter, deleteIter, canHaveShadowedData);
     }
 
 

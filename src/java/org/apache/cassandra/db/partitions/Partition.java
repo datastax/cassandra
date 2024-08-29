@@ -52,8 +52,8 @@ public interface Partition
     public boolean isEmpty();
 
     /**
-     * Whether the partition object has any rows, including non-empty static row.
-     * This may be true but partition still be non-empty if it has a deletion.
+     * Whether the partition object has any rows, excluding the static row.
+     * This may be false but partition still be non-empty if it has a deletion or a non-empty static row.
      */
     boolean hasRows();
 

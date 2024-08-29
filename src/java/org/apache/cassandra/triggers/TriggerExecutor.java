@@ -99,7 +99,7 @@ public class TriggerExecutor
                                                                      intermediate);
         // concatenate augmented and origin
         augmented.add(updates);
-        return augmented.get(0).merge(augmented);
+        return PartitionUpdate.merge(augmented);
     }
 
     /**

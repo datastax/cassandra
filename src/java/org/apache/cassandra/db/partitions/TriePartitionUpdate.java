@@ -54,7 +54,7 @@ import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
- * Stores updates made on a partition. Immutable.
+ * A trie-backed PartitionUpdate. Immutable.
  * <p>
  * Provides factories for simple variations (e.g. singleRowUpdate) and a mutable builder for constructing one.
  * The builder holds a mutable trie to which content may be added in any order, also taking care of
@@ -143,8 +143,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @param metadata the metadata for the created update.
      * @param key the partition key for the partition to update.
-     * @param row the row for the update (may be null).
-     * @param row the static row for the update (may be null).
+     * @param row the row for the update, may be a regular or static row and cannot be null.
      *
      * @return the newly created partition update containing only {@code row}.
      */
@@ -208,44 +207,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        false);
     }
 
-    /**
-     * Turns the given iterator into an update.
-     *
-     * @param iterator the iterator to turn into updates.
-     * @param filter the column filter used when querying {@code iterator}. This is used to make
-     * sure we don't include data for which the value has been skipped while reading (as we would
-     * then be writing something incorrect).
-     *
-     * Warning: this method does not close the provided iterator, it is up to
-     * the caller to close it.
-     */
-    @SuppressWarnings("resource")
-    public static TriePartitionUpdate fromIterator(UnfilteredRowIterator iterator, ColumnFilter filter)
-    {
-        return fromIterator(UnfilteredRowIterators.withOnlyQueriedData(iterator, filter));
-    }
-
-    @Override
-    protected boolean canHaveShadowedData()
-    {
-        return canHaveShadowedData;
-    }
-
-    /**
-     * Creates a partition update that entirely deletes a given partition.
-     *
-     * @param metadata the metadata for the created update.
-     * @param key the partition key for the partition that the created update should delete.
-     * @param timestamp the timestamp for the deletion.
-     * @param nowInSec the current time in seconds to use as local deletion time for the partition deletion.
-     *
-     * @return the newly created partition deletion update.
-     */
-    public static TriePartitionUpdate fullPartitionDelete(TableMetadata metadata, ByteBuffer key, long timestamp, int nowInSec)
-    {
-        return fullPartitionDelete(metadata, metadata.partitioner.decorateKey(key), timestamp, nowInSec);
-    }
-
     public static TriePartitionUpdate asTrieUpdate(PartitionUpdate update)
     {
         if (update instanceof TriePartitionUpdate)
@@ -260,26 +221,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     public static Trie<Object> asMergableTrie(PartitionUpdate update)
     {
         return asTrieUpdate(update).trie.prefixedBy(update.partitionKey());
-    }
-
-    /**
-     * Merges the provided updates, yielding a new update that incorporates all those updates.
-     *
-     * @param updates the collection of updates to merge. This shouldn't be empty.
-     *
-     * @return a partition update that include (merge) all the updates from {@code updates}.
-     */
-    public PartitionUpdate merge(List<? extends PartitionUpdate> updates)
-    {
-        assert !updates.isEmpty();
-        final int size = updates.size();
-
-        if (size == 1)
-            return Iterables.getOnlyElement(updates);
-
-        // This could be more efficient but its performance is not critical (only used by triggers).
-        List<UnfilteredRowIterator> asIterators = Lists.transform(updates, Partition::unfilteredIterator);
-        return fromIterator(UnfilteredRowIterators.merge(asIterators));
     }
 
     /**
@@ -329,6 +270,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
                 public DeletionInfo applyDeletion(DeletionInfo update)
                 {
+                    if (update.isLive())
+                        return update;
+
                     MutableDeletionInfo mdi = update.mutableCopy();
                     mdi.updateAllTimestamp(newTimestamp - 1);
                     return mdi;
@@ -650,7 +594,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         @Override
         public PartitionUpdate fromIterator(UnfilteredRowIterator iterator, ColumnFilter filter)
         {
-            return TriePartitionUpdate.fromIterator(iterator, filter);
+            return TriePartitionUpdate.fromIterator(UnfilteredRowIterators.withOnlyQueriedData(iterator, filter));
         }
     }
 }
