@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.hnsw;
+package org.apache.cassandra.index.sai.disk.v2;
 
 import org.junit.Test;
 
