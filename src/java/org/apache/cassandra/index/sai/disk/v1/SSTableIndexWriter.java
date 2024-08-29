@@ -417,7 +417,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
             {
                 var pq = ProductQuantization.load(reader);
-                return new CassandraOnHeapGraph.PqInfo(pq, Optional.of(unitVectors));
+                return new CassandraOnHeapGraph.PqInfo(pq, unitVectors);
             }
         }
         return null;
