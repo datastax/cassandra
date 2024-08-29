@@ -31,6 +31,7 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.io.sstable.Component;
@@ -150,6 +151,20 @@ public interface StorageProvider
     FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component);
 
     /**
+     * Creates a new {@link FileHandle.Builder} for the given primary index component during primary index writing time.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor    descriptor for the sstable whose handler is built.
+     * @param component     sstable component for which to build the handler.
+     * @param operationType the operation for current primary index writer
+     * @return a new {@link FileHandle.Builder} for the provided primary index component with access mode and chunk cache
+     * configured as appropriate.
+     */
+    FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType);
+
+    /**
      * Creates a new {@link FileHandle.Builder} for the given sstable component.
      * <p>
      * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
@@ -189,7 +204,7 @@ public interface StorageProvider
 
     /**
      * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files),
-     * that is suitable for reading the component "at flush time", that is typcally for when we need to access the
+     * that is suitable for reading the component during index build, that is typcally for when we need to access the
      * component to complete the writing of another related component.
      * <p>
      * Other the fact that this method will be called a different time, it's requirements are the same than for
@@ -199,7 +214,7 @@ public interface StorageProvider
      * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
      *   configured as appropriate.
      */
-    FileHandle.Builder flushTimeFileHandleBuilderFor(IndexComponent.ForRead component);
+    FileHandle.Builder indexBuildTimeFileHandleBuilderFor(IndexComponent.ForRead component);
 
     class DefaultProvider implements StorageProvider
     {
@@ -273,6 +288,14 @@ public interface StorageProvider
         }
 
         @Override
+        public FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType)
+        {
+            // By default, no difference between accesses during sstable writing and "at query time", but subclasses may need
+            // to differenciate both.
+            return fileHandleBuilderFor(descriptor, component);
+        }
+
+        @Override
         @SuppressWarnings("resource")
         public FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component, ZeroCopyMetadata zeroCopyMetadata)
         {
@@ -311,7 +334,7 @@ public interface StorageProvider
         }
 
         @Override
-        public FileHandle.Builder flushTimeFileHandleBuilderFor(IndexComponent.ForRead component)
+        public FileHandle.Builder indexBuildTimeFileHandleBuilderFor(IndexComponent.ForRead component)
         {
             // By default, no difference between accesses "at flush time" and "at query time", but subclasses may need
             // to differenciate both.

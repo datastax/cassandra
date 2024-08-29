@@ -157,4 +157,40 @@ public class GenericOrderByTest extends SAITester
             assertRows(execute("SELECT x FROM %s WHERE str_val = 'A' ORDER BY val ASC LIMIT 2"), row(1), row(2));
         });
     }
+
+    @Test
+    public void testSelectionAndOrderByOnTheSameColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, x int, v int, PRIMARY KEY (pk, x))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 1, 1, 1);
+        execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 1, 2, 5);
+        execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 1, 3, 2);
+        execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 1, 4, 4);
+        execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 2, 1, 7);
+        execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 2, 2, 6);
+        execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 2, 3, 8);
+        execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 2, 4, 3);
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT v FROM %s WHERE v >= -10 ORDER BY v ASC LIMIT 4"), row(1), row(2), row(3), row(4));
+            assertRows(execute("SELECT v FROM %s WHERE v > 1 ORDER BY v ASC LIMIT 4"), row(2), row(3), row(4), row(5));
+            assertRows(execute("SELECT v FROM %s WHERE v <= 3 ORDER BY v ASC LIMIT 4"), row(1), row(2), row(3));
+            assertRows(execute("SELECT v FROM %s WHERE v >= 4 AND v <= 6 ORDER BY v ASC LIMIT 4"), row(4), row(5), row(6));
+            assertRows(execute("SELECT v FROM %s WHERE v >= 7 ORDER BY v ASC LIMIT 4"), row(7), row(8));
+            assertRows(execute("SELECT v FROM %s WHERE v >= 10 ORDER BY v ASC LIMIT 4"));
+        });
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT v FROM %s WHERE v >= -10 ORDER BY v DESC LIMIT 4"), row(8), row(7), row(6), row(5));
+            assertRows(execute("SELECT v FROM %s WHERE v > 1 ORDER BY v DESC LIMIT 4"), row(8), row(7), row(6), row(5));
+            assertRows(execute("SELECT v FROM %s WHERE v <= 3 ORDER BY v DESC LIMIT 4"), row(3), row(2), row(1));
+            assertRows(execute("SELECT v FROM %s WHERE v >= 4 AND v <= 6 ORDER BY v DESC LIMIT 4"), row(6), row(5), row(4));
+            assertRows(execute("SELECT v FROM %s WHERE v >= 7 ORDER BY v DESC LIMIT 4"), row(8), row(7));
+            assertRows(execute("SELECT v FROM %s WHERE v >= 10 ORDER BY v DESC LIMIT 4"));
+        });
+    }
+
 }

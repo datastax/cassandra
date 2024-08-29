@@ -856,7 +856,12 @@ public class CompactionTask extends AbstractCompactionTask
             ids.add(sstable.getSSTableMetadata().pendingRepair);
 
         if (ids.size() != 1)
-            throw new RuntimeException(String.format("Attempting to compact pending repair sstables with sstables from other repair, or sstables not pending repair: %s", ids));
+        {
+            if (!SKIP_REPAIR_STATE_CHECKING)
+                throw new RuntimeException(String.format("Attempting to compact pending repair sstables with sstables from other repair, or sstables not pending repair: %s", ids));
+            // otherwise we should continue but mark the result as unrepaired
+            return ActiveRepairService.NO_PENDING_REPAIR;
+        }
 
         return ids.iterator().next();
     }

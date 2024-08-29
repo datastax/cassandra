@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -84,7 +83,6 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -106,7 +104,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     /**
      * Controls whether we optimize query plans.
-     * 0 disables the optimizer.
+     * 0 disables the optimizer. As a side effect, hybrid ANN queries will default to FilterSortOrder.SCAN_THEN_FILTER.
      * 1 enables the optimizer and tells the optimizer to respect the intersection clause limit.
      * Higher values enable the optimizer and disable the hard intersection clause limit.
      * Note: the config is not final to simplify testing.
@@ -345,7 +343,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  makeFilter(key));
     }
 
-    private Plan buildPlan()
+    Plan buildPlan()
     {
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
         Plan.RowsIteration rowsIteration = planFactory.fetch(keysIterationPlan);
@@ -361,9 +359,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                         : optimizedPlan;
 
         if (optimizedPlan.contains(node -> node instanceof Plan.AnnIndexScan))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SORT_THEN_FILTER);
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
         if (optimizedPlan.contains(node -> node instanceof Plan.KeysSort))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THEN_SORT);
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
 
         if (logger.isTraceEnabled())
             logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
@@ -398,31 +396,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return keysIterationPlan;
     }
 
-    public Iterator<? extends PrimaryKey> buildIterator()
+    public Iterator<? extends PrimaryKey> buildIterator(Plan plan)
     {
         try
         {
-            Plan plan = buildPlan();
             Plan.KeysIteration keysIteration = plan.firstNodeOfType(Plan.KeysIteration.class);
             assert keysIteration != null : "No index scan found";
-
-            // We need to estimate how many keys we'll be fetching for better performance.
-            // Some indexes may make a good use of knowing the number of requested keys in advance,
-            // because incremental re-requesting for more keys may be more expensive than getting them
-            // all at once.
-            Plan.Limit limit = plan.firstNodeOfType(Plan.Limit.class);
-            int hardLimit = limit != null ? limit.limit : Integer.MAX_VALUE;
-
-            // If there is filtering in the plan, we may need to fetch more keys
-            // from the index, so we need to reflect that in the limit.
-            // (In general, it costs more to over-fetch than under-fetch, because resume is cheap, so we don't
-            // need to use a high confidenceLevel.)
-            Plan.Filter filter = plan.firstNodeOfType(Plan.Filter.class);
-            int softLimit = (filter != null)
-                          ? SoftLimitUtil.softLimit(hardLimit, 0.5, filter.selectivity())
-                          : hardLimit;
-
-            return keysIteration.execute(this, softLimit);
+            return keysIteration.execute(this);
         }
         finally
         {
@@ -533,15 +513,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Use the configured {@link Orderer} to create an iterator that sorts the whole table by a specific column.
      */
     @Override
-    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(int softLimit)
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(Expression predicate, int softLimit)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
         try
         {
             for (MemtableIndex index : queryContext.view.memtableIndexes)
-                memtableResults.addAll(index.orderBy(queryContext, orderer, mergeRange, softLimit));
+                memtableResults.addAll(index.orderBy(queryContext, orderer, predicate, mergeRange, softLimit));
 
-            var sstableResults = orderSstables(queryContext.view, Collections.emptyList(), softLimit);
+            var totalRows = queryContext.view.getTotalSStableRows();
+            SSTableSearcher searcher = index -> index.orderBy(orderer, predicate, mergeRange, queryContext, softLimit, totalRows);
+            var sstableResults = searchSSTables(queryContext.view, searcher);
             sstableResults.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableResults, orderer.getComparator());
         }
@@ -584,11 +566,20 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
         var memtableResults = queryContext.view.memtableIndexes.stream()
-                                                               .map(index -> index.orderResultsBy(queryContext, sourceKeys, orderer, softLimit))
+                                                               .map(index -> index.orderResultsBy(queryContext,
+                                                                                                  sourceKeys,
+                                                                                                  orderer,
+                                                                                                  softLimit))
                                                                .collect(Collectors.toList());
         try
         {
-            var sstableScoredPrimaryKeyIterators = orderSstables(queryContext.view, sourceKeys, softLimit);
+            var totalRows = queryContext.view.getTotalSStableRows();
+            SSTableSearcher ssTableSearcher = index -> index.orderResultsBy(queryContext,
+                                                                            sourceKeys,
+                                                                            orderer,
+                                                                            softLimit,
+                                                                            totalRows);
+            var sstableScoredPrimaryKeyIterators = searchSSTables(queryContext.view, ssTableSearcher);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableScoredPrimaryKeyIterators, orderer.getComparator());
         }
@@ -600,22 +591,26 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     }
 
+
+    @FunctionalInterface
+    interface SSTableSearcher
+    {
+        List<CloseableIterator<PrimaryKeyWithSortKey>> search(SSTableIndex index) throws Exception;
+    }
+
     /**
      * Create the list of iterators over {@link PrimaryKeyWithSortKey} from the given {@link QueryViewBuilder.QueryView}.
      * @param queryView The view to use to create the iterators.
-     * @param sourceKeys The source keys to use to create the iterators. Use an empty list to search all keys.
      * @return The list of iterators over {@link PrimaryKeyWithSortKey}.
      */
-    private List<CloseableIterator<PrimaryKeyWithSortKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys, int softLimit)
+    private List<CloseableIterator<PrimaryKeyWithSortKey>> searchSSTables(QueryViewBuilder.QueryView queryView, SSTableSearcher searcher)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> results = new ArrayList<>();
-        long totalRows = queryView.view.sstables.stream().mapToLong(SSTableReader::getTotalRows).sum();
         for (var index : queryView.referencedIndexes)
         {
             try
             {
-                var iterators = sourceKeys.isEmpty() ? index.orderBy(orderer, mergeRange, queryContext, softLimit, totalRows)
-                                                     : index.orderResultsBy(queryContext, sourceKeys, orderer, softLimit, totalRows);
+                var iterators = searcher.search(index);
                 results.addAll(iterators);
             }
             catch (Throwable ex)
@@ -900,19 +895,19 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     @Override
-    public int estimateAnnNodesVisited(Orderer ordering, int limit, long candidates)
+    public double estimateAnnSearchCost(Orderer ordering, int limit, long candidates)
     {
         Preconditions.checkArgument(limit > 0, "limit must be > 0");
 
         var queryView = queryContext.view;
         assert queryView != null;
 
-        int annNodesCount = 0;
+        double cost = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
         {
-            // TODO: maybe limit and candidates should be scaled proportionally by the size of the memtable?
+            // FIXME convert nodes visited to search cost
             int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
-            annNodesCount += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
+            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
         }
 
         long totalRows = 0;
@@ -927,9 +922,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     continue;
                 int segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                 int segmentCandidates = max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
-                annNodesCount += segment.estimateAnnNodesVisited(segmentLimit, segmentCandidates);
+                cost += segment.estimateAnnSearchCost(segmentLimit, segmentCandidates);
             }
         }
-        return annNodesCount;
+        return cost;
     }
 }

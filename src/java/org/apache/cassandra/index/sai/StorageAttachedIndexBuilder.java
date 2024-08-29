@@ -21,6 +21,7 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
@@ -50,6 +51,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -143,6 +145,8 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return false;
         }
 
+        SSTableWatcher.instance.onIndexBuild(sstable);
+
         IndexDescriptor indexDescriptor = group.descriptorFor(sstable);
         Set<Component> replacedComponents = new HashSet<>();
 
@@ -214,8 +218,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     previousKeyPosition = dataPosition;
                 }
 
-                completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
-                txn.trackNewAttachedIndexFiles(sstable);
+                completeSSTable(txn, indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
             }
             logger.debug("Completed indexing sstable {}", sstable.descriptor);
 
@@ -308,11 +311,12 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             components.forWrite().forceDeleteAllComponents();
     }
 
-    private void completeSSTable(StorageAttachedIndexWriter indexWriter,
+    private void completeSSTable(LifecycleTransaction txn,
+                                 StorageAttachedIndexWriter indexWriter,
                                  SSTableReader sstable,
                                  Set<StorageAttachedIndex> indexes,
                                  CountDownLatch latch,
-                                 Set<Component> replacedComponents) throws InterruptedException
+                                 Set<Component> replacedComponents) throws InterruptedException, IOException
     {
         indexWriter.complete(sstable);
 
@@ -343,8 +347,16 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         sstable.registerComponents(group.activeComponents(sstable), tracker);
         if (!replacedComponents.isEmpty())
             sstable.unregisterComponents(replacedComponents, tracker);
-        Set<StorageAttachedIndex> incomplete = group.onSSTableChanged(Collections.emptyList(), Collections.singleton(sstable), existing, false);
 
+        /**
+         * During memtable flush, it completes the transaction first which opens the flushed sstable,
+         * and then notify the new sstable to SAI. Here we should do the same.
+         */
+        txn.trackNewAttachedIndexFiles(sstable);
+        // there is nothing to commit. Close() effectively abort the transaction.
+        txn.close();
+
+        Set<StorageAttachedIndex> incomplete = group.onSSTableChanged(Collections.emptyList(), Collections.singleton(sstable), existing, false);
         if (!incomplete.isEmpty())
         {
             // If this occurs during an initial index build, there is only one index in play, and

@@ -31,7 +31,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArraySet;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -60,6 +59,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.memory.HeapCloner;
 
 import static org.apache.cassandra.io.util.File.WriteMode.APPEND;
+import static org.apache.cassandra.io.util.File.WriteMode.OVERWRITE;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 
@@ -367,20 +367,16 @@ public abstract class SSTable
     private static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Component.TOC);
-        if (!tocFile.tryDelete())
-            logger.error("Failed to delete TOC component for " + descriptor);
-        appendTOC(descriptor, components);
+        writeTOC(tocFile, components, OVERWRITE);
     }
 
     /**
-     * Appends new component names to the TOC component.
+     * Write TOC file with given components and write mode
      */
-    @SuppressWarnings("resource")
-    protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
+    public static void writeTOC(File tocFile, Collection<Component> components, File.WriteMode writeMode)
     {
-        File tocFile = descriptor.fileFor(Component.TOC);
         FileOutputStreamPlus fos = null;
-        try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(APPEND))))
+        try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(writeMode))))
         {
             for (Component component : components)
                 w.println(component.name);
@@ -391,6 +387,16 @@ public abstract class SSTable
         {
             throw new FSWriteError(e, tocFile);
         }
+    }
+
+    /**
+     * Appends new component names to the TOC component.
+     */
+    @SuppressWarnings("resource")
+    protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
+    {
+        File tocFile = descriptor.fileFor(Component.TOC);
+        writeTOC(tocFile, components, APPEND);
     }
 
     /**

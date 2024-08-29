@@ -95,6 +95,8 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
+
 /**
  * Manage metadata for each column index.
  */
@@ -391,8 +393,11 @@ public class IndexContext
         MemtableIndex target = liveMemtables.get(memtable);
         if (target == null)
             return;
-
-        ByteBuffer oldValue = getValueOf(key, oldRow, FBUtilities.nowInSeconds());
+        // Use 0 for nowInSecs to get the value from the oldRow regardless of its liveness status. To get to this point,
+        // C* has already determined this is the current represntation of the oldRow in the memtable, and that means
+        // we need to add the newValue to the index and remove the oldValue from it, even if it has already expired via
+        // TTL.
+        ByteBuffer oldValue = getValueOf(key, oldRow, 0);
         ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
         target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
     }
@@ -750,7 +755,8 @@ public class IndexContext
     public void validate(DecoratedKey key, Row row)
     {
         // Validate the size of the inserted term.
-        validateMaxTermSizeForRow(key, row);
+        if (VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getBoolean())
+            validateMaxTermSizeForRow(key, row);
 
         // Verify vector is valid.
         if (isVector())

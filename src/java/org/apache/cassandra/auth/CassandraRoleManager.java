@@ -81,6 +81,12 @@ public class CassandraRoleManager implements IRoleManager
     static final String DEFAULT_SUPERUSER_NAME = "cassandra";
     static final String DEFAULT_SUPERUSER_PASSWORD = "cassandra";
 
+    // In some cases we want to avoid creating default super user accounts (for security purposes). For example CNDB
+    // can create roles without requiring default SU account. So we need a flag to tell C* to skip creating this role.
+    // Even though this says SKIP it's actually safer to create the user as non super user with no login creds
+    // and a timestamp of 1 in case a user forgets the flag on another node.
+    private static final boolean SKIP_DEFAULT_ROLE_SETUP = Boolean.getBoolean(Config.PROPERTY_PREFIX + "skip_default_role_setup");
+
     // Transform a row in the AuthKeyspace.ROLES to a Role instance
     private static final Function<UntypedResultSet.Row, Role> ROW_TO_ROLE = row ->
     {
@@ -349,11 +355,14 @@ public class CassandraRoleManager implements IRoleManager
             if (!hasExistingRoles())
             {
                 QueryProcessor.process(String.format("INSERT INTO %s.%s (role, is_superuser, can_login, salted_hash) " +
-                                                     "VALUES ('%s', true, true, '%s') USING TIMESTAMP 0",
+                                                     "VALUES ('%s', %s, %s, '%s') USING TIMESTAMP %s",
                                                      SchemaConstants.AUTH_KEYSPACE_NAME,
                                                      AuthKeyspace.ROLES,
                                                      DEFAULT_SUPERUSER_NAME,
-                                                     escape(hashpw(DEFAULT_SUPERUSER_PASSWORD))),
+                                                     SKIP_DEFAULT_ROLE_SETUP ? "false" : "true",
+                                                     SKIP_DEFAULT_ROLE_SETUP ? "false" : "true",
+                                                     SKIP_DEFAULT_ROLE_SETUP ? "" : escape(hashpw(DEFAULT_SUPERUSER_PASSWORD)),
+                                                     SKIP_DEFAULT_ROLE_SETUP ? "1" : "0"),
                                        consistencyForRole(DEFAULT_SUPERUSER_NAME));
                 logger.info("Created default superuser role '{}'", DEFAULT_SUPERUSER_NAME);
             }

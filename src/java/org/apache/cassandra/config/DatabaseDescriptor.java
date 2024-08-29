@@ -3644,7 +3644,7 @@ public class DatabaseDescriptor
 
     public static int getSAISegmentWriteBufferSpace()
     {
-        return conf.sai_options.segment_write_buffer_space_mb;
+        return conf == null ? StorageAttachedIndexOptions.DEFAULT_SEGMENT_BUFFER_MB : conf.sai_options.segment_write_buffer_space_mb;
     }
 
     public static void setSAISegmentWriteBufferSpace(int bufferSpace)

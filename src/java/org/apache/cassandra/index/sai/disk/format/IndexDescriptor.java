@@ -613,9 +613,9 @@ public class IndexDescriptor
             }
 
             @Override
-            public FileHandle createFlushTimeFileHandle()
+            public FileHandle createIndexBuildTimeFileHandle()
             {
-                try (final FileHandle.Builder builder = StorageProvider.instance.flushTimeFileHandleBuilderFor(this))
+                try (final FileHandle.Builder builder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(this))
                 {
                     return builder.order(byteOrder()).complete();
                 }

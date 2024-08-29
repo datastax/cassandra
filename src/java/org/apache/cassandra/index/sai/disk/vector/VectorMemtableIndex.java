@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -29,10 +28,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.PriorityQueue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.Function;
+import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterators;
@@ -57,14 +55,14 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -201,8 +199,13 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext context, Orderer orderer, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext context,
+                                                                  Orderer orderer,
+                                                                  Expression slice,
+                                                                  AbstractBounds<PartitionPosition> keyRange,
+                                                                  int limit)
     {
+        assert slice == null : "ANN does not support index slicing";
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
         var qv = vts.createFloatVector(orderer.vector);
@@ -280,6 +283,10 @@ public class VectorMemtableIndex implements MemtableIndex
             if (v == null)
                 return;
             var i = graph.getOrdinal(v);
+            if (i < 0)
+                // might happen if the vector and/or its postings have been removed in the meantime between getting the
+                // vector and getting the ordinal (graph#vectorForKey and graph#getOrdinal are not synchronized)
+                return;
             keysInGraph.add(k);
             relevantOrdinals.add(i);
         });
@@ -347,8 +354,7 @@ public class VectorMemtableIndex implements MemtableIndex
     private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)
     {
         int expectedNodesVisited = expectedNodesVisited(limit, nPermittedOrdinals, graphSize);
-        int expectedComparisons = indexContext.getIndexWriterConfig().getAnnMaxDegree() * expectedNodesVisited;
-        return (int) min(max(limit, Plan.memoryToDiskFactor() * expectedComparisons), GLOBAL_BRUTE_FORCE_ROWS);
+        return min(max(limit, expectedNodesVisited), GLOBAL_BRUTE_FORCE_ROWS);
     }
 
     public int estimateAnnNodesVisited(int limit, int nPermittedOrdinals)
@@ -358,6 +364,12 @@ public class VectorMemtableIndex implements MemtableIndex
 
     /**
      * All parameters must be greater than zero.  nPermittedOrdinals may be larger than graphSize.
+     * <p>
+     * Returns the expected number of nodes visited by an ANN search.
+     * !!!
+     * !!! "Visted" means we compute the coarse similarity with the query vector.  This is
+     * !!! roughly `degree` times larger than the number of nodes whose edge lists we load!
+     * !!!
      */
     public static int expectedNodesVisited(int limit, int nPermittedOrdinals, int graphSize)
     {
@@ -379,10 +391,10 @@ public class VectorMemtableIndex implements MemtableIndex
         return ensureSaneEstimate(raw, limit, graphSize);
     }
 
-    public static int ensureSaneEstimate(int rawEstimate, int limit, int graphSize)
+    public static int ensureSaneEstimate(int rawEstimate, int rerankK, int graphSize)
     {
-        // we will always visit at least min(limit, graphSize) nodes, and we can't visit more nodes than exist in the graph
-        return min(max(rawEstimate, min(limit, graphSize)), graphSize);
+        // we will always visit at least min(rerankK, graphSize) nodes, and we can't visit more nodes than exist in the graph
+        return min(max(rawEstimate, min(rerankK, graphSize)), graphSize);
     }
 
     @Override
@@ -393,9 +405,10 @@ public class VectorMemtableIndex implements MemtableIndex
         throw new UnsupportedOperationException();
     }
 
-    public Set<Integer> computeDeletedOrdinals(Function<PrimaryKey, Integer> ordinalMapper)
+    /** returns true if the index is non-empty and should be flushed */
+    public boolean preFlush(ToIntFunction<PrimaryKey> ordinalMapper)
     {
-        return graph.computeDeletedOrdinals(ordinalMapper);
+        return graph.preFlush(ordinalMapper);
     }
 
     public int size()
@@ -403,9 +416,9 @@ public class VectorMemtableIndex implements MemtableIndex
         return graph.size();
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
-        return graph.flush(perIndexComponents, deletedOrdinals);
+        return graph.flush(perIndexComponents);
     }
 
     @Override

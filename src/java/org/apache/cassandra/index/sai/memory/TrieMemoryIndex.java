@@ -31,7 +31,6 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
@@ -46,7 +45,6 @@ import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.tries.Direction;
@@ -54,7 +52,6 @@ import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -186,11 +183,13 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer)
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, @Nullable Expression slice)
     {
         if (data.isEmpty())
             return CloseableIterator.emptyIterator();
-        var iter = data.entrySet(orderer.isAscending() ? Direction.FORWARD : Direction.REVERSE).iterator();
+
+        Trie<PrimaryKeys> subtrie = getSubtrie(slice);
+        var iter = subtrie.entrySet(orderer.isAscending() ? Direction.FORWARD : Direction.REVERSE).iterator();
         return new AllTermsIterator(iter);
     }
 
@@ -227,6 +226,34 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
+        Trie<PrimaryKeys> subtrie = getSubtrie(expression);
+
+        var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
+        var mergingIteratorBuilder = MergingRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
+        lastQueueSize.set(mergingIteratorBuilder.size());
+
+        if (!Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
+            subtrie.entrySet().forEach(entry -> {
+                // Before version DB, we encoded composite types using a non order-preserving function. In order to
+                // perform a range query on a map, we use the bounds to get all entries for a given map key and then
+                // only keep the map entries that satisfy the expression.
+                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(ByteComparable.Version.OSS41));
+                if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
+                    mergingIteratorBuilder.add(entry.getValue());
+            });
+        else
+            subtrie.values().forEach(mergingIteratorBuilder::add);
+
+        return mergingIteratorBuilder.isEmpty()
+               ? RangeIterator.empty()
+               : new FilteringKeyRangeIterator(mergingIteratorBuilder.build(), keyRange);
+    }
+
+    private Trie<PrimaryKeys> getSubtrie(@Nullable Expression expression)
+    {
+        if (expression == null)
+            return data;
+
         ByteComparable lowerBound, upperBound;
         boolean lowerInclusive, upperInclusive;
         if (expression.lower != null)
@@ -251,26 +278,7 @@ public class TrieMemoryIndex extends MemoryIndex
             upperInclusive = false;
         }
 
-        var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
-        var mergingIteratorBuilder = MergingRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
-        lastQueueSize.set(mergingIteratorBuilder.size());
-
-        Trie<PrimaryKeys> subtrie = data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
-        if (!Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
-            subtrie.entrySet().forEach(entry -> {
-                // Before version DB, we encoded composite types using a non order-preserving function. In order to
-                // perform a range query on a map, we use the bounds to get all entries for a given map key and then
-                // only keep the map entries that satisfy the expression.
-                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(ByteComparable.Version.OSS41));
-                if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
-                    mergingIteratorBuilder.add(entry.getValue());
-            });
-        else
-            subtrie.values().forEach(mergingIteratorBuilder::add);
-
-        return mergingIteratorBuilder.isEmpty()
-               ? RangeIterator.empty()
-               : new FilteringKeyRangeIterator(mergingIteratorBuilder.build(), keyRange);
+        return data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
     }
 
     public ByteBuffer getMinTerm()

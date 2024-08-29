@@ -28,17 +28,26 @@ public interface OrdinalsView extends AutoCloseable
 {
     interface OrdinalConsumer
     {
-        void accept(long rowId, int ordinal) throws IOException;
+        void accept(int rowId, int ordinal) throws IOException;
     }
 
+    /** return the vector ordinal associated with the given row, or -1 if no vectors are associated with it */
     int getOrdinalForRowId(int rowId) throws IOException;
 
-    /** iterates over all ordinals in the view.
-     * return true if consumer was called at least once.
-     * */
-    boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException;
+    /**
+     * iterates over all ordinals in the view.  order of iteration is undefined. Only calls consumer for valid mappings
+     * from row id to ordinal.
+     */
+    void forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException;
 
-    Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException;
+    default Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
+    {
+        var bits = bitsSupplier.get();
+        this.forEachOrdinalInRange(startRowId, endRowId, (segmentRowId, ordinal) -> {
+            bits.set(ordinal);
+        });
+        return bits;
+    }
 
     @Override
     void close();

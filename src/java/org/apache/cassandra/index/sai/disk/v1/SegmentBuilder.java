@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -229,12 +228,12 @@ public abstract class SegmentBuilder
     {
         private final CompactionGraph graphIndex;
 
-        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter, ProductQuantization pq, boolean unitVectors)
+        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, ProductQuantization pq, boolean unitVectors, boolean allRowsHaveVectors, NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             try
             {
-                graphIndex = new CompactionGraph(components, pq, unitVectors, keyCount);
+                graphIndex = new CompactionGraph(components, pq, unitVectors, keyCount, allRowsHaveVectors);
             }
             catch (IOException e)
             {
@@ -305,7 +304,9 @@ public abstract class SegmentBuilder
         @Override
         protected SegmentMetadata.ComponentMetadataMap flushInternal() throws IOException
         {
-            return graphIndex.flush(Set.of());
+            if (graphIndex.isEmpty())
+                return null;
+            return graphIndex.flush();
         }
 
         @Override
@@ -393,11 +394,11 @@ public abstract class SegmentBuilder
         @Override
         protected SegmentMetadata.ComponentMetadataMap flushInternal() throws IOException
         {
-            // VSTODO this is a bit of a hack. We call computeDeletedOrdinals to call computeRowIds on each
-            // VectorPostings, which will populate the rowIds field, but if we refactor the code, we could skip that.
-            var deletedOrdinals = graphIndex.computeDeletedOrdinals(p -> p);
-            assert deletedOrdinals.isEmpty() : "Deleted ordinals should be empty when built during compaction";
-            return graphIndex.flush(components, Set.of());
+            var shouldFlush = graphIndex.preFlush(p -> p);
+            // there are no deletes to worry about when building the index during compaction,
+            // and SegmentBuilder::flush checks for the empty index case before calling flushInternal
+            assert shouldFlush;
+            return graphIndex.flush(components);
         }
 
         @Override
@@ -430,8 +431,9 @@ public abstract class SegmentBuilder
         }
 
         SegmentMetadata.ComponentMetadataMap indexMetas = flushInternal();
-
-        return new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
+        return indexMetas == null
+               ? null
+               : new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
     }
 
     public long addAll(ByteBuffer term, AbstractType<?> type, PrimaryKey key, long sstableRowId, AbstractAnalyzer analyzer, IndexContext indexContext)

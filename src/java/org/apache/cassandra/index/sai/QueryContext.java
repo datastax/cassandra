@@ -252,10 +252,10 @@ public class QueryContext
      */
     public enum FilterSortOrder
     {
-        /** First get the matching keys from the non-vector indexes, then use vector index to sort them */
-        FILTER_THEN_SORT,
+        /** First get the matching keys from the non-vector indexes, then use vector index to return the top K by similarity order */
+        SEARCH_THEN_ORDER,
 
-        /** First get the candidates in ANN order from the vector index, then fetch the rows and post-filter them */
-        SORT_THEN_FILTER
+        /** First get the candidates in ANN order from the vector index, then fetch the rows and filter them until we find K matching the predicates */
+        SCAN_THEN_FILTER
     }
 }

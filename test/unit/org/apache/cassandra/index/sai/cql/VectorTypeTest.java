@@ -23,10 +23,18 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.junit.Assert;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -36,10 +44,15 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
+import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.TracingTestImpl;
@@ -48,14 +61,32 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
+@RunWith(Parameterized.class)
 public class VectorTypeTest extends VectorTester
 {
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data()
+    {
+        return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v}).collect(Collectors.toList());
+    }
+
     private static final IPartitioner partitioner = Murmur3Partitioner.instance;
 
     @BeforeClass
     public static void setupClass()
     {
         System.setProperty("cassandra.custom_tracing_class", "org.apache.cassandra.tracing.TracingTestImpl");
+    }
+
+    @Before
+    @Override
+    public void setup() throws Throwable
+    {
+        super.setup();
+        SAIUtil.setLatestVersion(version);
     }
 
     @Override
@@ -135,6 +166,9 @@ public class VectorTypeTest extends VectorTester
             assertThat(trace).doesNotContain("Executing single-partition query");
         // manual inspection to verify that no extra traces were included
         logger.info(((TracingTestImpl) Tracing.instance).getTraces().toString());
+
+        // because we parameterized the test class we need to clean up after ourselves or the second run will fail
+        Tracing.instance.stopSession();
     }
 
     @Test
@@ -1187,5 +1221,54 @@ public class VectorTypeTest extends VectorTester
 
         // Confirm we can query the data
         assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
+    }
+
+    /**
+     * Tests a filter-then-sort query with a concurrent vector deletion. See CNDB-10536 for details.
+     */
+    @Test
+    public void testFilterThenSortQueryWithConcurrentVectorDeletion() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>, c int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // write into memtable
+        execute("INSERT INTO %s (k, v, c) VALUES (1, [1, 1], 1)");
+        execute("INSERT INTO %s (k, v, c) VALUES (2, [2, 2], 1)");
+
+        // inject a barrier to block CassandraOnHeapGraph#getOrdinal
+        Injections.Barrier barrier = Injections.newBarrier("block_get_ordinal", 2, false)
+                                               .add(InvokePointBuilder.newInvokePoint()
+                                                                      .onClass(CassandraOnHeapGraph.class)
+                                                                      .onMethod("getOrdinal")
+                                                                      .atEntry())
+                                               .build();
+        Injections.inject(barrier);
+
+        // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
+        QueryController.QUERY_OPT_LEVEL = 0;
+        try
+        {
+            ExecutorService executor = Executors.newFixedThreadPool(1);
+            String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
+            Future<UntypedResultSet> future = executor.submit(() -> execute(select));
+
+            // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
+            waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
+            execute("DELETE v FROM %s WHERE k = 1");
+            flush();
+
+            // release the barrier to resume the query, which should succeed
+            barrier.countDown();
+            assertRows(future.get(), row(2));
+
+            assertEquals(0, executor.shutdownNow().size());
+        }
+        finally
+        {
+            QueryController.QUERY_OPT_LEVEL = 1;
+        }
     }
 }
