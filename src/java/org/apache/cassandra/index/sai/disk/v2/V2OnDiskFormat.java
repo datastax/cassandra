@@ -108,7 +108,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isVector())
-            return new V2VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
+            throw new IllegalStateException("V2 (HNSW) vector index support has been removed");
         if (indexContext.isLiteral())
             return new V2InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
