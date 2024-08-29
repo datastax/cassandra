@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -347,14 +346,14 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (pqi == null && segments.size() > 0)
                 pqi = maybeReadPqFromLastSegment();
 
-            if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            if (pqi == null || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
             {
                 builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
             }
             else
             {
                 var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors.get(), allRowsHaveVectors, limiter);
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
             }
         }
         else if (indexContext.isLiteral())
@@ -419,7 +418,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
             {
                 var pq = ProductQuantization.load(reader);
-                return new CassandraOnHeapGraph.PqInfo(pq, Optional.of(unitVectors));
+                return new CassandraOnHeapGraph.PqInfo(pq, unitVectors);
             }
         }
         return null;
