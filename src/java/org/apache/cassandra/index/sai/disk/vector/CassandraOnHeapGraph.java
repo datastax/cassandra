@@ -26,7 +26,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -639,9 +638,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
     {
         public final ProductQuantization pq;
         /** an empty Optional indicates that the index was written with an older version that did not record this information */
-        public final Optional<Boolean> unitVectors;
+        public final boolean unitVectors;
 
-        public PqInfo(ProductQuantization pq, Optional<Boolean> unitVectors)
+        public PqInfo(ProductQuantization pq, boolean unitVectors)
         {
             this.pq = pq;
             this.unitVectors = unitVectors;
