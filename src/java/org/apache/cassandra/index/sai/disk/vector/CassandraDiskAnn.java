@@ -225,46 +225,55 @@ public class CassandraDiskAnn
 
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
-        var view = (GraphIndex.ScoringView) searcher.getView();
-        SearchScoreProvider ssp;
-        if (features.contains(FeatureId.FUSED_ADC))
+        try
         {
-            var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
-            var rr = view.rerankerFor(queryVector, similarityFunction);
-            ssp = new SearchScoreProvider(asf, rr);
+            var view = (GraphIndex.ScoringView) searcher.getView();
+            SearchScoreProvider ssp;
+            if (features.contains(FeatureId.FUSED_ADC))
+            {
+                var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
+                var rr = view.rerankerFor(queryVector, similarityFunction);
+                ssp = new SearchScoreProvider(asf, rr);
+            }
+            else if (compressedVectors == null)
+            {
+                ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction));
+            }
+            else
+            {
+                // unit vectors defined with dot product should switch to cosine similarity for compressed
+                // comparisons, since the compression does not maintain unit length
+                var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
+                         ? VectorSimilarityFunction.COSINE
+                         : similarityFunction;
+                var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
+                var rr = view.rerankerFor(queryVector, sf);
+                ssp = new SearchScoreProvider(asf, rr);
+            }
+            var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
+            if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
+                context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
+            Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results",
+                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
+            if (threshold > 0)
+            {
+                // Threshold based searches are comprehensive and do not need to resume the search.
+                graphAccessManager.release();
+                nodesVisitedConsumer.accept(result.getVisitedCount());
+                var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
+                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
+            }
+            else
+            {
+                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false);
+                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
+            }
         }
-        else if (compressedVectors == null)
+        catch (Throwable t)
         {
-            ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction));
-        }
-        else
-        {
-            // unit vectors defined with dot product should switch to cosine similarity for compressed
-            // comparisons, since the compression does not maintain unit length
-            var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
-                     ? VectorSimilarityFunction.COSINE
-                     : similarityFunction;
-            var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
-            var rr = view.rerankerFor(queryVector, sf);
-            ssp = new SearchScoreProvider(asf, rr);
-        }
-        var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
-        if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
-            context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
-        Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results",
-                      limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
-        if (threshold > 0)
-        {
-            // Threshold based searches are comprehensive and do not need to resume the search.
-            graphAccessManager.release();
-            nodesVisitedConsumer.accept(result.getVisitedCount());
-            var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
-            return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
-        }
-        else
-        {
-            var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false);
-            return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
+            // If we don't release it, we'll never be able to aquire it, so catch and rethrow Throwable.
+            graphAccessManager.forceRelease();
+            throw t;
         }
     }
 
