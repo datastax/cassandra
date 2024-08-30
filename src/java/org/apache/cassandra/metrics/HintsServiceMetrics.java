@@ -21,6 +21,7 @@ import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Meter;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -49,6 +50,10 @@ public final class HintsServiceMetrics
     private static final LoadingCache<InetAddressAndPort, Histogram> delayByEndpoint = Caffeine.newBuilder()
                                                                                                .executor(MoreExecutors.directExecutor())
                                                                                                .build(address -> Metrics.histogram(factory.createMetricName("Hint_delays-"+address.toString().replace(':', '.')), false));
+
+
+    public static final Counter hintsOnDisk = Metrics.counter(factory.createMetricName("HintsOnDisk"));
+    public static final Counter corruptedHintsOnDisk = Metrics.counter(factory.createMetricName("CorruptedHintsOnDisk"));
 
     public static void updateDelayMetrics(InetAddressAndPort endpoint, long delay)
     {
