@@ -320,6 +320,9 @@ public class Operation
             else if (isDisjunction && (expression.operator() == Operator.ANALYZER_MATCHES ||
                                        expression.operator() == Operator.EQ && controller.getContext(expression).isAnalyzed()))
             {
+                // In case of having a tokenizing query_analyzer (such as NGram) with OR, we need to split the
+                // expression into multiple expressions and intersect them.
+                // The additional node in case of no tokenization will be taken care of in Plan.Factory#intersection()
                 OperatorNode node = new AndNode();
                 node.add(new ExpressionNode(expression));
                 return node;
