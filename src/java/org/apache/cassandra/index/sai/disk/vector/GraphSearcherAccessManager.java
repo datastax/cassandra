@@ -61,6 +61,15 @@ public class GraphSearcherAccessManager
     }
 
     /**
+     * Release the {@link GraphSearcher} instance, allowing it to be used in another search,
+     * without confirming its state. Inteaded for use in exceptional code paths.
+     */
+    public void forceRelease()
+    {
+        locked.set(false);
+    }
+
+    /**
      * Close the {@link GraphSearcher} instance.  It cannot be used again after being closed.
      */
     public void close() throws IOException
