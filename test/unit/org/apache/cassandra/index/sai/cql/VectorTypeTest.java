@@ -36,6 +36,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -51,6 +52,8 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.inject.ActionBuilder;
+import org.apache.cassandra.inject.Expression;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.service.ClientState;
@@ -1196,6 +1199,30 @@ public class VectorTypeTest extends VectorTester
 
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"));
+        });
+    }
+
+    @Test
+    public void testEnsureIndexQueryableAfterTransientFailure() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+
+        var injection = Injections.newCustom("fail_on_searcher_search")
+                                  .add(InvokePointBuilder.newInvokePoint().onClass(GraphSearcher.class).onMethod("search").atEntry())
+                                  .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
+                                  .build();
+        Injections.inject(injection);
+        // Insert data so we can query the index
+        execute("INSERT INTO %s (pk, vec) VALUES (1, [1,1])");
+
+        // Ensure that we fail, as expected, and that a subsequent call to search is successful.
+        beforeAndAfterFlush(() -> {
+            injection.enable();
+            assertThatThrownBy(() -> execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2")).hasMessageContaining("Injected failure!");
+            injection.disable();
+            assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1));
         });
     }
 
