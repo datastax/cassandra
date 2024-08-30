@@ -155,13 +155,13 @@ public class TrieBackedPartition implements Partition
     protected final TableMetadata metadata;
     protected final RegularAndStaticColumns columns;
     protected final EncodingStats stats;
-    protected final int rowCount;
+    protected final int rowCountIncludingStatic;
     protected final boolean canHaveShadowedData;
 
     public TrieBackedPartition(DecoratedKey partitionKey,
                                RegularAndStaticColumns columns,
                                EncodingStats stats,
-                               int rowCount,
+                               int rowCountIncludingStatic,
                                Trie<Object> trie,
                                TableMetadata metadata,
                                boolean canHaveShadowedData)
@@ -171,7 +171,7 @@ public class TrieBackedPartition implements Partition
         this.metadata = metadata;
         this.columns = columns;
         this.stats = stats;
-        this.rowCount = rowCount;
+        this.rowCountIncludingStatic = rowCountIncludingStatic;
         this.canHaveShadowedData = canHaveShadowedData;
         // There must always be deletion info metadata.
         // Note: we can't use deletionInfo() because WithEnsureOnHeap's override is not yet set up.
@@ -318,7 +318,7 @@ public class TrieBackedPartition implements Partition
 
     public int rowCount()
     {
-        return rowCount;
+        return rowCountIncludingStatic - (hasStaticRow() ? 1 : 0);
     }
 
     public DeletionInfo deletionInfo()
@@ -343,12 +343,17 @@ public class TrieBackedPartition implements Partition
 
     public boolean isEmpty()
     {
-        return rowCount == 0 && deletionInfo().isLive() && trie.get(path(Clustering.STATIC_CLUSTERING)) == null;
+        return rowCountIncludingStatic == 0 && deletionInfo().isLive();
+    }
+
+    private boolean hasStaticRow()
+    {
+        return trie.get(path(Clustering.STATIC_CLUSTERING)) != null;
     }
 
     public boolean hasRows()
     {
-        return rowCount > 0;
+        return rowCountIncludingStatic > 1 || rowCountIncludingStatic > 0 && !hasStaticRow();
     }
 
     /**
@@ -616,7 +621,7 @@ public class TrieBackedPartition implements Partition
         private final boolean useRecursive;
         private final boolean collectDataSize;
 
-        private int rowCount;
+        private int rowCountIncludingStatic;
         private long dataSize;
 
         public ContentBuilder(TableMetadata metadata, DeletionTime partitionLevelDeletion, boolean isReverseOrder, boolean collectDataSize)
@@ -632,7 +637,7 @@ public class TrieBackedPartition implements Partition
             this.useRecursive = useRecursive(comparator);
             this.collectDataSize = collectDataSize;
 
-            rowCount = 0;
+            rowCountIncludingStatic = 0;
             dataSize = 0;
         }
 
@@ -647,7 +652,7 @@ public class TrieBackedPartition implements Partition
         public ContentBuilder addRow(Row row) throws TrieSpaceExhaustedException
         {
             putInTrie(comparator, useRecursive, trie, row);
-            ++rowCount;
+            ++rowCountIncludingStatic;
             if (collectDataSize)
                 dataSize += row.dataSize();
             return this;
@@ -683,7 +688,7 @@ public class TrieBackedPartition implements Partition
 
         public int rowCount()
         {
-            return rowCount;
+            return rowCountIncludingStatic;
         }
 
         public int dataSize()

@@ -26,7 +26,6 @@ import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.ColumnData;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.schema.TableMetadata;
@@ -104,7 +103,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
 
             this.dataSize += data.dataSize();
             this.heapSize += data.unsharedHeapSizeExcludingData();
-            ++currentPartition.rowCount;  // null pointer here means a problem in applyDeletion
+            ++currentPartition.rowCountIncludingStatic;  // null pointer here means a problem in applyDeletion
             return data;
         }
         else

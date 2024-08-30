@@ -317,6 +317,10 @@ public class PartitionImplementationTest
         assertEquals(sortedContent.stream().anyMatch(x -> x instanceof Row),
                      partition.hasRows());
 
+        // rowCount
+        assertEquals(sortedContent.stream().filter(x -> x instanceof Row).count(),
+                     partition.rowCount());
+
         // iterator
         assertIteratorsEqual(sortedContent.stream().filter(x -> x instanceof Row).iterator(),
                              partition.rowIterator());

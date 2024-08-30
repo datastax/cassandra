@@ -457,7 +457,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         @Unmetered
         public final MemtableShard owner;
 
-        public int rowCount;
+        public int rowCountIncludingStatic;
 
         public static final long HEAP_SIZE = ObjectSizes.measure(new PartitionData(DeletionInfo.LIVE, null));
 
@@ -466,7 +466,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         {
             super(deletion.getPartitionDeletion(), deletion.copyRanges(HeapCloner.instance));
             this.owner = owner;
-            this.rowCount = 0;
+            this.rowCountIncludingStatic = 0;
         }
 
         public PartitionData(PartitionData existing,
@@ -474,7 +474,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         {
             // Start with the update content, to properly copy it
             this(update, existing.owner);
-            rowCount = existing.rowCount;
+            rowCountIncludingStatic = existing.rowCountIncludingStatic;
             add(existing);
         }
 
@@ -490,7 +490,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
         public int rowCount()
         {
-            return rowCount;
+            return rowCountIncludingStatic;
         }
 
         @Override

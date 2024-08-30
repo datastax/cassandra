@@ -23,8 +23,6 @@ import java.util.Iterator;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -72,12 +70,12 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                 DecoratedKey key,
                                 RegularAndStaticColumns columns,
                                 EncodingStats stats,
-                                int rowCount,
+                                int rowCountIncludingStatic,
                                 int dataSize,
                                 Trie<Object> trie,
                                 boolean canHaveShadowedData)
     {
-        super(key, columns, stats, rowCount, trie, metadata, canHaveShadowedData);
+        super(key, columns, stats, rowCountIncludingStatic, trie, metadata, canHaveShadowedData);
         this.dataSize = dataSize;
     }
 
@@ -167,7 +165,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             throw new AssertionError(e);
         }
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.dataSize(), trie, false);
+        return new TriePartitionUpdate(metadata, key, columns, stats, row.isStatic() ? 0 : 1, row.dataSize(), trie, false);
     }
 
     /**
@@ -283,7 +281,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
-        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCount, dataSize, t, canHaveShadowedData);
+        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, dataSize, t, canHaveShadowedData);
     }
 
     /**
@@ -402,7 +400,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         private final InMemoryTrie<Object> trie = InMemoryTrie.shortLived();
         private final EncodingStats.Collector statsCollector = new EncodingStats.Collector();
         private final boolean useRecursive;
-        private int rowCount;
+        private int rowCountIncludingStatic;
         private long dataSize;
 
         public Builder(TableMetadata metadata,
@@ -425,7 +423,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             this.canHaveShadowedData = canHaveShadowedData;
             this.deletionInfo = deletionInfo.mutableCopy();
             useRecursive = useRecursive(metadata.comparator);
-            rowCount = 0;
+            rowCountIncludingStatic = 0;
             dataSize = 0;
             add(staticRow);
         }
@@ -509,7 +507,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                                              partitionKey(),
                                                              columns,
                                                              statsCollector.get(),
-                                                             rowCount,
+                                                             rowCountIncludingStatic,
                                                              Ints.saturatedCast(dataSize + deletionInfo.dataSize()),
                                                              trie,
                                                              canHaveShadowedData);
@@ -528,7 +526,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             }
             else
             {
-                ++rowCount;
+                ++rowCountIncludingStatic;
                 dataSize += update.dataSize();
             }
 
