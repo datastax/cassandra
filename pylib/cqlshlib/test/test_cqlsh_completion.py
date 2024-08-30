@@ -1078,7 +1078,7 @@ class TestCqlshCompletion(CqlshCompletionCase):
         self.trycompletions('SHOW REPLICAS ', choices=['-', '<wholenumber>'])
 
     def test_complete_in_tracing(self):
-        self.trycompletions('TRACING ', choices=[';', '<enter>', 'OFF', 'ON'])
+        self.trycompletions('TRACING ', choices=[';', '<enter>', 'OFF', 'ON', 'FULL', 'COMPACT'])
 
     def test_complete_in_select_limit_clause(self):
         self.trycompletions('SELECT * FROM system.peers LI', immediate='MIT ')
