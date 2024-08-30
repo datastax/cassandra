@@ -317,19 +317,28 @@ public class CassandraOnHeapGraph<T> implements Accountable
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
-        var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
-        var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
-        var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
-        Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results",
-                      limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
-        context.addAnnNodesVisited(result.getVisitedCount());
-        if (threshold > 0)
+        try
         {
-            // Threshold based searches do not support resuming the search.
-            graphAccessManager.release();
-            return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
+            var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
+            var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
+            var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
+            Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results",
+                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
+            context.addAnnNodesVisited(result.getVisitedCount());
+            if (threshold > 0)
+            {
+                // Threshold based searches do not support resuming the search.
+                graphAccessManager.release();
+                return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
+            }
+            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true);
         }
-        return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true);
+        catch (Throwable t)
+        {
+            // If we don't release it, we'll never be able to aquire it, so catch and rethrow Throwable.
+            graphAccessManager.forceRelease();
+            throw t;
+        }
     }
 
     /**
