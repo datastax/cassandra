@@ -165,7 +165,7 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testStandardAnalyzerWithFullConfig() throws Throwable
+    public void testStandardAnalyzerWithFullConfig()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -179,7 +179,7 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testStandardAnalyzerWithBuiltInName() throws Throwable
+    public void testStandardAnalyzerWithBuiltInName()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -189,7 +189,8 @@ public class LuceneAnalyzerTest extends SAITester
         standardAnalyzerTest();
     }
 
-    private void standardAnalyzerTest() throws Throwable {
+    private void standardAnalyzerTest()
+    {
         waitForIndexQueryable();
         execute("INSERT INTO %s (id, val) VALUES ('1', 'The quick brown fox jumps over the lazy DOG.')");
 
@@ -209,6 +210,8 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' OR (val : 'quick' AND val : 'missing')").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'dog')").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'missing')").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'missing cat' OR val : 'dog'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing cat' OR val : 'missing dog'").size());
 
         // EQ operator support is reintroduced for analyzed columns, it should work as ':' operator
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
