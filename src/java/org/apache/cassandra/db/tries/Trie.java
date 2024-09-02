@@ -415,18 +415,9 @@ public abstract class Trie<T>
     /**
      * Process the trie using the given ValueConsumer, skipping all branches below the top content-bearing node.
      */
-    public Void forEachValueSkippingBranches(ValueConsumer<T> consumer)
+    public Void forEachValueSkippingBranches(Direction direction, ValueConsumer<T> consumer)
     {
-        return processSkippingBranches(consumer, cursor(Direction.FORWARD));
-    }
-
-    /**
-     * Call the given consumer on all (path, content) pairs with non-null content in the trie in order, skipping all
-     * branches below the top content-bearing node.
-     */
-    public void forEachEntrySkippingBranches(BiConsumer<ByteComparable, T> consumer)
-    {
-        forEachEntrySkippingBranches(Direction.FORWARD, consumer);
+        return processSkippingBranches(consumer, cursor(direction));
     }
 
     /**
@@ -464,6 +455,8 @@ public abstract class Trie<T>
             walker.content(content);
             if (cursor.skipTo(cursor.depth(), cursor.incomingTransition() + cursor.direction().increase) < 0)
                 break;
+            walker.resetPathLength(cursor.depth() - 1);
+            walker.addPathByte(cursor.incomingTransition());
             content = cursor.content();
             if (content == null)
                 content = cursor.advanceToContent(walker);

@@ -26,6 +26,7 @@ import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Random;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import com.google.common.base.Predicates;
@@ -45,6 +46,7 @@ import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.assertMapEquals
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.checkGet;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKey;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKeys;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
@@ -160,7 +162,7 @@ public class PrefixTailTrieTest
             checkContent(tail, t.data);
         }
 
-        // Test tail iteration for metadata
+        // Test tail iteration for given class
         for (Direction td : Direction.values())
         {
             long count = 0;
@@ -199,6 +201,22 @@ public class PrefixTailTrieTest
             System.out.println("Between " + (leftWithPrefix == null ? "null" : leftWithPrefix.byteComparableAsString(VERSION)) + " and " + (rightWithPrefix == null ? "null" : rightWithPrefix.byteComparableAsString(VERSION)));
             assertEquals(first == null ? t : null, getRootContent(tail));   // this behavior will change soon to report all prefixes
             checkContent(tail, subMap(t.data, first, last));
+        }
+
+        // Test processSkippingBranches variations
+        for (Direction td : Direction.values())
+        {
+            final AtomicLong count = new AtomicLong(0);
+            trie.forEachValueSkippingBranches(td, v -> count.incrementAndGet());
+            assertEquals(COUNT_HEAD, count.get());
+
+            count.set(0);
+            trie.forEachEntrySkippingBranches(td, (key, tail) ->
+            {
+                assertArrayEquals(((Tail) tail).prefix, key.asByteComparableArray(VERSION));
+                count.incrementAndGet();
+            });
+            assertEquals(COUNT_HEAD, count.get());
         }
     }
 
