@@ -24,11 +24,13 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -63,9 +65,14 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WrappedRunnable;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.Promise;
 import org.jctools.maps.NonBlockingHashMap;
+import org.jctools.maps.NonBlockingHashSet;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.config.CassandraRelevantProperties.*;
@@ -84,10 +91,13 @@ public class CommitLogReplayer implements CommitLogReadHandler
     @VisibleForTesting
     public static MutationInitiator mutationInitiator = new MutationInitiator();
     private static final Logger logger = LoggerFactory.getLogger(CommitLogReplayer.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
     private static final int MAX_OUTSTANDING_REPLAY_COUNT = COMMITLOG_MAX_OUTSTANDING_REPLAY_COUNT.getInt();
 
     private final Map<Keyspace, AtomicInteger> keyspacesReplayed;
     private final Queue<Future<Integer>> futures;
+
+    private final Set<String> segmentsWithFailedMutations;
 
     private final Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted;
     private final CommitLogPosition globalPosition;
@@ -113,6 +123,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
     {
         this.keyspacesReplayed = new NonBlockingHashMap<>();
         this.futures = new ArrayDeque<>();
+        this.segmentsWithFailedMutations = new NonBlockingHashSet<>();
         this.cfPersisted = cfPersisted;
         this.globalPosition = globalPosition;
         this.replayFilter = replayFilter;
@@ -318,8 +329,10 @@ public class CommitLogReplayer implements CommitLogReadHandler
             logger.debug("Invalid mutation detected for table id {}", id);
         }
 
+        protected void onFailedMutation(String keyspace, Collection<TableId> tableIds) {}
+
         protected Future<Integer> initiateMutation(final Mutation mutation,
-                                                   final long segmentId,
+                                                   final CommitLogDescriptor desc,
                                                    final int serializedSize,
                                                    final int entryLocation,
                                                    final CommitLogReplayer commitLogReplayer)
@@ -350,13 +363,13 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
                         // replay if current segment is newer than last flushed one or,
                         // if it is the last known segment, if we are after the commit log segment position
-                        if (shouldReplay(update.metadata().id, commitLogReplayer, segmentId, entryLocation))
+                        if (shouldReplay(update.metadata().id, commitLogReplayer, desc.id, entryLocation))
                         {
                             if (newPUCollector == null)
                                 newPUCollector = new Mutation.PartitionUpdateCollector(mutation.getKeyspaceName(), mutation.key());
                             newPUCollector.add(update);
                             replayedCount++;
-                            updatesAndPositions.add(Triple.of(update, segmentId, entryLocation));
+                            updatesAndPositions.add(Triple.of(update, desc.id, entryLocation));
                         }
                         else
                         {
@@ -378,7 +391,24 @@ public class CommitLogReplayer implements CommitLogReadHandler
                     }
                 }
             };
-            return Stage.MUTATION.submit(runnable, serializedSize);
+            Promise<Integer> returnFuture = new AsyncPromise<>();
+            Future<Integer> mutationFuture = Stage.MUTATION.submit(runnable, serializedSize);//.addCallback((integer, ex) -> {
+            mutationFuture.addListener(() ->
+            {
+                try
+                {
+                    Integer result = mutationFuture.get();
+                    returnFuture.trySuccess(result);
+                }
+                catch (Throwable t)
+                {
+                    noSpamLogger.warn("Failed applying mutation for keyspace {}", mutation.getKeyspaceName(), t);
+                    onFailedMutation(mutation.getKeyspaceName(), mutation.getTableIds());
+                    commitLogReplayer.segmentsWithFailedMutations.add(desc.fileName());
+                    returnFuture.tryFailure(Throwables.unchecked(t.getCause()));
+                }
+            }, ImmediateExecutor.INSTANCE);
+            return returnFuture;
         }
 
         /**
@@ -596,9 +626,11 @@ public class CommitLogReplayer implements CommitLogReadHandler
         return false;
     }
 
-    public Set<String> getSegmentsWithInvalidMutations()
+    public Set<String> getSegmentWithInvalidOrFailedMutations()
     {
-        return commitLogReader.getSegmentsWithInvalidMutations();
+        Set<String> union = new HashSet<>(segmentsWithFailedMutations);
+        union.addAll(commitLogReader.getSegmentsWithInvalidMutations());
+        return union;
     }
 
     public void handleInvalidMutation(TableId id)
@@ -613,7 +645,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
         pendingMutationBytes += size;
         futures.offer(mutationInitiator.initiateMutation(m,
-                                                         desc.id,
+                                                         desc,
                                                          size,
                                                          entryLocation,
                                                          this));
