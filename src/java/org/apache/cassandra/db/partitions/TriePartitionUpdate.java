@@ -165,7 +165,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             throw new AssertionError(e);
         }
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, row.isStatic() ? 0 : 1, row.dataSize(), trie, false);
+        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.dataSize(), trie, false);
     }
 
     /**
@@ -199,7 +199,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        iterator.partitionKey(),
                                        iterator.columns(),
                                        iterator.stats(),
-                                       builder.rowCount(),
+                                       builder.rowCountIncludingStatic(),
                                        builder.dataSize(),
                                        builder.trie(),
                                        false);

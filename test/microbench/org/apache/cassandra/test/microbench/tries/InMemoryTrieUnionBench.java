@@ -96,7 +96,7 @@ public class InMemoryTrieUnionBench
         for (InMemoryTrie<Byte> trie : tries)
         {
             System.out.format("Trie size on heap %,d off heap %,d\n",
-                              trie.sizeOnHeap(), trie.sizeOffHeap());
+                              trie.usedSizeOnHeap(), trie.usedSizeOffHeap());
         }
         trie = Trie.mergeDistinct(tries);
 

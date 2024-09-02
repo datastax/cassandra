@@ -68,22 +68,6 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
             throw new AssertionError("Unexpected update type: " + update.getClass());
     }
 
-    public static RowData merge(RowData existing,
-                                RowData update,
-                                ColumnData.PostReconciliationFunction reconcileF)
-    {
-
-        LivenessInfo livenessInfo = LivenessInfo.merge(update.livenessInfo, existing.livenessInfo);
-        DeletionTime deletion = DeletionTime.merge(update.deletion, existing.deletion);
-        if (deletion.deletes(livenessInfo))
-            livenessInfo = LivenessInfo.EMPTY;
-
-        Object[] tree = BTreeRow.mergeRowBTrees(reconcileF,
-                                                existing.columnsBTree, update.columnsBTree,
-                                                deletion, existing.deletion);
-        return new RowData(tree, livenessInfo, deletion);
-    }
-
     /**
      * Called when a row needs to be copied to the Memtable trie.
      *
@@ -92,7 +76,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
      * @param keyState Used to obtain the path through which this node was reached.
      * @return the insert row, or the merged row, copied using our allocator
      */
-    public RowData applyRow(RowData existing, RowData insert, InMemoryTrie.KeyProducer<Object> keyState)
+    private RowData applyRow(RowData existing, RowData insert, InMemoryTrie.KeyProducer<Object> keyState)
     {
         if (existing == null)
         {
@@ -109,7 +93,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
         else
         {
             // data and heap size are updated during merge through the PostReconciliationFunction interface
-            RowData reconciled = merge(existing, insert, this);
+            RowData reconciled = merge(existing, insert);
 
             if (indexer != UpdateTransaction.NO_OP)
             {
@@ -119,6 +103,20 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
 
             return reconciled;
         }
+    }
+
+    private RowData merge(RowData existing, RowData update)
+    {
+
+        LivenessInfo livenessInfo = LivenessInfo.merge(update.livenessInfo, existing.livenessInfo);
+        DeletionTime deletion = DeletionTime.merge(update.deletion, existing.deletion);
+        if (deletion.deletes(livenessInfo))
+            livenessInfo = LivenessInfo.EMPTY;
+
+        Object[] tree = BTreeRow.mergeRowBTrees(this,
+                                                existing.columnsBTree, update.columnsBTree,
+                                                deletion, existing.deletion);
+        return new RowData(tree, livenessInfo, deletion);
     }
 
     private Clustering<?> clusteringFor(InMemoryTrie.KeyProducer<Object> keyState)
@@ -138,7 +136,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
      * @param update The update, always non-null.
      * @return the combined partition data, copying any updated deletion information to heap.
      */
-    public TrieMemtable.PartitionData applyDeletion(TrieMemtable.PartitionData existing, DeletionInfo update)
+    private TrieMemtable.PartitionData applyDeletion(TrieMemtable.PartitionData existing, DeletionInfo update)
     {
         if (indexer != UpdateTransaction.NO_OP)
         {

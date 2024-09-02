@@ -78,8 +78,8 @@ public class InMemoryTrieWriteBench
         if (PRINT_SIZES)
         {
             System.out.println(String.format("Size on heap %s off heap %s",
-                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
-                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+                                             FBUtilities.prettyPrintMemory(trie.usedSizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.usedSizeOffHeap())));
         }
         bh.consume(trie);
     }
@@ -99,8 +99,8 @@ public class InMemoryTrieWriteBench
         if (PRINT_SIZES)
         {
             System.out.println(String.format("Size on heap %s off heap %s",
-                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
-                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+                                             FBUtilities.prettyPrintMemory(trie.usedSizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.usedSizeOffHeap())));
         }
         bh.consume(trie);
     }
@@ -120,8 +120,8 @@ public class InMemoryTrieWriteBench
         if (PRINT_SIZES)
         {
             System.out.println(String.format("Size on heap %s off heap %s",
-                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
-                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+                                             FBUtilities.prettyPrintMemory(trie.usedSizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.usedSizeOffHeap())));
         }
         bh.consume(trie);
     }
@@ -141,8 +141,8 @@ public class InMemoryTrieWriteBench
         if (PRINT_SIZES)
         {
             System.out.println(String.format("Size on heap %s off heap %s",
-                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
-                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+                                             FBUtilities.prettyPrintMemory(trie.usedSizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.usedSizeOffHeap())));
         }
         bh.consume(trie);
     }

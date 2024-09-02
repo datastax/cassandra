@@ -380,9 +380,9 @@ public class ComparisonReadBench
         {
             long deepsize = meter.measureDeep(trie);
             System.out.format("Trie size on heap %,d off heap %,d deep size %,d\n",
-                              trie.sizeOnHeap(), trie.sizeOffHeap(), deepsize);
+                              trie.usedSizeOnHeap(), trie.usedSizeOffHeap(), deepsize);
             System.out.format("per entry on heap %.2f off heap %.2f deep size %.2f\n",
-                              trie.sizeOnHeap() * 1.0 / count, trie.sizeOffHeap() * 1.0 / count, deepsize * 1.0 / count);
+                              trie.usedSizeOnHeap() * 1.0 / count, trie.usedSizeOffHeap() * 1.0 / count, deepsize * 1.0 / count);
         }
     }
 

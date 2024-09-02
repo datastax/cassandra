@@ -77,8 +77,8 @@ public class CellReuseTest
 
         // dump some information first
         System.out.println(String.format(" LongLived ON_HEAP sizes %10s %10s count %d",
-                                         FBUtilities.prettyPrintMemory(trieLong.sizeOnHeap()),
-                                         FBUtilities.prettyPrintMemory(trieLong.sizeOffHeap()),
+                                         FBUtilities.prettyPrintMemory(trieLong.usedSizeOnHeap()),
+                                         FBUtilities.prettyPrintMemory(trieLong.usedSizeOffHeap()),
                                          Streams.stream(trieLong.values()).count()));
 
         Pair<BitSet, BitSet> longReachable = reachableCells(trieLong);

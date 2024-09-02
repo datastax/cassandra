@@ -1641,7 +1641,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * immediately after allocating a large buffer and not having a chance to use it. Counting only used space makes it
      * possible to flush out before making these large allocations.
      */
-    public long sizeOffHeap()
+    public long usedSizeOffHeap()
     {
         return bufferType == BufferType.ON_HEAP ? 0 : usedBufferSpace();
     }
@@ -1654,7 +1654,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * immediately after allocating a large buffer and not having a chance to use it. Counting only used space makes it
      * possible to flush out before making these large allocations.
      */
-    public long sizeOnHeap()
+    public long usedSizeOnHeap()
     {
         return usedObjectSpace() +
                REFERENCE_ARRAY_ON_HEAP_SIZE * getBufferIdx(contentCount, CONTENTS_START_SHIFT, CONTENTS_START_SIZE) +
@@ -1674,7 +1674,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     /**
      * Returns the amount of memory that has been allocated for various buffers but isn't currently in use.
-     * The total on-heap space used by the trie is {@code sizeOnHeap() + unusedReservedOnHeapMemory()}.
+     * The total on-heap space used by the trie is {@code usedSizeOnHeap() + unusedReservedOnHeapMemory()}.
      */
     @VisibleForTesting
     public long unusedReservedOnHeapMemory()

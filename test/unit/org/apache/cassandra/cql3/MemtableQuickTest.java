@@ -31,6 +31,7 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.concurrent.Refs;
@@ -61,6 +62,7 @@ public class MemtableQuickTest extends CQLTester
     {
         return ImmutableList.of("SkipListMemtable",
                                 "TrieMemtable",
+                                "TrieMemtableStage1",
                                 "PersistentMemoryMemtable");
     }
 
@@ -136,6 +138,13 @@ public class MemtableQuickTest extends CQLTester
         System.out.println("Selecting *");
         UntypedResultSet result = execute("SELECT * FROM " + table);
         assertRowCount(result, rowsPerPartition * (partitions - deletedPartitions) - deletedRows);
+
+        Memtable memtable = cfs.getCurrentMemtable();
+        Memtable.FlushCollection<?> flushSet = memtable.getFlushSet(null, null);
+        Assert.assertEquals(partitions, flushSet.partitionCount());
+        double expectedKeySize = partitions * 8;
+        // expected key size must be within 5% of actual
+        Assert.assertEquals(expectedKeySize, flushSet.partitionKeySize(), expectedKeySize * 0.05);
 
         cfs.forceBlockingFlush(UNIT_TESTS);
 

@@ -873,7 +873,7 @@ public abstract class Trie<T>
         if (c.descendAlong(prefix.asComparableBytes(BYTE_COMPARABLE_VERSION)))
             return c.tailTrie();
         else
-            return empty();
+            return null;
     }
 
     @SuppressWarnings("unchecked")

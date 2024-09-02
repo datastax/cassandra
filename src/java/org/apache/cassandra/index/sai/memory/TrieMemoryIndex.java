@@ -97,8 +97,8 @@ public class TrieMemoryIndex extends MemoryIndex
             value = TypeUtil.encode(value, indexContext.getValidator());
             analyzer.reset(value);
             final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
-            final long initialSizeOnHeap = data.sizeOnHeap();
-            final long initialSizeOffHeap = data.sizeOffHeap();
+            final long initialSizeOnHeap = data.usedSizeOnHeap();
+            final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
             while (analyzer.hasNext())
@@ -121,9 +121,9 @@ public class TrieMemoryIndex extends MemoryIndex
                 }
             }
 
-            onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
+            onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
                                             (primaryKeysReducer.heapAllocations() - reducerHeapSize));
-            offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
+            offHeapAllocationsTracker.accept(data.usedSizeOffHeap() - initialSizeOffHeap);
         }
         finally
         {

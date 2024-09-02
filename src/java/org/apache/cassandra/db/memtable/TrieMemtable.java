@@ -410,6 +410,9 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                                                        columnFilter,
                                                        dataRange,
                                                        getMinLocalDeletionTime());
+        // Note: the minLocalDeletionTime reported by the iterator is the memtable's minLocalDeletionTime. This is okay
+        // because we only need to report a lower bound that will eventually advance, and calculating a more precise
+        // bound would be an unnecessary expense.
     }
 
     private static ByteComparable toComparableBound(PartitionPosition position, boolean before)
@@ -429,13 +432,15 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         if (trie == null)
             return null;
         PartitionData holder = (PartitionData) trie.get(ByteComparable.EMPTY);
-        if (holder == null)
-            return null;
+        // If we found a matching path in the trie, it must be the root of this partition (because partition keys are
+        // prefix-free, it can't be a prefix for a different path, or have another partition key as prefix) and contain
+        // PartitionData (because the attachment of a new or modified partition to the trie is atomic).
+        assert holder != null : "Entry for " + key + " without associated PartitionData";
 
         return TrieBackedPartition.create(key,
                                           holder.columns(),
                                           holder.stats(),
-                                          holder.rowCount(),
+                                          holder.rowCountIncludingStatic(),
                                           trie,
                                           metadata,
                                           ensureOnHeap);
@@ -488,7 +493,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             return owner.stats;
         }
 
-        public int rowCount()
+        public int rowCountIncludingStatic()
         {
             return rowCountIncludingStatic;
         }
@@ -507,7 +512,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     }
 
 
-    static class KeySizeAndCountCollector extends TrieEntriesWalker<Object, Void>
+    class KeySizeAndCountCollector extends TrieEntriesWalker<Object, Void>
     {
         long keySize = 0;
         int keyCount = 0;
@@ -521,6 +526,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         @Override
         protected void content(Object content, byte[] bytes, int byteLength)
         {
+            // This is used with processSkippingBranches which should ensure that we only see the partition roots.
             assert content instanceof PartitionData;
             ++keyCount;
             keySize += byteLength;  // this should be a good enough approximation (it includes token and possibly some escaping)
@@ -533,8 +539,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
         var counter = new KeySizeAndCountCollector(); // need to jump over tails keys
         toFlush.processSkippingBranches(counter, Direction.FORWARD);
-        long partitionKeySize = counter.keySize;
         int partitionCount = counter.keyCount;
+        long partitionKeySize = counter.keySize;
 
         return new AbstractFlushCollection<TrieBackedPartition>()
         {
@@ -653,8 +659,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                     // Add the initial trie size on the first operation. This technically isn't correct (other shards
                     // do take their memory share even if they are empty) but doing it during construction may cause
                     // the allocator to block while we are trying to flush a memtable and become a deadlock.
-                    long onHeap = data.isEmpty() ? 0 : data.sizeOnHeap();
-                    long offHeap = data.isEmpty() ? 0 : data.sizeOffHeap();
+                    long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
+                    long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
                     // Use the fast recursive put if we know the key is small enough to not cause a stack overflow.
                     try
                     {
@@ -667,8 +673,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                         // This should never really happen as a flush would be triggered long before this limit is reached.
                         throw Throwables.propagate(e);
                     }
-                    allocator.offHeap().adjust(data.sizeOffHeap() - offHeap, opGroup);
-                    allocator.onHeap().adjust((data.sizeOnHeap() - onHeap) + updater.heapSize, opGroup);
+                    allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
+                    allocator.onHeap().adjust((data.usedSizeOnHeap() - onHeap) + updater.heapSize, opGroup);
                     partitionCount += updater.partitionsAdded;
                 }
                 finally
@@ -765,7 +771,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             return TrieBackedPartition.create(key,
                                               pd.columns(),
                                               pd.stats(),
-                                              pd.rowCount(),
+                                              pd.rowCountIncludingStatic(),
                                               tailTrie,
                                               metadata,
                                               ensureOnHeap);

@@ -370,9 +370,9 @@ public abstract class InMemoryTrieTestBase
         long ts = ObjectSizes.measureDeep(content);
         long onh = ObjectSizes.measureDeep(trie.contentArrays);
         System.out.format("Trie size on heap %,d off heap %,d measured %,d keys %,d treemap %,d\n",
-                          trie.sizeOnHeap(), trie.sizeOffHeap(), onh, keysize, ts);
+                          trie.usedSizeOnHeap(), trie.usedSizeOffHeap(), onh, keysize, ts);
         System.out.format("per entry on heap %.2f off heap %.2f measured %.2f keys %.2f treemap %.2f\n",
-                          trie.sizeOnHeap() * 1.0 / COUNT, trie.sizeOffHeap() * 1.0 / COUNT, onh * 1.0 / COUNT, keysize * 1.0 / COUNT, ts * 1.0 / COUNT);
+                          trie.usedSizeOnHeap() * 1.0 / COUNT, trie.usedSizeOffHeap() * 1.0 / COUNT, onh * 1.0 / COUNT, keysize * 1.0 / COUNT, ts * 1.0 / COUNT);
         if (VERBOSE)
             System.out.println("Trie " + trie.dump(ByteBufferUtil::bytesToHex));
 

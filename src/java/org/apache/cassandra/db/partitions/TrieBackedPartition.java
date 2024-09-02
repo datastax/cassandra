@@ -185,7 +185,7 @@ public class TrieBackedPartition implements Partition
         return new TrieBackedPartition(iterator.partitionKey(),
                                        iterator.columns(),
                                        iterator.stats(),
-                                       builder.rowCount(),
+                                       builder.rowCountIncludingStatic(),
                                        builder.trie(),
                                        iterator.metadata(),
                                        false);
@@ -217,14 +217,14 @@ public class TrieBackedPartition implements Partition
     public static TrieBackedPartition create(DecoratedKey partitionKey,
                                              RegularAndStaticColumns columnMetadata,
                                              EncodingStats encodingStats,
-                                             int rowCount,
+                                             int rowCountIncludingStatic,
                                              Trie<Object> trie,
                                              TableMetadata metadata,
                                              EnsureOnHeap ensureOnHeap)
     {
         return ensureOnHeap == EnsureOnHeap.NOOP
-               ? new TrieBackedPartition(partitionKey, columnMetadata, encodingStats, rowCount, trie, metadata, true)
-               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCount, trie, metadata, true, ensureOnHeap);
+               ? new TrieBackedPartition(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, trie, metadata, true)
+               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, trie, metadata, true, ensureOnHeap);
     }
 
     class RowIterator extends TrieEntriesIterator<Object, Row>
@@ -570,13 +570,13 @@ public class TrieBackedPartition implements Partition
         public WithEnsureOnHeap(DecoratedKey partitionKey,
                                 RegularAndStaticColumns columns,
                                 EncodingStats stats,
-                                int rowCount,
+                                int rowCountIncludingStatic,
                                 Trie<Object> trie,
                                 TableMetadata metadata,
                                 boolean canHaveShadowedData,
                                 EnsureOnHeap ensureOnHeap)
         {
-            super(partitionKey, columns, stats, rowCount, trie, metadata, canHaveShadowedData);
+            super(partitionKey, columns, stats, rowCountIncludingStatic, trie, metadata, canHaveShadowedData);
             this.ensureOnHeap = ensureOnHeap;
             this.onHeapDeletion = ensureOnHeap.applyToDeletionInfo(super.deletionInfo());
         }
@@ -686,7 +686,7 @@ public class TrieBackedPartition implements Partition
             return trie;
         }
 
-        public int rowCount()
+        public int rowCountIncludingStatic()
         {
             return rowCountIncludingStatic;
         }

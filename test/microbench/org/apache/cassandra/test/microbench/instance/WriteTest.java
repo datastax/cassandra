@@ -138,7 +138,7 @@ public class WriteTest extends CQLTester
         {
         case FLUSH:
             cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
-            // if we flush we also must truncate to avoid accummulating sstables
+            // if we flush we also must truncate to avoid accumulating sstables
         case TRUNCATE:
             execute("TRUNCATE TABLE " + table);
             // note: we turn snapshotting and durable writes (which would have caused a flush) off for this benchmark

@@ -524,9 +524,9 @@ public class InMemoryTrieThreadedTest
                           trie.bufferType,
                           forcedCopyChecker == NO_ATOMICITY ? "none" :
                           forcedCopyChecker == FORCE_ATOMIC ? "atomic" : "consistent partition",
-                          trie.sizeOnHeap(),
+                          trie.usedSizeOnHeap(),
                           trie.unusedReservedOnHeapMemory(),
-                          trie.sizeOffHeap());
+                          trie.usedSizeOffHeap());
 
         if (!errors.isEmpty())
             Assert.fail("Got errors:\n" + errors);

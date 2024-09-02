@@ -65,9 +65,9 @@ public class InMemoryTrieReadBench
             trie.putRecursive(ByteComparable.of(l), Byte.valueOf((byte) (l >> 56)), resolver);
         }
         System.out.format("Trie size on heap %,d off heap %,d\n",
-                          trie.sizeOnHeap(), trie.sizeOffHeap());
+                          trie.usedSizeOnHeap(), trie.usedSizeOffHeap());
         System.out.format("per entry on heap %.2f off heap %.2f\n",
-                          trie.sizeOnHeap() * 1.0 / count, trie.sizeOffHeap() * 1.0 / count);
+                          trie.usedSizeOnHeap() * 1.0 / count, trie.usedSizeOffHeap() * 1.0 / count);
     }
 
     @Benchmark
