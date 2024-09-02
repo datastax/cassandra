@@ -72,6 +72,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.HeapCloner;
@@ -529,7 +530,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             // This is used with processSkippingBranches which should ensure that we only see the partition roots.
             assert content instanceof PartitionData;
             ++keyCount;
-            keySize += byteLength;  // this should be a good enough approximation (it includes token and possibly some escaping)
+            byte[] keyBytes = DecoratedKey.keyFromByteSource(ByteSource.fixedLength(bytes, 0, byteLength), Trie.BYTE_COMPARABLE_VERSION, metadata().partitioner);
+            keySize += keyBytes.length;
         }
     }
 
