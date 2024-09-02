@@ -277,7 +277,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     @VisibleForTesting
     public Future<Void> buildIndex(final Index index)
     {
-        FutureTask<?> initialBuildTask = null;
+        FutureTask<?> initialBuildTask = new FutureTask<>(() -> null);
         // if the index didn't register itself, we can probably assume that no initialization needs to happen
         if (indexes.containsKey(index.getIndexMetadata().name))
         {
@@ -295,14 +295,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 logAndMarkIndexesFailed(Collections.singleton(index), t, true);
                 throw t;
             }
-        }
-
-        // if there's no initialization, just mark as built (if it should be queryable) and return:
-        if (initialBuildTask == null)
-        {
-            if (IndexBuildDecider.instance.isIndexQueryableAfterInitialBuild(baseCfs))
-                markIndexBuilt(index, true);
-            return ImmediateFuture.success(null);
         }
 
         // otherwise run the initialization task asynchronously with a callback to mark it built or failed
