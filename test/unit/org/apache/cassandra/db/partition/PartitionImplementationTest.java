@@ -52,6 +52,7 @@ import org.apache.cassandra.db.rows.Row.Deletion;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 @RunWith(Parameterized.class)
 public class PartitionImplementationTest
@@ -597,4 +598,19 @@ public class PartitionImplementationTest
         test(this::generateUnfiltereds, makeStaticRow());
     }
 
+    @Test
+    public void checkStaticPath()
+    {
+        ByteComparable sp = metadata.comparator.asByteComparable(Clustering.STATIC_CLUSTERING);
+        for (ByteComparable.Version v : ByteComparable.Version.values())
+            assertEquals(0, ByteComparable.compare(sp, TrieBackedPartition.STATIC_CLUSTERING_PATH, v));
+    }
+
+    @Test
+    public void checkBottomPath()
+    {
+        ByteComparable sp = metadata.comparator.asByteComparable(ClusteringBound.BOTTOM);
+        for (ByteComparable.Version v : ByteComparable.Version.values())
+            assertEquals(0, ByteComparable.compare(sp, TrieBackedPartition.BOTTOM_PATH, v));
+    }
 }

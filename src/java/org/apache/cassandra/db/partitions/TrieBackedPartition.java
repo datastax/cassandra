@@ -61,6 +61,7 @@ import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 
@@ -84,6 +85,11 @@ public class TrieBackedPartition implements Partition
      */
     @VisibleForTesting
     public static final int MAX_RECURSIVE_KEY_LENGTH = 128;
+
+    /** Pre-made path for STATIC_CLUSTERING, to avoid creating path object when querying static path. */
+    public static final ByteComparable STATIC_CLUSTERING_PATH = v -> ByteSource.oneByte(ClusteringPrefix.Kind.STATIC_CLUSTERING.asByteComparableValue(v));
+    /** Pre-made path for BOTTOM, to avoid creating path object when iterating rows. */
+    public static final ByteComparable BOTTOM_PATH = v -> ByteSource.oneByte(ClusteringBound.Kind.INCL_START_BOUND.asByteComparableValue(v));
 
     /**
      * The representation of a row stored at the leaf of a trie. Does not contain the row key.
@@ -333,7 +339,7 @@ public class TrieBackedPartition implements Partition
 
     public Row staticRow()
     {
-        RowData staticRow = (RowData) trie.get(path(Clustering.STATIC_CLUSTERING));
+        RowData staticRow = (RowData) trie.get(STATIC_CLUSTERING_PATH);
 
         if (staticRow != null)
             return toRow(staticRow, Clustering.STATIC_CLUSTERING);
@@ -348,7 +354,7 @@ public class TrieBackedPartition implements Partition
 
     private boolean hasStaticRow()
     {
-        return trie.get(path(Clustering.STATIC_CLUSTERING)) != null;
+        return trie.get(STATIC_CLUSTERING_PATH) != null;
     }
 
     public boolean hasRows()
@@ -369,7 +375,7 @@ public class TrieBackedPartition implements Partition
         // skip static row if present - the static clustering sorts before BOTTOM so that it's never included in
         // any slices (we achieve this by using the byte ByteSource.EXCLUDED for its representation, which is lower
         // than BOTTOM's ByteSource.LT_NEXT_COMPONENT).
-        return trie.subtrie(path(ClusteringBound.BOTTOM), null);
+        return trie.subtrie(BOTTOM_PATH, null);
     }
 
     public Iterator<Row> rowIterator()
@@ -486,7 +492,7 @@ public class TrieBackedPartition implements Partition
     {
         ByteComparable endPath = end != null ? path(end) : null;
         // use BOTTOM as bound to skip over static rows
-        ByteComparable startPath = start != null ? path(start) : path(ClusteringBound.BOTTOM);
+        ByteComparable startPath = start != null ? path(start) : BOTTOM_PATH;
         return rowIterator(trie.subtrie(startPath, endPath), Direction.fromBoolean(reversed));
     }
 
