@@ -294,8 +294,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     public int operationCount()
     {
-        return rowCount()
-             + (staticRow().isEmpty() ? 0 : 1)
+        return rowCountIncludingStatic
              + deletionInfo().rangeCount()
              + (deletionInfo().getPartitionDeletion().isLive() ? 0 : 1);
     }
