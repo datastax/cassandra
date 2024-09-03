@@ -608,27 +608,28 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         }
 
         // Schedule all index building tasks with callbacks to handle success and failure
-        List<Future<?>> futures = new ArrayList<>(byType.size());
+        List<ListenableFuture<?>> futures = new ArrayList<>(byType.size());
         byType.forEach((buildingSupport, groupedIndexes) ->
         {
-            SecondaryIndexBuilder builder = buildingSupport.getIndexBuildTask(baseCfs, groupedIndexes, sstables, false);
-            AsyncPromise<Object> build = new AsyncPromise<>();
-            CompactionManager.instance.submitIndexBuild(builder).addCallback(new FutureCallback<Object>()
+            List<SecondaryIndexBuilder> builders = buildingSupport.getParallelIndexBuildTasks(baseCfs, groupedIndexes, sstables, false);
+            List<ListenableFuture<?>> builderFutures = builders.stream().map(CompactionManager.instance::submitIndexBuild).collect(Collectors.toList());
+            final SettableFuture<Object> build = SettableFuture.create();
+            Futures.addCallback(Futures.allAsList(builderFutures), new FutureCallback<Object>()
             {
                 @Override
                 public void onFailure(Throwable t)
                 {
                     logger.warn("Failed to incrementally build indexes {}", getIndexNames(groupedIndexes));
-                    build.tryFailure(t);
+                    build.setException(t);
                 }
 
                 @Override
                 public void onSuccess(Object o)
                 {
                     logger.info("Incremental index build of {} completed", getIndexNames(groupedIndexes));
-                    build.trySuccess(o);
+                    build.set(o);
                 }
-            });
+            }, ImmediateExecutor.INSTANCE);
             futures.add(build);
         });
 
@@ -694,8 +695,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                        {
                            List<SecondaryIndexBuilder> builders = buildingSupport.getParallelIndexBuildTasks(baseCfs, groupedIndexes, sstables, isFullRebuild);
                            List<ListenableFuture<?>> builderFutures = builders.stream().map(CompactionManager.instance::submitIndexBuild).collect(Collectors.toList());
-                           final SettableFuture build = SettableFuture.create();
-                           Futures.addCallback(Futures.allAsList(builderFutures), new FutureCallback()
+                           final SettableFuture<Object> build = SettableFuture.create();
+                           Futures.addCallback(Futures.allAsList(builderFutures), new FutureCallback<Object>()
                            {
                                @Override
                                public void onFailure(Throwable t)
@@ -1823,6 +1824,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         FBUtilities.waitOnFutures(waitFor);
     }
 
+    @Override
     public void handleNotification(INotification notification, Object sender)
     {
         if (indexes.isEmpty())
@@ -1836,7 +1838,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             if (notice.memtable().isEmpty())
             {
                 IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableAdded(notice);
-                build(decision, notice.added);
+                build(decision, notice.added, i -> i.shouldBuildBlocking() && !i.isSSTableAttached());
             }
         }
         else if (notification instanceof SSTableListChangedNotification)
@@ -1844,28 +1846,22 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             SSTableListChangedNotification notice = (SSTableListChangedNotification) notification;
 
             IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableListChanged(notice);
-            build(decision, notice.added);
+            build(decision, notice.added, Index::shouldBuildBlocking);
         }
     }
 
-    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables)
+    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables, Predicate<Index> indexFilter)
     {
         if (decision == IndexBuildDecider.Decision.ASYNC)
         {
             buildIndexesAsync(Lists.newArrayList(sstables),
-                              indexes.values()
-                                     .stream()
-                                     .filter(Index::shouldBuildBlocking)
-                                     .collect(Collectors.toSet()),
+                              indexes.values().stream().filter(indexFilter).collect(Collectors.toSet()),
                               false);
         }
         else if (decision == IndexBuildDecider.Decision.SYNC)
         {
             buildIndexesBlocking(Lists.newArrayList(sstables),
-                                 indexes.values()
-                                        .stream()
-                                        .filter(Index::shouldBuildBlocking)
-                                        .collect(Collectors.toSet()),
+                                 indexes.values().stream().filter(indexFilter).collect(Collectors.toSet()),
                                  false);
         }
     }

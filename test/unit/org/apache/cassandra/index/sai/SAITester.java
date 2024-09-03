@@ -378,8 +378,8 @@ public class SAITester extends CQLTester
             IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
             if (indexDescriptor.isIndexEmpty(context))
                 continue;
-            if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
-                || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true))
+            if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true, false)
+                || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true, false))
                 return false;
         }
         return true;
@@ -563,11 +563,11 @@ public class SAITester extends CQLTester
             IndexDescriptor descriptor = loadDescriptor(sstable, cfs);
 
             // Note that validation makes sure that all expected components exists, on top of validating those.
-            descriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true);
+            descriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true, false);
             if (numericIndexContext != null)
-                descriptor.perIndexComponents(numericIndexContext).validateComponents(sstable, cfs.getTracker(), true);
+                descriptor.perIndexComponents(numericIndexContext).validateComponents(sstable, cfs.getTracker(), true, false);
             if (stringIndexContext != null)
-                descriptor.perIndexComponents(stringIndexContext).validateComponents(sstable, cfs.getTracker(), true);
+                descriptor.perIndexComponents(stringIndexContext).validateComponents(sstable, cfs.getTracker(), true, false);
         }
     }
 
