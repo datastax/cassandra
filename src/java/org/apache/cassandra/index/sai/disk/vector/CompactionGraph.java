@@ -110,6 +110,7 @@ public class CompactionGraph implements Closeable, Accountable
     private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
     private int lastRowId = -1;
+    // placeholder value that won't confuse code (like serialization) that expects non-null vectors
     private final ByteSequence<?> encodedOmittedVector;
     // caller's best guess as to whether we should expect to see vectors for all rows.  see comments in constructor
     private final boolean supportsOneToMany;
@@ -296,8 +297,8 @@ public class CompactionGraph implements Closeable, Accountable
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
         assert supportsOneToMany || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
                                                                                              nextOrdinal, builder.getGraph().size());
-        assert pqVectors.count() == builder.getGraph().size() : String.format("vector count %d != graph size %d",
-                                                                              pqVectors.count(), builder.getGraph().size());
+        assert pqVectors.count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
+                                                                                         pqVectors.count(), builder.getGraph().getIdUpperBound());
         assert postingsMap.keySet().size() == builder.getGraph().size() : String.format("postings map entry count %d != vector count %d",
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
         if (logger.isDebugEnabled())
