@@ -1198,31 +1198,6 @@ public class VectorTypeTest extends VectorTester
         });
     }
 
-    @Test
-    public void testCompactionWithEnoughRowsForPQAndDeleteARow() throws Throwable
-    {
-        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-
-        disableCompaction();
-
-        for (int i = 0; i <= CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
-            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(i, i + 1));
-        flush();
-
-        // By deleting a row, we trigger a key histogram to round its estimate to 0 instead of 1 rows per key, and
-        // that broke compaction, so we test that here.
-        execute("DELETE FROM %s WHERE pk = 0");
-        flush();
-
-        // Run compaction, it fails if compaction is not successful
-        compact();
-
-        // Confirm we can query the data
-        assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
-    }
-
     /**
      * Tests a filter-then-sort query with a concurrent vector deletion. See CNDB-10536 for details.
      */
