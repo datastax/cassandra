@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -132,7 +133,7 @@ public class IndexFileUtils
             if (!file.exists())
                 return;
 
-            try(FileChannel ch = FileChannel.open(file.toPath(), StandardOpenOption.READ))
+            try(FileChannel ch = StorageProvider.instance.writeTimeReadFileChannelFor(file))
             {
                 if (ch.size() == 0)
                     return;
