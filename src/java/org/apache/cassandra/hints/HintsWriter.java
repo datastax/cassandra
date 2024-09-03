@@ -284,7 +284,10 @@ class HintsWriter implements AutoCloseable
             flushBuffer();
             maybeFsync();
             maybeSkipCache();
-            totalHintsWritten.addAndGet(hintsWritten);
+            long hintsCnt = totalHintsWritten.addAndGet(hintsWritten);
+            descriptor.setDataSize(channel.position());
+            descriptor.setStatistics(new HintsDescriptor.Statistics(hintsCnt));
+            descriptor.writeStatsComponent(file.toPath().getParent());
             HintsServiceMetrics.hintsOnDisk.inc(hintsWritten);
         }
 

@@ -98,6 +98,7 @@ public class HintsReaderTest
                 }
             }
             assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(cnt0 + num * 2L);
+            assertThat(writer.totalHintsWritten.get()).isEqualTo(num * 2L);
             FileUtils.clean(buffer);
         }
     }

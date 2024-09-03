@@ -161,7 +161,6 @@ public class HintsServiceTest
             long hintsOnDisk0 = HintsServiceMetrics.hintsOnDisk.getCount();
             long corruptedHintsOnDisk0 = HintsServiceMetrics.corruptedHintsOnDisk.getCount();
 
-            // write 100 hints on disk for host that is not part of cluster
             UUID randomHost1 = UUID.randomUUID();
             UUID randomHost2 = UUID.randomUUID();
             int numHints = 10;
@@ -292,17 +291,20 @@ public class HintsServiceTest
         assertThat(HintsService.instance.getTotalFilesNum()).isEqualTo(2);
         assertThat(HintsService.instance.getCorruptedFilesNum()).isEqualTo(0);
         assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(20);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
 
         HintsService.instance.deleteAllHintsForEndpoint(endpointToDeleteHints);
         assertFalse(storeToDeleteHints.hasFiles());
         assertTrue(anotherStore.hasFiles());
         assertTrue(HintsService.instance.getCatalog().hasFiles());
         assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(10);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
 
         HintsService.instance.deleteAllHints();
         assertEquals(0, HintsService.instance.getTotalHintsSize());
         assertFalse(anotherStore.hasFiles());
         assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(0);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
     }
 
     private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)
