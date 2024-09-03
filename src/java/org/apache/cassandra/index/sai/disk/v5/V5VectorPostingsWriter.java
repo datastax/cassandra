@@ -38,6 +38,7 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
+import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
 
@@ -398,10 +399,11 @@ public class V5VectorPostingsWriter<T>
                     extraPostings.put(a[i], oldOrdinal);
             }
         }
+        assert totalRowsAssigned <= maxRow + 1: "rowids are not unique -- " + totalRowsAssigned + " >= " + maxRow;
 
         // derive the correct structure
         Structure structure;
-        if (totalRowsAssigned > 0 && (minRow != 0 || totalRowsAssigned != maxRow + 1))
+        if (totalRowsAssigned > 0 && (minRow != 0 || totalRowsAssigned < maxRow + 1))
         {
             logger.debug("Not all rows are assigned vectors, cannot remap");
             structure = Structure.ZERO_OR_ONE_TO_MANY;
