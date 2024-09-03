@@ -43,11 +43,16 @@ public interface ShardManager
 
     static ShardManager create(DiskBoundaries diskBoundaries, AbstractReplicationStrategy rs)
     {
-        // TODO is there a convention for config option names/types? Starting with a boolean for now.
-        // TODO throw an exception if we have meaningful disk boundaries and node_aware is true.
-        if (Boolean.parseBoolean(rs.configOptions.get("node_aware")))
-            return new ShardManagerNodeAware(rs);
         List<Token> diskPositions = diskBoundaries.getPositions();
+
+        // TODO is there a convention for config option names/types? Starting with a boolean for now.
+        if (Boolean.parseBoolean(rs.configOptions.get("node_aware")))
+        {
+            if (diskPositions != null && diskPositions.size() > 1)
+                throw new IllegalArgumentException("Cannot use node_aware strategy with disk boundaries");
+            return new ShardManagerNodeAware(rs);
+        }
+
         SortedLocalRanges localRanges = diskBoundaries.getLocalRanges();
         IPartitioner partitioner = localRanges.getRealm().getPartitioner();
         // this should only happen in tests that change partitioners, but we don't want UCS to throw
