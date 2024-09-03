@@ -278,7 +278,10 @@ public class CompactionGraph implements Closeable, Accountable
         if (postingsStructure == Structure.ONE_TO_ONE)
             postingsStructure = Structure.ONE_TO_MANY;
         if (postings.add(segmentRowId))
+        {
             bytesUsed += postings.bytesPerPosting();
+            postingsMap.put(vector, postings); // re-serialize to disk
+        }
         return new InsertionResult(bytesUsed);
     }
 
