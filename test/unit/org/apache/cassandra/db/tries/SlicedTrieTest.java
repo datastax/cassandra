@@ -40,6 +40,7 @@ import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.assertSameConte
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKeys;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.makeInMemoryTrie;
 import static java.util.Arrays.asList;
+import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.prefixFree;
 import static org.junit.Assert.assertEquals;
 
 public class SlicedTrieTest
@@ -197,6 +198,43 @@ public class SlicedTrieTest
                     checkEqualRange(content1, trie1, l, includeLeft, r, includeRight);
                 }
             }
+        }
+    }
+
+    @Test
+    public void testFromIteratorSubtrie()
+    {
+        boolean prevPrefixFree = prefixFree;
+        try
+        {
+            prefixFree = true;
+            ByteComparable[] keys = generateKeys(rand, 100);
+            Arrays.sort(keys, BYTE_COMPARABLE_COMPARATOR);
+            NavigableMap<ByteComparable, ByteBuffer> content = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
+            makeInMemoryTrie(keys, content, true); // to construct keys
+            Trie<ByteBuffer> trie = new TrieFromOrderedData.FromMap<>(content, x -> x, x -> x);
+            InMemoryTrieTestBase.assertSameContent(trie, content);
+
+            for (int li = -1; li < keys.length; ++li)
+            {
+                ByteComparable l = li < 0 ? null : keys[li];
+                for (int ri = Math.max(0, li); ri <= keys.length; ++ri)
+                {
+                    ByteComparable r = ri == keys.length ? null : keys[ri];
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        boolean includeLeft = (i & 1) != 0;
+                        boolean includeRight = (i & 2) != 0;
+                        if ((!includeLeft || !includeRight) && li == ri)
+                            continue;
+                        checkEqualRange(content, trie, l, includeLeft, r, includeRight);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            prefixFree = false;
         }
     }
 

@@ -28,6 +28,8 @@ import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
@@ -44,8 +46,10 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.TrieFromOrderedData;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -215,9 +219,54 @@ public class TriePartitionUpdate extends TrieBackedPartition.FullRows implements
         }
     }
 
+    static class TrieFromRows extends TrieFromOrderedData<Row, Object>
+    {
+        final Partition partition;
+        final ClusteringComparator comparator;
+
+        TrieFromRows(Partition partition)
+        {
+            this.partition = partition;
+            comparator = partition.metadata().comparator;
+        }
+
+        @Override
+        public Iterator<Row> getIterator(Direction direction)
+        {
+            assert direction.isForward();
+            return partition.rowIterator();
+        }
+
+        @Override
+        public ByteComparable keyFor(Row entry)
+        {
+            return comparator.asByteComparable(entry.clustering());
+        }
+
+        @Override
+        public Object contentFor(Row entry)
+        {
+            return entry;
+        }
+    }
+
+    static Trie<Object> trieFor(PartitionUpdate update)
+    {
+        Trie<Object> trie = Trie.singleton(ByteComparable.EMPTY, update.deletionInfo());
+        Row staticRow = update.staticRow();
+        if (!staticRow.isEmpty())
+            trie = trie.mergeWith(Trie.singleton(STATIC_CLUSTERING_PATH, staticRow), Trie.throwingResolver());
+
+        return trie.mergeWith(new TrieFromRows(update), Trie.throwingResolver());
+    }
+
     public static Trie<Object> asMergableTrie(PartitionUpdate update)
     {
-        return asTrieUpdate(update).trie.prefixedBy(update.partitionKey());
+        Trie<Object> updateTrie = update instanceof TriePartitionUpdate
+                                  ? ((TriePartitionUpdate) update).trie
+                                  : trieFor(update);
+
+        return updateTrie.prefixedBy(update.partitionKey());
     }
 
     /**
