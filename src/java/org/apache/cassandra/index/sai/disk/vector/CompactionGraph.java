@@ -280,16 +280,16 @@ public class CompactionGraph implements Closeable, Accountable
             return new InsertionResult(bytesUsed, ordinal, vector);
         }
 
-        // postings list already exists, just add the new key (if it's not already in the list)
+        // postings list already exists, just add the new key
         if (postingsStructure == Structure.ONE_TO_ONE)
             postingsStructure = Structure.ONE_TO_MANY;
-        if (postings.add(segmentRowId))
-        {
-            bytesUsed += postings.bytesPerPosting();
-            postingsMap.put(vector, postings); // re-serialize to disk
-            if (!useSyntheticOrdinals)
-                skippedOrdinals.add(segmentRowId);
-        }
+        var newPosting = postings.add(segmentRowId);
+        assert newPosting;
+        bytesUsed += postings.bytesPerPosting();
+        postingsMap.put(vector, postings); // re-serialize to disk
+        if (!useSyntheticOrdinals)
+            skippedOrdinals.add(segmentRowId);
+
         return new InsertionResult(bytesUsed);
     }
 

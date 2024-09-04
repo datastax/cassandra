@@ -204,8 +204,8 @@ public class V5VectorPostingsWriter<T>
             writer.writeInt(rowId);
             writer.writeInt(remappedPostings.ordinalMapper.oldToNew(originalOrdinal));
             // validate that we do in fact have contiguous rowids in the non-extra mapping
-            for (int j = lastExtraRowId + 1; j < rowId; j++)
-                assert remappedPostings.ordinalMap.inverse().containsKey(j);
+            assert IntStream.range(lastExtraRowId + 1, rowId)
+                            .allMatch(j -> remappedPostings.ordinalMap.inverse().containsKey(j)) : "Non-contiguous rowids found in non-extra mapping";
             lastExtraRowId = rowId;
         }
 
