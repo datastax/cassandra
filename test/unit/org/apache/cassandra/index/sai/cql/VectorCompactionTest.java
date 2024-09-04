@@ -30,7 +30,11 @@ import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 public class VectorCompactionTest extends VectorTester
@@ -55,14 +59,12 @@ public class VectorCompactionTest extends VectorTester
     @Test
     public void testCompactionWithEnoughRowsForPQAndDeleteARow()
     {
-        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        createTable();
 
         disableCompaction();
 
         for (int i = 0; i <= CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
-            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(i, i + 1));
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, vector(i, i + 1));
         flush();
 
         // By deleting a row, we trigger a key histogram to round its estimate to 0 instead of 1 rows per key, and
@@ -74,7 +76,7 @@ public class VectorCompactionTest extends VectorTester
         compact();
 
         // Confirm we can query the data
-        assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
+        assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF [1,2] LIMIT 1"), 1);
     }
 
     @Test
@@ -87,15 +89,49 @@ public class VectorCompactionTest extends VectorTester
         }
     }
 
+    // Exercise the one-to-many path in compaction
     public void testOneToManyCompactionInternal(int vectorsPerSstable, int sstables)
     {
-        // Exercise the one-to-many path in compaction
-        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        createTable();
 
         disableCompaction();
 
+        insertOneToManyRows(vectorsPerSstable, sstables);
+
+        // queries should behave sanely before and after compaction
+        validateQueries();
+        compact();
+        validateQueries();
+    }
+
+    @Test
+    public void testOneToManyCompactionTooManyHoles()
+    {
+        int sstables = 2;
+        testOneToManyCompactionInternal(10, sstables);
+        testOneToManyCompactionHolesInternal(CassandraOnHeapGraph.MIN_PQ_ROWS, sstables);
+    }
+
+    public void testOneToManyCompactionHolesInternal(int vectorsPerSstable, int sstables)
+    {
+        createTable();
+
+        disableCompaction();
+
+        insertOneToManyRows(vectorsPerSstable, sstables);
+
+        // this should be done after writing data so that we exercise the "we thought we were going to use the
+        // one-to-many-path but there were too many holes so we changed plans" code path
+        V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 0.0;
+
+        // queries should behave sanely before and after compaction
+        validateQueries();
+        compact();
+        validateQueries();
+    }
+
+    private void insertOneToManyRows(int vectorsPerSstable, int sstables)
+    {
         var R = getRandom();
         double duplicateChance = R.nextDouble() * 0.2;
         int j = 0;
@@ -115,15 +151,33 @@ public class VectorCompactionTest extends VectorTester
                     vectorsInserted.add(v);
                 }
                 assert v != null;
-                execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j++, v);
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", j++, v);
             }
             flush();
         }
+    }
 
-        // Run compaction, it fails if compaction is not successful
-        compact();
+    private void createTable()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+    }
 
-        // Confirm we can query the data
-        assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
+    private void validateQueries()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            var q = randomVectorBoxed(2);
+            var r = execute("SELECT pk, similarity_cosine(v, ?) as similarity FROM %s ORDER BY v ANN OF ? LIMIT 10", q, q);
+            float lastSimilarity = Float.MAX_VALUE;
+            assertEquals(10, r.size());
+            for (var row : r)
+            {
+                float similarity = (float) row.getFloat("similarity");
+                assertTrue(similarity <= lastSimilarity);
+                lastSimilarity = similarity;
+            }
+        }
     }
 }
