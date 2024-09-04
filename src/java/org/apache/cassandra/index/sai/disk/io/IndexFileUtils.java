@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.function.Supplier;
 import java.nio.channels.FileChannel;
-import java.nio.file.StandardOpenOption;
 import java.util.zip.CRC32;
 import java.util.zip.CRC32C;
 import java.util.zip.Checksum;
@@ -38,6 +37,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -171,7 +171,7 @@ public class IndexFileUtils
             if (!file.exists())
                 return;
 
-            try(FileChannel ch = FileChannel.open(file.toPath(), StandardOpenOption.READ))
+            try(FileChannel ch = StorageProvider.instance.writeTimeReadFileChannelFor(file))
             {
                 if (ch.size() == 0)
                     return;
