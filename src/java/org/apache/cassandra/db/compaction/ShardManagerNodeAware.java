@@ -27,7 +27,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.dht.tokenallocator.TokenAllocation;
+import org.apache.cassandra.dht.tokenallocator.IsolatedTokenAllocator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
@@ -46,8 +46,6 @@ import org.apache.cassandra.locator.TokenMetadata;
     // I haven't figured out yet whether the interesting part of this class is the fact that we use the token allocator
     // to find higher level splits or if it is the node awareness. Is it possible to remove the node awareness and keep
     // the allocator's logic or do we need both?
-// TODO should we extend ShardManagerDiskAware?
-
 public class ShardManagerNodeAware implements ShardManager
 {
     public static final Token[] TOKENS = new Token[0];
@@ -90,13 +88,9 @@ public class ShardManagerNodeAware implements ShardManager
         if (splitPointCount > sortedTokens.size())
         {
             // Need to allocate tokens within node boundaries.
-            var endpoints = tokenMetadataClone.getAllEndpoints();
-            double addititionalSplits = splitPointCount - sortedTokens.size();
-            var splitPointsPerNode = (int) Math.ceil(addititionalSplits / endpoints.size());
-            // Compute additional tokens since we don't have enough
-            for (var endpoint : endpoints)
-                sortedTokens.addAll(TokenAllocation.allocateTokens(tokenMetadataClone, rs, endpoint, splitPointsPerNode));
-            // Sort again since we added new tokens.
+            int additionalSplits = splitPointCount - sortedTokens.size();
+            var newTokens = IsolatedTokenAllocator.allocateTokens(additionalSplits, rs);
+            sortedTokens.addAll(newTokens);
             sortedTokens.sort(Token::compareTo);
         }
         var splitPoints = findTokenAlignedSplitPoints(sortedTokens.toArray(TOKENS), shardCount);

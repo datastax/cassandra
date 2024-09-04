@@ -45,8 +45,7 @@ public interface ShardManager
     {
         List<Token> diskPositions = diskBoundaries.getPositions();
 
-        // TODO is there a convention for config option names/types? Starting with a boolean for now.
-        if (Boolean.parseBoolean(rs.configOptions.get("node_aware")))
+        if (rs.isNodeAware())
         {
             if (diskPositions != null && diskPositions.size() > 1)
                 throw new IllegalArgumentException("Cannot use node_aware strategy with disk boundaries");

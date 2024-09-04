@@ -386,6 +386,14 @@ public abstract class AbstractReplicationStrategy
     }
 
     /**
+     * Whether this strategy is node aware. This setting impacts compaction.
+     */
+    public boolean isNodeAware() {
+        // TODO is there a convention for config option names/types? Starting with a boolean for now.
+        return Boolean.parseBoolean(configOptions.get("node_aware"));
+    }
+
+    /**
      * Before constructing the ARS we first give it a chance to prepare the options map in any way it
      * would like to. For example datacenter auto-expansion or other templating to make the user interface
      * more usable. Note that this may mutate the passed strategyOptions Map.
