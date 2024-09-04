@@ -463,7 +463,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         @Unmetered
         public final MemtableShard owner;
 
-        public int rowCountIncludingStatic;
+        private int rowCountIncludingStatic;
 
         public static final long HEAP_SIZE = ObjectSizes.measure(new PartitionData(DeletionInfo.LIVE, null));
 
@@ -497,6 +497,11 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         public int rowCountIncludingStatic()
         {
             return rowCountIncludingStatic;
+        }
+
+        public void markInsertedRows(int howMany)
+        {
+            rowCountIncludingStatic += howMany;
         }
 
         @Override
@@ -673,7 +678,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                     catch (TrieSpaceExhaustedException e)
                     {
                         // This should never really happen as a flush would be triggered long before this limit is reached.
-                        throw Throwables.propagate(e);
+                        throw new AssertionError(e);
                     }
                     allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
                     allocator.onHeap().adjust((data.usedSizeOnHeap() - onHeap) + updater.heapSize, opGroup);

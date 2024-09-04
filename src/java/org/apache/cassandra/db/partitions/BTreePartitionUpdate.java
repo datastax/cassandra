@@ -22,8 +22,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,8 +35,6 @@ import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.ColumnData;
-import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
@@ -244,6 +240,7 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
      *
      * @return the number of "operations" performed by the update.
      */
+    @Override
     public int operationCount()
     {
         return rowCount()
@@ -257,12 +254,14 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
      *
      * @return the size of the data contained in this update.
      */
+    @Override
     public int dataSize()
     {
         return Ints.saturatedCast(BTree.<Row>accumulate(holder.tree, (row, value) -> row.dataSize() + value, 0L)
                 + holder.staticRow.dataSize() + holder.deletionInfo.dataSize());
     }
 
+    @Override
     public TableMetadata metadata()
     {
         return metadata;
@@ -282,6 +281,7 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
         return holder;
     }
 
+    @Override
     public EncodingStats stats()
     {
         return holder().stats;
@@ -292,45 +292,16 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
      *
      * @return the maximum timestamp used in this update.
      */
+    @Override
     public long maxTimestamp()
     {
         long maxTimestamp = deletionInfo.maxTimestamp();
         for (Row row : rows())
-        {
-            maxTimestamp = Math.max(maxTimestamp, row.primaryKeyLivenessInfo().timestamp());
-            for (ColumnData cd : row)
-            {
-                if (cd.column().isSimple())
-                {
-                    maxTimestamp = Math.max(maxTimestamp, ((Cell<?>)cd).timestamp());
-                }
-                else
-                {
-                    ComplexColumnData complexData = (ComplexColumnData)cd;
-                    maxTimestamp = Math.max(maxTimestamp, complexData.complexDeletion().markedForDeleteAt());
-                    for (Cell<?> cell : complexData)
-                        maxTimestamp = Math.max(maxTimestamp, cell.timestamp());
-                }
-            }
-        }
+            maxTimestamp = Math.max(maxTimestamp, Rows.collectMaxTimestamp(row));
 
         if (this.holder.staticRow != null)
-        {
-            for (ColumnData cd : this.holder.staticRow.columnData())
-            {
-                if (cd.column().isSimple())
-                {
-                    maxTimestamp = Math.max(maxTimestamp, ((Cell<?>) cd).timestamp());
-                }
-                else
-                {
-                    ComplexColumnData complexData = (ComplexColumnData) cd;
-                    maxTimestamp = Math.max(maxTimestamp, complexData.complexDeletion().markedForDeleteAt());
-                    for (Cell<?> cell : complexData)
-                        maxTimestamp = Math.max(maxTimestamp, cell.timestamp());
-                }
-            }
-        }
+            maxTimestamp = Math.max(maxTimestamp, Rows.collectMaxTimestamp(this.holder.staticRow));
+
         return maxTimestamp;
     }
 
@@ -340,6 +311,7 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
      *
      * @return a list with counter marks for every counter in this update.
      */
+    @Override
     public List<CounterMark> collectCounterMarks()
     {
         assert metadata().isCounter();
@@ -361,6 +333,7 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
         }
     }
 
+    @Override
     public void validateIndexedColumns()
     {
         IndexRegistry.obtain(metadata()).validate(this);
@@ -376,6 +349,7 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
         return new BTreePartitionUpdate(metadata, key, holder, deletionInfo, canHaveShadowedData);
     }
 
+    @Override
     public BTreePartitionUpdate withUpdatedTimestamps(long timestamp)
     {
         return new Builder(this, rowCount()).updateAllTimestamp(timestamp).build();

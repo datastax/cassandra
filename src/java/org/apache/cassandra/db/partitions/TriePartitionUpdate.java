@@ -38,7 +38,6 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ColumnData;
-import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
@@ -235,6 +234,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      * tombstones always wins on timestamp equality, using -1 guarantees our deletion will still
      * delete anything from a previous update.
      */
+    @Override
     public TriePartitionUpdate withUpdatedTimestamps(long newTimestamp)
     {
 
@@ -292,6 +292,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @return the number of "operations" performed by the update.
      */
+    @Override
     public int operationCount()
     {
         return rowCountIncludingStatic
@@ -304,6 +305,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @return the size of the data contained in this update.
      */
+    @Override
     public int dataSize()
     {
         return dataSize;
@@ -314,6 +316,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @throws org.apache.cassandra.serializers.MarshalException if some of the data contained in this update is corrupted.
      */
+    @Override
     public void validate()
     {
         for (Iterator<Row> it = rowsIncludingStatic(); it.hasNext();)
@@ -330,28 +333,13 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @return the maximum timestamp used in this update.
      */
+    @Override
     public long maxTimestamp()
     {
         long maxTimestamp = deletionInfo().maxTimestamp();
         for (Iterator<Row> it = rowsIncludingStatic(); it.hasNext();)
-        {
-            Row row = it.next();
-            maxTimestamp = Math.max(maxTimestamp, row.primaryKeyLivenessInfo().timestamp());
-            for (ColumnData cd : row)
-            {
-                if (cd.column().isSimple())
-                {
-                    maxTimestamp = Math.max(maxTimestamp, ((Cell<?>)cd).timestamp());
-                }
-                else
-                {
-                    ComplexColumnData complexData = (ComplexColumnData)cd;
-                    maxTimestamp = Math.max(maxTimestamp, complexData.complexDeletion().markedForDeleteAt());
-                    for (Cell<?> cell : complexData)
-                        maxTimestamp = Math.max(maxTimestamp, cell.timestamp());
-                }
-            }
-        }
+            maxTimestamp = Math.max(maxTimestamp, Rows.collectMaxTimestamp(it.next()));
+
         return maxTimestamp;
     }
 
@@ -361,6 +349,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @return a list with counter marks for every counter in this update.
      */
+    @Override
     public List<CounterMark> collectCounterMarks()
     {
         assert metadata().isCounter();

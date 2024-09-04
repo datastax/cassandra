@@ -465,7 +465,7 @@ public class TrieBackedPartition implements Partition
                 {
                     Clustering<?> clustering = clusterings.next();
                     Object rowData = trie.get(path(clustering));
-                    if (rowData != null && rowData instanceof RowData)
+                    if (rowData instanceof RowData)
                         return toRow((RowData) rowData, clustering);
                 }
                 return endOfData();

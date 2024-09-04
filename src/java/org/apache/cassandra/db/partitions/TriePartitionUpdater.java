@@ -58,6 +58,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
         this.owner = owner;
     }
 
+    @Override
     public Object apply(Object existing, Object update, InMemoryTrie.KeyProducer<Object> keyState)
     {
         if (update instanceof RowData)
@@ -87,7 +88,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
 
             this.dataSize += data.dataSize();
             this.heapSize += data.unsharedHeapSizeExcludingData();
-            ++currentPartition.rowCountIncludingStatic;  // null pointer here means a problem in applyDeletion
+            currentPartition.markInsertedRows(1);  // null pointer here means a problem in applyDeletion
             return data;
         }
         else
