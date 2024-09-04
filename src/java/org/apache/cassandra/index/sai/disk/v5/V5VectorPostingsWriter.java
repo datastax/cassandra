@@ -38,7 +38,6 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
-import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
 

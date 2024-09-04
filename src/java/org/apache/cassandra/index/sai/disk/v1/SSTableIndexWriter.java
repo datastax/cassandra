@@ -51,6 +51,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionT
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
@@ -394,7 +395,9 @@ public class SSTableIndexWriter implements PerIndexWriter
         // No PQ instance available in completed indexes, so check if we just wrote one
         var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
         assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
-        try (var fh = pqComponent.createFileHandle();
+
+        try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent);
+             var fh = fhBuilder.complete();
              var reader = fh.createReader())
         {
             var sm = segments.get(segments.size() - 1);

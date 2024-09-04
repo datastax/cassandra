@@ -34,6 +34,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
@@ -171,20 +172,24 @@ public class Operation
                     else if (e instanceof RowFilter.MapComparisonExpression)
                     {
                         var map = (RowFilter.MapComparisonExpression) e;
-                        switch (map.operator()) {
+                        var operator = map.operator();
+                        switch (operator) {
                             case EQ:
-                                range.add(Operator.EQ, map.getIndexValue().duplicate());
+                            case NEQ:
+                                range.add(operator, map.getIndexValue().duplicate());
                                 break;
                             case GT:
                             case GTE:
-                                range.add(map.operator(), map.getLowerBound().duplicate());
+                                range.add(operator, map.getLowerBound().duplicate());
                                 range.add(Operator.LTE, map.getUpperBound().duplicate());
                                 break;
                             case LT:
                             case LTE:
                                 range.add(Operator.GTE, map.getLowerBound().duplicate());
-                                range.add(map.operator(), map.getUpperBound().duplicate());
+                                range.add(operator, map.getUpperBound().duplicate());
                                 break;
+                            default:
+                                throw new InvalidRequestException("Unexpected operator: " + operator);
                         }
                     }
                     else
