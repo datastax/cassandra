@@ -20,15 +20,26 @@ package org.apache.cassandra.utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
+import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.metrics.MetricNameFactory;
+import org.apache.cassandra.metrics.MicrometerMetrics;
 import org.apache.cassandra.utils.obs.IBitSet;
 import org.apache.cassandra.utils.obs.MemoryLimiter;
 import org.apache.cassandra.utils.obs.OffHeapBitSet;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.USE_MICROMETER;
+import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 public class FilterFactory
 {
     public static final IFilter AlwaysPresent = new AlwaysPresentFilter();
     // marker for lazy bloom filter
     public static final IFilter AlwaysPresentForLazyLoading = new AlwaysPresentFilter();
+
+    public static final FilterFactoryMetrics metrics = FilterFactoryMetrics.create();
 
     private static final Logger logger = LoggerFactory.getLogger(FilterFactory.class);
     private static final long BITSET_EXCESS = 20;
@@ -88,9 +99,78 @@ public class FilterFactory
         catch (MemoryLimiter.ReachedMemoryLimitException | OutOfMemoryError e)
         {
             logger.error("Failed to create new Bloom filter with {} elements: ({}) - " +
-                         "continuing but this will have severe performance implications, consider increasing FP chance or" +
+                         "continuing but this will have severe performance implications. Consider increasing FP chance " +
+                         "(bloom_filter_fp_chance) or increasing system ram space or" +
                          "lowering number of sstables through compaction", numElements, e.getMessage());
+            metrics.incrementOOMError();
             return AlwaysPresent;
+        }
+    }
+
+    public interface FilterFactoryMetrics
+    {
+        static FilterFactoryMetrics create()
+        {
+            return USE_MICROMETER.getBoolean() ? new FilterFactoryMicormeterMetrics()
+                                                : new FilterFactoryCodahaleMetrics();
+        }
+
+        void incrementOOMError();
+
+        long oomErrors();
+    }
+
+    /**
+     * Metrics exposed in Prometheus friendly format
+     */
+    public static final class FilterFactoryMicormeterMetrics extends MicrometerMetrics implements FilterFactoryMetrics
+    {
+        public static final String METRICS_PREFIX = "bloom_filter";
+        public static final String OOM_ERRORS = METRICS_PREFIX + "_oom_errors";
+        private volatile Counter oomCounter;
+        public FilterFactoryMicormeterMetrics()
+        {
+            this.oomCounter = counter(OOM_ERRORS);
+        }
+
+        @Override
+        public synchronized void register(MeterRegistry newRegistry, Tags newTags)
+        {
+            super.register(newRegistry, newTags);
+            this.oomCounter = counter(OOM_ERRORS);
+        }
+
+        @Override
+        public void incrementOOMError()
+        {
+            oomCounter.increment();
+        }
+
+        @Override
+        public long oomErrors()
+        {
+            return (long) oomCounter.count();
+        }
+    }
+
+    /**
+     * Metrics exposed in Codahale format
+     */
+    public static final class FilterFactoryCodahaleMetrics implements FilterFactoryMetrics
+    {
+        private static final MetricNameFactory metricNameFactory = new DefaultNameFactory("BloomFilter");
+        private static final com.codahale.metrics.Counter oomCounter = Metrics.counter(metricNameFactory.createMetricName("OutOfMemory"));
+
+        @Override
+        public void incrementOOMError()
+        {
+            oomCounter.inc();
+        }
+
+        @Override
+        public long oomErrors()
+        {
+            return oomCounter.getCount();
         }
     }
 }
