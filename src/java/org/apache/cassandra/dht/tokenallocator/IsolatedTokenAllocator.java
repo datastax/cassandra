@@ -58,8 +58,9 @@ public class IsolatedTokenAllocator
 
         // Distribute nodes among the racks in round-robin fashion in the order the user is supposed to start them.
         var localDc = source.snitch.getLocalDatacenter();
-        // Get a list to consistently iterate over the racks as we allocate nodes
-        List<String> racks = source.getTokenMetadata().getTopology().getDatacenterRacks().get(localDc).keys().elementSet().asList();
+        // Get a list to consistently iterate over the racks as we allocate nodes. Need to clone the map in
+        // order to retreive the topology.
+        List<String> racks = source.getTokenMetadata().cloneOnlyTokenMap().getTopology().getDatacenterRacks().get(localDc).keys().elementSet().asList();
         int nodeId = 0;
         int tokensAdded = 0;
         while (tokensAdded <= additionalSplits)
@@ -115,16 +116,16 @@ public class IsolatedTokenAllocator
             SummaryStatistics newOwnership = allocation.getAllocationRingOwnership(SimpleSnitch.DATA_CENTER_NAME, rackId);
             SummaryStatistics oldOwnership = lastCheckPoint.put(rackId, newOwnership);
             if (oldOwnership != null)
-                logger.debug(String.format("Replicated node load in rack=%d before allocating node %d: %s.", rackId, nodeId,
+                logger.debug(String.format("Replicated node load in rack=%s before allocating node %d: %s.", rackId, nodeId,
                                            TokenAllocation.statToString(oldOwnership)));
-            logger.debug(String.format("Replicated node load in rack=%d after allocating node %d: %s.", rackId, nodeId,
+            logger.debug(String.format("Replicated node load in rack=%s after allocating node %d: %s.", rackId, nodeId,
                                        TokenAllocation.statToString(newOwnership)));
             if (oldOwnership != null && oldOwnership.getStandardDeviation() != 0.0)
             {
                 double stdDevGrowth = newOwnership.getStandardDeviation() - oldOwnership.getStandardDeviation();
                 if (stdDevGrowth > TokenAllocation.WARN_STDEV_GROWTH)
                 {
-                    logger.warn(String.format("Growth of %.2f%% in token ownership standard deviation after allocating node %d on rack %d above warning threshold of %d%%",
+                    logger.warn(String.format("Growth of %.2f%% in token ownership standard deviation after allocating node %d on rack %s above warning threshold of %d%%",
                                               stdDevGrowth * 100, nodeId, rackId, (int)(TokenAllocation.WARN_STDEV_GROWTH * 100)));
                 }
             }

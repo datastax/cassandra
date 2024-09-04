@@ -166,11 +166,11 @@ public class TokenMetadata
      */
     public TokenMetadata cloneWithNewSnitch(IEndpointSnitch snitch)
     {
-        var topology = Topology.builder(() -> snitch).build();
         lock.readLock().lock();
         try
         {
-            return new TokenMetadata(tokenToEndpointMap, endpointToHostIdMap, topology, partitioner);
+            var clonedTopology = topology.unbuild().withSnitchSupplier(() -> snitch).build();
+            return new TokenMetadata(tokenToEndpointMap, endpointToHostIdMap, clonedTopology, partitioner);
         }
         finally
         {
@@ -1521,7 +1521,7 @@ public class TokenMetadata
             private final Map<String, Multimap<String, InetAddressAndPort>> dcRacks;
             /** reverse-lookup map for endpoint to current known dc/rack assignment */
             private final Map<InetAddressAndPort, Pair<String, String>> currentLocations;
-            private final Supplier<IEndpointSnitch> snitchSupplier;
+            private Supplier<IEndpointSnitch> snitchSupplier;
 
             Builder(Supplier<IEndpointSnitch> snitchSupplier)
             {
@@ -1623,6 +1623,12 @@ public class TokenMetadata
 
                 doRemoveEndpoint(ep, current);
                 doAddEndpoint(ep, dc, rack);
+            }
+
+            Builder withSnitchSupplier(Supplier<IEndpointSnitch> snitchSupplier)
+            {
+                this.snitchSupplier = snitchSupplier;
+                return this;
             }
 
             Topology build()
