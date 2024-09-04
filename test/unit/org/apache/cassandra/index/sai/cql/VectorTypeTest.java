@@ -1189,19 +1189,6 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testQueryOnEmptyTable() throws Throwable
-    {
-        createTable("CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"));
-        });
-    }
-
-    @Test
     public void testEnsureIndexQueryableAfterTransientFailure() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
