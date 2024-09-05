@@ -110,6 +110,10 @@ public class VectorCompactionTest extends VectorTester
         int sstables = 2;
         testOneToManyCompactionInternal(10, sstables);
         testOneToManyCompactionHolesInternal(CassandraOnHeapGraph.MIN_PQ_ROWS, sstables);
+        testOneToManyCompactionHolesInternal(CassandraOnHeapGraph.MIN_PQ_ROWS, sstables);
+        testOneToManyCompactionHolesInternal(CassandraOnHeapGraph.MIN_PQ_ROWS, sstables);
+        testOneToManyCompactionHolesInternal(CassandraOnHeapGraph.MIN_PQ_ROWS, sstables);
+        testOneToManyCompactionHolesInternal(CassandraOnHeapGraph.MIN_PQ_ROWS, sstables);
     }
 
     public void testOneToManyCompactionHolesInternal(int vectorsPerSstable, int sstables)
@@ -138,12 +142,14 @@ public class VectorCompactionTest extends VectorTester
         for (int i = 0; i < sstables; i++)
         {
             var vectorsInserted = new ArrayList<Vector<Float>>();
-            while (vectorsInserted.size() < vectorsPerSstable)
+            var duplicateExists = false;
+            while (vectorsInserted.size() < vectorsPerSstable || !duplicateExists)
             {
                 Vector<Float> v;
                 if (R.nextDouble() < duplicateChance && !vectorsInserted.isEmpty())
                 {
                     v = vectorsInserted.get(R.nextIntBetween(0, vectorsInserted.size() - 1));
+                    duplicateExists = true;
                 }
                 else
                 {
