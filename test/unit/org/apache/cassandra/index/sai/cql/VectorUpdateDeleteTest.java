@@ -19,9 +19,13 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.Collection;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -32,8 +36,11 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
@@ -1004,5 +1011,79 @@ public class VectorUpdateDeleteTest extends VectorTester
 
         // Ensure that we only have one vector
         assertEquals("The TTL'd row is overwritten and removed during flush.", 1, sai.getIndexContext().getCellCount());
+    }
+
+    @Test
+    public void testCompactionWithEnoughRowsForPQAndDeleteARow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        disableCompaction();
+
+        for (int i = 0; i <= CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(i, i + 1));
+        flush();
+
+        // By deleting a row, we trigger a key histogram to round its estimate to 0 instead of 1 rows per key, and
+        // that broke compaction, so we test that here.
+        execute("DELETE FROM %s WHERE pk = 0");
+        flush();
+
+        // Run compaction, it fails if compaction is not successful
+        compact();
+
+        // Confirm we can query the data
+        assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
+    }
+
+    /**
+     * Tests a filter-then-sort query with a concurrent vector deletion. See CNDB-10536 for details.
+     */
+    @Test
+    public void testFilterThenSortQueryWithConcurrentVectorDeletion() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>, c int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // write into memtable
+        execute("INSERT INTO %s (k, v, c) VALUES (1, [1, 1], 1)");
+        execute("INSERT INTO %s (k, v, c) VALUES (2, [2, 2], 1)");
+
+        // inject a barrier to block CassandraOnHeapGraph#getOrdinal
+        Injections.Barrier barrier = Injections.newBarrier("block_get_ordinal", 2, false)
+                                               .add(InvokePointBuilder.newInvokePoint()
+                                                                      .onClass(CassandraOnHeapGraph.class)
+                                                                      .onMethod("getOrdinal")
+                                                                      .atEntry())
+                                               .build();
+        Injections.inject(barrier);
+
+        // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
+        QueryController.QUERY_OPT_LEVEL = 0;
+        try
+        {
+            ExecutorService executor = Executors.newFixedThreadPool(1);
+            String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
+            Future<UntypedResultSet> future = executor.submit(() -> execute(select));
+
+            // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
+            waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
+            execute("DELETE v FROM %s WHERE k = 1");
+            flush();
+
+            // release the barrier to resume the query, which should succeed
+            barrier.countDown();
+            assertRows(future.get(), row(2));
+
+            assertEquals(0, executor.shutdownNow().size());
+        }
+        finally
+        {
+            QueryController.QUERY_OPT_LEVEL = 1;
+        }
     }
 }
