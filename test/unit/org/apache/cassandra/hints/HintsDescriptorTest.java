@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.google.common.collect.ImmutableMap;
@@ -110,8 +111,8 @@ public class HintsDescriptorTest
             try (HintsWriter ignored = HintsWriter.create(directory, expected))
             {
             }
-            HintsDescriptor actual = HintsDescriptor.readFromFile(expected.file(directory));
-            assertEquals(expected, actual);
+            Optional<HintsDescriptor> actual = HintsDescriptor.readFromFileQuietly(new File(directory, expected.fileName()).toPath());
+            assertEquals(Optional.of(expected), actual);
         }
         finally
         {
@@ -148,6 +149,30 @@ public class HintsDescriptorTest
         assertThat(p).doesNotExist();
         assertThat(newFile.exists());
         newFile.deleteOnExit();
+    }
+
+    @Test
+    public void testStatistics() throws IOException
+    {
+        UUID hostId = UUID.randomUUID();
+        int version = HintsDescriptor.CURRENT_VERSION;
+        long timestamp = System.currentTimeMillis();
+        ImmutableMap<String, Object> parameters = ImmutableMap.of();
+        HintsDescriptor expected = new HintsDescriptor(hostId, version, timestamp, parameters);
+
+        File directory = new File(Files.createTempDirectory("hints"));
+        directory.deleteOnExit();
+        try (HintsWriter ignored = HintsWriter.create(directory, expected))
+        {
+            ignored.totalHintsWritten.set(1234567L);
+        }
+        HintsDescriptor actual = HintsDescriptor.readFromFileQuietly(new File(directory, expected.fileName()).toPath()).get();
+        actual.loadStatsComponent(directory.toPath());
+        assertThat(actual.statistics().totalCount()).isEqualTo(1234567L);
+
+        new File(directory, HintsDescriptor.statisticsFileName(actual.hostId, actual.timestamp, actual.version)).tryDelete();
+        actual.loadStatsComponent(directory.toPath());
+        assertThat(actual.statistics()).isEqualTo(HintsDescriptor.EMPTY_STATS);
     }
 
     private static void testSerializeDeserializeLoop(HintsDescriptor descriptor) throws IOException
