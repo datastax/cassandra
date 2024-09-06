@@ -18,7 +18,12 @@
 package org.apache.cassandra.hints;
 
 import java.io.DataInput;
+import java.io.DataInputStream;
+import java.io.DataOutput;
+import java.io.DataOutputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -42,6 +47,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
@@ -94,6 +100,8 @@ final class HintsDescriptor
 
     private final Cipher cipher;
     private final ICompressor compressor;
+
+    private volatile Statistics statistics = EMPTY_STATS;
 
     HintsDescriptor(UUID hostId, int version, long timestamp, ImmutableMap<String, Object> parameters)
     {
@@ -208,6 +216,26 @@ final class HintsDescriptor
         return dataSize;
     }
 
+    public void setStatistics(Statistics statistics)
+    {
+        this.statistics = statistics;
+    }
+
+    public Statistics statistics()
+    {
+        return statistics;
+    }
+
+    String statisticsFileName()
+    {
+        return statisticsFileName(hostId, timestamp, version);
+    }
+
+    static String statisticsFileName(UUID hostId, long timestamp, int version)
+    {
+        return String.format("%s-%s-%s-Statistics.hints", hostId, timestamp, version);
+    }
+
     private static final class EncryptionData
     {
         final Cipher cipher;
@@ -293,6 +321,7 @@ final class HintsDescriptor
         {
             HintsDescriptor descriptor = deserialize(raf);
             descriptor.setDataSize(FileUtils.size(path));
+            descriptor.loadStatsComponent(path.getParent());
             return Optional.of(descriptor);
         }
         catch (ChecksumMismatchException e)
@@ -327,20 +356,6 @@ final class HintsDescriptor
         catch (IOException ex)
         {
             logger.error("Error handling corrupt hints file {}", path.toString(), ex);
-        }
-    }
-
-    static HintsDescriptor readFromFile(File path)
-    {
-        try (FileInputStreamPlus raf = new FileInputStreamPlus(path))
-        {
-            HintsDescriptor descriptor = deserialize(raf);
-            descriptor.setDataSize(path.length());
-            return descriptor;
-        }
-        catch (IOException e)
-        {
-            throw new FSReadError(e, path);
         }
     }
 
@@ -511,5 +526,74 @@ final class HintsDescriptor
     {
         if (expected != actual)
             throw new ChecksumMismatchException("Hints Descriptor CRC Mismatch");
+    }
+
+    @VisibleForTesting
+    void loadStatsComponent(Path hintsDirectory)
+    {
+        Path file = hintsDirectory.resolve(statisticsFileName());
+        try (InputStream inputStream = Files.newInputStream(file);
+             DataInputStream statsFile = new DataInputStream(inputStream))
+        {
+            this.statistics = Statistics.deserialize(statsFile);
+        }
+        catch (FileNotFoundException e)
+        {
+            // Statistics are only used for metrics; it's ok to ignore an absent component during upgrades
+            logger.warn("Cannot find stats component `{}` for hints descriptor, initialising with empty statistics.", file);
+            this.statistics = EMPTY_STATS;
+        }
+        catch (IOException e)
+        {
+            // Ignore error in case of corruption
+            logger.error("Cannot read stats component `{}` for hints descriptor, initialising with empty statistics.", file, e);
+            this.statistics = EMPTY_STATS;
+        }
+    }
+
+    void writeStatsComponent(Path directory)
+    {
+        File file = new File(directory, statisticsFileName());
+        try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(file.toPath())))
+        {
+            statistics.serialize(out);
+        }
+        catch (IOException e)
+        {
+            throw new FSWriteError(e, file);
+        }
+    }
+
+    public static Statistics EMPTY_STATS = new Statistics(0);
+
+    public static class Statistics
+    {
+        private final long totalCount;
+
+        public Statistics(long totalCount)
+        {
+            this.totalCount = totalCount;
+        }
+
+        public long totalCount()
+        {
+            return totalCount;
+        }
+
+        public void serialize(DataOutput out) throws IOException
+        {
+            out.writeLong(totalCount);
+        }
+
+        public static Statistics deserialize(DataInput in) throws IOException
+        {
+            long totalCount = in.readLong();
+            return new Statistics(totalCount);
+        }
+
+        public static int serializedSize()
+        {
+            return Long.BYTES;
+        }
     }
 }

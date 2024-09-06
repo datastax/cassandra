@@ -21,9 +21,9 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
-
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.RateLimiter;
 
@@ -78,6 +78,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
         {
             HintsDescriptor descriptor = HintsDescriptor.deserialize(reader);
             descriptor.setDataSize(file.length());
+            descriptor.loadStatsComponent(file.toPath().getParent());
             if (descriptor.isCompressed())
             {
                 // since the hints descriptor is always uncompressed, it needs to be read with the normal ChecksummedDataInput.
@@ -95,6 +96,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
         }
     }
 
+    @VisibleForTesting
     static HintsReader open(File file)
     {
         return open(file, null);
