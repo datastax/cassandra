@@ -44,6 +44,7 @@ import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaTestUtil;
@@ -54,6 +55,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.apache.cassandra.Util.dk;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class HintsReaderTest
 {
@@ -86,6 +88,7 @@ public class HintsReaderTest
         try (HintsWriter writer = HintsWriter.create(directory, descriptor))
         {
             ByteBuffer buffer = ByteBuffer.allocateDirect(256 * 1024);
+            long cnt0 = HintsServiceMetrics.hintsOnDisk.getCount();
             try (HintsWriter.Session session = writer.newSession(buffer))
             {
                 for (int i = 0; i < num; i++)
@@ -97,6 +100,8 @@ public class HintsReaderTest
                     session.append(Hint.create(m, timestamp));
                 }
             }
+            assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(cnt0 + num * 2L);
+            assertThat(writer.totalHintsWritten.get()).isEqualTo(num * 2L);
             FileUtils.clean(buffer);
         }
 
