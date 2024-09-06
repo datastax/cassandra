@@ -38,6 +38,8 @@ import org.junit.rules.ExpectedException;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -50,7 +52,11 @@ import org.apache.cassandra.utils.KeyGenerator.RandomStringGenerator;
 import org.apache.cassandra.utils.obs.IBitSet;
 import org.apache.cassandra.utils.obs.MemoryLimiter;
 
-import static org.junit.Assert.*;
+import static org.apache.cassandra.config.CassandraRelevantProperties.USE_MICROMETER;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class BloomFilterTest
 {
@@ -289,6 +295,7 @@ public class BloomFilterTest
             {
                 assertNotNull(blankFilter);
                 assertEquals(blankFilter, FilterFactory.AlwaysPresent);
+                assertEquals(1, FilterFactory.metrics.oomErrors());
 
                 assertEquals(memBefore, memoryLimiter.memoryAllocated());
             }
@@ -324,6 +331,22 @@ public class BloomFilterTest
             ByteArrayInputStream in = new ByteArrayInputStream(out.getData(), 0, out.getLength());
             BloomFilterSerializer.forVersion(false).deserialize(Util.DataInputStreamPlusImpl.wrap(in), memoryLimiter);
         }
+    }
+
+    @Test
+    public void testBloomFilterMetrics()
+    {
+        FilterFactory.FilterFactoryMetrics metrics = FilterFactory.FilterFactoryMetrics.create();
+        assertTrue(metrics instanceof FilterFactory.FilterFactoryCodahaleMetrics);
+        long prev = metrics.oomErrors();
+        metrics.incrementOOMError();
+        assertEquals(prev + 1, metrics.oomErrors());
+        USE_MICROMETER.setBoolean(true);
+        metrics = FilterFactory.FilterFactoryMetrics.create();
+        assertTrue(metrics instanceof FilterFactory.FilterFactoryMicormeterMetrics);
+        ((FilterFactory.FilterFactoryMicormeterMetrics) metrics).register(new SimpleMeterRegistry(), Tags.of("k", "v"));
+        metrics.incrementOOMError();
+        assertEquals(1, metrics.oomErrors());
     }
 
     @Test
