@@ -50,15 +50,9 @@ public class OffHeapBitSet implements IBitSet
         long wordCount = (((numBits - 1) >>> 6) + 1);
         if (wordCount > Integer.MAX_VALUE)
             throw new UnsupportedOperationException("Bloom filter size is > 16GB, reduce the bloom_filter_fp_chance");
-        try
-        {
-            long byteCount = wordCount * 8L;
-            bytes = allocate(byteCount, memoryLimiter);
-        }
-        catch (OutOfMemoryError e)
-        {
-            throw new RuntimeException("Out of native memory occured, You can avoid it by increasing the system ram space or by increasing bloom_filter_fp_chance.");
-        }
+
+        long byteCount = wordCount * 8L;
+        bytes = allocate(byteCount, memoryLimiter); // Can possibly throw OOM, but we handle it in the caller
         // flush/clear the existing memory.
         clear();
     }
