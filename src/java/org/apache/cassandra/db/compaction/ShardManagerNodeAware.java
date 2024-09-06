@@ -81,32 +81,35 @@ public class ShardManagerNodeAware implements ShardManager
     @Override
     public ShardTracker boundaries(int shardCount)
     {
+        // Because sstables do not wrap around, we need shardCount - 1 splits.
         var splitPointCount = shardCount - 1;
         // Clone token map to avoid race conditions in the event we need to getAllEndpoints
         var tokenMetadataClone = tokenMetadata.cloneOnlyTokenMap();
         var sortedTokens = tokenMetadataClone.sortedTokens();
         if (splitPointCount > sortedTokens.size())
         {
-            // Need to allocate tokens within node boundaries.
+            // Not enough tokens, allocate them.
             int additionalSplits = splitPointCount - sortedTokens.size();
             var newTokens = IsolatedTokenAllocator.allocateTokens(additionalSplits, rs);
             sortedTokens.addAll(newTokens);
             sortedTokens.sort(Token::compareTo);
         }
-        var splitPoints = findTokenAlignedSplitPoints(sortedTokens.toArray(TOKENS), shardCount);
-        return new NodeAlignedShardTracker(shardCount, splitPoints);
+        var splitPoints = findTokenAlignedSplitPoints(sortedTokens.toArray(TOKENS), splitPointCount);
+        return new NodeAlignedShardTracker(splitPoints);
     }
 
-    private Token[] findTokenAlignedSplitPoints(Token[] sortedTokens, int shardCount)
+    private Token[] findTokenAlignedSplitPoints(Token[] sortedTokens, int splitPointCount)
     {
-        // Short circuit on equal
-        if (sortedTokens.length == shardCount - 1)
+        assert splitPointCount <= sortedTokens.length : splitPointCount + " > " + sortedTokens.length;
+
+        // Short circuit on equal and on count 1.
+        if (sortedTokens.length == splitPointCount)
             return sortedTokens;
-        // TODO how do we handle 1 shard. Should it be the token min value or the first value in the sorted tokens array?
-        if (shardCount == 1)
-            return new Token[]{sortedTokens[0]};
-        var evenSplitPoints = computeUniformSplitPoints(tokenMetadata.partitioner, shardCount);
-        var nodeAlignedSplitPoints = new Token[shardCount - 1];
+        if (splitPointCount == 0)
+            return TOKENS;
+
+        var evenSplitPoints = computeUniformSplitPoints(tokenMetadata.partitioner, splitPointCount);
+        var nodeAlignedSplitPoints = new Token[splitPointCount];
 
         // UCS requires that the splitting points for a given density are also splitting points for
         // all higher densities, so we pick from among the existing tokens.
@@ -166,13 +169,13 @@ public class ShardManagerNodeAware implements ShardManager
     }
 
 
-    private Token[] computeUniformSplitPoints(IPartitioner partitioner, int shardCount)
+    private Token[] computeUniformSplitPoints(IPartitioner partitioner, int splitPointCount)
     {
-        var tokenCount = shardCount - 1;
-        var tokens = new Token[tokenCount];
-        for (int i = 0; i < tokenCount; i++)
+        var tokens = new Token[splitPointCount];
+        for (int i = 0; i < splitPointCount; i++)
         {
-            var ratio = ((double) i) / shardCount;
+            // Want the shard count here to get the right ratio.
+            var ratio = ((double) i) / (splitPointCount + 1);
             tokens[i] = partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), ratio);
         }
         return tokens;
@@ -180,27 +183,29 @@ public class ShardManagerNodeAware implements ShardManager
 
     private class NodeAlignedShardTracker implements ShardTracker
     {
-        private final int shardCount;
+        private final Token minToken;
         private final Token[] sortedTokens;
-        private int index = 0;
+        private int nextShardIndex = 0;
+        private Token currentEnd;
 
-        NodeAlignedShardTracker(int shardCount, Token[] sortedTokens)
+        NodeAlignedShardTracker(Token[] sortedTokens)
         {
-            this.shardCount = shardCount;
             this.sortedTokens = sortedTokens;
+            this.minToken = rs.getTokenMetadata().partitioner.getMinimumToken();
+            this.currentEnd = nextShardIndex < sortedTokens.length ? sortedTokens[nextShardIndex] : null;
         }
 
         @Override
         public Token shardStart()
         {
-            return sortedTokens[index];
+            return nextShardIndex == 0 ? minToken : sortedTokens[nextShardIndex - 1];
         }
 
         @Nullable
         @Override
         public Token shardEnd()
         {
-            return index + 1 < sortedTokens.length ? sortedTokens[index + 1] : null;
+            return nextShardIndex < sortedTokens.length ? sortedTokens[nextShardIndex] : null;
         }
 
         @Override
@@ -212,9 +217,9 @@ public class ShardManagerNodeAware implements ShardManager
         @Override
         public double shardSpanSize()
         {
-            var start = sortedTokens[index];
             // No weight applied because weighting is a local range property.
-            return start.size(end());
+            // TODO test wrap around.
+            return shardStart().size(end());
         }
 
         /**
@@ -223,19 +228,18 @@ public class ShardManagerNodeAware implements ShardManager
          */
         private Token end()
         {
-            var end = shardEnd();
-            return end != null ? end : sortedTokens[index].minValue();
+            Token end = shardEnd();
+            return end != null ? end : minToken;
         }
 
         @Override
         public boolean advanceTo(Token nextToken)
         {
-            var currentEnd = shardEnd();
             if (currentEnd == null || nextToken.compareTo(currentEnd) <= 0)
                 return false;
             do
             {
-                index++;
+                nextShardIndex++;
                 currentEnd = shardEnd();
                 if (currentEnd == null)
                     break;
@@ -246,7 +250,7 @@ public class ShardManagerNodeAware implements ShardManager
         @Override
         public int count()
         {
-            return shardCount;
+            return sortedTokens.length + 1;
         }
 
         @Override
@@ -273,7 +277,7 @@ public class ShardManagerNodeAware implements ShardManager
         @Override
         public int shardIndex()
         {
-            return index;
+            return nextShardIndex - 1;
         }
 
         @Override

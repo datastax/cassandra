@@ -27,7 +27,9 @@ import java.util.List;
 import java.util.Map;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterators;
 import com.google.common.collect.Maps;
+import org.apache.commons.lang3.NotImplementedException;
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
 
 import org.slf4j.Logger;
@@ -36,19 +38,22 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.locator.ReplicaCollection;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 
 /**
- * A utility class for allocating a set number of new tokens given an existing {@link TokenMetadata} object without
- * changing the source metadata.
+ * A utility class for allocating a set number of new tokens given an existing {@link AbstractReplicationStrategy}
+ * object without changing the source metadata.
  */
 public class IsolatedTokenAllocator
 {
     private static final Logger logger = LoggerFactory.getLogger(IsolatedTokenAllocator.class);
 
-    public static Collection<Token> allocateTokens(int additionalSplits, AbstractReplicationStrategy source)
+    public static List<Token> allocateTokens(int additionalSplits, AbstractReplicationStrategy source)
     {
         Preconditions.checkArgument(additionalSplits > 0, "additionalSplits must be greater than zero");
         Preconditions.checkNotNull(source);
@@ -60,15 +65,26 @@ public class IsolatedTokenAllocator
         var localDc = source.snitch.getLocalDatacenter();
         // Get a list to consistently iterate over the racks as we allocate nodes. Need to clone the map in
         // order to retreive the topology.
-        List<String> racks = source.getTokenMetadata().cloneOnlyTokenMap().getTopology().getDatacenterRacks().get(localDc).keys().elementSet().asList();
+        var localRacks = source.getTokenMetadata().cloneOnlyTokenMap().getTopology().getDatacenterRacks().get(localDc);
+        assert localRacks != null && !localRacks.isEmpty() : "No racks found for local datacenter " + localDc;
+        var racks = Iterators.cycle(localRacks.keySet());
         int nodeId = 0;
-        int tokensAdded = 0;
-        while (tokensAdded <= additionalSplits)
+        while (allocatedTokens.size() < additionalSplits)
         {
             // Allocate tokens for current node, distributing tokens round-robin among the racks.
-            var newTokens = allocator.allocateTokensForNode(nodeId, racks.get(nodeId % racks.size()));
-            tokensAdded += newTokens.size();
-            allocatedTokens.addAll(newTokens);
+            var newTokens = allocator.allocateTokensForNode(nodeId, racks.next());
+            int remainingTokensNeeded = additionalSplits - allocatedTokens.size();
+            if (newTokens.size() > remainingTokensNeeded)
+            {
+                var iter = newTokens.iterator();
+                for (int i = 0; i < remainingTokensNeeded; i++)
+                    allocatedTokens.add(iter.next());
+                return allocatedTokens;
+            }
+            else
+            {
+                allocatedTokens.addAll(newTokens);
+            }
             nodeId++;
         }
         return allocatedTokens;
@@ -85,14 +101,13 @@ public class IsolatedTokenAllocator
         private final TokenAllocation allocation;
         private final Map<String, SummaryStatistics> lastCheckPoint = Maps.newHashMap();
 
-        private QuietAllocator(AbstractReplicationStrategy source)
+        private QuietAllocator(AbstractReplicationStrategy rs)
         {
-            this.quietSnitch = new QuietSnitch();
-            this.quietTokenMetadata = source.getTokenMetadata().cloneWithNewSnitch(quietSnitch);
-            // TODO all or full replicas?
-            var rf = source.getReplicationFactor().allReplicas;
+            // Wrap the replication strategy's snitch with a quiet snitch
+            this.quietSnitch = new QuietSnitch(rs.snitch);
+            this.quietTokenMetadata = rs.getTokenMetadata().cloneWithNewSnitch(quietSnitch);
             var numTokens = DatabaseDescriptor.getNumTokens();
-            this.allocation = TokenAllocation.create(quietSnitch, quietTokenMetadata, rf, numTokens);
+            this.allocation = TokenAllocation.create(quietTokenMetadata, rs, quietSnitch, numTokens);
         }
 
         private Collection<Token> allocateTokensForNode(int nodeId, String rackId)
@@ -132,14 +147,57 @@ public class IsolatedTokenAllocator
         }
     }
 
-    private static class QuietSnitch extends SimpleSnitch
+    /**
+     * A
+     */
+    private static class QuietSnitch implements IEndpointSnitch
     {
-        final Map<InetAddressAndPort, String> nodeByRack = new HashMap<>();
+        private final Map<InetAddressAndPort, String> nodeByRack = new HashMap<>();
+        private final IEndpointSnitch fallbackSnitch;
+
+        QuietSnitch(IEndpointSnitch fallbackSnitch)
+        {
+            this.fallbackSnitch = fallbackSnitch;
+        }
 
         @Override
         public String getRack(InetAddressAndPort endpoint)
         {
-            return nodeByRack.get(endpoint);
+            String result = nodeByRack.get(endpoint);
+            return result != null ? result : fallbackSnitch.getRack(endpoint);
+        }
+
+        @Override
+        public String getDatacenter(InetAddressAndPort endpoint)
+        {
+            // For our mocked endpoints, we return the local datacenter, otherwise we return the real datacenter
+            return nodeByRack.containsKey(endpoint)
+                   ? fallbackSnitch.getLocalDatacenter()
+                   : fallbackSnitch.getDatacenter(endpoint);
+        }
+
+        @Override
+        public <C extends ReplicaCollection<? extends C>> C sortedByProximity(InetAddressAndPort address, C addresses)
+        {
+            throw new NotImplementedException("sortedByProximity not implemented in QuietSnitch");
+        }
+
+        @Override
+        public int compareEndpoints(InetAddressAndPort target, Replica r1, Replica r2)
+        {
+            throw new NotImplementedException("compareEndpoints not implemented in QuietSnitch");
+        }
+
+        @Override
+        public void gossiperStarting()
+        {
+            // This snitch doesn't gossip.
+        }
+
+        @Override
+        public boolean isWorthMergingForRangeQuery(ReplicaCollection<?> merged, ReplicaCollection<?> l1, ReplicaCollection<?> l2)
+        {
+            throw new NotImplementedException("isWorthMergingForRangeQuery not implemented in QuietSnitch");
         }
     }
 
