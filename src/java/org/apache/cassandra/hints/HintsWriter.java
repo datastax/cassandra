@@ -24,6 +24,7 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -33,6 +34,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
@@ -54,6 +56,9 @@ class HintsWriter implements AutoCloseable
     protected final CRC32 globalCRC;
 
     private volatile long lastSyncPosition = 0L;
+
+    @VisibleForTesting
+    AtomicLong totalHintsWritten = new AtomicLong();
 
     protected HintsWriter(File directory, HintsDescriptor descriptor, File file, FileChannel channel, int fd, CRC32 globalCRC)
     {
@@ -120,6 +125,8 @@ class HintsWriter implements AutoCloseable
         perform(file, Throwables.FileOpType.WRITE, this::doFsync, channel::close);
 
         writeChecksum();
+        descriptor.setStatistics(new HintsDescriptor.Statistics(totalHintsWritten.get()));
+        descriptor.writeStatsComponent(file.toPath().getParent());
 
         descriptor.setDataSize(file.length());
     }
@@ -172,6 +179,7 @@ class HintsWriter implements AutoCloseable
 
         private final long initialSize;
         private long bytesWritten;
+        private long hintsWritten;
 
         Session(ByteBuffer buffer, long initialSize)
         {
@@ -202,6 +210,7 @@ class HintsWriter implements AutoCloseable
         void append(ByteBuffer hint) throws IOException
         {
             bytesWritten += hint.remaining();
+            hintsWritten += 1;
 
             // if the hint to write won't fit in the aggregation buffer, flush it
             if (hint.remaining() > buffer.remaining())
@@ -259,9 +268,14 @@ class HintsWriter implements AutoCloseable
             }
 
             if (hintBuffer == buffer)
+            {
                 bytesWritten += totalSize;
+                hintsWritten += 1;
+            }
             else
+            {
                 append(hintBuffer.flip());
+            }
         }
 
         /**
@@ -274,6 +288,11 @@ class HintsWriter implements AutoCloseable
             maybeFsync();
             maybeSkipCache();
             descriptor.hintsFileSize(position());
+            long hintsCnt = totalHintsWritten.addAndGet(hintsWritten);
+            descriptor.setDataSize(channel.position());
+            descriptor.setStatistics(new HintsDescriptor.Statistics(hintsCnt));
+            descriptor.writeStatsComponent(file.toPath().getParent());
+            HintsServiceMetrics.hintsOnDisk.inc(hintsWritten);
         }
 
         private void flushBuffer() throws IOException
