@@ -164,6 +164,8 @@ public abstract class Controller
     public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
+    static final String IS_NODE_AWARE_OPTION = "is_node_aware";
+    public static final boolean DEFAULT_IS_NODE_AWARE = Boolean.parseBoolean(System.getProperty(PREFIX + IS_NODE_AWARE_OPTION));
 
     /**
      * Provision for growth of the constructed SSTables as the size of the data grows. By default the target SSTable
@@ -297,6 +299,7 @@ public abstract class Controller
     protected String tableName;
 
     protected final int baseShardCount;
+    private final boolean isNodeAware;
 
     protected final long targetSSTableSize;
     protected final double sstableGrowthModifier;
@@ -323,6 +326,7 @@ public abstract class Controller
                long expiredSSTableCheckFrequency,
                boolean ignoreOverlapsInExpirationCheck,
                int baseShardCount,
+               boolean isNodeAware,
                long targetSStableSize,
                double sstableGrowthModifier,
                int reservedThreads,
@@ -338,6 +342,7 @@ public abstract class Controller
         this.currentFlushSize = currentFlushSize;
         this.expiredSSTableCheckFrequency = TimeUnit.MILLISECONDS.convert(expiredSSTableCheckFrequency, TimeUnit.SECONDS);
         this.baseShardCount = baseShardCount;
+        this.isNodeAware = isNodeAware;
         this.targetSSTableSize = targetSStableSize;
         this.overlapInclusionMethod = overlapInclusionMethod;
         this.sstableGrowthModifier = sstableGrowthModifier;
@@ -543,6 +548,11 @@ public abstract class Controller
             }
             return shards;
         }
+    }
+
+    public boolean isNodeAware()
+    {
+        return isNodeAware;
     }
 
     /**
@@ -871,6 +881,10 @@ public abstract class Controller
             baseShardCount = DEFAULT_BASE_SHARD_COUNT;
         }
 
+        boolean isNodeAware = options.containsKey(IS_NODE_AWARE_OPTION)
+                              ? Boolean.parseBoolean(options.get(IS_NODE_AWARE_OPTION))
+                              : DEFAULT_IS_NODE_AWARE;
+
         long targetSStableSize = options.containsKey(TARGET_SSTABLE_SIZE_OPTION)
                                  ? FBUtilities.parseHumanReadableBytes(options.get(TARGET_SSTABLE_SIZE_OPTION))
                                  : DEFAULT_TARGET_SSTABLE_SIZE;
@@ -942,6 +956,7 @@ public abstract class Controller
                                                 expiredSSTableCheckFrequency,
                                                 ignoreOverlapsInExpirationCheck,
                                                 baseShardCount,
+                                                isNodeAware,
                                                 targetSStableSize,
                                                 sstableGrowthModifier,
                                                 reservedThreadsPerLevel,
@@ -960,6 +975,7 @@ public abstract class Controller
                                               expiredSSTableCheckFrequency,
                                               ignoreOverlapsInExpirationCheck,
                                               baseShardCount,
+                                              isNodeAware,
                                               targetSStableSize,
                                               sstableGrowthModifier,
                                               reservedThreadsPerLevel,
@@ -1011,15 +1027,8 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(ADAPTIVE_OPTION);
-        if (s != null)
-        {
-            if (!s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
-            {
-                throw new ConfigurationException(String.format(booleanParseErr, ADAPTIVE_OPTION, s));
-            }
-            adaptive = Boolean.parseBoolean(s);
-        }
+        adaptive = validateBoolean(options, ADAPTIVE_OPTION, DEFAULT_ADAPTIVE);
+        validateBoolean(options, IS_NODE_AWARE_OPTION, DEFAULT_IS_NODE_AWARE);
 
         minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, DEFAULT_MIN_SSTABLE_SIZE);
         validateSizeWithAlt(options, FLUSH_SIZE_OVERRIDE_OPTION, FLUSH_SIZE_OVERRIDE_OPTION_MB, 20);
@@ -1082,12 +1091,7 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION);
-        if (s != null && !s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
-        {
-            throw new ConfigurationException(String.format(booleanParseErr,
-                                                           ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION, s));
-        }
+        validateBoolean(options, ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION, false);
 
         s = options.remove(BASE_SHARD_COUNT_OPTION);
         if (s != null)
@@ -1221,6 +1225,18 @@ public abstract class Controller
             return specialValue;
         else
             return getSizeWithAlt(options, optionHumanReadable, optionAlt, altShift, defaultValue);
+    }
+
+    private static boolean validateBoolean(Map<String, String> options, String option, boolean defaultValue) throws ConfigurationException
+    {
+        var s = options.remove(option);
+        if (s != null)
+        {
+            if (!s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
+                throw new ConfigurationException(String.format("%s should either be 'true' or 'false', not %s", option, s));
+            return Boolean.parseBoolean(s);
+        }
+        return defaultValue;
     }
 
     private static void validateSizeWithAlt(Map<String, String> options, String optionHumanReadable, String optionAlt, int altShift)

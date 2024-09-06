@@ -41,14 +41,14 @@ public interface ShardManager
      */
     static final double MINIMUM_TOKEN_COVERAGE = Math.scalb(1.0, -48);
 
-    static ShardManager create(DiskBoundaries diskBoundaries, AbstractReplicationStrategy rs)
+    static ShardManager create(DiskBoundaries diskBoundaries, AbstractReplicationStrategy rs, boolean isNodeAware)
     {
         List<Token> diskPositions = diskBoundaries.getPositions();
 
-        if (rs.isNodeAware())
+        if (isNodeAware)
         {
             if (diskPositions != null && diskPositions.size() > 1)
-                throw new IllegalArgumentException("Cannot use node_aware strategy with disk boundaries");
+                throw new IllegalArgumentException("Cannot use node aware strategy with disk boundaries");
             return new ShardManagerNodeAware(rs);
         }
 
