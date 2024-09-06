@@ -324,7 +324,7 @@ public class CompactionGraph implements Closeable, Accountable
             long postingsOffset = postingsOutput.getFilePointer();
             var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
             long postingsLength;
-            try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createFileHandle();
+            try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createIndexBuildTimeFileHandle();
                  var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
             {
                 var postingsFuture = es.submit(() -> {
