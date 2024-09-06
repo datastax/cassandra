@@ -57,6 +57,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_TEST_LAST_VALID_SEGMENTS;
 import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 
 /**
@@ -80,7 +81,7 @@ public abstract class SegmentBuilder
 
     // Served as safe net in case memory limit is not triggered or when merger merges small segments..
     public static final long LAST_VALID_SEGMENT_ROW_ID = ((long)Integer.MAX_VALUE / 2) - 1L;
-    private static long testLastValidSegmentRowId = -1;
+    private static long testLastValidSegmentRowId = SAI_TEST_LAST_VALID_SEGMENTS.getLong();
 
     /** The number of column indexes being built globally. (Starts at one to avoid divide by zero.) */
     public static final AtomicLong ACTIVE_BUILDER_COUNT = new AtomicLong(1);
