@@ -18,7 +18,14 @@
 package org.apache.cassandra.hints;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -36,6 +43,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.SyncUtil;
@@ -79,6 +87,9 @@ final class HintsStore
 
         //noinspection resource
         lastUsedTimestamp = descriptors.stream().mapToLong(d -> d.timestamp).max().orElse(0L);
+
+        long hintsNum = descriptors.stream().mapToLong(d -> d.statistics().totalCount()).sum();
+        HintsServiceMetrics.hintsOnDisk.inc(hintsNum);
     }
 
     static HintsStore create(UUID hostId, File hintsDirectory, ImmutableMap<String, Object> writerParams, List<HintsDescriptor> descriptors)
@@ -176,6 +187,7 @@ final class HintsStore
         {
             cleanUp(descriptor);
             delete(descriptor);
+            HintsServiceMetrics.corruptedHintsOnDisk.dec(descriptor.statistics().totalCount());
         }
     }
 
@@ -228,7 +240,10 @@ final class HintsStore
     {
         File hintsFile = descriptor.file(hintsDirectory);
         if (hintsFile.tryDelete())
+        {
+            HintsServiceMetrics.hintsOnDisk.dec(descriptor.statistics().totalCount());
             logger.info("Deleted hint file {}", descriptor.fileName());
+        }
         else if (hintsFile.exists())
             logger.error("Failed to delete hint file {}", descriptor.fileName());
         else
@@ -236,6 +251,8 @@ final class HintsStore
 
         //noinspection ResultOfMethodCallIgnored
         descriptor.checksumFile(hintsDirectory).tryDelete();
+        //noinspection ResultOfMethodCallIgnored
+        new File(hintsDirectory, descriptor.statisticsFileName()).tryDelete();
     }
 
     boolean hasFiles()
@@ -279,6 +296,16 @@ final class HintsStore
         return total;
     }
 
+    public int getTotalFilesNum()
+    {
+        return dispatchDequeue.size() + corruptedFiles.size();
+    }
+
+    public int getCorruptedFilesNum()
+    {
+        return corruptedFiles.size();
+    }
+
     void cleanUp(HintsDescriptor descriptor)
     {
         dispatchPositions.remove(descriptor);
@@ -288,6 +315,7 @@ final class HintsStore
     void markCorrupted(HintsDescriptor descriptor)
     {
         corruptedFiles.add(descriptor);
+        HintsServiceMetrics.corruptedHintsOnDisk.inc(descriptor.statistics().totalCount());
     }
 
     /*
