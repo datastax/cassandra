@@ -205,7 +205,7 @@ public class CompactionGraph implements Closeable, Accountable
                       .withMapper(mapper);
         if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
         {
-            writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getMaximumNodeConnections(), compressor));
+            writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getAnnMaxDegree(), compressor));
         }
         else
         {
