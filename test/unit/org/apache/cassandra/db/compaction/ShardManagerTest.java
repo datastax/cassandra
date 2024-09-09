@@ -317,8 +317,6 @@ public class ShardManagerTest
         var rs = Mockito.mock(AbstractReplicationStrategy.class);
 
         // todo use OfflineTokenAllocator to make this test work for the new class
-        when(rs.isNodeAware()).thenReturn(false);
-
         final ShardTracker shardTracker = ShardManager.create(db, rs, false)
                                                       .boundaries(numShards);
         IntArrayList list = new IntArrayList();
@@ -353,9 +351,6 @@ public class ShardManagerTest
             DiskBoundaries db = Mockito.mock(DiskBoundaries.class);
             when(db.getLocalRanges()).thenReturn(sortedRanges);
             when(db.getPositions()).thenReturn(diskBoundaries);
-
-            var rs = Mockito.mock(AbstractReplicationStrategy.class);
-            when(rs.isNodeAware()).thenReturn(false);
 
             ShardManager shardManager = ShardManager.create(db, rs, false);
             for (int numShards = 1; numShards <= 3; ++numShards)
