@@ -203,8 +203,8 @@ public class V2VectorPostingsWriter<T>
         return Pair.create(ordinalMap, maxRow);
     }
 
-    public static <T> V5VectorPostingsWriter.RemappedPostings remapPostings(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
-                                                                            boolean containsDeletes)
+    public static <T> V5VectorPostingsWriter.RemappedPostings remapForMemtable(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
+                                                                               boolean containsDeletes)
     {
         var p = buildOrdinalMap(postingsMap);
         int maxNewOrdinal = postingsMap.size() - 1; // no in-graph deletes in v2

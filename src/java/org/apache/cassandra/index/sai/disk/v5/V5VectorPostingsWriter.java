@@ -106,7 +106,7 @@ public class V5VectorPostingsWriter<T>
         if (structure == Structure.ONE_TO_ONE)
             remappedPostings = new RemappedPostings(Structure.ONE_TO_ONE, graphSize - 1, graphSize - 1, null, null);
         else
-            remappedPostings = remapPostings(postingsMap);
+            remappedPostings = remapForMemtable(postingsMap);
     }
 
     public long writePostings(SequentialWriter writer,
@@ -365,7 +365,7 @@ public class V5VectorPostingsWriter<T>
     /**
      * @see RemappedPostings
      */
-    public static <T> RemappedPostings remapPostings(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
+    public static <T> RemappedPostings remapForMemtable(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
     {
         assert V5OnDiskFormat.writeV5VectorPostings();
 
