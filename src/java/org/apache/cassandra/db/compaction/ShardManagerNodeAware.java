@@ -48,6 +48,7 @@ import org.apache.cassandra.locator.TokenMetadata;
     // the allocator's logic or do we need both?
 public class ShardManagerNodeAware implements ShardManager
 {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ShardManagerNodeAware.class);
     public static final Token[] TOKENS = new Token[0];
     private final AbstractReplicationStrategy rs;
     private final TokenMetadata tokenMetadata;
@@ -81,6 +82,7 @@ public class ShardManagerNodeAware implements ShardManager
     @Override
     public ShardTracker boundaries(int shardCount)
     {
+        logger.debug("Creating shard boundaries for {} shards", shardCount);
         // Because sstables do not wrap around, we need shardCount - 1 splits.
         var splitPointCount = shardCount - 1;
         // Clone token map to avoid race conditions in the event we need to getAllEndpoints
