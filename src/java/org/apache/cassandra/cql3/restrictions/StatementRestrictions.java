@@ -35,7 +35,6 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.IntegerType;
-import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
@@ -152,7 +151,8 @@ public class StatementRestrictions
     private StatementRestrictions(TableMetadata table, boolean allowFiltering)
     {
         this.table = table;
-        this.partitionKeyRestrictions = PartitionKeySingleRestrictionSet.builder(table.partitionKeyAsClusteringComparator()).build();
+        this.partitionKeyRestrictions = PartitionKeySingleRestrictionSet.builder(table.partitionKeyAsClusteringComparator())
+                                                                        .build(IndexRegistry.obtain(table));
         this.clusteringColumnsRestrictions = ClusteringColumnRestrictions.builder(table, allowFiltering).build();
         this.nonPrimaryKeyRestrictions = RestrictionSet.builder().build();
         this.notNullColumns = ImmutableSet.of();
@@ -440,12 +440,12 @@ public class StatementRestrictions
                     }
                     else
                     {
-                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction());
+                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction(), indexRegistry);
                     }
                 }
             }
 
-            PartitionKeyRestrictions partitionKeyRestrictions = partitionKeyRestrictionSet.build();
+            PartitionKeyRestrictions partitionKeyRestrictions = partitionKeyRestrictionSet.build(indexRegistry);
             ClusteringColumnRestrictions clusteringColumnsRestrictions = clusteringColumnsRestrictionSet.build();
             RestrictionSet nonPrimaryKeyRestrictions = nonPrimaryKeyRestrictionSet.build();
             ImmutableSet<ColumnMetadata> notNullColumns = notNullColumnsBuilder.build();
@@ -696,7 +696,7 @@ public class StatementRestrictions
                     throw new InvalidRequestException(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE,
                                                                     restriction.getFirstColumn()));
                 }
-                receiver.addRestriction(restriction, false);
+                receiver.addRestriction(restriction, false, indexRegistry);
             }
         }
 

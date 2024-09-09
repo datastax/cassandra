@@ -384,7 +384,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // Remove the ORDER BY filter expression from the filter tree, as it is added below.
         var filterElement = filterOperation().filter(e -> !Orderer.isFilterExpressionOrderer(e));
-        Plan.KeysIteration keysIterationPlan = Operation.Node.buildTree(filterElement)
+        Plan.KeysIteration keysIterationPlan = Operation.Node.buildTree(this, filterElement)
                                                              .analyzeTree(this)
                                                              .plan(this);
 
@@ -440,7 +440,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     public FilterTree buildFilter()
     {
-        return Operation.Node.buildTree(filterOperation()).analyzeTree(this).filterTree();
+        return Operation.Node.buildTree(this, filterOperation()).analyzeTree(this).filterTree();
     }
 
     /**

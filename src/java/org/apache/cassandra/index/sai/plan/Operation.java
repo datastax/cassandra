@@ -34,6 +34,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
@@ -102,9 +103,11 @@ public class Operation
                 switch (e.operator())
                 {
                     case EQ:
-                        // EQ operator will always be a multiple expression because it is being used by
-                        // map entries
+                        // EQ operator will always be a multiple expression because it is being used by map entries
                         isMultiExpression = indexContext.isNonFrozenCollection();
+
+                        // EQ wil behave like ANALYZER_MATCHES for analyzed columns if the analyzer supports EQ queries
+                        isMultiExpression |= indexContext.isAnalyzed() && analyzerFactory.supportsEquals();
                         break;
                     case CONTAINS:
                     case CONTAINS_KEY:
@@ -171,20 +174,24 @@ public class Operation
                     else if (e instanceof RowFilter.MapComparisonExpression)
                     {
                         var map = (RowFilter.MapComparisonExpression) e;
-                        switch (map.operator()) {
+                        var operator = map.operator();
+                        switch (operator) {
                             case EQ:
-                                range.add(Operator.EQ, map.getIndexValue().duplicate());
+                            case NEQ:
+                                range.add(operator, map.getIndexValue().duplicate());
                                 break;
                             case GT:
                             case GTE:
-                                range.add(map.operator(), map.getLowerBound().duplicate());
+                                range.add(operator, map.getLowerBound().duplicate());
                                 range.add(Operator.LTE, map.getUpperBound().duplicate());
                                 break;
                             case LT:
                             case LTE:
                                 range.add(Operator.GTE, map.getLowerBound().duplicate());
-                                range.add(map.operator(), map.getUpperBound().duplicate());
+                                range.add(operator, map.getUpperBound().duplicate());
                                 break;
+                            default:
+                                throw new InvalidRequestException("Unexpected operator: " + operator);
                         }
                     }
                     else
@@ -274,22 +281,22 @@ public class Operation
 
         abstract Plan.KeysIteration plan(QueryController controller);
 
-        static Node buildTree(List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
+        static Node buildTree(QueryController controller, List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
             OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
             for (RowFilter.Expression expression : expressions)
-                node.add(buildExpression(expression, isDisjunction));
+                node.add(buildExpression(controller, expression, isDisjunction));
             for (RowFilter.FilterElement child : children)
-                node.add(buildTree(child));
+                node.add(buildTree(controller, child));
             return node;
         }
 
-        static Node buildTree(RowFilter.FilterElement filterOperation)
+        static Node buildTree(QueryController controller, RowFilter.FilterElement filterOperation)
         {
-            return buildTree(filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
+            return buildTree(controller, filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
         }
 
-        static Node buildExpression(RowFilter.Expression expression, boolean isDisjunction)
+        static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
             if (expression.operator() == Operator.IN)
             {
@@ -312,8 +319,12 @@ public class Operation
                     return new EmptyNode();
                 return node;
             }
-            else if (expression.operator() == Operator.ANALYZER_MATCHES && isDisjunction)
+            else if (isDisjunction && (expression.operator() == Operator.ANALYZER_MATCHES ||
+                                       expression.operator() == Operator.EQ && controller.getContext(expression).isAnalyzed()))
             {
+                // In case of having a tokenizing query_analyzer (such as NGram) with OR, we need to split the
+                // expression into multiple expressions and intersect them.
+                // The additional node in case of no tokenization will be taken care of in Plan.Factory#intersection()
                 OperatorNode node = new AndNode();
                 node.add(new ExpressionNode(expression));
                 return node;

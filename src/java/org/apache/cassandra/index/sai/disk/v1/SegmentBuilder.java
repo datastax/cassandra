@@ -82,7 +82,7 @@ public abstract class SegmentBuilder
 
     // Served as safe net in case memory limit is not triggered or when merger merges small segments..
     public static final long LAST_VALID_SEGMENT_ROW_ID = ((long)Integer.MAX_VALUE / 2) - 1L;
-    private static long testLastValidSegmentRowId = -1;
+    private static long testLastValidSegmentRowId = Long.parseLong(System.getProperty("cassandra.sai.test_last_valid_segments", "-1"));
 
     /** The number of column indexes being built globally. (Starts at one to avoid divide by zero.) */
     public static final AtomicLong ACTIVE_BUILDER_COUNT = new AtomicLong(1);
