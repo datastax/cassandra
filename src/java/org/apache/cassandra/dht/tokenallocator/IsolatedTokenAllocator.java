@@ -67,6 +67,10 @@ public class IsolatedTokenAllocator
         // order to retreive the topology.
         var localRacks = source.getTokenMetadata().cloneOnlyTokenMap().getTopology().getDatacenterRacks().get(localDc);
         assert localRacks != null && !localRacks.isEmpty() : "No racks found for local datacenter " + localDc;
+        // TODO how concerned should we be about the order of the racks here? Seems like we need to do it the
+        // same way each time. Issues could arise where we allocate a token for one rack, but that isn't the rack
+        // that bootstraps a new node next. Perhaps this is fine as long as we always add 1 node to each rack when we
+        // scale, which we probably do.
         var racks = Iterators.cycle(localRacks.keySet());
         int nodeId = 0;
         while (allocatedTokens.size() < additionalSplits)

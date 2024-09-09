@@ -81,7 +81,7 @@ public class IsolatedTokenAllocatorTest
     // Test confirms that the IsolatedTokenAllocator generates token splits in the same way that we generate new
     // tokens for added nodes.
     @Test
-    public void testTokenAllocationForMultipleNodes() throws UnknownHostException
+    public void testTokenAllocationForMultipleNodesOneRack() throws UnknownHostException
     {
         DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
         DatabaseDescriptor.setEndpointSnitch(new RackInferringSnitch());
@@ -110,6 +110,38 @@ public class IsolatedTokenAllocatorTest
         assertEquals(24, nextTokens.size());
         var tokens345 = generateFakeEndpoints(tokenMetadata, networkTopology, 3, 5, 8, dc, "0");
         assertTrue(tokens345.containsAll(nextTokens));
+    }
+
+    // Test confirms that the IsolatedTokenAllocator generates token splits in the same way that we generate new
+    // tokens for added nodes.
+    @Test
+    public void testTokenAllocationForMultiNodeMultiRack() throws UnknownHostException
+    {
+        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
+        DatabaseDescriptor.setEndpointSnitch(new RackInferringSnitch());
+        var config = new Config();
+        config.num_tokens = 8;
+        DatabaseDescriptor.setConfig(config);
+        var tokenMetadata = new TokenMetadata();
+        var snitch = DatabaseDescriptor.getEndpointSnitch();
+        var dc = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
+        var rf = Map.of(dc, "3");
+        var networkTopology = new NetworkTopologyStrategy("0", tokenMetadata, snitch, rf);
+
+
+        var existingTokens = new ArrayList<>();
+        // Set up 1 node in each of 3 racks
+        for (int i = 0; i < 3; i++)
+           existingTokens.addAll(generateFakeEndpoints(tokenMetadata, networkTopology, 1, 1, 8, dc, Integer.toString(i)));
+
+        // Generate the next set of tokens
+        var nextTokens = IsolatedTokenAllocator.allocateTokens(16, networkTopology);
+        // The nextTokens should not include any tokens from existingTokens
+        assertTrue(nextTokens.stream().noneMatch(existingTokens::contains));
+        var newlyAddedTokens = new ArrayList<>();
+        for (int i = 0; i < 3; i++)
+            newlyAddedTokens.addAll(generateFakeEndpoints(tokenMetadata, networkTopology, 2, 3, 8, dc, Integer.toString(i)));
+        assertTrue(newlyAddedTokens.containsAll(nextTokens));
     }
 
     // Generates endpoints and adds them to the tmd and the rs.
