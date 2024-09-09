@@ -213,11 +213,6 @@ public class V2VectorPostingsWriter<T>
 
         var ordinalMap = p.left;
         var maxRow = p.right;
-        return new V5VectorPostingsWriter.RemappedPostings(V5VectorPostingsWriter.Structure.ONE_TO_ONE,
-                                                           maxNewOrdinal,
-                                                           maxRow,
-                                                           ordinalMap,
-                                                           new Int2IntHashMap(Integer.MIN_VALUE),
-                                                           new V5VectorPostingsWriter.BiMapMapper(maxNewOrdinal, ordinalMap));
+        return new V5VectorPostingsWriter.RemappedPostings(V5VectorPostingsWriter.Structure.ONE_TO_ONE, maxNewOrdinal, maxRow, ordinalMap, new Int2IntHashMap(Integer.MIN_VALUE));
     }
 }

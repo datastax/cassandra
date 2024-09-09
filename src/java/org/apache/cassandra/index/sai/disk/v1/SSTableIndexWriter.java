@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -346,9 +347,14 @@ public class SSTableIndexWriter implements PerIndexWriter
                 pqi = maybeReadPqFromLastSegment();
 
             if (pqi == null || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            {
                 builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+            }
             else
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, limiter);
+            {
+                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
+            }
         }
         else if (indexContext.isLiteral())
         {
@@ -365,6 +371,23 @@ public class SSTableIndexWriter implements PerIndexWriter
                      FBUtilities.prettyPrintMemory(globalBytesUsed));
 
         return builder;
+    }
+
+    private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
+    {
+        int segmentsChecked = 0;
+        for (SSTableIndex index : indexContext.getView().getIndexes())
+        {
+            for (Segment segment : index.getSegments())
+            {
+                segmentsChecked++;
+                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                var structure = searcher.getPostingsStructure();
+                if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
+                    return false;
+            }
+        }
+        return segmentsChecked != 0;
     }
 
     private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException
