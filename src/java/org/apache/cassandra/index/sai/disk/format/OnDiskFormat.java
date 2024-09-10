@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Set;
@@ -143,9 +144,9 @@ public interface OnDiskFormat
      * @param component The component to validate
      * @param checksum {@code true} if the checksum should be tested as part of the validation
      *
-     * @return true if the component is valid
+     * @throws UncheckedIOException if there is a problem validating any on-disk component
      */
-    boolean validateIndexComponent(IndexComponent.ForRead component, boolean checksum);
+    void validateIndexComponent(IndexComponent.ForRead component, boolean checksum);
 
     /**
      * Returns the set of {@link IndexComponentType} for the per-SSTable part of an index.
