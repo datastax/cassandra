@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -1393,8 +1394,13 @@ public abstract class CQLSSTableWriterTest
 
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(Descriptor.fromFile(dataFiles[0]));
 
-        assertTrue(indexDescriptor.perIndexComponents(createIndexContext("idx1", UTF8Type.instance)).isComplete());
-        assertTrue(indexDescriptor.perIndexComponents(createIndexContext("idx2", UTF8Type.instance)).isComplete());
+        IndexContext idx1 = createIndexContext("idx1", UTF8Type.instance);
+        IndexContext idx2 = createIndexContext("idx2", UTF8Type.instance);
+        HashSet<IndexContext> indices = new HashSet<>(Arrays.asList(idx1, idx2));
+        indexDescriptor.reload(indices);
+
+        assertTrue(indexDescriptor.perIndexComponents(idx1).isComplete());
+        assertTrue(indexDescriptor.perIndexComponents(idx2).isComplete());
 
         if (PathUtils.isDirectory(dataDir.toPath()))
             PathUtils.forEach(dataDir.toPath(), PathUtils::deleteRecursive);
@@ -1435,8 +1441,8 @@ public abstract class CQLSSTableWriterTest
         // no indexes built due to withBuildIndexes set to false
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(Descriptor.fromFile(dataFiles[0]));
 
-        assertTrue(indexDescriptor.perIndexComponents(createIndexContext("idx1", UTF8Type.instance)).isComplete());
-        assertTrue(indexDescriptor.perIndexComponents(createIndexContext("idx2", UTF8Type.instance)).isComplete());
+        assertFalse(indexDescriptor.perIndexComponents(createIndexContext("idx1", UTF8Type.instance)).isComplete());
+        assertFalse(indexDescriptor.perIndexComponents(createIndexContext("idx2", UTF8Type.instance)).isComplete());
     }
 
     public IndexContext createIndexContext(String name, AbstractType<?> validator)
