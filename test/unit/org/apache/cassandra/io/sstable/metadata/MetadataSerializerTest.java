@@ -87,8 +87,7 @@ public class MetadataSerializerTest
             for (MetadataType type : MetadataType.values())
             {
                 if ((type != MetadataType.STATS) || latestVersion.hasImprovedMinMax())
-                    assertEquals(originalMetadata.get(type), deserialized.get(type));
-
+                    assertEquals(type.name(), originalMetadata.get(type), deserialized.get(type));
             }
         }
     }
@@ -145,15 +144,16 @@ public class MetadataSerializerTest
                                          .build();
         MetadataCollector collector = new MetadataCollector(cfm.comparator)
                                       .commitLogIntervals(new IntervalSet<>(cllb, club));
-        if (DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion().hasTokenSpaceCoverage())
+        Version version = DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion();
+        if (version.hasTokenSpaceCoverage())
             collector.tokenSpaceCoverage(0.7);
 
         String partitioner = RandomPartitioner.class.getCanonicalName();
         double bfFpChance = 0.1;
         collector.updateClusteringValues(Clustering.make(UTF8Type.instance.decompose("abc"), Int32Type.instance.decompose(123)));
         collector.updateClusteringValues(Clustering.make(UTF8Type.instance.decompose("cba"), withNulls ? null : Int32Type.instance.decompose(234)));
-        ByteBuffer first = AsciiType.instance.decompose("a");
-        ByteBuffer last = AsciiType.instance.decompose("b");
+        ByteBuffer first = version.hasKeyRange() ? AsciiType.instance.decompose("a") : null;
+        ByteBuffer last = version.hasKeyRange() ? AsciiType.instance.decompose("b") : null;
         return collector.finalizeMetadata(partitioner, bfFpChance, 0, null, false, SerializationHeader.make(cfm, Collections.emptyList()), first, last);
     }
 
