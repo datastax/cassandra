@@ -1935,8 +1935,9 @@ public abstract class CQLTester
     }
 
     /**
-     * Runs the given function before and after a flush of sstables.  This is useful for checking that behavior is
-     * the same whether data is in memtables or sstables.
+     * Runs the given function before a flush, after a flush, and finally after a compaction of the table. This is
+     * useful for checking that behavior is the same whether data is in memtables, memtable-flushed-sstbales,
+     * compaction-built-sstables.
      * @param runnable
      * @throws Throwable
      */
