@@ -1299,4 +1299,37 @@ public class VectorTypeTest extends VectorTester
             QueryController.QUERY_OPT_LEVEL = 1;
         }
     }
+
+    @Test
+    public void testHybridQueryWithMissingVectorValuesForMaxSegmentRow() throws Throwable
+    {
+        // Want to test the search then order path
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        // We use a clustered primary key to simplify the mental model for this test.
+        // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
+        // in a peer index for an sstable's search index but not its vector index.
+        createTable("CREATE TABLE %s (k int, i int, v vector<float, 2>, c int,  PRIMARY KEY(k, i))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+        // We'll manually control compaction.
+        disableCompaction();
+
+        // Insert a complete row. We need at least one row with a vector and an entry for column c to ensure that
+        // the query doesn't skip the query portion where we map from Primary Key back to sstable row id.
+        execute("INSERT INTO %s (k, i, v, c) VALUES (0, ?, ?, ?)", 1, vector(1, 1), 1);
+
+        // Insert the first and last row in the table and leave of the vector
+        execute("INSERT INTO %s (k, i, c) VALUES (0, 0, 0)");
+        execute("INSERT INTO %s (k, i, c) VALUES (0, 2, 2)");
+
+        // The bug was specifically for sstables after compaction, but it's trivial to cover the before flush and before
+        // compaction cases here, so we do.
+        runThenFlushThenCompact(() -> {
+            // There is only one row that satisfies the WHERE clause and has a vector for each of these queries.
+            assertRows(execute("SELECT i FROM %s WHERE c <= 1 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
+            assertRows(execute("SELECT i FROM %s WHERE c >= 1 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
+        });
+    }
 }
