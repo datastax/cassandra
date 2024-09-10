@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteOrder;
 import java.util.Collection;
@@ -411,7 +412,7 @@ public class IndexDescriptor
         }
 
         @Override
-        public boolean validateComponents(SSTable sstable, Tracker tracker, boolean validateChecksum)
+        public boolean validateComponents(SSTable sstable, Tracker tracker, boolean validateChecksum, boolean rethrow)
         {
             if (isEmpty())
                 return true;
@@ -425,23 +426,35 @@ public class IndexDescriptor
                     logger.warn(logMessage("Missing index component {} from SSTable {}"), expected, descriptor);
                     isValid = false;
                 }
-                else if (!version().onDiskFormat().validateIndexComponent(component, validateChecksum))
+                else
                 {
-                    logger.warn(logMessage("Invalid/corrupted component {} for SSTable {}"), expected, descriptor);
-                    if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+                    try
                     {
-                        // We delete the corrupted file. Yes, this may break ongoing reads to that component, but
-                        // if something is wrong with the file, we're rather fail loudly from that point on than
-                        // risking reading and returning corrupted data.
-                        deleteComponentFile(component.file());
-                        // Note that invalidation will also delete the completion marker
+                        version().onDiskFormat().validateIndexComponent(component, validateChecksum);
                     }
-                    else
+                    catch (UncheckedIOException e)
                     {
-                        logger.debug("Leaving believed-corrupt component {} of SSTable {} in place because {} is false", expected, descriptor, CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getKey());
-                    }
+                        logger.warn(logMessage("Invalid/corrupted component {} for SSTable {}"), expected, descriptor);
 
-                    isValid = false;
+                        if (rethrow)
+                            throw e;
+
+                        if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+                        {
+                            // We delete the corrupted file. Yes, this may break ongoing reads to that component, but
+                            // if something is wrong with the file, we're rather fail loudly from that point on than
+                            // risking reading and returning corrupted data.
+                            deleteComponentFile(component.file());
+                            // Note that invalidation will also delete the completion marker
+                        }
+                        else
+                        {
+                            logger.debug("Leaving believed-corrupt component {} of SSTable {} in place because {} is false",
+                                         expected, descriptor, CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getKey());
+                        }
+
+                        isValid = false;
+                    }
                 }
             }
             if (!isValid)
