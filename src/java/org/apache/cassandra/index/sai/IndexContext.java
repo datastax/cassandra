@@ -850,7 +850,7 @@ public class IndexContext
             {
                 if (validate)
                 {
-                    if (!perIndexComponents.validateComponents(context.sstable, owner.getTracker(), false))
+                    if (!perIndexComponents.validateComponents(context.sstable, owner.getTracker(), true, false))
                     {
                         // Note that a precise warning is already logged by the validation if there is an issue.
                         invalid.add(context);

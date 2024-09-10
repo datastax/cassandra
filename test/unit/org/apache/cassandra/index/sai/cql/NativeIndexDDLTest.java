@@ -973,7 +973,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void verifyRebuildCorruptedFiles() throws Throwable
+    public void verifyRebuildCorruptedFiles() throws Throwable // TODO CNDB-10210: fix this test
     {
         // prepare schema and data
         createTable(CREATE_TABLE_TEMPLATE);
@@ -1177,7 +1177,7 @@ public class NativeIndexDDLTest extends SAITester
         try
         {
             // Create a new index, which will actuate a build compaction and fail, but leave the node running...
-            IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
+            IndexContext numericIndexContext = createIndexContext(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
             // two index builders running in different compaction threads because of parallelised index initial build
             waitForAssert(() -> assertEquals(2, INDEX_BUILD_COUNTER.get()));
             waitForCompactionsFinished();
@@ -1212,7 +1212,7 @@ public class NativeIndexDDLTest extends SAITester
         try
         {
             // Create a new index, which will actuate a build compaction and fail, but leave the node running...
-            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
             // two index builders running in different compaction threads because of parallelised index initial build
             waitForAssert(() -> assertEquals(2, INDEX_BUILD_COUNTER.get()));
             waitForAssert(() -> assertEquals(0, getCompactionTasks()));
@@ -1405,7 +1405,7 @@ public class NativeIndexDDLTest extends SAITester
 
         Injections.inject(delayIndexBuilderCompletion);
 
-        IndexContext numericIndexContext = getIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
+        IndexContext numericIndexContext = getIndexContext(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1")));
 
         waitForAssert(() -> assertTrue(getCompactionTasks() > 0), 1000, TimeUnit.MILLISECONDS);
 
