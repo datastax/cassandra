@@ -688,11 +688,15 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
              "SELECT m, s, t, u FROM %s");
 
         // filtering
-        test("SELECT * FROM %s WHERE l = ['a', 'b'] ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE s = {'a', 'b'} ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE m = {'a': 'b', 'c': 'd'} ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE l = ['a', 'b'] ALLOW FILTERING", false, false,
+             "SELECT * FROM %s WHERE l = ['a', ... ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE s = {'a', 'b'} ALLOW FILTERING", false, false,
+             "SELECT * FROM %s WHERE s = {'a', ... ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE m = {'a': 'b', 'c': 'd'} ALLOW FILTERING", false, false,
+             "SELECT * FROM %s WHERE m = {'a': ... ALLOW FILTERING");
         test("SELECT * FROM %s WHERE t = ('a', 1) ALLOW FILTERING");
-        test("SELECT * FROM %s WHERE u = {a: 'a', b: 1} ALLOW FILTERING");
+        test("SELECT * FROM %s WHERE u = {a: 'a', b: 1} ALLOW FILTERING", false, false,
+             "SELECT * FROM %s WHERE u = {a: 'a... ALLOW FILTERING");
         testInvalid("SELECT * FROM %s WHERE l['a'] = 'a' ALLOW FILTERING");
         testInvalid("SELECT * FROM %s WHERE s['a'] = 'a' ALLOW FILTERING");
         testInvalid("SELECT * FROM %s WHERE m['a'] = 'a' ALLOW FILTERING");
@@ -834,6 +838,11 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
 
     private void test(String query, boolean matchAnyExpected, String... expected)
     {
+        test(query, matchAnyExpected, true, expected);
+    }
+
+    private void test(String query, boolean matchAnyExpected, boolean executeExpected, String... expected)
+    {
         List<String> actual = toCQLString(query);
         List<String> fullExpected = Stream.of(expected)
                                           .map(this::formatQuery)
@@ -847,9 +856,10 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         else
            assertEquals(fullExpected, actual);
 
-        // execute both the expected output commands to verify that they are valid CQL
-        for (String q : expected)
-            execute(q);
+        // execute all the expected output commands to verify that they are valid CQL
+        if (executeExpected)
+            for (String q : expected)
+                execute(q);
     }
 
     private void testInvalid(String query) throws Throwable
