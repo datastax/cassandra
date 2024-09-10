@@ -113,7 +113,7 @@ public class CompactionGraph implements Closeable, Accountable
     private int lastRowId = -1;
     // placeholder value that won't confuse code (like serialization) that expects non-null vectors
     private final ByteSequence<?> encodedOmittedVector;
-    // if `useSyntheticOrdinals` is true then we use rowId as source of ordinals, otherwise use `nextOrdinal` to avoid holes
+    // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
 
@@ -148,7 +148,7 @@ public class CompactionGraph implements Closeable, Accountable
         // are adding previously unindexed data then we could still encounter rows with null vectors,
         // so this is just a best guess.  If the guess is wrong then the penalty is that we end up
         // with "holes" in the ordinal sequence (and pq and data files) which we would prefer to avoid
-        // (hence the effort to predict `allRowsHaveVectors` but will not cause correctness issues,
+        // (hence the effort to predict `allRowsHaveVectors`) but will not cause correctness issues,
         // and the next compaction will fill in the holes.
         this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings() || !allRowsHaveVectors;
 
@@ -324,9 +324,15 @@ public class CompactionGraph implements Closeable, Accountable
                  var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
             {
                 var postingsFuture = es.submit(() -> {
-                    // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary
-                    if (postingsStructure == Structure.ONE_TO_MANY && !V5OnDiskFormat.writeV5VectorPostings())
+                    // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
+                    // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
+                    // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
+                    // if a row with null vector in sstable A gets updated with a vector in sstable B)
+                    if (postingsStructure == Structure.ONE_TO_MANY
+                        && (!V5OnDiskFormat.writeV5VectorPostings() || useSyntheticOrdinals))
+                    {
                         postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
+                    }
                     var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
                                                                           builder.getGraph().size(),
                                                                           postingsMap);

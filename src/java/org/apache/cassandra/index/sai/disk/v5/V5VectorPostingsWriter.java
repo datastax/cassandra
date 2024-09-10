@@ -25,7 +25,6 @@ import java.util.Set;
 import java.util.function.IntPredicate;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -41,7 +40,6 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
-import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
 
@@ -113,6 +111,8 @@ public class V5VectorPostingsWriter<T>
      */
     public static RemappedPostings describeForCompaction(Structure structure, int graphSize, Map<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
     {
+        assert !postingsMap.isEmpty(); // flush+compact should skip writing an index component in this case
+
         if (structure == Structure.ONE_TO_ONE)
         {
             return new RemappedPostings(Structure.ONE_TO_ONE,
@@ -125,20 +125,28 @@ public class V5VectorPostingsWriter<T>
 
         if (structure == Structure.ONE_TO_MANY)
         {
-            var maxOldOrdinal = postingsMap.values().stream().mapToInt(VectorPostings::getOrdinal).max().orElseThrow();
-            int maxRow = postingsMap.values().stream().flatMap(p -> p.getRowIds().stream()).mapToInt(i -> i).max().orElseThrow();
+            // compute maxOldOrdinal, maxRow, and extraOrdinals from the postingsMap
+            int maxOldOrdinal = Integer.MIN_VALUE;
+            int maxRow = Integer.MIN_VALUE;
             var extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
             for (var entry : postingsMap.entrySet())
             {
-                if (entry.getValue().getRowIds().size() == 1)
-                    continue;
-                var a = entry.getValue().getRowIds().toIntArray();
-                Arrays.sort(a);
-                int ordinal = entry.getValue().getOrdinal();
-                for (int i = 1; i < a.length; i++)
-                    extraOrdinals.put(a[i], ordinal);
+                var postings = entry.getValue();
+                int ordinal = postings.getOrdinal();
+
+                maxOldOrdinal = Math.max(maxOldOrdinal, ordinal);
+                var rowIds = postings.getRowIds();
+                assert ordinal == rowIds.getInt(0); // synthetic ordinals not allowed in ONE_TO_MANY
+                for (int i = 0; i < rowIds.size(); i++)
+                {
+                    int rowId = rowIds.getInt(i);
+                    maxRow = Math.max(maxRow, rowId);
+                    if (i > 0)
+                        extraOrdinals.put(rowId, ordinal);
+                }
             }
-            var skippedOrdinals = extraOrdinals.keySet().stream().flatMapToInt(IntStream::of).collect(IntHashSet::new, IntHashSet::add, IntHashSet::addAll);
+
+            var skippedOrdinals = extraOrdinals.keySet();
             return new RemappedPostings(Structure.ONE_TO_MANY,
                                         maxOldOrdinal,
                                         maxRow,
@@ -355,9 +363,6 @@ public class V5VectorPostingsWriter<T>
         public final int maxNewOrdinal;
         /** the largest rowId in the postings (inclusive) */
         public final int maxRowId;
-        /** map from original vector ordinal to rowId that will be its new, remapped ordinal */
-        @Nullable
-        private final BiMap<Integer, Integer> ordinalMap;
         /** map from rowId to [original] vector ordinal */
         @Nullable
         private final Int2IntHashMap extraPostings;
@@ -370,7 +375,6 @@ public class V5VectorPostingsWriter<T>
             this.structure = structure;
             this.maxNewOrdinal = maxNewOrdinal;
             this.maxRowId = maxRowId;
-            this.ordinalMap = ordinalMap;
             this.extraPostings = extraPostings;
             this.ordinalMapper = ordinalMapper;
         }
@@ -474,11 +478,6 @@ public class V5VectorPostingsWriter<T>
                                     null,
                                     null,
                                     new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
-    }
-
-    public OrdinalMapper getOrdinalMapper()
-    {
-        return remappedPostings.ordinalMapper;
     }
 
     public static class BiMapMapper implements OrdinalMapper

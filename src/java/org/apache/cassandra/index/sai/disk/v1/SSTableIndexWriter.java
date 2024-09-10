@@ -389,7 +389,7 @@ public class SSTableIndexWriter implements PerIndexWriter
                     return false;
             }
         }
-        return segmentsChecked != 0;
+        return true;
     }
 
     private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException
