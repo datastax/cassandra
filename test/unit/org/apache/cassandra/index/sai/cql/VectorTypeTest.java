@@ -1298,4 +1298,36 @@ public class VectorTypeTest extends VectorTester
             QueryController.QUERY_OPT_LEVEL = 1;
         }
     }
+
+    @Test
+    public void testHybridQueryWithMissingVectorValuesForMaxSegmentRow() throws Throwable
+    {
+        // Want to test the search then order path
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        // We use a clustered primary key to simplify the mental model for this test.
+        // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
+        // in a peer index for an sstable's search index but not its vector index.
+        createTable("CREATE TABLE %s (k int, i int, v vector<float, 2>, c int,  PRIMARY KEY(k, i))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        // We'll manually control compaction.
+        disableCompaction();
+
+        // Insert some complete rows. The number here is arbitrary, but we need at least one to ensure that
+        // the query doesn't skip the query portion where we map from Primary Key back to sstable row id.
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, i, v, c) VALUES (0, ?, ?, ?)", i, vector(i, i + 1), i);
+
+        // Insert the last row in the table and leave of the vector
+        execute("INSERT INTO %s (k, i, c) VALUES (0, 10, 10)");
+
+        // The bug was specifically for sstables after compaction, but it's trivial to cover the before flush and before
+        // compaction cases here, so we do.
+        runThenFlushThenCompact(() -> {
+            // There is only one row that satisfies the WHERE clause and has a vector.
+            assertRows(execute("SELECT i FROM %s WHERE c >= 9 ORDER BY v ANN OF [1,1] LIMIT 1"), row(9));
+        });
+    }
 }

@@ -1934,6 +1934,28 @@ public abstract class CQLTester
         }
     }
 
+    /**
+     * Runs the given function before and after a flush of sstables.  This is useful for checking that behavior is
+     * the same whether data is in memtables or sstables.
+     * @param runnable
+     * @throws Throwable
+     */
+    public void runThenFlushThenCompact(CheckedFunction runnable) throws Throwable
+    {
+        beforeAndAfterFlush(runnable);
+
+        compact();
+
+        try
+        {
+            runnable.apply();
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError("Test failed after compact:\n" + t, t);
+        }
+    }
+
     private static String replaceValues(String query, Object[] values)
     {
         StringBuilder sb = new StringBuilder();
