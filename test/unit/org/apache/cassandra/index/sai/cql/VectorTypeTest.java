@@ -1315,19 +1315,20 @@ public class VectorTypeTest extends VectorTester
         // We'll manually control compaction.
         disableCompaction();
 
-        // Insert some complete rows. The number here is arbitrary, but we need at least one to ensure that
+        // Insert a complete row. We need at least one row with a vector and an entry for column c to ensure that
         // the query doesn't skip the query portion where we map from Primary Key back to sstable row id.
-        for (int i = 0; i < 10; i++)
-            execute("INSERT INTO %s (k, i, v, c) VALUES (0, ?, ?, ?)", i, vector(i, i + 1), i);
+        execute("INSERT INTO %s (k, i, v, c) VALUES (0, ?, ?, ?)", 1, vector(1, 1), 1);
 
-        // Insert the last row in the table and leave of the vector
-        execute("INSERT INTO %s (k, i, c) VALUES (0, 10, 10)");
+        // Insert the first and last row in the table and leave of the vector
+        execute("INSERT INTO %s (k, i, c) VALUES (0, 0, 0)");
+        execute("INSERT INTO %s (k, i, c) VALUES (0, 2, 2)");
 
         // The bug was specifically for sstables after compaction, but it's trivial to cover the before flush and before
         // compaction cases here, so we do.
         runThenFlushThenCompact(() -> {
-            // There is only one row that satisfies the WHERE clause and has a vector.
-            assertRows(execute("SELECT i FROM %s WHERE c >= 9 ORDER BY v ANN OF [1,1] LIMIT 1"), row(9));
+            // There is only one row that satisfies the WHERE clause and has a vector for each of these queries.
+            assertRows(execute("SELECT i FROM %s WHERE c <= 1 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
+            assertRows(execute("SELECT i FROM %s WHERE c >= 1 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
         });
     }
 }
