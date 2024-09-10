@@ -175,12 +175,14 @@ public class ShardManagerNodeAware implements ShardManager
 
     private Token[] computeUniformSplitPoints(IPartitioner partitioner, int splitPointCount)
     {
+        // Want the shard count here to get the right ratio.
+        var rangeStep = 1.0 / (splitPointCount + 1);
         var tokens = new Token[splitPointCount];
         for (int i = 0; i < splitPointCount; i++)
         {
-            // Want the shard count here to get the right ratio.
-            var ratio = ((double) i) / (splitPointCount + 1);
-            tokens[i] = partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), ratio);
+            // Multiply the step by the index + 1 to get the ratio to the left of the minimum token.
+            var ratioToLeft = rangeStep * (i + 1);
+            tokens[i] = partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), ratioToLeft);
         }
         return tokens;
     }
