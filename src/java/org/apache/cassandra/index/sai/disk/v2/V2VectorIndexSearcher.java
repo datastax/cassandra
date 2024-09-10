@@ -583,9 +583,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 // Increment here to simplify the sstableRowId < 0 logic.
                 i++;
 
-                // these should still be true based on our computation of keysInRange
-                assert sstableRowId >= metadata.minSSTableRowId : String.format("sstableRowId %d < minSSTableRowId %d", sstableRowId, metadata.minSSTableRowId);
-                assert sstableRowId <= metadata.maxSSTableRowId : String.format("sstableRowId %d > maxSSTableRowId %d", sstableRowId, metadata.maxSSTableRowId);
+                // During compaction, the SegmentMetadata is written based on the rows with vector values. Therefore,
+                // we can find a row that has a row id but is outside the min/max range of the segment. We can ignore
+                // these rows here and skip the row id to ordinal conversion that would result in a -1 ordinal.
+                if (sstableRowId < metadata.minSSTableRowId || sstableRowId > metadata.maxSSTableRowId)
+                    continue;
 
                 // convert the global row id to segment row id and from segment row id to graph ordinal
                 int segmentRowId = metadata.toSegmentRowId(sstableRowId);
