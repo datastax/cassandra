@@ -264,8 +264,9 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         txnProxy.prepareToCommit();
         if (openResult)
             openResult();
-        txnProxy.commit();
+
         observers.forEach(obs -> obs.complete(this));
+        txnProxy.commit();
         return finished();
     }
 
