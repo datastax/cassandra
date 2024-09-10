@@ -97,6 +97,7 @@ public class ShardManagerNodeAware implements ShardManager
             sortedTokens.sort(Token::compareTo);
         }
         var splitPoints = findTokenAlignedSplitPoints(sortedTokens.toArray(TOKENS), splitPointCount);
+        logger.debug("Creating shard boundaries for {} shards. Currently {} tokens: {}. Split points: {}", shardCount, sortedTokens.size(), sortedTokens, Arrays.toString(splitPoints));
         return new NodeAlignedShardTracker(splitPoints);
     }
 
@@ -111,6 +112,7 @@ public class ShardManagerNodeAware implements ShardManager
             return TOKENS;
 
         var evenSplitPoints = computeUniformSplitPoints(tokenMetadata.partitioner, splitPointCount);
+        logger.debug("Even split points: {}", Arrays.toString(evenSplitPoints));
         var nodeAlignedSplitPoints = new Token[splitPointCount];
 
         // UCS requires that the splitting points for a given density are also splitting points for
