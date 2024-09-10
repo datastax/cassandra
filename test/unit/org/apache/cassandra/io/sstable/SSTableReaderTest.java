@@ -519,7 +519,7 @@ public class SSTableReaderTest
 
         // the keys are specifically chosen to cover certain use cases
         // existing key is read from index
-        sstable.getPosition(dk(7), SSTableReader.Operator.EQ);
+        sstable.getPosition(dk(2), SSTableReader.Operator.EQ);
         assertEquals(1, sstable.getFilterTracker().getTruePositiveCount());
         assertEquals(0, sstable.getFilterTracker().getTrueNegativeCount());
         assertEquals(0, sstable.getFilterTracker().getFalsePositiveCount());
