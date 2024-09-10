@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Collection;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -218,9 +219,10 @@ public interface IndexComponents
          *                as part of unregistering the components when they are invalid.
          * @param validateChecksum if {@code true}, the checksum of the components will be validated. Otherwise, only
          *                         basic checks on the header and footers will be performed.
+         * @param rethrow whether to throw an {@link UncheckedIOException} if the group is invalid
          * @return whether the group is valid.
          */
-        boolean validateComponents(SSTable sstable, Tracker tracker, boolean validateChecksum);
+        boolean validateComponents(SSTable sstable, Tracker tracker, boolean validateChecksum, boolean rethrow);
 
         /**
          * Marks the group as invalid/broken.
