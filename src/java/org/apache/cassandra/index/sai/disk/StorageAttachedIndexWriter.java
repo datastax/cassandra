@@ -279,11 +279,6 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         // Mark the write aborted, so we can short-circuit any further operations on the component writers.
         aborted = true;
         
-        // For non-compaction, make any indexes involved in this transaction non-queryable, as they will likely not match the backing table.
-        // For compaction: the compaction task should be aborted and new sstables will not be added to tracker
-        if (fromIndex && opType != OperationType.COMPACTION)
-            indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
-        
         for (PerIndexWriter perIndexWriter : perIndexWriters)
         {
             try
@@ -304,6 +299,11 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             // If the token/offset files have already been written successfully, they can be reused later. 
             perSSTableWriter.abort(accumulator);
         }
+
+        // If the abort was from an index error, propagate the error upstream so index builds, compactions, and
+        // flushes can handle it correctly.
+        if (fromIndex)
+            throw Throwables.unchecked(accumulator);
     }
 
     private void addRow(Row row) throws IOException, InMemoryTrie.SpaceExhaustedException

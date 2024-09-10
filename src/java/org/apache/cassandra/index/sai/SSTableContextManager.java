@@ -100,7 +100,7 @@ public class SSTableContextManager
             try
             {
                 // Only validate on restart or newly refreshed SSTable. Newly built files are unlikely to be corrupted.
-                if (validate && !sstableContexts.containsKey(sstable) && !perSSTableComponents.validateComponents(sstable, tracker, false))
+                if (validate && !sstableContexts.containsKey(sstable) && !perSSTableComponents.validateComponents(sstable, tracker, true, false))
                 {
                     // Note that the validation already log details on the problem if it fails, so no reason to log further
                     hasInvalid = true;
