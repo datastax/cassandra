@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -58,6 +59,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.IndexInput;
 
@@ -220,17 +222,17 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public boolean validateIndexComponent(IndexComponent.ForRead component,boolean checksum)
+    public void validateIndexComponent(IndexComponent.ForRead component, boolean checksum)
     {
         if (component.isCompletionMarker())
-            return true;
+            return;
 
         // starting with v3, vector components include proper headers and checksum; skip for earlier versions
         IndexContext context = component.parent().context();
         if (isVectorDataComponent(context, component.componentType())
             && !component.parent().version().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
         {
-            return true;
+            return;
         }
 
         Version earliest = getExpectedEarliestVersion(context, component.componentType());
@@ -241,19 +243,20 @@ public class V1OnDiskFormat implements OnDiskFormat
             else
                 SAICodecUtils.validate(input, earliest);
         }
-        catch (Throwable e)
+        catch (Exception e)
         {
-            if (logger.isDebugEnabled())
-            {
-                logger.debug(component.parent().logMessage("{} failed for index component {} on SSTable {}"),
-                             (checksum ? "Checksum validation" : "Validation"),
-                             component,
-                             component.parent().descriptor(),
-                             e);
-            }
-            return false;
+            logger.warn(component.parent().logMessage("{} failed for index component {} on SSTable {}"),
+                        (checksum ? "Checksum validation" : "Validation"),
+                        component,
+                        component.parent().descriptor(),
+                        e);
+
+            if (e instanceof IOException)
+                throw new UncheckedIOException((IOException) e);
+            if (e.getCause() instanceof IOException)
+                throw new UncheckedIOException((IOException) e.getCause());
+            throw Throwables.unchecked(e);
         }
-        return true;
     }
 
     @Override

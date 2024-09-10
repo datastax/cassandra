@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Collections;
+
 import com.google.common.collect.Iterables;
 import org.junit.After;
 import org.junit.Before;
@@ -109,6 +111,17 @@ public class IndexParallelBuildTest extends SAITester
         assertEquals(1, parallelBuildCounter.get());
 
         // verify index can be read
+        assertRowCount(sstable * rowsPerSSTable, "SELECT id1 FROM %s WHERE v1>=0");
+
+        // reset the counter
+        parallelBuildCounter.reset();
+        assertEquals(0, parallelBuildCounter.get());
+
+        // verify parallel index build again, this time with a full rebuild with the sstables already loaded
+        getCurrentColumnFamilyStore().indexManager.rebuildIndexesBlocking(Collections.singleton(index));
+        assertEquals(1, parallelBuildCounter.get());
+
+        // verify index can still be read
         assertRowCount(sstable * rowsPerSSTable, "SELECT id1 FROM %s WHERE v1>=0");
     }
 

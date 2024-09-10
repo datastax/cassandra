@@ -98,7 +98,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     @Override
     public void build()
     {
-        logger.debug(logMessage("Starting full index build"));
+        logger.debug(logMessage(String.format("Starting %s %s index build...",
+                                              isInitialBuild ? "initial" : "non-initial",
+                                              isFullRebuild ? "full" : "partial")));
+
         for (Map.Entry<SSTableReader, Set<StorageAttachedIndex>> e : sstables.entrySet())
         {
             SSTableReader sstable = e.getKey();
@@ -112,9 +115,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             }
 
             if (indexSSTable(sstable, existing))
-            {
                 return;
-            }
         }
     }
 
