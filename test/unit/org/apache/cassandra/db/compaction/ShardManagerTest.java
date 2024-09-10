@@ -352,6 +352,8 @@ public class ShardManagerTest
             when(db.getLocalRanges()).thenReturn(sortedRanges);
             when(db.getPositions()).thenReturn(diskBoundaries);
 
+            var rs = Mockito.mock(AbstractReplicationStrategy.class);
+
             ShardManager shardManager = ShardManager.create(db, rs, false);
             for (int numShards = 1; numShards <= 3; ++numShards)
             {
