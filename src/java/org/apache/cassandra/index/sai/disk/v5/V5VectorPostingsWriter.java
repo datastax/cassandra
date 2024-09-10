@@ -398,10 +398,11 @@ public class V5VectorPostingsWriter<T>
                     extraPostings.put(a[i], oldOrdinal);
             }
         }
+        assert totalRowsAssigned <= maxRow + 1: "rowids are not unique -- " + totalRowsAssigned + " >= " + maxRow;
 
         // derive the correct structure
         Structure structure;
-        if (totalRowsAssigned > 0 && (minRow != 0 || totalRowsAssigned != maxRow + 1))
+        if (totalRowsAssigned > 0 && (minRow != 0 || totalRowsAssigned < maxRow + 1))
         {
             logger.debug("Not all rows are assigned vectors, cannot remap");
             structure = Structure.ZERO_OR_ONE_TO_MANY;
