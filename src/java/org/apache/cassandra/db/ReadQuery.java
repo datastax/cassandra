@@ -251,7 +251,7 @@ public interface ReadQuery
      * validation method to check that nothing in this query's parameters
      * violates the implementation specific validation rules.
      */
-    default void maybeValidateIndex()
+    default void maybeValidateIndexes()
     {
     }
 
