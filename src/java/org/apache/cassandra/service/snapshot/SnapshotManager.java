@@ -53,7 +53,18 @@ public class SnapshotManager {
 
     private final long initialDelaySeconds;
     private final long cleanupPeriodSeconds;
-    private final SnapshotLoader snapshotLoader;
+
+    private static class SnapshotLoaderHolder
+    {
+        // Use subclass for lazy initialization to avoid race with DatabaseDescriptor.createAllDirectories()
+        private static final SnapshotLoader snapshotLoader = new SnapshotLoader(DatabaseDescriptor.getAllDataFileLocations());;
+    }
+
+    private static SnapshotLoader getSnapshotLoader()
+    {
+        // Return the singleton SnapshotLoader instance
+        return SnapshotManager.SnapshotLoaderHolder.snapshotLoader;
+    }
 
     @VisibleForTesting
     protected volatile ScheduledFuture<?> cleanupTaskFuture;
@@ -75,7 +86,6 @@ public class SnapshotManager {
     {
         this.initialDelaySeconds = initialDelaySeconds;
         this.cleanupPeriodSeconds = cleanupPeriodSeconds;
-        snapshotLoader = new SnapshotLoader(DatabaseDescriptor.getAllDataFileLocations());
     }
 
     public Collection<TableSnapshot> getExpiringSnapshots()
@@ -111,12 +121,12 @@ public class SnapshotManager {
 
     public synchronized Set<TableSnapshot> loadSnapshots(String keyspace)
     {
-        return snapshotLoader.loadSnapshots(keyspace);
+        return getSnapshotLoader().loadSnapshots(keyspace);
     }
 
     public synchronized Set<TableSnapshot> loadSnapshots()
     {
-        return snapshotLoader.loadSnapshots();
+        return getSnapshotLoader().loadSnapshots();
     }
 
     @VisibleForTesting
