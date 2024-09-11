@@ -158,6 +158,16 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 // Inclusive on both ends because min/maxLeafFP return the offsets to the leaves
                 // that intersect the query (i.e. contain at least one point matching the query) and
                 // possible range query exclusiveness is handled by the query object.
+
+                // if descending, we need to swap the leaf bounds because the order of the map is reversed. We used our
+                // query to find minLeaf/maxLeaf, which retains the natural ascending order.
+                if (!isAscending)
+                {
+                    var tmp = minLeafFP;
+                    minLeafFP = maxLeafFP;
+                    maxLeafFP = tmp;
+                }
+
                 leafNodeToLeafFP = leafNodeToLeafFP.subMap(minLeafFP, true, maxLeafFP, true);
             }
 
