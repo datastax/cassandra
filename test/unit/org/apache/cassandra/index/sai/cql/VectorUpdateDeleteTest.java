@@ -119,6 +119,22 @@ public class VectorUpdateDeleteTest extends VectorTester
         assertContainsInt(result, "pk", 0);
     }
 
+    @Test
+    public void testFlushWithDeletedVectors() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+
+        execute("INSERT INTO %s (pk, v) VALUES (0, [1.0, 2.0])");
+        execute("INSERT INTO %s (pk, v) VALUES (0, null)");
+
+        flush();
+
+        var result = execute("SELECT * FROM %s ORDER BY v ann of [2.5, 3.5] LIMIT 1");
+        assertThat(result).hasSize(0);
+    }
+
     // range delete won't trigger UpdateTransaction#onUpdated
     @Test
     public void rangeDeleteVectorInMemoryAndFlushTest() throws Throwable
