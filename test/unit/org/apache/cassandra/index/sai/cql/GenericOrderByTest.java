@@ -158,11 +158,6 @@ public class GenericOrderByTest extends SAITester
         });
     }
 
-    private void loadData()
-    {
-
-    }
-
     @Test
     public void testSelectionAndOrderByOnTheSameColumn() throws Throwable
     {
