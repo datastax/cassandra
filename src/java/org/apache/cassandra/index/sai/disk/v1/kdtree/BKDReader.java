@@ -25,6 +25,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
@@ -150,7 +151,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             bkdPostingsInput = IndexFileUtils.instance.openInput(postingsFile);
             bkdInput.seek(firstLeafFilePointer);
 
-            var leafNodeToLeafFP = isAscending ? getLeafOffsets() : getLeafOffsets().descendingMap();
+            NavigableMap<Long, Integer> leafNodeToLeafFP = getLeafOffsets();
             if (query != null)
             {
                 var minLeafFP = findMinLeafFP(query);
@@ -158,18 +159,13 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 // Inclusive on both ends because min/maxLeafFP return the offsets to the leaves
                 // that intersect the query (i.e. contain at least one point matching the query) and
                 // possible range query exclusiveness is handled by the query object.
-
-                // if descending, we need to swap the leaf bounds because the order of the map is reversed. We used our
-                // query to find minLeaf/maxLeaf, which retains the natural ascending order.
-                if (!isAscending)
-                {
-                    var tmp = minLeafFP;
-                    minLeafFP = maxLeafFP;
-                    maxLeafFP = tmp;
-                }
-
                 leafNodeToLeafFP = leafNodeToLeafFP.subMap(minLeafFP, true, maxLeafFP, true);
             }
+
+            // Delay choosing ordering of the map until we have restricted it to a submap, so that the submap code
+            // doesn't need to reason about differences between order-by order and the natural ordering in the query
+            // restriction.
+            leafNodeToLeafFP = isAscending ? leafNodeToLeafFP : leafNodeToLeafFP.descendingMap();
 
             // init the first leaf
             iterator = leafNodeToLeafFP.entrySet().iterator();
