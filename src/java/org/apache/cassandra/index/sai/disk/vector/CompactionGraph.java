@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -111,10 +112,10 @@ public class CompactionGraph implements Closeable, Accountable
     private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
     private int lastRowId = -1;
+    // placeholder value that won't confuse code (like serialization) that expects non-null vectors
     private final ByteSequence<?> encodedOmittedVector;
-    // caller's best guess as to whether we should expect to see vectors for all rows.  see comments in constructor
-    private final boolean supportsOneToMany;
-    // if `supportsOneToMany` is true then we use rowId as source of ordinals, otherwise use this to avoid holes
+    // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
+    private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
 
     public CompactionGraph(IndexComponents.ForWrite perIndexComponents, ProductQuantization compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
@@ -148,9 +149,9 @@ public class CompactionGraph implements Closeable, Accountable
         // are adding previously unindexed data then we could still encounter rows with null vectors,
         // so this is just a best guess.  If the guess is wrong then the penalty is that we end up
         // with "holes" in the ordinal sequence (and pq and data files) which we would prefer to avoid
-        // (hence the effort to predict `allRowsHaveVectors` but will not cause correctness issues,
+        // (hence the effort to predict `allRowsHaveVectors`) but will not cause correctness issues,
         // and the next compaction will fill in the holes.
-        this.supportsOneToMany = allRowsHaveVectors;
+        this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings() || !allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         Component tmpComponent = new Component(SSTableFormat.Components.Types.CUSTOM, "chronicle" + Descriptor.TMP_EXT);
@@ -177,41 +178,33 @@ public class CompactionGraph implements Closeable, Accountable
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
-        writer = createTermsWriter(maxRowsInGraph);
+        // placeholder writer, will be replaced at flush time when we finalize the index contents
+        writer = createTermsWriterBuilder().withMapper(new OrdinalMapper.IdentityMapper(maxRowsInGraph)).build();
         writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
         SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
     }
 
-    private OnDiskGraphIndexWriter createTermsWriter(int maxVectorOrdinal) throws IOException
+    private OnDiskGraphIndexWriter.Builder createTermsWriterBuilder() throws IOException
     {
         var indexConfig = context.getIndexWriterConfig();
-        // We can use IdentityMapper here because it does the right thing in all three scenarios:
-        // 1-to-1: trivially correct because rowId == ordinal since rows are added to the index
-        //         in the same order as they are added to the sstable
-        // 1-to-many: by construction, the ordinal of a shared vector will be the rowId of the first row
-        //            with the corresponding vector, which is what we want
-        // 0-or-1-to-many: we write an exhaustive explicit mapping and no renumbering is required
-        //
-        // See also the comments around the `supportsOneToMany` field.
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                       .withStartOffset(termsOffset)
-                      .with(new InlineVectors(dimension))
-                      .withMapper(new OrdinalMapper.IdentityMapper(maxVectorOrdinal));
+                      .with(new InlineVectors(dimension));
         if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
         {
-            writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getMaximumNodeConnections(), compressor));
+            writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getAnnMaxDegree(), compressor));
         }
         else
         {
             writerBuilder = writerBuilder.withVersion(JVECTOR_2_VERSION);
         }
-        return writerBuilder.build();
+        return writerBuilder;
     }
 
     @Override
     public void close() throws IOException
     {
-        // this gets called in finally{} blocks, so use closeQuietly to avoid generating additional exceptions
+        // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
         FileUtils.closeQuietly(writer);
         FileUtils.closeQuietly(postingsMap);
         Files.delete(postingsFile.toJavaIOFile().toPath());
@@ -260,7 +253,7 @@ public class CompactionGraph implements Closeable, Accountable
         {
             // add a new entry
             // this all runs on the same compaction thread, so we don't need to worry about concurrency
-            int ordinal = supportsOneToMany ? segmentRowId : nextOrdinal++;
+            int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
             postings = new CompactionVectorPostings(ordinal, segmentRowId);
             postingsMap.put(vector, postings);
             writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
@@ -274,11 +267,14 @@ public class CompactionGraph implements Closeable, Accountable
             return new InsertionResult(bytesUsed, ordinal, vector);
         }
 
-        // postings list already exists, just add the new key (if it's not already in the list)
+        // postings list already exists, just add the new key
         if (postingsStructure == Structure.ONE_TO_ONE)
             postingsStructure = Structure.ONE_TO_MANY;
-        if (postings.add(segmentRowId))
-            bytesUsed += postings.bytesPerPosting();
+        var newPosting = postings.add(segmentRowId);
+        assert newPosting;
+        bytesUsed += postings.bytesPerPosting();
+        postingsMap.put(vector, postings); // re-serialize to disk
+
         return new InsertionResult(bytesUsed);
     }
 
@@ -289,16 +285,16 @@ public class CompactionGraph implements Closeable, Accountable
 
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
-        // recreate the writer now that we know how many vectors there are
+        // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
+        writer.writeHeader();
         writer.close();
-        writer = createTermsWriter(builder.getGraph().getIdUpperBound() - 1);
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
-        assert supportsOneToMany || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
-                                                                                             nextOrdinal, builder.getGraph().size());
-        assert pqVectors.count() == builder.getGraph().size() : String.format("vector count %d != graph size %d",
-                                                                              pqVectors.count(), builder.getGraph().size());
+        assert !useSyntheticOrdinals || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
+                                                                                                 nextOrdinal, builder.getGraph().size());
+        assert pqVectors.count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
+                                                                                         pqVectors.count(), builder.getGraph().getIdUpperBound());
         assert postingsMap.keySet().size() == builder.getGraph().size() : String.format("postings map entry count %d != vector count %d",
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
         if (logger.isDebugEnabled())
@@ -320,8 +316,8 @@ public class CompactionGraph implements Closeable, Accountable
             pqVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
-            // write postings asynchronously while we run cleanup().  this requires the index header to be present
-            writer.writeHeader();
+            // write postings asynchronously while we run cleanup()
+            var ordinalMapper = new AtomicReference<OrdinalMapper>();
             long postingsOffset = postingsOutput.getFilePointer();
             var es = ExecutorFactory.Global.executorFactory().sequential("CompactionGraphPostingsWriter");
             long postingsLength;
@@ -329,16 +325,29 @@ public class CompactionGraph implements Closeable, Accountable
                  var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
             {
                 var postingsFuture = es.submit(() -> {
+                    // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
+                    // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
+                    // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
+                    // if a row with null vector in sstable A gets updated with a vector in sstable B)
+                    if (postingsStructure == Structure.ONE_TO_MANY
+                        && (!V5OnDiskFormat.writeV5VectorPostings() || useSyntheticOrdinals))
+                    {
+                        postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
+                    }
+                    var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
+                                                                          builder.getGraph().size(),
+                                                                          postingsMap);
+                    ordinalMapper.set(rp.ordinalMapper);
                     try (var view = index.getView())
                     {
                         if (V5OnDiskFormat.writeV5VectorPostings())
                         {
-                            return new V5VectorPostingsWriter<Integer>(postingsStructure, builder.getGraph().size(), postingsMap)
-                                               .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
+                            return new V5VectorPostingsWriter<Integer>(rp).writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
                         }
                         else
                         {
-                            return new V2VectorPostingsWriter<Integer>(postingsStructure == Structure.ONE_TO_ONE, builder.getGraph().size(), i -> i)
+                            assert postingsStructure == Structure.ONE_TO_ONE || postingsStructure == Structure.ZERO_OR_ONE_TO_MANY;
+                            return new V2VectorPostingsWriter<Integer>(postingsStructure == Structure.ONE_TO_ONE, builder.getGraph().size(), rp.ordinalMapper::newToOld)
                                    .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, Set.of());
                         }
                     }
@@ -352,6 +361,9 @@ public class CompactionGraph implements Closeable, Accountable
                 postingsLength = postingsEnd - postingsOffset;
                 es.shutdown();
             }
+
+            // Recreate the writer with the final ordinalMapper
+            writer = createTermsWriterBuilder().withMapper(ordinalMapper.get()).build();
 
             // write the graph edge lists and optionally fused adc features
             var start = nanoTime();
@@ -391,7 +403,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean requiresFlush()
     {
-        return nextOrdinal >= postingsEntriesAllocated;
+        return builder.getGraph().size() >= postingsEntriesAllocated;
     }
 
     private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {

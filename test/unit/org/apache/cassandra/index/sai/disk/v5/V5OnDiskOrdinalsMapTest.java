@@ -188,7 +188,7 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
     private <T> void validate(Structure structure, Map<VectorFloat<?>, VectorPostings<T>> postingsMap, RamAwareVectorValues vectorValues) throws IOException
     {
         // build the remapping and write the postings
-        var remapped = V5VectorPostingsWriter.remapPostings(postingsMap);
+        var remapped = V5VectorPostingsWriter.remapForMemtable(postingsMap);
         assert remapped.structure == structure : remapped.structure + " != " + structure;
         File tempFile = createTempFile("testfile");
         PostingsMetadata postingsMd = writePostings(tempFile, vectorValues, postingsMap, remapped);
