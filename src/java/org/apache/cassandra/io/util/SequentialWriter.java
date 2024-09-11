@@ -431,7 +431,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     }
 
     @Override
-    public final void close()
+    public void close()
     {
         if (option.finishOnClose())
             txnProxy.finish();
