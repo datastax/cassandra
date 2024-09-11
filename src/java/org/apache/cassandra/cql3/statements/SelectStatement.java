@@ -761,7 +761,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
 
         // If there's a secondary index that the command can use, have it validate the request parameters.
-        command.maybeValidateIndex();
+        command.maybeValidateIndexes();
 
         return command;
     }

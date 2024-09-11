@@ -25,11 +25,12 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
+
+import javax.annotation.Nullable;
 
 import com.google.common.base.Objects;
-import com.google.common.base.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,6 +47,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -72,13 +74,13 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNu
  * be handled by a 2ndary index, and the rest is simply filtered out from the
  * result set (the later can only happen if the query was using ALLOW FILTERING).
  */
-public abstract class RowFilter implements Iterable<RowFilter.Expression>
+public class RowFilter implements Iterable<RowFilter.Expression>
 {
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     public static final Serializer serializer = new Serializer();
-    public static final RowFilter NONE = CQLFilter.NONE;
+    public static final RowFilter NONE = new RowFilter(FilterElement.NONE);
 
     protected final FilterElement root;
 
@@ -99,17 +101,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     /**
-     * @return *all* the expressions from the RowFilter tree in pre-order.
-     */
-    public Stream<Expression> getExpressionsPreOrder()
-    {
-        return root.getExpressionsPreOrder();
-    }
-
-    /**
      * Checks if some of the expressions apply to clustering or regular columns.
      * @return {@code true} if some of the expressions apply to clustering or regular columns, {@code false} otherwise.
      */
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
         warnIfFilterIsATree();
@@ -122,7 +117,55 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         return false;
     }
 
-    protected abstract Transformation<BaseRowIterator<?>> filter(TableMetadata metadata, int nowInSec);
+    protected Transformation<BaseRowIterator<?>> filter(TableMetadata metadata, int nowInSec)
+    {
+        FilterElement partitionLevelOperation = root.partitionLevelTree();
+        FilterElement rowLevelOperation = root.rowLevelTree();
+
+        final boolean filterNonStaticColumns = rowLevelOperation.size() > 0;
+
+        return new Transformation<>()
+        {
+            DecoratedKey pk;
+
+            protected BaseRowIterator<?> applyToPartition(BaseRowIterator<?> partition)
+            {
+                pk = partition.partitionKey();
+
+                // Short-circuit all partitions that won't match based on static and partition keys
+                if (!partitionLevelOperation.isSatisfiedBy(metadata, partition.partitionKey(), partition.staticRow()))
+                {
+                    partition.close();
+                    return null;
+                }
+
+                BaseRowIterator<?> iterator = partition instanceof UnfilteredRowIterator
+                                              ? Transformation.apply((UnfilteredRowIterator) partition, this)
+                                              : Transformation.apply((RowIterator) partition, this);
+
+                if (filterNonStaticColumns && !iterator.hasNext())
+                {
+                    iterator.close();
+                    return null;
+                }
+
+                return iterator;
+            }
+
+            @Override
+            public Row applyToRow(Row row)
+            {
+                Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec, metadata.enforceStrictLiveness());
+                if (purged == null)
+                    return null;
+
+                if (!rowLevelOperation.isSatisfiedBy(metadata, pk, purged))
+                    return null;
+
+                return row;
+            }
+        };
+    }
 
     /**
      * Filters the provided iterator so that only the row satisfying the expression of this filter
@@ -170,7 +213,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     /**
-     * Returns true if all of the expressions within this filter that apply to the partition key are satisfied by
+     * Returns true if all the expressions within this filter that apply to the partition key are satisfied by
      * the given key, false otherwise.
      */
     public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
@@ -184,14 +227,14 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             ByteBuffer value = keyValidator instanceof CompositeType
                              ? ((CompositeType) keyValidator).split(key.getKey())[e.column.position()]
                              : key.getKey();
-            if (!e.operator().isSatisfiedBy(e.column.type, value, e.value))
+            if (!e.operator().isSatisfiedBy(e.column.type, value, e.value, e.analyzer()))
                 return false;
         }
         return true;
     }
 
     /**
-     * Returns true if all of the expressions within this filter that apply to the clustering key are satisfied by
+     * Returns true if all the expressions within this filter that apply to the clustering key are satisfied by
      * the given Clustering, false otherwise.
      */
     public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering<?> clustering)
@@ -202,10 +245,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             if (!e.column.isClusteringColumn())
                 continue;
 
-            if (!e.operator().isSatisfiedBy(e.column.type, clustering.bufferAt(e.column.position()), e.value))
-            {
+            if (!e.operator().isSatisfiedBy(e.column.type, clustering.bufferAt(e.column.position()), e.value, e.analyzer()))
                 return false;
-            }
         }
         return true;
     }
@@ -221,7 +262,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         if (root.size() == 1)
             return RowFilter.NONE;
 
-        return new CQLFilter(root.filter(e -> !e.equals(expression)));
+        return new RowFilter(root.filter(e -> !e.equals(expression)));
     }
 
     public RowFilter withoutExpressions()
@@ -231,7 +272,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public RowFilter restrict(Predicate<Expression> filter)
     {
-        return new CQLFilter(root.filter(filter));
+        return new RowFilter(root.filter(filter));
     }
 
     public boolean isEmpty()
@@ -239,6 +280,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         return root.isEmpty();
     }
 
+    @Override
     public Iterator<Expression> iterator()
     {
         warnIfFilterIsATree();
@@ -255,42 +297,55 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     {
         if (!root.children.isEmpty())
         {
-            noSpamLogger.warn("RowFilter is a tree, but we're using it as a list of top-levels expressions", new Exception("stacktrace of a potential misuse"));
+            noSpamLogger.warn("RowFilter is a tree, but we're using it as a list of top-levels expressions",
+                              new Exception("stacktrace of a potential misuse"));
         }
     }
 
     public static Builder builder()
     {
-        return new Builder();
+        return new Builder(null);
+    }
+
+    public static Builder builder(IndexRegistry indexRegistry)
+    {
+        return new Builder(indexRegistry);
     }
 
     public static class Builder
     {
         private FilterElement.Builder current = new FilterElement.Builder(false);
 
+        private final IndexRegistry indexRegistry;
+
+        public Builder(IndexRegistry indexRegistry)
+        {
+            this.indexRegistry = indexRegistry;
+        }
+
         public RowFilter build()
         {
-            return new CQLFilter(current.build());
+            return new RowFilter(current.build());
         }
 
-        public RowFilter buildFromRestrictions(StatementRestrictions restrictions, IndexRegistry indexManager, TableMetadata table, QueryOptions options)
+        public RowFilter buildFromRestrictions(StatementRestrictions restrictions, TableMetadata table, QueryOptions options)
         {
-            return new CQLFilter(doBuild(restrictions, indexManager, table, options));
+            return new RowFilter(doBuild(restrictions, table, options));
         }
 
-        private FilterElement doBuild(StatementRestrictions restrictions, IndexRegistry indexManager, TableMetadata table, QueryOptions options)
+        private FilterElement doBuild(StatementRestrictions restrictions, TableMetadata table, QueryOptions options)
         {
             FilterElement.Builder element = new FilterElement.Builder(restrictions.isDisjunction());
             this.current = element;
 
             for (Restrictions restrictionSet : restrictions.filterRestrictions().getRestrictions())
-                restrictionSet.addToRowFilter(this, indexManager, options);
+                restrictionSet.addToRowFilter(this, indexRegistry, options);
 
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));
 
             for (StatementRestrictions child : restrictions.children())
-                element.children.add(doBuild(child, indexManager, table, options));
+                element.children.add(doBuild(child, table, options));
 
             // Optimize out any conjunctions / disjunctions with TRUE.
             // This is not needed for correctness.
@@ -329,7 +384,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             {
                 // If we're in disjunction mode, we must not pass the current builder to addToRowFilter.
                 // We create a new conjunction sub-builder instead and add all expressions there.
-                var builder = new Builder();
+                var builder = new Builder(indexRegistry);
                 addToRowFilterDelegate.accept(builder);
 
                 if (builder.current.expressions.size() == 1 && builder.current.children.isEmpty())
@@ -365,14 +420,20 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public SimpleExpression add(ColumnMetadata def, Operator op, ByteBuffer value)
         {
-            SimpleExpression expression = new SimpleExpression(def, op, value);
+            SimpleExpression expression = new SimpleExpression(def, op, value, analyzer(def, op));
             add(expression);
             return expression;
         }
 
         public void addMapComparison(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
         {
-            add(new MapComparisonExpression(def, key, op, value));
+            add(new MapComparisonExpression(def, key, op, value, analyzer(def, op)));
+        }
+
+        @Nullable
+        private Index.Analyzer analyzer(ColumnMetadata def, Operator op)
+        {
+            return indexRegistry == null ? null : indexRegistry.getAnalyzerFor(def, op).orElse(null);
         }
 
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
@@ -434,7 +495,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public static final FilterElement NONE = new FilterElement(false, Collections.emptyList(), Collections.emptyList());
 
-        private boolean isDisjunction;
+        private final boolean isDisjunction;
 
         private final List<Expression> expressions;
 
@@ -457,6 +518,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return expressions;
         }
 
+        @Override
         public Iterator<Expression> iterator()
         {
             List<Expression> allExpressions = new ArrayList<>(expressions);
@@ -469,9 +531,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         {
             FilterElement.Builder builder = new Builder(isDisjunction);
 
-            expressions.stream().filter(filter).forEach(e -> builder.expressions.add(e));
+            expressions.stream().filter(filter).forEach(builder.expressions::add);
 
-            children.stream().map(c -> c.filter(filter)).forEach(c -> builder.children.add(c));
+            children.stream().map(c -> c.filter(filter)).forEach(builder.children::add);
 
             return builder.build();
         }
@@ -563,22 +625,16 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
-                sb.append("(");
+                sb.append('(');
                 sb.append(children.get(i));
-                sb.append(")");
+                sb.append(')');
             }
             return sb.toString();
         }
 
-        public Stream<Expression> getExpressionsPreOrder()
-        {
-            return Stream.concat(expressions.stream(),
-                                 children.stream().flatMap(FilterElement::getExpressionsPreOrder));
-        }
-
         public static class Builder
         {
-            private boolean isDisjunction;
+            private final boolean isDisjunction;
             private final List<Expression> expressions = new ArrayList<>();
             private final List<FilterElement> children = new ArrayList<>();
 
@@ -649,66 +705,6 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
     }
 
-    private static class CQLFilter extends RowFilter
-    {
-        private static final CQLFilter NONE = new CQLFilter(FilterElement.NONE);
-
-        private CQLFilter(FilterElement operation)
-        {
-            super(operation);
-        }
-
-        protected Transformation<BaseRowIterator<?>> filter(TableMetadata metadata, int nowInSec)
-        {
-            FilterElement partitionLevelOperation = root.partitionLevelTree();
-            FilterElement rowLevelOperation = root.rowLevelTree();
-
-            final boolean filterNonStaticColumns = rowLevelOperation.size() > 0;
-
-            return new Transformation<BaseRowIterator<?>>()
-            {
-                DecoratedKey pk;
-
-                @SuppressWarnings("resource")
-                protected BaseRowIterator<?> applyToPartition(BaseRowIterator<?> partition)
-                {
-                    pk = partition.partitionKey();
-
-                    // Short-circuit all partitions that won't match based on static and partition keys
-                    if (!partitionLevelOperation.isSatisfiedBy(metadata, partition.partitionKey(), partition.staticRow()))
-                    {
-                        partition.close();
-                        return null;
-                    }
-
-                    BaseRowIterator<?> iterator = partition instanceof UnfilteredRowIterator
-                                                  ? Transformation.apply((UnfilteredRowIterator) partition, this)
-                                                  : Transformation.apply((RowIterator) partition, this);
-
-                    if (filterNonStaticColumns && !iterator.hasNext())
-                    {
-                        iterator.close();
-                        return null;
-                    }
-
-                    return iterator;
-                }
-
-                public Row applyToRow(Row row)
-                {
-                    Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec, metadata.enforceStrictLiveness());
-                    if (purged == null)
-                        return null;
-
-                    if (!rowLevelOperation.isSatisfiedBy(metadata, pk, purged))
-                        return null;
-
-                    return row;
-                }
-            };
-        }
-    }
-
     public static abstract class Expression
     {
         public static final Serializer serializer = new Serializer();
@@ -718,7 +714,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         // (we could clean those on a major protocol update, but it's not worth
         // the trouble for now)
         // VECTOR
-        protected enum Kind {
+        protected enum Kind
+        {
             SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), VECTOR_RADIUS(100);
             private final int val;
             Kind(int v) { val = v; }
@@ -739,6 +736,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         protected abstract Kind kind();
+
         protected final ColumnMetadata column;
         protected final Operator operator;
         protected final ByteBuffer value;
@@ -768,6 +766,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         public Operator operator()
         {
             return operator;
+        }
+
+        @Nullable
+        public Index.Analyzer analyzer()
+        {
+            return null;
         }
 
         /**
@@ -817,8 +821,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         /**
          * Returns whether the provided row satisfied this expression or not.
          *
-         *
-         * @param metadata
+         * @param metadata the metadata of the queried table
          * @param partitionKey the partition key for row to check.
          * @param row the row to check. It should *not* contain deleted cells
          * (i.e. it should come from a RowIterator).
@@ -853,9 +856,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
             Expression that = (Expression)o;
 
-            return Objects.equal(this.kind(), that.kind())
+            return this.kind() == that.kind()
+                && this.operator == that.operator
                 && Objects.equal(this.column.name, that.column.name)
-                && Objects.equal(this.operator, that.operator)
                 && Objects.equal(this.value, that.value);
         }
 
@@ -926,6 +929,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 ByteBuffer name = ByteBufferUtil.readWithShortLength(in);
                 Operator operator = Operator.readFrom(in);
                 ColumnMetadata column = metadata.getColumn(name);
+                Index.Analyzer analyzer = IndexRegistry.obtain(metadata).getAnalyzerFor(column, operator).orElse(null);
 
                 // Compact storage tables, when used with thrift, used to allow falling through this withouot throwing an
                 // exception. However, since thrift was removed in 4.0, this behaviour was not restored in CASSANDRA-16217
@@ -935,11 +939,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 switch (kind)
                 {
                     case SIMPLE:
-                        return new SimpleExpression(column, operator, ByteBufferUtil.readWithShortLength(in));
+                        return new SimpleExpression(column, operator, ByteBufferUtil.readWithShortLength(in), analyzer);
                     case MAP_COMPARISON:
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
                         ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
-                        return new MapComparisonExpression(column, key, operator, value);
+                        return new MapComparisonExpression(column, key, operator, value, analyzer);
                     case VECTOR_RADIUS:
                         Operator boundaryOperator = Operator.readFrom(in);
                         ByteBuffer distance = ByteBufferUtil.readWithShortLength(in);
@@ -962,7 +966,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 switch (expression.kind())
                 {
                     case SIMPLE:
-                        size += ByteBufferUtil.serializedSizeWithShortLength(((SimpleExpression)expression).value);
+                        size += ByteBufferUtil.serializedSizeWithShortLength((expression).value);
                         break;
                     case MAP_COMPARISON:
                         MapComparisonExpression mexpr = (MapComparisonExpression)expression;
@@ -989,15 +993,37 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     /**
-     * An expression of the form 'column' 'op' 'value'.
+     * An expression that can be associated with an {@link Index.Analyzer}.
      */
-    public static class SimpleExpression extends Expression
+    public abstract static class AnalyzableExpression extends Expression
     {
-        public SimpleExpression(ColumnMetadata column, Operator operator, ByteBuffer value)
+        @Nullable
+        protected final Index.Analyzer analyzer;
+
+        public AnalyzableExpression(ColumnMetadata column, Operator operator, ByteBuffer value, @Nullable Index.Analyzer analyzer)
         {
             super(column, operator, value);
+            this.analyzer = analyzer;
         }
 
+        @Nullable
+        public final Index.Analyzer analyzer()
+        {
+            return analyzer;
+        }
+    }
+
+    /**
+     * An expression of the form 'column' 'op' 'value'.
+     */
+    public static class SimpleExpression extends AnalyzableExpression
+    {
+        public SimpleExpression(ColumnMetadata column, Operator operator, ByteBuffer value, @Nullable Index.Analyzer analyzer)
+        {
+            super(column, operator, value, analyzer);
+        }
+
+        @Override
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             // We support null conditions for LWT (in ColumnCondition) but not for RowFilter.
@@ -1025,13 +1051,13 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                                 return false;
 
                             ByteBuffer counterValue = LongType.instance.decompose(CounterContext.instance().total(foundValue, ByteBufferAccessor.instance));
-                            return operator.isSatisfiedBy(LongType.instance, counterValue, value);
+                            return operator.isSatisfiedBy(LongType.instance, counterValue, value, analyzer);
                         }
                         else
                         {
                             // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
                             ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                            return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
+                            return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value, analyzer);
                         }
                     }
                 case NEQ:
@@ -1039,12 +1065,13 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 case LIKE_SUFFIX:
                 case LIKE_CONTAINS:
                 case LIKE_MATCHES:
+                case ANALYZER_MATCHES:
                 case ANN:
                     {
                         assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for 'complex' types";
                         ByteBuffer foundValue = getValue(metadata, partitionKey, row);
                         // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-                        return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
+                        return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value, analyzer);
                     }
                 case CONTAINS:
                     return contains(metadata, partitionKey, row);
@@ -1166,14 +1193,18 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * supported when 'column' is a map) and where the operator can be {@link Operator#EQ}, {@link Operator#NEQ},
      * {@link Operator#LT}, {@link Operator#LTE}, {@link Operator#GT}, or {@link Operator#GTE}.
      */
-    public static class MapComparisonExpression extends Expression
+    public static class MapComparisonExpression extends AnalyzableExpression
     {
         private final ByteBuffer key;
         private ByteBuffer indexValue = null;
 
-        public MapComparisonExpression(ColumnMetadata column, ByteBuffer key, Operator operator, ByteBuffer value)
+        public MapComparisonExpression(ColumnMetadata column,
+                                       ByteBuffer key,
+                                       Operator operator,
+                                       ByteBuffer value,
+                                       @Nullable Index.Analyzer analyzer)
         {
-            super(column, operator, value);
+            super(column, operator, value, analyzer);
             assert column.type instanceof MapType && (operator == Operator.EQ || operator == Operator.NEQ || operator.isSlice());
             this.key = key;
         }
@@ -1199,12 +1230,14 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
          * Returns whether the provided row satisfies this expression. For equality, it validates that the row contains
          * the exact key/value pair. For inequalities, it validates that the row contains the key, then that the value
          * satisfies the inequality.
-         * @param metadata
+         *
+         * @param metadata the metadata of the queried table
          * @param partitionKey the partition key for row to check.
          * @param row the row to check. It should *not* contain deleted cells
          * (i.e. it should come from a RowIterator).
          * @return whether the row is satisfied by this expression.
          */
+        @Override
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             return isSatisfiedByEq(metadata, partitionKey, row) ^ (operator == Operator.NEQ);
@@ -1276,7 +1309,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             MapComparisonExpression that = (MapComparisonExpression)o;
 
             return Objects.equal(this.column.name, that.column.name)
-                && Objects.equal(this.operator, that.operator)
+                && this.operator == that.operator
                 && Objects.equal(this.key, that.key)
                 && Objects.equal(this.value, that.value);
         }
@@ -1336,7 +1369,6 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
     }
 
-
     public static class GeoDistanceExpression extends Expression
     {
         private final ByteBuffer distance;
@@ -1373,9 +1405,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         /**
-         * Build a new {@link GeoDistanceExpression} that is shifted by 360 degrees and can correctly search
+         * @return a new {@link GeoDistanceExpression} that is shifted by 360 degrees and can correctly search
          * on the opposite side of the antimeridian.
-         * @return
          */
         public GeoDistanceExpression buildShiftedExpression()
         {
@@ -1448,7 +1479,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             GeoDistanceExpression that = (GeoDistanceExpression)o;
 
             return Objects.equal(this.column.name, that.column.name)
-                   && Objects.equal(this.distanceOperator, that.distanceOperator)
+                   && this.distanceOperator == that.distanceOperator
                    && Objects.equal(this.distance, that.distance)
                    && Objects.equal(this.value, that.value);
         }
@@ -1506,6 +1537,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return value;
         }
 
+        @Override
         public String toString()
         {
             return String.format("expr(%s, %s)",
@@ -1516,12 +1548,14 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                                          .customExpressionValueType());
         }
 
+        @Override
         protected Kind kind()
         {
             return Kind.CUSTOM;
         }
 
         // Filtering by custom expressions isn't supported yet, so just accept any row
+        @Override
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             return true;
@@ -1540,7 +1574,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * is important, new types should registered last and obsoleted types should still be registered (
      * or dummy implementations registered in their place) to preserve consistent identifiers across
      * the cluster).
-     *
+     * </p>
      * During serialization, the identifier for the Deserializer implementation is prepended to the
      * implementation specific payload. To deserialize, the identifier is read first to obtain the
      * Deserializer, which then provides the concrete expression instance.
@@ -1613,6 +1647,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             super(column, operator, value);
         }
 
+        @Override
         protected Kind kind()
         {
             return Kind.USER;
@@ -1634,14 +1669,13 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         {
             in.readBoolean(); // Unused
             FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata);
-            return new CQLFilter(operation);
+            return new RowFilter(operation);
         }
 
         public long serializedSize(RowFilter filter, int version)
         {
-            long size = 1 // unused boolean
-                        + FilterElement.serializer.serializedSize(filter.root, version);
-            return size;
+            return 1 // unused boolean
+                   + FilterElement.serializer.serializedSize(filter.root, version);
         }
     }
 }

@@ -62,6 +62,8 @@ import org.apache.cassandra.guardrails.DefaultGuardrail;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -378,8 +380,10 @@ public abstract class ReadCommand extends AbstractReadQuery
      * validation method to check that nothing in this command's parameters
      * violates the implementation specific validation rules.
      */
-    public void maybeValidateIndex()
+    public void maybeValidateIndexes()
     {
+        IndexRegistry.obtain(metadata()).validate(rowFilter());
+
         if (null != indexQueryPlan)
             indexQueryPlan.validate(this);
     }

@@ -436,6 +436,30 @@ public interface Index
     }
 
     /**
+     * Returns the {@link Analyzer} for this index, if any. If the index doesn't transform the column values, this
+     * method will return an empty optional.
+     *
+     * @return the transforming column value analyzer for the index, if any
+     */
+    default Optional<Analyzer> getAnalyzer()
+    {
+        return Optional.empty();
+    }
+
+    /**
+     * Class representing a transformation of the indexed values done by the index.
+     * </p>
+     * This is used by the CQL operators when a filtering expression supported by an index is evaluated outside the
+     * index. It can be used to perform the same transformation on values that the index does when indexing. That way,
+     * the CQL operator can replicate the index behaviour when filtering results.
+     */
+    @FunctionalInterface
+    interface Analyzer
+    {
+        List<ByteBuffer> analyze(ByteBuffer value);
+    }
+
+    /**
      * Transform an initial RowFilter into the filter that will still need to applied
      * to a set of Rows after the index has performed it's initial scan.
      * Used in ReadCommand#executeLocal to reduce the amount of filtering performed on the
@@ -718,27 +742,15 @@ public interface Index
          * @return partitions from the base table matching the criteria of the search.
          */
         public UnfilteredPartitionIterator search(ReadExecutionController executionController);
-
-        /**
-         * Replica filtering protection may fetch data that doesn't match query conditions.
-         *
-         * On coordinator, we need to filter the replicas' responses again.
-         *
-         * @return filtered response that satisfied query conditions
-         */
-        default PartitionIterator filterReplicaFilteringProtection(PartitionIterator fullResponse)
-        {
-            return command().rowFilter().filter(fullResponse, command().metadata(), command().nowInSec());
-        }
     }
 
     /**
      * Class providing grouped operations for indexes that communicate with each other.
-     *
+     * </p>
      * Index implementations should provide a {@code Group} implementation calling to
-     * {@link SecondaryIndexManager#registerIndex(Index, Object, Supplier)} during index registering
+     * {@link IndexRegistry#registerIndex(Index, Key, Supplier)}
      * at {@link #register(IndexRegistry)} method and provide {@code groupKey} calling to
-     * {@link SecondaryIndexManager#unregisterIndex(Index, Object)} during index unregistering
+     * {@link IndexRegistry#unregisterIndex(Index, Key)} during index unregistering
      * at {@link #unregister(IndexRegistry)} method
      */
     interface Group

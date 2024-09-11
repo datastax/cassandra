@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.plan;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -39,13 +38,9 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
-import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -54,7 +49,6 @@ import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
@@ -91,27 +85,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public ReadCommand command()
     {
         return command;
-    }
-
-    @Override
-    public PartitionIterator filterReplicaFilteringProtection(PartitionIterator fullResponse)
-    {
-        for (RowFilter.Expression expression : controller.filterOperation())
-        {
-            AbstractAnalyzer analyzer = controller.getContext(expression).getAnalyzerFactory().create();
-            try
-            {
-                if (analyzer.transformValue())
-                    return applyIndexFilter(fullResponse, analyzeFilter(), queryContext);
-            }
-            finally
-            {
-                analyzer.end();
-            }
-        }
-
-        // if no analyzer does transformation
-        return Index.Searcher.super.filterReplicaFilteringProtection(fullResponse);
     }
 
     @Override
@@ -699,112 +672,5 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             super.close();
             rows.close();
         }
-    }
-
-    /**
-     * Used by {@link StorageAttachedIndexSearcher#filterReplicaFilteringProtection} to filter rows for columns that
-     * have transformations so won't get handled correctly by the row filter.
-     */
-    @SuppressWarnings("resource")
-    private static PartitionIterator applyIndexFilter(PartitionIterator response, FilterTree tree, QueryContext queryContext)
-    {
-        return new PartitionIterator()
-        {
-            @Override
-            public void close()
-            {
-                response.close();
-            }
-
-            @Override
-            public boolean hasNext()
-            {
-                return response.hasNext();
-            }
-
-            @Override
-            public RowIterator next()
-            {
-                RowIterator delegate = response.next();
-                Row staticRow = delegate.staticRow();
-
-                return new RowIterator()
-                {
-                    Row next;
-
-                    @Override
-                    public TableMetadata metadata()
-                    {
-                        return delegate.metadata();
-                    }
-
-                    @Override
-                    public boolean isReverseOrder()
-                    {
-                        return delegate.isReverseOrder();
-                    }
-
-                    @Override
-                    public RegularAndStaticColumns columns()
-                    {
-                        return delegate.columns();
-                    }
-
-                    @Override
-                    public DecoratedKey partitionKey()
-                    {
-                        return delegate.partitionKey();
-                    }
-
-                    @Override
-                    public Row staticRow()
-                    {
-                        return staticRow;
-                    }
-
-                    @Override
-                    public void close()
-                    {
-                        delegate.close();
-                    }
-
-                    private Row computeNext()
-                    {
-                        while (delegate.hasNext())
-                        {
-                            Row row = delegate.next();
-                            queryContext.addRowsFiltered(1);
-                            if (tree.isSatisfiedBy(delegate.partitionKey(), row, staticRow))
-                                return row;
-                        }
-                        return null;
-                    }
-
-                    private Row loadNext()
-                    {
-                        if (next == null)
-                            next = computeNext();
-                        return next;
-                    }
-
-                    @Override
-                    public boolean hasNext()
-                    {
-                        return loadNext() != null;
-                    }
-
-                    @Override
-                    public Row next()
-                    {
-                        Row result = loadNext();
-                        next = null;
-
-                        if (result == null)
-                            throw new NoSuchElementException();
-                        return result;
-                    }
-                };
-            }
-        };
     }
 }

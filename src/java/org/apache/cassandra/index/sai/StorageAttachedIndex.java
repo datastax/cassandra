@@ -645,6 +645,29 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public Optional<Analyzer> getAnalyzer()
+    {
+        if (!indexContext.isAnalyzed())
+            return Optional.empty();
+
+        return Optional.of(value -> {
+            List<ByteBuffer> tokens = new ArrayList<>();
+            AbstractAnalyzer analyzer = indexContext.getQueryAnalyzerFactory().create();
+            try
+            {
+                analyzer.reset(value);
+                while (analyzer.hasNext())
+                    tokens.add(analyzer.next());
+            }
+            finally
+            {
+                analyzer.end();
+            }
+            return tokens;
+        });
+    }
+
+    @Override
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
         // it should be executed from the SAI query plan, this is only used by the singleton index query plan
