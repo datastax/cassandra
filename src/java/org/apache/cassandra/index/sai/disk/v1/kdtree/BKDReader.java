@@ -25,6 +25,8 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
@@ -150,7 +152,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             bkdPostingsInput = IndexFileUtils.instance.openInput(postingsFile);
             bkdInput.seek(firstLeafFilePointer);
 
-            var leafNodeToLeafFP = isAscending ? getLeafOffsets() : getLeafOffsets().descendingMap();
+            NavigableMap<Long, Integer> leafNodeToLeafFP = getLeafOffsets();
             if (query != null)
             {
                 var minLeafFP = findMinLeafFP(query);
@@ -160,6 +162,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 // possible range query exclusiveness is handled by the query object.
                 leafNodeToLeafFP = leafNodeToLeafFP.subMap(minLeafFP, true, maxLeafFP, true);
             }
+
+            if (!isAscending)
+                leafNodeToLeafFP = leafNodeToLeafFP.descendingMap();
 
             // init the first leaf
             iterator = leafNodeToLeafFP.entrySet().iterator();

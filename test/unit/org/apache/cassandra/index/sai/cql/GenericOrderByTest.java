@@ -191,6 +191,16 @@ public class GenericOrderByTest extends SAITester
             assertRows(execute("SELECT v FROM %s WHERE v >= 7 ORDER BY v DESC LIMIT 4"), row(8), row(7));
             assertRows(execute("SELECT v FROM %s WHERE v >= 10 ORDER BY v DESC LIMIT 4"));
         });
-    }
 
+        // Test with larger number of rows to force selecting multiple leaves in the KDtree:
+        for (int i = 0; i < 5000; i++)
+            execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", i, i, i);
+
+        beforeAndAfterFlush(() -> {
+            assertRowCount(execute("SELECT v FROM %s WHERE v >= 100 ORDER BY v LIMIT 10"), 10);
+            assertRowCount(execute("SELECT v FROM %s WHERE v < 4900 ORDER BY v DESC LIMIT 10"), 10);
+            assertRowCount(execute("SELECT v FROM %s WHERE v >= 100 AND v < 4900 ORDER BY v LIMIT 10"), 10);
+            assertRowCount(execute("SELECT v FROM %s WHERE v >= 100 AND v < 4900 ORDER BY v DESC LIMIT 10"), 10);
+        });
+    }
 }
