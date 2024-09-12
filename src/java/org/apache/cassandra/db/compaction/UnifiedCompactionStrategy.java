@@ -1198,7 +1198,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             int threshold = level.threshold;
             int fanout = level.fanout;
             int index = level.index;
-            int maxSSTablesToCompact = Math.max(fanout, (int) Math.min(spaceAvailable / level.avg, controller.maxSSTablesToCompact()));
+            int maxSSTablesToCompact = Math.min(
+                    controller.maxSSTablesToCompact(), // never compact more than this
+                    Math.max(fanout, (int) (spaceAvailable / level.avg)));
 
             assert count >= threshold;
             if (count <= fanout)
