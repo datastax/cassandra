@@ -31,8 +31,6 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.shared.ClusterUtils;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -155,13 +153,14 @@ public class IndexStreamingFailureTest extends TestBaseImpl
         }
 
         @SuppressWarnings("unused")
-        public static SegmentMetadata flush(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
+        public static SegmentMetadata flush() throws IOException
         {
             throw new IOException(TEST_ERROR_MESSAGE);
         }
 
+        // Object is added here for CC because simply importing another Version confuses AbstractCluster
         @SuppressWarnings("unused")
-        public static void validateChecksum(IndexInput input) throws IOException
+        public static void validateChecksum(IndexInput input, Object version) throws IOException
         {
             throw new CorruptIndexException(TEST_ERROR_MESSAGE, "Test resource");
         }
