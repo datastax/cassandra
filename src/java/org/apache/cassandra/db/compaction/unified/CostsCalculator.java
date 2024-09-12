@@ -44,7 +44,7 @@ public class CostsCalculator
 
     /** How often values are sampled. Sampling for periods that are too short (<= 1 second) may not give good results since
      * we many not collect sufficient data. */
-    final static int samplingPeriodMs = Integer.getInteger(Controller.PREFIX + "sample_time_ms", 5000);
+    final static int samplingPeriodMs = Controller.getIntegerSystemProperty("sample_time_ms", 5000);
 
     private final Environment env;
     private final MovingAverageOfDelta partitionsReadPerPeriod;

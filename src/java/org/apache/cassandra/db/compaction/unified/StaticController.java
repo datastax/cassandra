@@ -43,7 +43,7 @@ public class StaticController extends Controller
      * The scaling parameters W, one per bucket index and separated by a comma.
      * Higher indexes will use the value of the last index with a W specified.
      */
-    private static final String DEFAULT_STATIC_SCALING_PARAMETERS = System.getProperty(PREFIX + SCALING_PARAMETERS_OPTION, "T4");
+    private static final String DEFAULT_STATIC_SCALING_PARAMETERS = getSystemProperty(SCALING_PARAMETERS_OPTION, "T4");
     private final int[] scalingParameters;
 
     @VisibleForTesting // comp. simulation
