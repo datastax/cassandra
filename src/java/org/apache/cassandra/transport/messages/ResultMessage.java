@@ -242,7 +242,11 @@ public abstract class ResultMessage<T extends ResultMessage<T>> extends Message.
             if (keyspaceMapper == Constants.IDENTITY_STRING_MAPPER)
                 return this;
 
-            ResultSet newResultSet = result.withOverriddenKeyspace(keyspaceMapper);
+            return withResultSet(result.withOverriddenKeyspace(keyspaceMapper));
+        }
+
+        public Rows withResultSet(ResultSet newResultSet)
+        {
             if (newResultSet == result)
                 return this;
 
