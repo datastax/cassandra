@@ -33,6 +33,8 @@ import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getSystemProperty;
+
 /**
  * The static compaction controller periodically checks the IO costs
  * that result from the current configuration of the {@link UnifiedCompactionStrategy}.
@@ -43,7 +45,7 @@ public class StaticController extends Controller
      * The scaling parameters W, one per bucket index and separated by a comma.
      * Higher indexes will use the value of the last index with a W specified.
      */
-    private static final String DEFAULT_STATIC_SCALING_PARAMETERS = System.getProperty(PREFIX + SCALING_PARAMETERS_OPTION, "T4");
+    private static final String DEFAULT_STATIC_SCALING_PARAMETERS = getSystemProperty(SCALING_PARAMETERS_OPTION, "T4");
     private final int[] scalingParameters;
 
     @VisibleForTesting // comp. simulation
