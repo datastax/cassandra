@@ -52,6 +52,15 @@ public final class WithProperties implements AutoCloseable
         return set(prop, () -> prop.setString(value));
     }
 
+    public WithProperties clear(CassandraRelevantProperties prop)
+    {
+        return set(prop, () -> {
+            String prev = prop.getString();
+            prop.clearValue(); // checkstyle: suppress nearby 'clearValueSystemPropertyUsage'
+            return prev;
+        });
+    }
+
     public WithProperties set(CassandraRelevantProperties prop, String... values)
     {
         return set(prop, Arrays.asList(values));
