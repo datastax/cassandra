@@ -802,7 +802,7 @@ public enum CassandraRelevantProperties
     UCS_NUM_SHARDS("unified_compaction.num_shards"),
     UCS_OVERLAP_INCLUSION_METHOD("unified_compaction.overlap_inclusion_method"),
     UCS_RESERVATIONS_TYPE_OPTION("unified_compaction.reservations_type_option", Reservations.Type.LEVEL_OR_BELOW.name()),
-    UCS_RESERVED_THREADS_PER_LEVEL("reserved_threads_per_level", "0"),
+    UCS_RESERVED_THREADS("reserved_threads", "max"),
     UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
     UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0.5"),
     UCS_STATIC_SCALING_PARAMETERS("unified_compaction.scaling_parameters", "T4"),
@@ -860,12 +860,26 @@ public enum CassandraRelevantProperties
         this.defaultVal = null;
     }
 
+    public static final String CASSANDRA_PREFIX = "cassandra.";
+    public static final String LEGACY_PREFIX = "dse.";
+
     private final String key;
     private final String defaultVal;
 
     public String getKey()
     {
         return key;
+    }
+
+    /**
+     * Returns the key with the legacy prefix. If the key starts with "cassandra.", it will be replaced with "dse.".
+     * Otherwise, "dse." will be prepended to the key.
+     */
+    public String getKeyWithLegacyPrefix()
+    {
+        if (key.startsWith(CASSANDRA_PREFIX))
+            return LEGACY_PREFIX + key.substring(CASSANDRA_PREFIX.length());
+        return LEGACY_PREFIX + key;
     }
 
     /**
@@ -876,6 +890,20 @@ public enum CassandraRelevantProperties
     {
         String value = System.getProperty(key);
 
+        return value == null ? defaultVal : STRING_CONVERTER.convert(value);
+    }
+
+    /**
+     * Gets the value of the indicated system property.
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the default value.
+     * @return system property value if it exists, defaultValue otherwise.
+     */
+    public String getStringWithLegacyFallback()
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
         return value == null ? defaultVal : STRING_CONVERTER.convert(value);
     }
 
@@ -907,6 +935,23 @@ public enum CassandraRelevantProperties
     public String getString(String overrideDefaultValue)
     {
         String value = System.getProperty(key);
+        if (value == null)
+            return overrideDefaultValue;
+
+        return STRING_CONVERTER.convert(value);
+    }
+
+    /**
+     * Gets the value of a system property as a String.
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the overrideDefaultValue value.
+     * @return system property String value if it exists, overrideDefaultValue otherwise.
+     */
+    public String getStringWithLegacyFallback(String overrideDefaultValue)
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
         if (value == null)
             return overrideDefaultValue;
 
@@ -963,11 +1008,42 @@ public enum CassandraRelevantProperties
 
     /**
      * Gets the value of a system property as a boolean.
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the default value.
+     * @return system property boolean value if it exists, false otherwise().
+     */
+    public boolean getBooleanWithLegacyFallback()
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
+        return BOOLEAN_CONVERTER.convert(value == null ? defaultVal : value);
+    }
+
+    /**
+     * Gets the value of a system property as a boolean.
      * @return system property boolean value if it exists, overrideDefaultValue otherwise.
      */
     public boolean getBoolean(boolean overrideDefaultValue)
     {
         String value = System.getProperty(key);
+        if (value == null)
+            return overrideDefaultValue;
+
+        return BOOLEAN_CONVERTER.convert(value);
+    }
+
+    /**
+     * Gets the value of a system property as a boolean.
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the overrideDefaultValue value.
+     * @return system property boolean value if it exists, overrideDefaultValue otherwise.
+     */
+    public boolean getBooleanWithLegacyFallback(boolean overrideDefaultValue)
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
         if (value == null)
             return overrideDefaultValue;
 
@@ -994,12 +1070,36 @@ public enum CassandraRelevantProperties
     }
 
     /**
+     * Clears the value set in the system property using the LEGACY_PREFIX.
+     */
+    public void clearValueWithLegacyPrefix()
+    {
+        System.clearProperty(getKeyWithLegacyPrefix());
+    }
+
+    /**
      * Gets the value of a system property as a int.
      * @return System property value if it exists, defaultValue otherwise. Throws an exception if no default value is set.
      */
     public int getInt()
     {
         String value = System.getProperty(key);
+        if (value == null && defaultVal == null)
+            throw new ConfigurationException("Missing property value or default value is not set: " + key);
+        return INTEGER_CONVERTER.convert(value == null ? defaultVal : value);
+    }
+
+    /**
+     * Gets the value of a system property as an int.
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the default value.
+     * @return System property value if it exists, defaultValue otherwise. Throws an exception if no default value is set.
+     */
+    public int getIntWithLegacyFalback()
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
         if (value == null && defaultVal == null)
             throw new ConfigurationException("Missing property value or default value is not set: " + key);
         return INTEGER_CONVERTER.convert(value == null ? defaultVal : value);
@@ -1044,6 +1144,22 @@ public enum CassandraRelevantProperties
 
     /**
      * Gets the value of a system property as a double.
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the default value.
+     * @return System property value if it exists, defaultValue otherwise. Throws an exception if no default value is set.
+     */
+    public double getDoubleWithLegacyFallback()
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
+        if (value == null && defaultVal == null)
+            throw new ConfigurationException("Missing property value or default value is not set: " + key);
+        return DOUBLE_CONVERTER.convert(value == null ? defaultVal : value);
+    }
+
+    /**
+     * Gets the value of a system property as a double.
      * @return system property value if it exists, defaultValue otherwise.
      */
     public double getDouble(double overrideDefaultValue)
@@ -1078,6 +1194,22 @@ public enum CassandraRelevantProperties
 
     /**
      * Gets the value of a system property, given as a human-readable size in bytes (e.g. 100MiB, 10GB, 500B).
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the default value.
+     * @return System property value if it exists, defaultValue otherwise. Throws an exception if no default value is set.
+     */
+    public long getSizeInBytesWithLegacyFallback()
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
+        if (value == null && defaultVal == null)
+            throw new ConfigurationException("Missing property value or default value is not set: " + key);
+        return SIZE_IN_BYTES_CONVERTER.convert(value == null ? defaultVal : value);
+    }
+
+    /**
+     * Gets the value of a system property, given as a human-readable size in bytes (e.g. 100MiB, 10GB, 500B).
      * @return System property value if it exists, defaultValue otherwise.
      */
     public long getSizeInBytes(long overrideDefaultValue)
@@ -1091,11 +1223,44 @@ public enum CassandraRelevantProperties
 
     /**
      * Gets the value of a system property, given as a human-readable size in bytes (e.g. 100MiB, 10GB, 500B).
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the default value.
+     * @return System property value if it exists, overrideDefaultValue otherwise.
+     */
+    public long getSizeInBytesWithLegacyFallback(long overrideDefaultValue)
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
+        if (value == null)
+            return overrideDefaultValue;
+
+        return SIZE_IN_BYTES_CONVERTER.convert(value);
+    }
+
+    /**
+     * Gets the value of a system property, given as a human-readable size in bytes (e.g. 100MiB, 10GB, 500B).
      * @return System property value if it exists, defaultValue otherwise. Throws an exception if no default value is set.
      */
     public double getPercentage()
     {
         String value = System.getProperty(key);
+        if (value == null && defaultVal == null)
+            throw new ConfigurationException("Missing property value or default value is not set: " + key);
+        return PERCENT_CONVERTER.convert(value == null ? defaultVal : value);
+    }
+
+    /**
+     * Gets the value of a system property, given as a human-readable size in bytes (e.g. 100MiB, 10GB, 500B).
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the default value.
+     * @return System property value if it exists, defaultValue otherwise. Throws an exception if no default value is set.
+     */
+    public double getPercentageWithLegacyFallback()
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
         if (value == null && defaultVal == null)
             throw new ConfigurationException("Missing property value or default value is not set: " + key);
         return PERCENT_CONVERTER.convert(value == null ? defaultVal : value);
@@ -1189,6 +1354,29 @@ public enum CassandraRelevantProperties
     public <T extends Enum<T>> T getEnum(boolean toUppercase, Class<T> enumClass)
     {
         String value = System.getProperty(key, defaultVal);
+        return Enum.valueOf(enumClass, toUppercase ? value.toUpperCase() : value);
+    }
+
+    /**
+     * Gets the value of a system property as an enum, optionally calling {@link String#toUpperCase()} first.
+     * If the property is not set, it will try to get the value from the legacy property. If both are missing,
+     * it returns the default value.
+     * If the value is missing, the default value for this property is used
+     *
+     * @param toUppercase before converting to enum
+     * @param enumClass enumeration class
+     * @param <T> type
+     * @return enum value
+     */
+    public <T extends Enum<T>> T getEnumWithLegacyFallback(boolean toUppercase, Class<T> enumClass)
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            value = System.getProperty(getKeyWithLegacyPrefix());
+        if (value == null && defaultVal == null)
+            throw new ConfigurationException("Missing property value or default value is not set: " + key);
+        if (value == null)
+            value = defaultVal;
         return Enum.valueOf(enumClass, toUppercase ? value.toUpperCase() : value);
     }
 
