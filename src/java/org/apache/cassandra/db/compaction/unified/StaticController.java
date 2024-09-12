@@ -46,7 +46,7 @@ public class StaticController extends Controller
      * Higher indexes will use the value of the last index with a W specified.
      */
     static final String STATIC_SCALING_FACTORS_OPTION = "static_scaling_factors";
-    private final static String DEFAULT_STATIC_SCALING_PARAMETERS = UCS_STATIC_SCALING_PARAMETERS.getString();
+    private final static String DEFAULT_STATIC_SCALING_PARAMETERS = UCS_STATIC_SCALING_PARAMETERS.getStringWithLegacyFallback();
 
     private final int[] scalingParameters;
 

@@ -81,7 +81,7 @@ public abstract class Controller
     /** @deprecated See STAR-1878 */
     @Deprecated(since = "CC 4.0")
     public static final String DATASET_SIZE_OPTION_GB = "dataset_size_in_gb";
-    static final long DEFAULT_DATASET_SIZE = UCS_DATASET_SIZE.getSizeInBytes(DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() << 30);
+    static final long DEFAULT_DATASET_SIZE = UCS_DATASET_SIZE.getSizeInBytesWithLegacyFallback(DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() << 30);
 
     /**
      * The number of shards. This is the main configuration option for UCS V1 (i.e. before the density/overlap
@@ -105,7 +105,7 @@ public abstract class Controller
      */
     /** @deprecated See STAR-1898 */
     @Deprecated(since = "CC 4.0")
-    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(UCS_NUM_SHARDS.getString()).map(Integer::valueOf);
+    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(UCS_NUM_SHARDS.getStringWithLegacyFallback()).map(Integer::valueOf);
 
     /**
      * The minimum sstable size. Sharded writers split sstables over shard only if they are at least as large as the
@@ -121,7 +121,7 @@ public abstract class Controller
     static final String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
     static final String MIN_SSTABLE_SIZE_OPTION_AUTO = "auto";
 
-    static final long DEFAULT_MIN_SSTABLE_SIZE = UCS_MIN_SSTABLE_SIZE.getSizeInBytes();
+    static final long DEFAULT_MIN_SSTABLE_SIZE = UCS_MIN_SSTABLE_SIZE.getSizeInBytesWithLegacyFallback();
     /**
      * Value to use to set the min sstable size from the flush size.
      */
@@ -145,7 +145,7 @@ public abstract class Controller
      * behind, higher read amplification, and other problems of that nature.
      */
     public static final String MAX_SPACE_OVERHEAD_OPTION = "max_space_overhead";
-    static final double DEFAULT_MAX_SPACE_OVERHEAD = UCS_MAX_SPACE_OVERHEAD.getDouble();
+    static final double DEFAULT_MAX_SPACE_OVERHEAD = UCS_MAX_SPACE_OVERHEAD.getDoubleWithLegacyFallback();
     static final double MAX_SPACE_OVERHEAD_LOWER_BOUND = 0.01;
     static final double MAX_SPACE_OVERHEAD_UPPER_BOUND = 1.0;
 
@@ -157,13 +157,13 @@ public abstract class Controller
      * For others a base count of 1 is used as system tables are usually small and do not need as much compaction
      * parallelism, while having directories defined provides for parallelism in a different way.
      */
-    public static final int DEFAULT_BASE_SHARD_COUNT = UCS_BASE_SHARD_COUNT.getInt();
+    public static final int DEFAULT_BASE_SHARD_COUNT = UCS_BASE_SHARD_COUNT.getIntWithLegacyFalback();
 
     /**
      * The target SSTable size. This is the size of the SSTables that the controller will try to create.
      */
     static final String TARGET_SSTABLE_SIZE_OPTION = "target_sstable_size";
-    public static final long DEFAULT_TARGET_SSTABLE_SIZE = UCS_TARGET_SSTABLE_SIZE.getSizeInBytes();
+    public static final long DEFAULT_TARGET_SSTABLE_SIZE = UCS_TARGET_SSTABLE_SIZE.getSizeInBytesWithLegacyFallback();
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
 
@@ -193,7 +193,7 @@ public abstract class Controller
      * a growth value of 0.333, and 64 (~16GiB each) for a growth value of 0.5.
      */
     static final String SSTABLE_GROWTH_OPTION = "sstable_growth";
-    static final double DEFAULT_SSTABLE_GROWTH = UCS_SSTABLE_GROWTH.getPercentage();
+    static final double DEFAULT_SSTABLE_GROWTH = UCS_SSTABLE_GROWTH.getPercentageWithLegacyFallback();
 
     /**
      * Number of reserved threads to keep for each compaction level. This is used to ensure that there are always
@@ -206,9 +206,8 @@ public abstract class Controller
      * <p>
      * The default value is max, all compaction threads are distributed among the levels.
      */
-    // TODO there is a change in default value between OSS=0 and CC=max
-    static final String RESERVED_THREADS_OPTION = "reserved_threads_per_level";
-    public static final int DEFAULT_RESERVED_THREADS = FBUtilities.parseIntAllowingMax(UCS_RESERVED_THREADS_PER_LEVEL.getString("max"));
+    static final String RESERVED_THREADS_OPTION = "reserved_threads";
+    public static final int DEFAULT_RESERVED_THREADS = FBUtilities.parseIntAllowingMax(UCS_RESERVED_THREADS.getStringWithLegacyFallback("max"));
 
     /**
      * Reservation type, defining whether reservations can be used by lower levels. If set to `per_level`, the
@@ -218,19 +217,19 @@ public abstract class Controller
      * The default value is `level_or_below`.
      */
     static final String RESERVATIONS_TYPE_OPTION = "reservations_type";
-    public static final Reservations.Type DEFAULT_RESERVED_THREADS_TYPE = UCS_RESERVATIONS_TYPE_OPTION.getEnum(true, Reservations.Type.class);
+    public static final Reservations.Type DEFAULT_RESERVED_THREADS_TYPE = UCS_RESERVATIONS_TYPE_OPTION.getEnumWithLegacyFallback(true, Reservations.Type.class);
 
     /**
      * This parameter is intended to modify the shape of the LSM by taking into account the survival ratio of data, for now it is fixed to one.
      */
-    static final double DEFAULT_SURVIVAL_FACTOR = UCS_SURVIVAL_FACTOR.getDouble();
+    static final double DEFAULT_SURVIVAL_FACTOR = UCS_SURVIVAL_FACTOR.getDoubleWithLegacyFallback();
     final static double[] DEFAULT_SURVIVAL_FACTORS = new double[] { DEFAULT_SURVIVAL_FACTOR };
 
     /**
      * Either true or false. This parameter determines which controller will be used.
      */
     static final String ADAPTIVE_OPTION = "adaptive";
-    static final boolean DEFAULT_ADAPTIVE = UCS_ADAPTIVE_ENABLED.getBoolean();
+    static final boolean DEFAULT_ADAPTIVE = UCS_ADAPTIVE_ENABLED.getBooleanWithLegacyFallback();
 
     /**
      * The maximum number of sstables to compact in one operation.
@@ -282,7 +281,7 @@ public abstract class Controller
      */
     static final String OVERLAP_INCLUSION_METHOD_OPTION = "overlap_inclusion_method";
     static final Overlaps.InclusionMethod DEFAULT_OVERLAP_INCLUSION_METHOD =
-        Overlaps.InclusionMethod.valueOf(UCS_OVERLAP_INCLUSION_METHOD.getString(Overlaps.InclusionMethod.TRANSITIVE.toString()).toUpperCase());
+        Overlaps.InclusionMethod.valueOf(UCS_OVERLAP_INCLUSION_METHOD.getStringWithLegacyFallback(Overlaps.InclusionMethod.TRANSITIVE.toString()).toUpperCase());
 
     /**
      * The scaling parameters W, one per bucket index and separated by a comma.
@@ -355,7 +354,7 @@ public abstract class Controller
         this.reservedThreads = reservedThreads;
         this.reservationsType = reservationsType;
         this.maxSpaceOverhead = maxSpaceOverhead;
-        this.l0ShardsEnabled = UCS_L0_SHARDS_ENABLED.getBoolean(false); // FIXME VECTOR-23
+        this.l0ShardsEnabled = UCS_L0_SHARDS_ENABLED.getBooleanWithLegacyFallback(false); // FIXME VECTOR-23
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -864,7 +863,7 @@ public abstract class Controller
         double maxSpaceOverhead = options.containsKey(MAX_SPACE_OVERHEAD_OPTION)
                 ? FBUtilities.parsePercent(options.get(MAX_SPACE_OVERHEAD_OPTION))
                 : DEFAULT_MAX_SPACE_OVERHEAD;
-        int maxSSTablesToCompact = Integer.parseInt(options.getOrDefault(MAX_SSTABLES_TO_COMPACT_OPTION, "0"));
+        int maxSSTablesToCompact = Integer.parseInt(options.getOrDefault(MAX_SSTABLES_TO_COMPACT_OPTION, "256"));
         long expiredSSTableCheckFrequency = options.containsKey(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_OPTION)
                 ? Long.parseLong(options.get(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_OPTION))
                 : DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS;
@@ -934,7 +933,7 @@ public abstract class Controller
 
         // For remote storage, the sstables on L0 are created by the different replicas, and therefore it is likely
         // that there are RF identical copies, so here we adjust the survival factor for L0
-        double[] survivalFactors = !UCS_SHARED_STORAGE.getBoolean()
+        double[] survivalFactors = !UCS_SHARED_STORAGE.getBooleanWithLegacyFallback()
                                    ? DEFAULT_SURVIVAL_FACTORS
                                    : new double[] { DEFAULT_SURVIVAL_FACTOR / realm.getKeyspaceReplicationStrategy().getReplicationFactor().allReplicas, DEFAULT_SURVIVAL_FACTOR };
 
