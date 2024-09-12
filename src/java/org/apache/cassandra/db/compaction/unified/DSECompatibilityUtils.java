@@ -42,16 +42,7 @@ public class DSECompatibilityUtils
 
     protected static Boolean getBooleanSystemProperty(String option)
     {
-        String value = getSystemProperty(option);
-        boolean result = false;
-        try
-        {
-            result = Boolean.parseBoolean(value);
-        }
-        catch (IllegalArgumentException | NullPointerException e)
-        {
-        }
-        return result;
+        return Boolean.parseBoolean(getSystemProperty(option));
     }
 
     public static Integer getIntegerSystemProperty(String option, int defaultValue)
