@@ -33,6 +33,8 @@ import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getSystemProperty;
+
 /**
  * The static compaction controller periodically checks the IO costs
  * that result from the current configuration of the {@link UnifiedCompactionStrategy}.

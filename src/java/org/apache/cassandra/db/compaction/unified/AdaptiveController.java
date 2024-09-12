@@ -40,6 +40,9 @@ import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getIntegerSystemProperty;
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getSystemProperty;
+
 /**
  * The adaptive compaction controller dynamically calculates the optimal scaling parameter W.
  * <p/>

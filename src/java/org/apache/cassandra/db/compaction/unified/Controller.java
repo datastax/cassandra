@@ -59,6 +59,8 @@ import org.apache.cassandra.utils.Overlaps;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getBooleanSystemProperty;
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getSystemProperty;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
@@ -358,41 +360,6 @@ public abstract class Controller
                     "Set it to 'true' to enable aggressive SSTable expiration.");
         }
         this.ignoreOverlapsInExpirationCheck = ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION && ignoreOverlapsInExpirationCheck;
-    }
-
-    protected static String getSystemProperty(String option)
-    {
-        return getSystemProperty(option, null);
-    }
-
-    /**
-     * Tries to get system property with PREFIX first. If it doesn't find it,
-     * looks for system property with LEGACY_PREFIX. If both are missing it
-     * returns the default value.
-     */
-    protected static String getSystemProperty(String option, String defaultValue) {
-        String value = System.getProperty(PREFIX + option);
-        if (value == null)
-            value = System.getProperty(LEGACY_PREFIX + option, defaultValue);
-        return value;
-    }
-
-    protected static Boolean getBooleanSystemProperty(String option)
-    {
-        return Boolean.getBoolean(PREFIX + option) || Boolean.getBoolean(LEGACY_PREFIX + option);
-    }
-
-    /**
-     * Tries to get system property with PREFIX first. If it doesn't find it,
-     * looks for system property with LEGACY_PREFIX. If both are missing it
-     * returns the default value.
-     */
-    public static Integer getIntegerSystemProperty(String option, int defaultValue)
-    {
-        Integer value = Integer.getInteger(PREFIX + option);
-        if (value == null)
-            value = Integer.getInteger(LEGACY_PREFIX + option, defaultValue);
-        return value;
     }
 
     public static File getControllerConfigPath(String keyspaceName, String tableName)
