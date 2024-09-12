@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import org.junit.After;
 import org.junit.Test;
 
 import org.apache.cassandra.utils.FBUtilities;
@@ -33,6 +34,20 @@ import static org.junit.Assert.assertTrue;
 
 public class DSECompatibilityUtilsTest
 {
+
+    /**
+     * Making sure to start each test with clean system property state
+     */
+    @After
+    public void doAfter()
+    {
+        String[] options = new String[]{MIN_SSTABLE_SIZE_OPTION, MIN_COST, SHARED_STORAGE};
+        String[] prefixes = new String[]{PREFIX, LEGACY_PREFIX};
+
+        for(String option: options)
+            for(String prefix: prefixes)
+                System.clearProperty(prefix + option);
+    }
     @Test
     public void testGetSystemProperty()
     {
