@@ -154,7 +154,7 @@ parser.add_argument("-e", "--execute", help='Execute the statement and quit.')
 parser.add_argument("--connect-timeout", default=DEFAULT_CONNECT_TIMEOUT_SECONDS, dest='connect_timeout',
                     help='Specify the connection timeout in seconds (default: %(default)s seconds).')
 parser.add_argument("--request-timeout", default=DEFAULT_REQUEST_TIMEOUT_SECONDS, dest='request_timeout',
-                    help='Specify the default request timeout in seconds (default: %(default)s seconds).')
+                    help='Specify the default request timeout in seconds (default: %(default)s seconds)')
 parser.add_argument("--consistency-level", dest='consistency_level',
                     help='Specify the initial consistency level.')
 parser.add_argument("--serial-consistency-level", dest='serial_consistency_level',
