@@ -46,7 +46,7 @@ public class CostsCalculator
 
     /** How often values are sampled. Sampling for periods that are too short (<= 1 second) may not give good results since
      * we many not collect sufficient data. */
-    final static int samplingPeriodMs = UCS_ADAPTIVE_SAMPLE_TIME_MS.getInt();
+    final static int samplingPeriodMs = UCS_ADAPTIVE_SAMPLE_TIME_MS.getIntWithLegacyFalback();
 
     private final Environment env;
     private final MovingAverageOfDelta partitionsReadPerPeriod;

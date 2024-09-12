@@ -67,28 +67,28 @@ public class AdaptiveController extends Controller
 
     /** The minimum valid value for the scaling parameter */
     static final String MIN_SCALING_PARAMETER = "adaptive_min_scaling_parameter";
-    static private final int DEFAULT_MIN_SCALING_PARAMETER = UCS_ADAPTIVE_MIN_SCALING_PARAMETER.getInt();
+    static private final int DEFAULT_MIN_SCALING_PARAMETER = UCS_ADAPTIVE_MIN_SCALING_PARAMETER.getIntWithLegacyFalback();
 
     /** The maximum valid value for the scaling parameter */
     static final String MAX_SCALING_PARAMETER = "adaptive_max_scaling_parameter";
-    static private final int DEFAULT_MAX_SCALING_PARAMETER = UCS_ADAPTIVE_MAX_SCALING_PARAMETER.getInt();
+    static private final int DEFAULT_MAX_SCALING_PARAMETER = UCS_ADAPTIVE_MAX_SCALING_PARAMETER.getIntWithLegacyFalback();
 
     /** The interval for periodically checking the optimal value for the scaling parameter */
     static final String INTERVAL_SEC = "adaptive_interval_sec";
-    static private final int DEFAULT_INTERVAL_SEC = UCS_ADAPTIVE_INTERVAL_SEC.getInt();
+    static private final int DEFAULT_INTERVAL_SEC = UCS_ADAPTIVE_INTERVAL_SEC.getIntWithLegacyFalback();
 
     /** The gain is a number between 0 and 1 used to determine if a new choice of the scaling parameter is better than the current one */
     static final String THRESHOLD = "adaptive_threshold";
-    private static final double DEFAULT_THRESHOLD = UCS_ADAPTIVE_THRESHOLD.getDouble();
+    private static final double DEFAULT_THRESHOLD = UCS_ADAPTIVE_THRESHOLD.getDoubleWithLegacyFallback();
 
     /** Below the minimum cost we don't try to optimize the scaling parameter, we consider the current scaling parameter good enough. This is necessary because the cost
      * can vanish to zero when there are neither reads nor writes and right now we don't know how to handle this case.  */
     static final String MIN_COST = "adaptive_min_cost";
-    static private final int DEFAULT_MIN_COST = UCS_ADAPTIVE_MIN_COST.getInt();
+    static private final int DEFAULT_MIN_COST = UCS_ADAPTIVE_MIN_COST.getIntWithLegacyFalback();
 
     /** The maximum number of concurrent Adaptive Compactions */
     static final String MAX_ADAPTIVE_COMPACTIONS = "max_adaptive_compactions";
-    private static final int DEFAULT_MAX_ADAPTIVE_COMPACTIONS = UCS_MAX_ADAPTIVE_COMPACTIONS.getInt();
+    private static final int DEFAULT_MAX_ADAPTIVE_COMPACTIONS = UCS_MAX_ADAPTIVE_COMPACTIONS.getIntWithLegacyFalback();
     private final int intervalSec;
     private final int minScalingParameter;
     private final int maxScalingParameter;
