@@ -258,7 +258,7 @@ public class EndpointGroupingCoordinator
 
                     // extract subrange response in token order
                     ReadResponse subrangeResponse = multiRangeResponse.subrangeResponse(multiRangeCommand, range);
-                    handler.onResponse(Message.remoteResponse(response.header.from, Verb.RANGE_RSP, subrangeResponse));
+                    handler.onResponse(Message.remoteResponse(response.header.from, Verb.RANGE_RSP, response.header.params(), subrangeResponse));
                 }
             }
 

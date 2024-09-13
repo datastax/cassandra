@@ -117,11 +117,12 @@ public class MultiRangeReadCommand extends ReadCommand
 
         PartitionRangeReadCommand command = (PartitionRangeReadCommand) subrangeHandlers.get(0).command();
         List<DataRange> dataRanges = new ArrayList<>(subrangeHandlers.size());
-        for(ReadCallback<?, ?> handler : subrangeHandlers)
+        boolean trackWarnings = false;
+        for (ReadCallback<?, ?> handler : subrangeHandlers)
         {
             dataRanges.add(((PartitionRangeReadCommand) handler.command()).dataRange());
+            trackWarnings |= handler.command().isTrackingWarnings();
         }
-
 
         return new MultiRangeReadCommand(command.isDigestQuery(),
                                          command.digestVersion(),
@@ -133,7 +134,18 @@ public class MultiRangeReadCommand extends ReadCommand
                                          command.limits(),
                                          dataRanges,
                                          command.indexQueryPlan(),
-                                         false);
+                                         trackWarnings);
+    }
+
+    // we need to override this method to return instances of MultiRangeReadResponse that don't mess with the serializer
+    @Override
+    public ReadResponse createEmptyResponse()
+    {
+        UnfilteredPartitionIterator iterator = EmptyIterators.unfilteredPartition(metadata());
+
+        return isDigestQuery()
+               ? ReadResponse.createDigestResponse(iterator, this)
+               : MultiRangeReadResponse.createDataResponse(iterator, this);
     }
 
     /**
