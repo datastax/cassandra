@@ -247,7 +247,7 @@ public class CassandraDiskAnn
                          ? VectorSimilarityFunction.COSINE
                          : similarityFunction;
                 var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
-                var rr = view.rerankerFor(queryVector, sf);
+                var rr = view.rerankerFor(queryVector, similarityFunction);
                 ssp = new SearchScoreProvider(asf, rr);
             }
             var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
