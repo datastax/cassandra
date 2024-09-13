@@ -164,7 +164,7 @@ public class ShardManagerNodeAware implements ShardManager
 
                     // Choose the nearest neighbor. By convention, prefer left if value is midpoint, but don't
                     // choose the same token twice.
-                    if (value.size(leftNeighbor) <= value.size(rightNeighbor) && !leftNeighbor.equals(nodeAlignedSplitPoints[pos - 1]))
+                    if (value.size(leftNeighbor) <= value.size(rightNeighbor) && !leftNeighbor.equals(nodeAlignedSplitPoints[i - 1]))
                     {
                         nodeAlignedSplitPoints[i] = leftNeighbor;
                         // No need to bump pos because we decremented it to find the right split token.
