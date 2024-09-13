@@ -71,6 +71,8 @@ public class QueryContext
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
 
+    private String optimizedPlan;
+
     @VisibleForTesting
     public QueryContext()
     {
@@ -81,11 +83,17 @@ public class QueryContext
     {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
         this.queryStartTimeNanos = System.nanoTime();
+        this.optimizedPlan = "";
     }
 
     public long totalQueryTimeNs()
     {
         return System.nanoTime() - queryStartTimeNanos;
+    }
+
+    public String optimizedPlan()
+    {
+        return optimizedPlan;
     }
 
     // setters
@@ -148,6 +156,11 @@ public class QueryContext
     public void setFilterSortOrder(FilterSortOrder filterSortOrder)
     {
         this.filterSortOrder = filterSortOrder;
+    }
+
+    public void setOptimizedPlan(String optimizedPlan)
+    {
+        this.optimizedPlan = optimizedPlan;
     }
 
     // getters

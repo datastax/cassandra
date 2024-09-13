@@ -127,6 +127,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         // Can't check for `command.isTopK()` because the planner could optimize sorting out
         if (plan.ordering() != null)
         {
+            queryContext.setOptimizedPlan(plan.toStringRecursive());
             // TopK queries require a consistent view of the sstables and memtables in order to validate overwritten
             // rows. Acquire the view before building any of the iterators.
             try (var queryView = new QueryViewBuilder(cfs, controller.getOrderer(), controller.mergeRange(), queryContext).build())
@@ -144,6 +145,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
         else
         {
+            queryContext.setOptimizedPlan("");
             Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
             assert keysIterator instanceof RangeIterator;
             return new ResultRetriever((RangeIterator) keysIterator, filterTree, controller, executionController, queryContext);

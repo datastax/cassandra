@@ -119,6 +119,7 @@ public class Config
     public boolean cross_node_timeout = true;
 
     public volatile long slow_query_log_timeout_in_ms = 500L;
+    public volatile int sai_slow_log_num_slowest_queries = 5;
 
     public volatile double phi_convict_threshold = 8.0;
 
