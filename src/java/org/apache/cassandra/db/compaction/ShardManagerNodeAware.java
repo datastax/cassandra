@@ -82,23 +82,32 @@ public class ShardManagerNodeAware implements ShardManager
     @Override
     public ShardTracker boundaries(int shardCount)
     {
-        logger.debug("Creating shard boundaries for {} shards", shardCount);
-        // Because sstables do not wrap around, we need shardCount - 1 splits.
-        var splitPointCount = shardCount - 1;
-        // Clone token map to avoid race conditions in the event we need to getAllEndpoints
-        var tokenMetadataClone = tokenMetadata.cloneOnlyTokenMap();
-        var sortedTokens = tokenMetadataClone.sortedTokens();
-        if (splitPointCount > sortedTokens.size())
+        try
         {
-            // Not enough tokens, allocate them.
-            int additionalSplits = splitPointCount - sortedTokens.size();
-            var newTokens = IsolatedTokenAllocator.allocateTokens(additionalSplits, rs);
-            sortedTokens.addAll(newTokens);
-            sortedTokens.sort(Token::compareTo);
+            logger.debug("Attempting to create shard boundaries for {} shards", shardCount);
+            //e5ae871ca68f
+            // Because sstables do not wrap around, we need shardCount - 1 splits.
+            var splitPointCount = shardCount - 1;
+            // Clone token map to avoid race conditions in the event we need to getAllEndpoints
+            var tokenMetadataClone = tokenMetadata.cloneOnlyTokenMap();
+            var sortedTokens = tokenMetadataClone.sortedTokens();
+            if (splitPointCount > sortedTokens.size())
+            {
+                // Not enough tokens, allocate them.
+                int additionalSplits = splitPointCount - sortedTokens.size();
+                var newTokens = IsolatedTokenAllocator.allocateTokens(additionalSplits, rs);
+                sortedTokens.addAll(newTokens);
+                sortedTokens.sort(Token::compareTo);
+            }
+            var splitPoints = findTokenAlignedSplitPoints(sortedTokens.toArray(TOKENS), splitPointCount);
+            logger.debug("Creating shard boundaries for {} shards. Currently {} tokens: {}. Split points: {}", shardCount, sortedTokens.size(), sortedTokens, Arrays.toString(splitPoints));
+            return new NodeAlignedShardTracker(splitPoints);
         }
-        var splitPoints = findTokenAlignedSplitPoints(sortedTokens.toArray(TOKENS), splitPointCount);
-        logger.debug("Creating shard boundaries for {} shards. Currently {} tokens: {}. Split points: {}", shardCount, sortedTokens.size(), sortedTokens, Arrays.toString(splitPoints));
-        return new NodeAlignedShardTracker(splitPoints);
+        catch (Throwable t)
+        {
+            logger.error("Error creating shard boundaries", t);
+            throw t;
+        }
     }
 
     private Token[] findTokenAlignedSplitPoints(Token[] sortedTokens, int splitPointCount)
