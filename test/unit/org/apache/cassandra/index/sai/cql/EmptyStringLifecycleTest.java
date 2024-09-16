@@ -76,4 +76,17 @@ public class EmptyStringLifecycleTest extends SAITester
         UntypedResultSet rows = execute("SELECT * FROM %s WHERE v = ''");
         assertRows(rows, row(1, ""), row(0, ""));
     }
+
+    @Test
+    public void testOrderBy()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        disableCompaction(KEYSPACE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, 'v'));
+
+        execute("INSERT INTO %s (k, v) VALUES (0, '')");
+
+        UntypedResultSet rows = execute("SELECT * FROM %s ORDER BY v LIMIT 10");
+        assertRows(rows, row(0, ""));
+    }
 }
