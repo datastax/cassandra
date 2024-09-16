@@ -20,6 +20,7 @@ package org.apache.cassandra.concurrent;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -43,8 +44,13 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.cql3.statements.ModificationStatement;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ExecutorUtils;
@@ -58,6 +64,8 @@ public enum Stage
 {
     READ              (false, "ReadStage",             "request",  DatabaseDescriptor::getConcurrentReaders,        DatabaseDescriptor::setConcurrentReaders,        maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
     MUTATION          (true,  "MutationStage",         "request",  DatabaseDescriptor::getConcurrentWriters,        DatabaseDescriptor::setConcurrentWriters,        maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
+    COORDINATE_READ   (false, "CoordReadStage",        "request",  DatabaseDescriptor::getConcurrentCoordinatorReaders,        DatabaseDescriptor::setConcurrentCoordinatorReaders,        maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
+    COORDINATE_MUTATION(true, "CoordMutationStage",    "request",  DatabaseDescriptor::getConcurrentCoordinatorWriters,        DatabaseDescriptor::setConcurrentCoordinatorWriters,        maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
     COUNTER_MUTATION  (true,  "CounterMutationStage",  "request",  DatabaseDescriptor::getConcurrentCounterWriters, DatabaseDescriptor::setConcurrentCounterWriters, maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
     VIEW_MUTATION     (true,  "ViewMutationStage",     "request",  DatabaseDescriptor::getConcurrentViewWriters,    DatabaseDescriptor::setConcurrentViewWriters,    maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
     GOSSIP            (true,  "GossipStage",           "internal", () -> 1,                                         null,                                            Stage::singleThreadedStage),
@@ -143,6 +151,22 @@ public enum Stage
                                                                               .collect(Collectors.joining(",")));
             }
         }
+    }
+
+    public static Optional<Stage> fromStatement(CQLStatement statement)
+    {
+        if (CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.getBoolean())
+        {
+            if (statement instanceof SelectStatement)
+            {
+                return Optional.of(Stage.COORDINATE_READ);
+            }
+            else if (statement instanceof ModificationStatement || statement instanceof BatchStatement)
+            {
+                return Optional.of(Stage.COORDINATE_MUTATION);
+            }
+        }
+        return Optional.empty();
     }
 
     // Convenience functions to execute on this stage
@@ -280,6 +304,11 @@ public enum Stage
     public int getActiveTaskCount()
     {
         return executor().getActiveTaskCount();
+    }
+
+    public long getCompletedTaskCount()
+    {
+        return executor().getCompletedTaskCount();
     }
 
     /**

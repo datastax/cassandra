@@ -532,6 +532,16 @@ public class DatabaseDescriptor
             throw new ConfigurationException("concurrent_writes must be at least 2, but was " + conf.concurrent_writes, false);
         }
 
+        if (conf.concurrent_coordinator_reads < 2)
+        {
+            throw new ConfigurationException("concurrent_coordinator_reads must be at least 2, but was " + conf.concurrent_coordinator_reads, false);
+        }
+
+        if (conf.concurrent_coordinator_writes < 2)
+        {
+            throw new ConfigurationException("concurrent_coordinator_writes must be at least 2, but was " + conf.concurrent_coordinator_writes, false);
+        }
+
         if (conf.concurrent_counter_writes < 2)
             throw new ConfigurationException("concurrent_counter_writes must be at least 2, but was " + conf.concurrent_counter_writes, false);
 
@@ -1815,6 +1825,34 @@ public class DatabaseDescriptor
         conf.phi_convict_threshold = phiConvictThreshold;
     }
 
+    public static int getConcurrentCoordinatorReaders()
+    {
+        return conf.concurrent_coordinator_reads;
+    }
+
+    public static void setConcurrentCoordinatorReaders(int concurrent_reads)
+    {
+        if (concurrent_reads < 0)
+        {
+            throw new IllegalArgumentException("Concurrent coordinator readers must be non-negative");
+        }
+        conf.concurrent_coordinator_reads = concurrent_reads;
+    }
+
+    public static int getConcurrentCoordinatorWriters()
+    {
+        return conf.concurrent_coordinator_writes;
+    }
+
+    public static void setConcurrentCoordinatorWriters(int concurrent_writers)
+    {
+        if (concurrent_writers < 0)
+        {
+            throw new IllegalArgumentException("Concurrent coordinator writers must be non-negative");
+        }
+        conf.concurrent_coordinator_writes = concurrent_writers;
+    }
+
     public static int getConcurrentReaders()
     {
         return conf.concurrent_reads;
@@ -1824,7 +1862,7 @@ public class DatabaseDescriptor
     {
         if (concurrent_reads < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent readers must be non-negative");
         }
         conf.concurrent_reads = concurrent_reads;
     }
@@ -1838,7 +1876,7 @@ public class DatabaseDescriptor
     {
         if (concurrent_writers < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent writers must be non-negative");
         }
         conf.concurrent_writes = concurrent_writers;
     }

@@ -538,7 +538,15 @@ public enum CassandraRelevantProperties
      * If provided, this custom factory class will be used to create stage executor for a couple of stages.
      * @see Stage for details
      */
-    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class");
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class"),
+
+    /**
+     * If true, makes read and write CQL statements async, splitting them from the {@link org.apache.cassandra.concurrent.Stage#NATIVE_TRANSPORT_REQUESTS}
+     * stage and into the {@link org.apache.cassandra.concurrent.Stage#COORDINATE_READ} and {@link org.apache.cassandra.concurrent.Stage#COORDINATE_MUTATION}
+     * stages respectively; in other words, the native transport stage will not block, offloading request processing
+     * (and any related blocking behaviour) to the specific read and write stages.
+     */
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
