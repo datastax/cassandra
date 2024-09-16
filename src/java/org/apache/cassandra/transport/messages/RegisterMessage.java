@@ -19,6 +19,7 @@ package org.apache.cassandra.transport.messages;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import io.netty.buffer.ByteBuf;
 
@@ -63,7 +64,12 @@ public class RegisterMessage extends Message.Request
     }
 
     @Override
-    protected Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    protected CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    {
+        return CompletableFuture.completedFuture(executeSync(queryState, queryStartNanoTime, traceRequest));
+    }
+
+    private Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
     {
         assert connection instanceof ServerConnection;
         Connection.Tracker tracker = connection.getTracker();
