@@ -363,18 +363,18 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void verifyEmptyStringIndexingBehaviorOnNonAnalyzedColumn() throws Throwable
+    public void verifyEmptyStringIndexingBehaviorOnNonAnalyzedColumn()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
         flush();
-        assertRows(execute("SELECT * FROM %s WHERE v = ''"));
+        assertRows(execute("SELECT * FROM %s WHERE v = ''"), row(0, ""));
     }
 
     @Test
-    public void testEmptyQueryString() throws Throwable
+    public void verifyEmptyStringIndexingBehaviorOnAnalyzedColumn()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'standard'}");
@@ -383,6 +383,7 @@ public class LuceneAnalyzerTest extends SAITester
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "some text to analyze");
         flush();
         assertRows(execute("SELECT * FROM %s WHERE v : ''"));
+        assertRows(execute("SELECT * FROM %s WHERE v : ' '"));
     }
 
     // The english analyzer has a default set of stop words. This test relies on "the" being one of those stop words.

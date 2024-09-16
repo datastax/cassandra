@@ -233,7 +233,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             currentBuilder = newSegmentBuilder(sstableRowId);
         }
 
-        if (term.remaining() == 0)
+        if (term.remaining() == 0 && !indexContext.getValidator().allowsEmpty())
             return;
 
         long allocated = currentBuilder.addAll(term, type, key, sstableRowId, analyzer, indexContext);

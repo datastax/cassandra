@@ -78,7 +78,9 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.AbstractTypeGenerators;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.asserts.SoftAssertionsWithLimit;
 import org.assertj.core.api.SoftAssertions;
@@ -101,6 +103,7 @@ import static org.apache.cassandra.utils.AbstractTypeGenerators.unfreeze;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.unwrap;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytesToHex;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.quicktheories.QuickTheory.qt;
 
 @SuppressWarnings({ "unchecked", "rawtypes" })
@@ -134,6 +137,24 @@ public class AbstractTypeTest
         cassandra40TypesCompatibility = new LoadedTypesCompatibility(compatibilityFile("4.0"), ImmutableSet.of());
         dse68cndbTypesCompatibility = new LoadedTypesCompatibility(compatibilityFile("dse-6.8-cndb"), ImmutableSet.of());
         currentTypesCompatibility = new CurrentTypesCompatibility();
+    }
+
+    @Test
+    public void empty()
+    {
+        qt().forAll(AbstractTypeGenerators.primitiveTypeGen()).checkAssert(type -> {
+            if (type.allowsEmpty())
+            {
+                type.validate(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+                // empty container or null is valid; only checks that this method doesn't fail
+                type.compose(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+            }
+            else
+            {
+                assertThatThrownBy(() -> type.validate(ByteBufferUtil.EMPTY_BYTE_BUFFER)).isInstanceOf(MarshalException.class);
+                assertThatThrownBy(() -> type.getSerializer().validate(ByteBufferUtil.EMPTY_BYTE_BUFFER)).isInstanceOf(MarshalException.class);
+            }
+        });
     }
 
     @Test

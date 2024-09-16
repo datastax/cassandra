@@ -57,6 +57,12 @@ public class DecimalType extends NumberType<BigDecimal>
 
     DecimalType() {super(ComparisonType.CUSTOM);} // singleton
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public boolean isEmptyValueMeaningless()
     {
         return true;
