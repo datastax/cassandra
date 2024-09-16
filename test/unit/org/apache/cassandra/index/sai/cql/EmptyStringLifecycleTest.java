@@ -30,7 +30,7 @@ public class EmptyStringLifecycleTest extends SAITester
     @BeforeClass
     public static void setup()
     {
-        StorageService.instance.initServer(); // Ensure the node has advanced out of STARTING mode
+        StorageService.instance.setStartingModeUnsafe(); // Ensure the node has advanced out of STARTING mode
     }
 
     @Test
@@ -78,10 +78,23 @@ public class EmptyStringLifecycleTest extends SAITester
 
         execute("INSERT INTO %s (k, v) VALUES (1, '')");
         flush();
-        
+
         compact();
 
         UntypedResultSet rows = execute("SELECT * FROM %s WHERE v = ''");
         assertRows(rows, row(1, ""), row(0, ""));
+    }
+
+    @Test
+    public void testOrderBy()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        disableCompaction(KEYSPACE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, 'v'));
+
+        execute("INSERT INTO %s (k, v) VALUES (0, '')");
+
+        UntypedResultSet rows = execute("SELECT * FROM %s ORDER BY v LIMIT 10");
+        assertRows(rows, row(0, ""));
     }
 }
