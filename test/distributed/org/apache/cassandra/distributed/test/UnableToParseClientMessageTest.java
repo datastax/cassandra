@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import org.junit.AfterClass;
@@ -263,7 +262,7 @@ public class UnableToParseClientMessageTest extends TestBaseImpl
         }
 
         @Override
-        protected Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+        public Response executeSync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
         {
             throw new AssertionError("execute not supported");
         }

@@ -24,6 +24,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -214,9 +215,14 @@ public abstract class Message
             return false;
         }
 
-        protected abstract Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
+        protected CompletableFuture<Response> executeAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+        {
+            return CompletableFuture.completedFuture(executeSync(queryState, queryStartNanoTime, traceRequest));
+        }
 
-        public final Response execute(QueryState queryState, long queryStartNanoTime)
+        public abstract Response executeSync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
+
+        public final CompletableFuture<Response> maybeExecuteAync(QueryState queryState, long queryStartNanoTime)
         {
             boolean shouldTrace = false;
             UUID tracingSessionId = null;
@@ -236,21 +242,16 @@ public abstract class Message
                 }
             }
 
-            Response response;
-            try
-            {
-                response = execute(queryState, queryStartNanoTime, shouldTrace);
-            }
-            finally
-            {
-                if (shouldTrace)
-                    Tracing.instance.stopSession();
-            }
+            boolean finalShouldTrace = shouldTrace;
+            UUID finalTracingSessionId = tracingSessionId;
+            return executeAsync(queryState, queryStartNanoTime, shouldTrace)
+                   .whenComplete((result, ignored) -> {
+                       if (finalShouldTrace)
+                           Tracing.instance.stopSession();
 
-            if (isTraceable() && isTracingRequested())
-                response.setTracingId(tracingSessionId);
-
-            return response;
+                       if (isTraceable() && isTracingRequested())
+                           result.setTracingId(finalTracingSessionId);
+                   });
         }
 
         public void setTracingRequested()

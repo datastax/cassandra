@@ -495,7 +495,15 @@ public enum CassandraRelevantProperties
      * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
      * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
      */
-    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false");
+    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
+
+    /**
+     * If true, makes read and write CQL statements async, splitting them from the {@link org.apache.cassandra.concurrent.Stage#NATIVE_TRANSPORT_REQUESTS}
+     * stage and into the {@link org.apache.cassandra.concurrent.Stage#READ} and {@link org.apache.cassandra.concurrent.Stage#MUTATION}
+     * stages respectively; in other words, the native transport stage will not block, offloading request processing
+     * (and any related blocking behaviour) to the specific read and write stages.
+     */
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

@@ -112,7 +112,7 @@ public class PrepareMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    public Message.Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
     {
         try
         {
