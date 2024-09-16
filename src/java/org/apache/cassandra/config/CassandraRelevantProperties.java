@@ -497,7 +497,15 @@ public enum CassandraRelevantProperties
      * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class");
+    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+
+    /**
+     * If true, makes read and write CQL statements async, splitting them from the {@link org.apache.cassandra.concurrent.Stage#NATIVE_TRANSPORT_REQUESTS}
+     * stage and into the {@link org.apache.cassandra.concurrent.Stage#READ} and {@link org.apache.cassandra.concurrent.Stage#MUTATION}
+     * stages respectively; in other words, the native transport stage will not block, offloading request processing
+     * (and any related blocking behaviour) to the specific read and write stages.
+     */
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
