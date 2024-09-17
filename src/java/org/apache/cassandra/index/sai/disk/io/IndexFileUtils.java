@@ -49,8 +49,9 @@ public class IndexFileUtils
 {
     protected static final Logger logger = LoggerFactory.getLogger(IndexFileUtils.class);
 
+    // KATE non-final only because we need to set it for testing...
     @VisibleForTesting
-    public static final SequentialWriterOption DEFAULT_WRITER_OPTION = SequentialWriterOption.newBuilder()
+    public static SequentialWriterOption DEFAULT_WRITER_OPTION = SequentialWriterOption.newBuilder()
                                                                                              .trickleFsync(DatabaseDescriptor.getTrickleFsync())
                                                                                              .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKiB() * 1024)
                                                                                              .bufferType(BufferType.OFF_HEAP)
@@ -62,7 +63,8 @@ public class IndexFileUtils
     private static final Supplier<Checksum> LEGACY_CHECKSUM_FACTORY = CRC32::new;
     private static IndexFileUtils overrideInstance = null;
 
-    private final SequentialWriterOption writerOption;
+    // KATE non-final only because we need to set it for testing...
+    private SequentialWriterOption writerOption;
 
     public static synchronized void setOverrideInstance(IndexFileUtils overrideInstance)
     {
