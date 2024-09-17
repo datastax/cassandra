@@ -396,10 +396,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (arenaSelector != null && !arenaSelector.diskBoundaries.isOutOfDate())
                 return; // another thread beat us to the update
 
-            // todo what is our realm like in cndb? it's not "local" anymore, is it?
             DiskBoundaries currentBoundaries = realm.getDiskBoundaries();
-            logger.info("Updating shard manager with new disk boundaries {}, for {}, with {}", currentBoundaries,
-                        realm.getKeyspaceReplicationStrategy(), controller.isNodeAware());
             shardManager = ShardManager.create(currentBoundaries, realm.getKeyspaceReplicationStrategy(), controller.isNodeAware());
             arenaSelector = new ArenaSelector(controller, currentBoundaries);
             // Note: this can just as well be done without the synchronization (races would be benign, just doing some

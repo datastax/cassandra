@@ -230,7 +230,6 @@ public class ShardManagerTokenAware implements ShardManager
         public double shardSpanSize()
         {
             // No weight applied because weighting is a local range property.
-            // TODO test wrap around.
             return shardStart().size(end());
         }
 
