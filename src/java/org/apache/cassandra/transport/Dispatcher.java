@@ -77,25 +77,31 @@ public class Dispatcher
         assert request.connection() instanceof ServerConnection;
         ServerConnection connection = (ServerConnection) request.connection();
         Thread requestThread = Thread.currentThread();
-        this.processRequest(connection, request, backpressure)
-            .whenCompleteAsync((response, ex) -> {
-                FlushItem<?> toFlush;
-                if (ex == null)
-                {
-                    toFlush = forFlusher.toFlushItem(channel, request, response);
-                    Message.logger.trace("Responding: {}, v={}", response, connection.getVersion());
-                }
-                else
-                {
-                    JVMStabilityInspector.inspectThrowable(ex);
-                    ExceptionHandlers.UnexpectedChannelExceptionHandler handler = new ExceptionHandlers.UnexpectedChannelExceptionHandler(channel, true);
-                    ErrorMessage error = ErrorMessage.fromException(ex, handler);
-                    error.setStreamId(request.getStreamId());
-                    toFlush = forFlusher.toFlushItem(channel, request, error);
-                }
-                ClientWarn.instance.resetWarnings();
-                flush(toFlush);
-            }, Thread.currentThread() == requestThread ? Stage.IMMEDIATE.executor() : Stage.NATIVE_TRANSPORT_REQUESTS.executor());
+        try
+        {
+            this.processRequest(connection, request, backpressure)
+                .whenCompleteAsync((response, ex) -> {
+                    FlushItem<?> toFlush;
+                    if (ex == null)
+                    {
+                        toFlush = forFlusher.toFlushItem(channel, request, response);
+                        Message.logger.trace("Responding: {}, v={}", response, connection.getVersion());
+                    }
+                    else
+                    {
+                        JVMStabilityInspector.inspectThrowable(ex);
+                        ExceptionHandlers.UnexpectedChannelExceptionHandler handler = new ExceptionHandlers.UnexpectedChannelExceptionHandler(channel, true);
+                        ErrorMessage error = ErrorMessage.fromException(ex, handler);
+                        error.setStreamId(request.getStreamId());
+                        toFlush = forFlusher.toFlushItem(channel, request, error);
+                    }
+                    flush(toFlush);
+                }, Thread.currentThread() == requestThread ? Stage.IMMEDIATE.executor() : Stage.NATIVE_TRANSPORT_REQUESTS.executor());
+        }
+        finally
+        {
+            ClientWarn.instance.resetWarnings();
+        }
     }
 
     CompletableFuture<Message.Response> processRequest(ServerConnection connection, Message.Request request, Overload backpressure)

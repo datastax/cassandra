@@ -17,27 +17,84 @@
  */
 package org.apache.cassandra.transport;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.util.Collections;
+import java.util.Map;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.BatchQueryOptions;
+import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.BatchMessage;
 import org.apache.cassandra.transport.messages.ExecuteMessage;
 import org.apache.cassandra.transport.messages.PrepareMessage;
 import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.MD5Digest;
 
 public class TransportTest extends CQLTester
 {
+    private static Field cqlQueryHandlerField;
+    private static boolean modifiersAccessible;
+
+    @BeforeClass
+    public static void makeCqlQueryHandlerAccessible()
+    {
+        try
+        {
+            cqlQueryHandlerField = ClientState.class.getDeclaredField("cqlQueryHandler");
+            cqlQueryHandlerField.setAccessible(true);
+
+            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            modifiersAccessible = modifiersField.isAccessible();
+            modifiersField.setAccessible(true);
+            modifiersField.setInt(cqlQueryHandlerField, cqlQueryHandlerField.getModifiers() & ~Modifier.FINAL);
+        }
+        catch (IllegalAccessException | NoSuchFieldException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @AfterClass
+    public static void resetCqlQueryHandlerField()
+    {
+        if (cqlQueryHandlerField == null)
+            return;
+        try
+        {
+            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            modifiersField.setAccessible(true);
+            modifiersField.setInt(cqlQueryHandlerField, cqlQueryHandlerField.getModifiers() | Modifier.FINAL);
+
+            cqlQueryHandlerField.setAccessible(false);
+
+            modifiersField.setAccessible(modifiersAccessible);
+        }
+        catch (IllegalAccessException | NoSuchFieldException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     @After
     public void dropCreatedTable()
     {
@@ -69,6 +126,8 @@ public class TransportTest extends CQLTester
     private void doTestTransport(long expectedTasks) throws Throwable
     {
         SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort);
+        QueryHandler queryHandler = (QueryHandler) cqlQueryHandlerField.get(null);
+        cqlQueryHandlerField.set(null, new TransportTest.TestQueryHandler());
         try
         {
             requireNetwork();
@@ -83,10 +142,14 @@ public class TransportTest extends CQLTester
 
             ExecuteMessage executeMessage = new ExecuteMessage(prepareResponse.statementId, prepareResponse.resultMetadataId, QueryOptions.DEFAULT);
             Message.Response executeResponse = client.execute(executeMessage);
+            Assert.assertEquals(1, executeResponse.getWarnings().size());
+            Assert.assertEquals("async-prepared", executeResponse.getWarnings().get(0));
             Assert.assertEquals(expectedTasks, Stage.READ.executor().getCompletedTaskCount());
 
             QueryMessage readMessage = new QueryMessage("SELECT * FROM " + KEYSPACE + ".atable", QueryOptions.DEFAULT);
             Message.Response readResponse = client.execute(readMessage);
+            Assert.assertEquals(1, executeResponse.getWarnings().size());
+            Assert.assertEquals("async-process", readResponse.getWarnings().get(0));
             Assert.assertEquals(expectedTasks * 2, Stage.READ.executor().getCompletedTaskCount());
 
             BatchMessage batchMessage = new BatchMessage(BatchStatement.Type.UNLOGGED,
@@ -94,15 +157,74 @@ public class TransportTest extends CQLTester
                                                          Collections.singletonList(Collections.<ByteBuffer>emptyList()),
                                                          QueryOptions.DEFAULT);
             Message.Response batchResponse = client.execute(batchMessage);
+            Assert.assertEquals(1, executeResponse.getWarnings().size());
+            Assert.assertEquals("async-batch", batchResponse.getWarnings().get(0));
             Assert.assertEquals(expectedTasks, Stage.MUTATION.executor().getCompletedTaskCount());
 
             QueryMessage insertMessage = new QueryMessage("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')", QueryOptions.DEFAULT);
             Message.Response insertResponse = client.execute(insertMessage);
+            Assert.assertEquals(1, executeResponse.getWarnings().size());
+            Assert.assertEquals("async-process", insertResponse.getWarnings().get(0));
             Assert.assertEquals(expectedTasks * 2, Stage.MUTATION.executor().getCompletedTaskCount());
         }
         finally
         {
             client.close();
+            cqlQueryHandlerField.set(null, queryHandler);
+        }
+    }
+
+    public static class TestQueryHandler implements QueryHandler
+    {
+        public QueryProcessor.Prepared getPrepared(MD5Digest id)
+        {
+            return QueryProcessor.instance.getPrepared(id);
+        }
+
+        public CQLStatement parse(String query, QueryState state, QueryOptions options)
+        {
+            return QueryProcessor.instance.parse(query, state, options);
+        }
+
+        public ResultMessage.Prepared prepare(String query,
+                                              ClientState clientState,
+                                              Map<String, ByteBuffer> customPayload)
+        throws RequestValidationException
+        {
+            return QueryProcessor.instance.prepare(query, clientState, customPayload);
+        }
+
+        public ResultMessage process(CQLStatement statement,
+                                     QueryState state,
+                                     QueryOptions options,
+                                     Map<String, ByteBuffer> customPayload,
+                                     long queryStartNanoTime)
+        throws RequestExecutionException, RequestValidationException
+        {
+            ClientWarn.instance.warn("async-process");
+            return QueryProcessor.instance.process(statement, state, options, customPayload, queryStartNanoTime);
+        }
+
+        public ResultMessage processBatch(BatchStatement statement,
+                                          QueryState state,
+                                          BatchQueryOptions options,
+                                          Map<String, ByteBuffer> customPayload,
+                                          long queryStartNanoTime)
+        throws RequestExecutionException, RequestValidationException
+        {
+            ClientWarn.instance.warn("async-batch");
+            return QueryProcessor.instance.processBatch(statement, state, options, customPayload, queryStartNanoTime);
+        }
+
+        public ResultMessage processPrepared(CQLStatement statement,
+                                             QueryState state,
+                                             QueryOptions options,
+                                             Map<String, ByteBuffer> customPayload,
+                                             long queryStartNanoTime)
+        throws RequestExecutionException, RequestValidationException
+        {
+            ClientWarn.instance.warn("async-prepared");
+            return QueryProcessor.instance.processPrepared(statement, state, options, customPayload, queryStartNanoTime);
         }
     }
 }
