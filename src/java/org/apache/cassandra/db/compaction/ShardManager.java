@@ -49,7 +49,7 @@ public interface ShardManager
         {
             if (diskPositions != null && diskPositions.size() > 1)
                 throw new IllegalArgumentException("Cannot use node aware strategy with disk boundaries");
-            return new ShardManagerNodeAware(rs);
+            return new ShardManagerTokenAware(rs);
         }
 
         SortedLocalRanges localRanges = diskBoundaries.getLocalRanges();
