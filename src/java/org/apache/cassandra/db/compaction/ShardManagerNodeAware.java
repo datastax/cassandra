@@ -129,51 +129,43 @@ public class ShardManagerNodeAware implements ShardManager
         int pos = 0;
         for (int i = 0; i < evenSplitPoints.length; i++)
         {
+            int min = pos;
+            int max = sortedTokens.length - evenSplitPoints.length + i;
             Token value = evenSplitPoints[i];
-            pos = Arrays.binarySearch(sortedTokens, pos, sortedTokens.length, value);
+            pos = Arrays.binarySearch(sortedTokens, min, max, value);
+            if (pos < 0)
+                pos = -pos - 1;
 
-            if (pos >= 0)
+            if (pos == min)
             {
-                // Exact match found
+                // No left neighbor, so choose the right neighbor
                 nodeAlignedSplitPoints[i] = sortedTokens[pos];
                 pos++;
             }
+            else if (pos == max)
+            {
+                // No right neighbor, so choose the left neighbor
+                // This also means that for all greater indexes we don't have a choice.
+                for (; i < evenSplitPoints.length; ++i)
+                    nodeAlignedSplitPoints[i] = sortedTokens[pos++ - 1];
+            }
             else
             {
-                // pos is -(insertion point) - 1, so calculate the insertion point
-                pos = -pos - 1;
+                // Check the neighbors
+                Token leftNeighbor = sortedTokens[pos - 1];
+                Token rightNeighbor = sortedTokens[pos];
 
-                if (pos == 0)
+                // Choose the nearest neighbor. By convention, prefer left if value is midpoint, but don't
+                // choose the same token twice.
+                if (leftNeighbor.size(value) <= value.size(rightNeighbor))
                 {
-                    // No left neighbor, so choose the right neighbor
-                    nodeAlignedSplitPoints[i] = sortedTokens[pos];
-                    pos++;
-                }
-                else if (pos == sortedTokens.length)
-                {
-                    // todo assert we're at the end?
-                    // No right neighbor, so choose the left neighbor
-                    nodeAlignedSplitPoints[i] = sortedTokens[pos - 1];
-                    pos++;
+                    nodeAlignedSplitPoints[i] = leftNeighbor;
+                    // No need to bump pos because we decremented it to find the right split token.
                 }
                 else
                 {
-                    // Check the neighbors
-                    Token leftNeighbor = sortedTokens[pos - 1];
-                    Token rightNeighbor = sortedTokens[pos];
-
-                    // Choose the nearest neighbor. By convention, prefer left if value is midpoint, but don't
-                    // choose the same token twice.
-                    if (value.size(leftNeighbor) <= value.size(rightNeighbor) && !leftNeighbor.equals(nodeAlignedSplitPoints[i - 1]))
-                    {
-                        nodeAlignedSplitPoints[i] = leftNeighbor;
-                        // No need to bump pos because we decremented it to find the right split token.
-                    }
-                    else
-                    {
-                        nodeAlignedSplitPoints[i] = rightNeighbor;
-                        pos++;
-                    }
+                    nodeAlignedSplitPoints[i] = rightNeighbor;
+                    pos++;
                 }
             }
         }

@@ -148,7 +148,6 @@ public class IsolatedTokenAllocatorTest
     private List<Token> generateFakeEndpoints(TokenMetadata tmd, AbstractReplicationStrategy rs, int firstNodeId, int lastNodId, int vnodes, String dc, String rack) throws UnknownHostException
     {
         System.out.printf("Adding nodes %d through %d to dc=%s, rack=%s.%n", firstNodeId, lastNodId, dc, rack);
-        IPartitioner p = tmd.partitioner;
         var result = new ArrayList<Token>();
         for (int i = firstNodeId; i <= lastNodId; i++)
         {
