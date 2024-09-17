@@ -47,8 +47,11 @@ public abstract class MemtableSizeTestBase extends CQLTester
     // The meter in ObjectSizes uses omitSharedBufferOverhead which counts off-heap data too
     // Note: To see a printout of the usage for each object, add .enableDebug() here (most useful with smaller number of
     // partitions).
-    static final MemoryMeter meter = new MemoryMeter().ignoreKnownSingletons()
-                                                      .withGuessing(MemoryMeter.Guess.FALLBACK_UNSAFE);
+    static MemoryMeter meter =  MemoryMeter.builder()
+                                           .withGuessing(MemoryMeter.Guess.INSTRUMENTATION_AND_SPECIFICATION,
+                                                         MemoryMeter.Guess.UNSAFE)
+//                                           .printVisitedTreeUpTo(1000)
+                                           .build();
 
     static String keyspace;
     String table;
