@@ -45,6 +45,7 @@ import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.MessageParams;
 import org.apache.cassandra.db.MultiRangeReadCommand;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
@@ -56,6 +57,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
@@ -88,6 +90,7 @@ import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -745,6 +748,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     }
                 }
 
+                maybeTriggerReferencedIndexesGuardrail(referencedIndexes.size());
+
                 if (failed)
                 {
                     // TODO: This might be a good candidate for a table/index group metric in the future...
@@ -759,6 +764,25 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         finally
         {
             Tracing.trace("Querying storage-attached indexes {}", indexNames);
+        }
+    }
+
+    void maybeTriggerReferencedIndexesGuardrail(int numReferencedIndexes)
+    {
+        if (Guardrails.saiSSTableIndexesPerQuery.failsOn(numReferencedIndexes, null))
+        {
+            String msg = String.format("Query %s attempted to read from too many indexes (%s) but max allowed is %s; " +
+                                       "query aborted (see sai_sstable_indexes_per_query_fail_threshold)",
+                                       command.toCQLString(),
+                                       numReferencedIndexes,
+                                       Guardrails.CONFIG_PROVIDER.getOrCreate(null).getSaiSSTableIndexesPerQueryFailThreshold());
+            Tracing.trace(msg);
+            MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_FAIL, numReferencedIndexes);
+            throw new QueryReferencingTooManyIndexesException(msg);
+        }
+        else if (Guardrails.saiSSTableIndexesPerQuery.warnsOn(numReferencedIndexes, null))
+        {
+            MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_WARN, numReferencedIndexes);
         }
     }
 
