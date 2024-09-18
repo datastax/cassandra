@@ -165,7 +165,8 @@ public abstract class Controller
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
     static final String IS_NODE_AWARE_OPTION = "is_node_aware";
-    public static final boolean DEFAULT_IS_NODE_AWARE = Boolean.parseBoolean(System.getProperty(PREFIX + IS_NODE_AWARE_OPTION));
+    // Temporarily enable by default for testing
+    public static final boolean DEFAULT_IS_NODE_AWARE = Boolean.parseBoolean(System.getProperty(PREFIX + IS_NODE_AWARE_OPTION, "true"));
 
     /**
      * Provision for growth of the constructed SSTables as the size of the data grows. By default the target SSTable
