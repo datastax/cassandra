@@ -59,6 +59,8 @@ import org.apache.cassandra.utils.Overlaps;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getBooleanSystemProperty;
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getSystemProperty;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
@@ -70,6 +72,7 @@ public abstract class Controller
     private static final ConcurrentMap<TableMetadata, Controller.Metrics> allMetrics = new ConcurrentHashMap<>();
 
     static final String PREFIX = "unified_compaction.";
+    static final String LEGACY_PREFIX = "dse.unified_compaction.";
 
     /**
      * The data size in GB, it will be assumed that the node will have on disk roughly this size of data when it
@@ -80,7 +83,7 @@ public abstract class Controller
     @Deprecated
     public static final String DATASET_SIZE_OPTION_GB = "dataset_size_in_gb";
     static final long DEFAULT_DATASET_SIZE =
-        FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + DATASET_SIZE_OPTION,
+        FBUtilities.parseHumanReadableBytes(getSystemProperty(DATASET_SIZE_OPTION,
                                                               DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() + "GiB"));
 
     /**
@@ -105,7 +108,7 @@ public abstract class Controller
      * and replayers in CNDB without having to change the schema for each tenant.
      */
     @Deprecated
-    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(System.getProperty(PREFIX + NUM_SHARDS_OPTION)).map(Integer::valueOf);
+    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(getSystemProperty(NUM_SHARDS_OPTION)).map(Integer::valueOf);
 
     /**
      * The minimum sstable size. Sharded writers split sstables over shard only if they are at least as large as the
@@ -120,7 +123,7 @@ public abstract class Controller
     static final String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
     static final String MIN_SSTABLE_SIZE_OPTION_AUTO = "auto";
 
-    static final long DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + MIN_SSTABLE_SIZE_OPTION, "100MiB"));
+    static final long DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(MIN_SSTABLE_SIZE_OPTION, "100MiB"));
     /**
      * Value to use to set the min sstable size from the flush size.
      */
@@ -143,7 +146,7 @@ public abstract class Controller
      * behind, higher read amplification, and other problems of that nature.
      */
     public static final String MAX_SPACE_OVERHEAD_OPTION = "max_space_overhead";
-    static final double DEFAULT_MAX_SPACE_OVERHEAD = FBUtilities.parsePercent(System.getProperty(PREFIX + MAX_SPACE_OVERHEAD_OPTION, "0.2"));
+    static final double DEFAULT_MAX_SPACE_OVERHEAD = FBUtilities.parsePercent(getSystemProperty(MAX_SPACE_OVERHEAD_OPTION, "0.2"));
     static final double MAX_SPACE_OVERHEAD_LOWER_BOUND = 0.01;
     static final double MAX_SPACE_OVERHEAD_UPPER_BOUND = 1.0;
 
@@ -155,13 +158,13 @@ public abstract class Controller
      * For others a base count of 1 is used as system tables are usually small and do not need as much compaction
      * parallelism, while having directories defined provides for parallelism in a different way.
      */
-    public static final int DEFAULT_BASE_SHARD_COUNT = Integer.parseInt(System.getProperty(PREFIX + BASE_SHARD_COUNT_OPTION, "4"));
+    public static final int DEFAULT_BASE_SHARD_COUNT = Integer.parseInt(getSystemProperty(BASE_SHARD_COUNT_OPTION, "4"));
 
     /**
      * The target SSTable size. This is the size of the SSTables that the controller will try to create.
      */
     static final String TARGET_SSTABLE_SIZE_OPTION = "target_sstable_size";
-    public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
+    public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
 
@@ -191,7 +194,7 @@ public abstract class Controller
      * a growth value of 0.333, and 64 (~16GiB each) for a growth value of 0.5.
      */
     static final String SSTABLE_GROWTH_OPTION = "sstable_growth";
-    static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(System.getProperty(PREFIX + SSTABLE_GROWTH_OPTION, "0.5"));
+    static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(getSystemProperty(SSTABLE_GROWTH_OPTION, "0.5"));
 
     /**
      * Number of reserved threads to keep for each compaction level. This is used to ensure that there are always
@@ -205,7 +208,7 @@ public abstract class Controller
      * The default value is max, all compaction threads are distributed among the levels.
      */
     static final String RESERVED_THREADS_OPTION = "reserved_threads";
-    public static final int DEFAULT_RESERVED_THREADS = FBUtilities.parseIntAllowingMax(System.getProperty(PREFIX + RESERVED_THREADS_OPTION, "max"));
+    public static final int DEFAULT_RESERVED_THREADS = FBUtilities.parseIntAllowingMax(getSystemProperty(RESERVED_THREADS_OPTION, "max"));
 
     /**
      * Reservation type, defining whether reservations can be used by lower levels. If set to `per_level`, the
@@ -216,20 +219,20 @@ public abstract class Controller
      */
     static final String RESERVATIONS_TYPE_OPTION = "reservations_type";
     public static final Reservations.Type DEFAULT_RESERVED_THREADS_TYPE =
-        Reservations.Type.valueOf(System.getProperty(PREFIX + RESERVATIONS_TYPE_OPTION,
+        Reservations.Type.valueOf(getSystemProperty(RESERVATIONS_TYPE_OPTION,
                                                      Reservations.Type.LEVEL_OR_BELOW.name()).toUpperCase());
 
     /**
      * This parameter is intended to modify the shape of the LSM by taking into account the survival ratio of data, for now it is fixed to one.
      */
-    static final double DEFAULT_SURVIVAL_FACTOR = Double.parseDouble(System.getProperty(PREFIX + "survival_factor", "1"));
+    static final double DEFAULT_SURVIVAL_FACTOR = Double.parseDouble(getSystemProperty("survival_factor", "1"));
     static final double[] DEFAULT_SURVIVAL_FACTORS = new double[] { DEFAULT_SURVIVAL_FACTOR };
 
     /**
      * Either true or false. This parameter determines which controller will be used.
      */
     static final String ADAPTIVE_OPTION = "adaptive";
-    static final boolean DEFAULT_ADAPTIVE = Boolean.parseBoolean(System.getProperty(PREFIX + ADAPTIVE_OPTION, "false"));
+    static final boolean DEFAULT_ADAPTIVE = Boolean.parseBoolean(getSystemProperty(ADAPTIVE_OPTION, "false"));
 
     /**
      * The maximum number of sstables to compact in one operation.
@@ -271,7 +274,7 @@ public abstract class Controller
      */
     static final String OVERLAP_INCLUSION_METHOD_OPTION = "overlap_inclusion_method";
     static final Overlaps.InclusionMethod DEFAULT_OVERLAP_INCLUSION_METHOD =
-        Overlaps.InclusionMethod.valueOf(System.getProperty(PREFIX + OVERLAP_INCLUSION_METHOD_OPTION,
+        Overlaps.InclusionMethod.valueOf(getSystemProperty(OVERLAP_INCLUSION_METHOD_OPTION,
                                                           Overlaps.InclusionMethod.TRANSITIVE.toString()).toUpperCase());
 
     /**
@@ -344,7 +347,7 @@ public abstract class Controller
         this.reservedThreads = reservedThreads;
         this.reservationsType = reservationsType;
         this.maxSpaceOverhead = maxSpaceOverhead;
-        this.l0ShardsEnabled = Boolean.parseBoolean(System.getProperty(PREFIX + L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
+        this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -853,7 +856,7 @@ public abstract class Controller
         double maxSpaceOverhead = options.containsKey(MAX_SPACE_OVERHEAD_OPTION)
                 ? FBUtilities.parsePercent(options.get(MAX_SPACE_OVERHEAD_OPTION))
                 : DEFAULT_MAX_SPACE_OVERHEAD;
-        int maxSSTablesToCompact = Integer.parseInt(options.getOrDefault(MAX_SSTABLES_TO_COMPACT_OPTION, "0"));
+        int maxSSTablesToCompact = Integer.parseInt(options.getOrDefault(MAX_SSTABLES_TO_COMPACT_OPTION, "256"));
         long expiredSSTableCheckFrequency = options.containsKey(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_OPTION)
                 ? Long.parseLong(options.get(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_OPTION))
                 : DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS;
@@ -923,7 +926,7 @@ public abstract class Controller
 
         // For remote storage, the sstables on L0 are created by the different replicas, and therefore it is likely
         // that there are RF identical copies, so here we adjust the survival factor for L0
-        double[] survivalFactors = System.getProperty(PREFIX + SHARED_STORAGE) == null || !Boolean.getBoolean(PREFIX + SHARED_STORAGE)
+        double[] survivalFactors = getSystemProperty(SHARED_STORAGE) == null || !getBooleanSystemProperty(SHARED_STORAGE)
                                    ? DEFAULT_SURVIVAL_FACTORS
                                    : new double[] { DEFAULT_SURVIVAL_FACTOR / realm.getKeyspaceReplicationStrategy().getReplicationFactor().allReplicas, DEFAULT_SURVIVAL_FACTOR };
 
