@@ -39,7 +39,6 @@ import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
-import org.apache.cassandra.distributed.util.Auth;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
 import org.apache.cassandra.service.disk.usage.DiskUsageMonitor;
@@ -77,18 +76,7 @@ public class GuardrailDiskUsageTest extends GuardrailTester
                                                 .set("authenticator", "PasswordAuthenticator"))
                               .start(), 1);
 
-        Auth.waitForExistingRoles(cluster.get(1));
-
-        // create a regular user, since the default superuser is excluded from guardrails
-        com.datastax.driver.core.Cluster.Builder builder = com.datastax.driver.core.Cluster.builder().addContactPoint("127.0.0.1");
-        try (com.datastax.driver.core.Cluster c = builder.withCredentials("cassandra", "cassandra").build();
-             Session session = c.connect())
-        {
-            session.execute("CREATE USER test WITH PASSWORD 'test'");
-        }
-
-        // connect using that superuser, we use the driver to get access to the client warnings
-        driverCluster = builder.withCredentials("test", "test").build();
+        driverCluster = buildDriverCluster(cluster);
         driverSession = driverCluster.connect();
     }
 
@@ -111,8 +99,14 @@ public class GuardrailDiskUsageTest extends GuardrailTester
         return cluster;
     }
 
+    @Override
+    protected Session getSession()
+    {
+        return driverSession;
+    }
+
     @Test
-    public void testDiskUsage() throws Throwable
+    public void testDiskUsage()
     {
         schemaChange("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         String insert = format("INSERT INTO %s(k, v) VALUES (?, 0)");

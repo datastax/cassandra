@@ -28,7 +28,6 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import com.datastax.driver.core.Session;
@@ -37,6 +36,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.Feature;
@@ -133,7 +133,6 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
     }
 
     @Test
-    @Ignore("CNDB-9987")
     public void testSAIWarnThreshold()
     {
         prepareSchema(true);
@@ -147,10 +146,11 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
 
         // create 3 more SSTables on each node, this will trigger warn threshold (3 > 2 but < 5)
         valueToQuery = createSSTables(3);
+        String valueToQueryString = LongType.instance.toCQLString(LongType.instance.decompose(valueToQuery), true);
         String expectedMessage = tooManyIndexesReadWarnMessage(cluster.size(),
                                                                3,
                                                                String.format("SELECT * FROM %s.%s WHERE v1 = %s ALLOW FILTERING",
-                                                                             KEYSPACE, tableName, valueToQuery));
+                                                                             KEYSPACE, tableName, valueToQueryString));
         assertThat(getOnlyElement(executeSelect(valueToQuery, false))).contains(expectedMessage);
 
         assertWarnAborts(1, 0);
@@ -170,7 +170,7 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
         expectedMessage = tooManyIndexesReadWarnMessage(cluster.size() - 1,
                                                         3,
                                                         String.format("SELECT * FROM %s.%s WHERE v1 = %s ALLOW FILTERING",
-                                                                      KEYSPACE, tableName, valueToQuery));
+                                                                      KEYSPACE, tableName, valueToQueryString));
 
         assertThat(getOnlyElement(executeSelect(valueToQuery, false))).contains(expectedMessage);
 
@@ -200,7 +200,6 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
     }
 
     @Test
-    @Ignore("CNDB-9987")
     public void testSAIFailThreshold()
     {
         prepareSchema(true);
@@ -208,11 +207,10 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
 
         // create 6 SSTables on each node, this will trigger fail threshold (6 > 5)
         long valueToQuery = createSSTables(6);
-
+        String valueToQueryString = LongType.instance.toCQLString(LongType.instance.decompose(valueToQuery), true);
         String expectedMessage = String.format("referenced %s SSTable indexes for a query without restrictions on partition key " +
                                                "and aborted the query SELECT * FROM %s.%s WHERE v1 = %s ALLOW FILTERING",
-                                               6, KEYSPACE, tableName, valueToQuery);
-
+                                               6, KEYSPACE, tableName, valueToQueryString);
         assertThat(getOnlyElement(executeSelect(valueToQuery, true))).contains(expectedMessage);
 
         assertWarnAborts(0, 1);
