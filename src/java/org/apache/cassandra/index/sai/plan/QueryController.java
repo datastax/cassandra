@@ -365,8 +365,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (optimizedPlan.contains(node -> node instanceof Plan.KeysSort))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
 
+        // KATE: revert below, it was just for dirty testing and printing in the logs, we should not redact here
         if (logger.isTraceEnabled())
-            logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
+            logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursiveRedacted());
 
         if (Tracing.isTracing())
         {

@@ -236,7 +236,7 @@ public class Expression
             case GT:
                 operation = Op.RANGE;
                 if (context.getDefinition().isReversedType())
-                    upper = new Bound(value, validator,  upperInclusive);
+                    upper = new Bound(value, validator, upperInclusive);
                 else
                     lower = new Bound(value, validator, lowerInclusive);
                 break;
@@ -345,6 +345,7 @@ public class Expression
     /**
      * Returns the lower bound of the expression as a ByteComparable with an encoding based on the version and the
      * validator.
+     *
      * @param version the version of the index
      * @return
      */
@@ -363,6 +364,7 @@ public class Expression
     /**
      * Returns the upper bound of the expression as a ByteComparable with an encoding based on the version and the
      * validator.
+     *
      * @param version the version of the index
      * @return
      */
@@ -395,6 +397,7 @@ public class Expression
      * {@link ByteBuffer}, but it does not apply the validator's encoding. We do this because we apply
      * {@link TypeUtil#encode(ByteBuffer, AbstractType)} before we find the min/max on an index and this method is
      * exposed publicly for determining if a bound is within an index's min/max.
+     *
      * @param version
      * @return
      */
@@ -408,6 +411,7 @@ public class Expression
      * {@link ByteBuffer}, but it does not apply the validator's encoding. We do this because we apply
      * {@link TypeUtil#encode(ByteBuffer, AbstractType)} before we find the min/max on an index and this method is
      * exposed publicly for determining if a bound is within an index's min/max.
+     *
      * @param version
      * @return
      */
@@ -528,17 +532,40 @@ public class Expression
         return boundedAnnEuclideanDistanceThreshold;
     }
 
+    public String toStringRedacted()
+    {
+        return toStringInternal(true);
+    }
+
     public String toString()
     {
-        return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
-                             context.getColumnName(),
-                             operation,
-                             lower == null ? "null" : validator.getString(lower.value.raw),
-                             lower != null && lower.inclusive,
-                             upper == null ? "null" : validator.getString(upper.value.raw),
-                             upper != null && upper.inclusive,
-                             Iterators.toString(Iterators.transform(exclusions.iterator(), validator::getString)));
+        return toStringInternal(false);
     }
+
+    private String toStringInternal(boolean redacted)
+    {
+        if(redacted)
+        {
+            return String.format("Expression{name: %s, op: %s, lower: %s, upper: %s, exclusions: %s}",
+                                 context.getColumnName(),
+                                 operation,
+                                 lower == null ? "null" : "<redacted>",
+                                 upper == null ? "null" : "<redacted>",
+                                 Iterators.toString(Iterators.transform(exclusions.iterator(), element -> "<redacted>")));
+        }
+        else {
+            return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
+                                 context.getColumnName(),
+                                 operation,
+                                 lower == null ? "null" : validator.getString(lower.value.raw),
+                                 lower != null && lower.inclusive,
+                                 upper == null ? "null" : validator.getString(upper.value.raw),
+                                 upper != null && upper.inclusive,
+                                 Iterators.toString(Iterators.transform(exclusions.iterator(), validator::getString)));
+        }
+    }
+
+
 
     public String getIndexName()
     {

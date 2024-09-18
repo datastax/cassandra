@@ -127,7 +127,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         // Can't check for `command.isTopK()` because the planner could optimize sorting out
         if (plan.ordering() != null)
         {
-            queryContext.setOptimizedPlan(plan.toStringRecursive());
+            queryContext.setOptimizedPlan(plan.toStringRecursiveRedacted());
             // TopK queries require a consistent view of the sstables and memtables in order to validate overwritten
             // rows. Acquire the view before building any of the iterators.
             try (var queryView = new QueryViewBuilder(cfs, controller.getOrderer(), controller.mergeRange(), queryContext).build())

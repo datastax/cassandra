@@ -44,7 +44,6 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -297,12 +296,33 @@ abstract public class Plan
     }
 
     /**
+     * Formats the whole plan as a pretty tree with redacted information for slow query logging
+     */
+    public final String toStringRecursiveRedacted()
+    {
+        TreeFormatter<Plan> formatter = new TreeFormatter<>(Plan::toStringRedacted, Plan::subplans);
+        return formatter.format(this);
+    }
+
+    /**
      * Returns the string representation of this node only
      */
     public final String toString()
     {
-        String title = title();
-        String description = description();
+        String title = title(false);
+        String description = description(false);
+        return (title.isEmpty())
+               ? String.format("%s (%s)\n%s", getClass().getSimpleName(), cost(), description).stripTrailing()
+               : String.format("%s %s (%s)\n%s", getClass().getSimpleName(), title, cost(), description).stripTrailing();
+    }
+
+    /**
+     * Returns the redacted string representation of this node only (used in slow query logging)
+     */
+    public final String toStringRedacted()
+    {
+        String title = title(true);
+        String description = description(true);
         return (title.isEmpty())
                ? String.format("%s (%s)\n%s", getClass().getSimpleName(), cost(), description).stripTrailing()
                : String.format("%s %s (%s)\n%s", getClass().getSimpleName(), title, cost(), description).stripTrailing();
@@ -311,9 +331,9 @@ abstract public class Plan
     /**
      * Returns additional information specific to the node displayed in the first line.
      * The information is included in the output of {@link #toString()} and {@link #toStringRecursive()}.
-     * It is up to subclasses to implement it.
+     * It is up to subclasses to implement it. The redacted version is used in slow query logging.
      */
-    protected String title()
+    protected String title(boolean redacted)
     {
         return "";
     }
@@ -321,9 +341,9 @@ abstract public class Plan
     /**
      * Returns additional information specific to the node, displayed below the title.
      * The information is included in the output of {@link #toString()} and {@link #toStringRecursive()}.
-     * It is up to subclasses to implement it.
+     * It is up to subclasses to implement it. The redacted version is used in slow query logging.
      */
-    protected String description()
+    protected String description(boolean redacted)
     {
         return "";
     }
@@ -337,8 +357,10 @@ abstract public class Plan
      */
     public final Plan optimize()
     {
+        // KATE: revert below, it was just for dirty testing and printing in the logs; we should keep on using here
+        // toStringRecursive(), all three places below
         if (logger.isTraceEnabled())
-            logger.trace("Optimizing plan:\n{}", this.toStringRecursive());
+            logger.trace("Optimizing plan:\n{}", this.toStringRecursiveRedacted());
 
         Plan bestPlanSoFar = this;
         List<Leaf> leaves = nodesOfType(Leaf.class);
@@ -349,14 +371,14 @@ abstract public class Plan
         {
             Plan candidate = bestPlanSoFar.removeRestriction(leaf.id);
             if (logger.isTraceEnabled())
-                logger.trace("Candidate query plan:\n{}", candidate.toStringRecursive());
+                logger.trace("Candidate query plan:\n{}", candidate.toStringRecursiveRedacted());
 
             if (candidate.fullCost() <= bestPlanSoFar.fullCost())
                 bestPlanSoFar = candidate;
         }
 
         if (logger.isTraceEnabled())
-            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toStringRecursive());
+            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toStringRecursiveRedacted());
         return bestPlanSoFar;
     }
 
@@ -771,20 +793,23 @@ abstract public class Plan
         }
 
         @Override
-        protected final String title()
+        protected final String title(boolean redacted)
         {
             return String.format("of %s (sel: %.9f, step: %.1f)",
                                  getIndexName(), selectivity(), access.meanDistance());
         }
 
         @Override
-        protected String description()
+        protected String description(boolean redacted )
         {
             StringBuilder sb = new StringBuilder();
             if (predicate != null)
             {
                 sb.append("predicate: ");
-                sb.append(predicate);
+                if (redacted)
+                    sb.append(predicate.toStringRedacted());
+                else
+                    sb.append(predicate);
                 sb.append('\n');
             }
             if (ordering != null)
@@ -1524,9 +1549,11 @@ abstract public class Plan
         }
 
         @Override
-        protected String title()
+        protected String title(boolean redacted)
         {
-            return String.format("%s (sel: %.9f)", filter, selectivity() / source.get().selectivity());
+            if (!redacted)
+                return String.format("%s (sel: %.9f)", filter.toString(), selectivity() / source.get().selectivity());
+            return String.format("%s (sel: %.9f)", filter.toStringRedacted(), selectivity() / source.get().selectivity());
         }
     }
 
@@ -1592,7 +1619,7 @@ abstract public class Plan
         }
 
         @Override
-        protected String title()
+        protected String title(boolean redacted)
         {
             return "" + limit;
         }
