@@ -71,7 +71,7 @@ public class ShardManagerTokenAware implements ShardManager
     @Override
     public double rangeSpanned(Range<Token> tableRange)
     {
-        return tableRange.left.size(tableRange.right);
+        return 1;
     }
 
     @Override
@@ -281,8 +281,7 @@ public class ShardManagerTokenAware implements ShardManager
         @Override
         public double rangeSpanned(PartitionPosition first, PartitionPosition last)
         {
-            // Ignore local range owndership for initial implementation.
-            return first.getToken().size(last.getToken());
+            return 1;
         }
 
         @Override
