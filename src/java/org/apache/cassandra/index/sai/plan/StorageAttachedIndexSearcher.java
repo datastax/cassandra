@@ -129,6 +129,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // rows. Acquire the view before building any of the iterators.
             try (var queryView = new QueryViewBuilder(cfs, controller.getOrderer(), controller.mergeRange(), queryContext).build())
             {
+                controller.maybeTriggerReferencedIndexesGuardrail(queryView.referencedIndexes.size());
+
                 // TODO this is a bit of a hack, but we need to get the view from the queryView. Find better way to
                 // thread this through.
                 queryContext.view = queryView;
@@ -147,7 +149,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return new ResultRetriever((RangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
         }
     }
-
 
     /**
      * Converts expressions into filter tree (which is currently just a single AND).
