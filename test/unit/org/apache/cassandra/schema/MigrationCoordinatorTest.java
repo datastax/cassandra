@@ -205,7 +205,7 @@ public class MigrationCoordinatorTest
         Pair<InetAddressAndPort, RequestCallback<Collection<Mutation>>> request2 = wrapper.requests.poll();
         Assert.assertEquals(EP2, request2.left);
         Assert.assertFalse(coordinator.awaitSchemaRequests(1));
-        request2.right.onResponse(Message.remoteResponse(request2.left, Verb.SCHEMA_PULL_RSP, Collections.emptyList()));
+        request2.right.onResponse(Message.remoteResponse(request2.left, Verb.SCHEMA_PULL_RSP, Message.NO_PARAMS, Collections.emptyList()));
         Assert.assertEquals(EP2, Iterables.getOnlyElement(wrapper.mergedSchemasFrom));
         Assert.assertTrue(coordinator.awaitSchemaRequests(1));
 
@@ -317,7 +317,7 @@ public class MigrationCoordinatorTest
 
         getUnchecked(wrapper.coordinator.reportEndpointVersion(EP3, V2));
         Pair<InetAddressAndPort, RequestCallback<Collection<Mutation>>> cb = wrapper.requests.remove();
-        cb.right.onResponse(Message.remoteResponse(cb.left, Verb.SCHEMA_PULL_RSP, Collections.emptyList()));
+        cb.right.onResponse(Message.remoteResponse(cb.left, Verb.SCHEMA_PULL_RSP, Message.NO_PARAMS, Collections.emptyList()));
 
         getUnchecked(wrapper.coordinator.reportEndpointVersion(EP1, V1));
         getUnchecked(wrapper.coordinator.reportEndpointVersion(EP2, V1));
@@ -352,7 +352,7 @@ public class MigrationCoordinatorTest
 
         // a single success should unblock startup though
         cb = wrapper.requests.remove();
-        cb.right.onResponse(Message.remoteResponse(cb.left, Verb.SCHEMA_PULL_RSP, Collections.emptyList()));
+        cb.right.onResponse(Message.remoteResponse(cb.left, Verb.SCHEMA_PULL_RSP, Message.NO_PARAMS, Collections.emptyList()));
         Assert.assertTrue(wrapper.coordinator.awaitSchemaRequests(1));
     }
 
@@ -440,7 +440,7 @@ public class MigrationCoordinatorTest
 
             assertThat(msg.verb()).isEqualTo(Verb.SCHEMA_PULL_REQ);
             assertThat(endpoint).isEqualTo(regularNode1);
-            callback.onResponse(Message.remoteResponse(regularNode1, Verb.SCHEMA_PULL_RSP, mutations));
+            callback.onResponse(Message.remoteResponse(regularNode1, Verb.SCHEMA_PULL_RSP, Message.NO_PARAMS, mutations));
             return null;
         }).when(wrapper.messagingService).sendWithCallback(any(Message.class), any(InetAddressAndPort.class), any(RequestCallback.class));
         wrapper.coordinator.reset();
