@@ -286,12 +286,12 @@ public class Message<T>
      * Used by the {@code MultiRangeReadCommand} to split multi-range responses from a replica
      * into single-range responses.
      */
-    public static <T> Message<T> remoteResponse(InetAddressAndPort from, Verb verb, T payload)
+    public static <T> Message<T> remoteResponse(InetAddressAndPort from, Verb verb, Map<ParamType, Object> params, T payload)
     {
         assert verb.isResponse();
         long createdAtNanos = approxTime.now();
         long expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
-        return new Message<>(new Header(0, verb, from, createdAtNanos, expiresAtNanos, 0, NO_PARAMS), payload);
+        return new Message<>(new Header(0, verb, from, createdAtNanos, expiresAtNanos, 0, params), payload);
     }
 
     /** Builds a response Message with provided payload, and all the right fields inferred from request Message */
@@ -366,7 +366,7 @@ public class Message<T>
         return new Message<>(header.withParams(values), payload);
     }
 
-    private static final EnumMap<ParamType, Object> NO_PARAMS = new EnumMap<>(ParamType.class);
+    public static final EnumMap<ParamType, Object> NO_PARAMS = new EnumMap<>(ParamType.class);
 
     private static Map<ParamType, Object> buildParams(ParamType type, Object value)
     {

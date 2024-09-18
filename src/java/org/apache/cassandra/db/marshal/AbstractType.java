@@ -205,9 +205,26 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return getString(bytes, ByteBufferAccessor.instance);
     }
 
+    public final String getString(ByteBuffer bytes, boolean truncate)
+    {
+        String s = getString(bytes);
+        return truncate ? truncateString(s) : s;
+    }
+
     public String toCQLString(ByteBuffer bytes)
     {
         return asCQL3Type().toCQLLiteral(bytes);
+    }
+
+    public String toCQLString(ByteBuffer bytes, boolean truncate)
+    {
+        String s = toCQLString(bytes);
+        return truncate ? truncateString(s) : s;
+    }
+
+    private static String truncateString(String valueString)
+    {
+        return valueString.length() <= 9 ? valueString : valueString.substring(0, 6) + "...";
     }
 
     /** get a byte representation of the given string. */
