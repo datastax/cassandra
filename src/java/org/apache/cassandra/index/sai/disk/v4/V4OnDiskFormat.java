@@ -41,6 +41,8 @@ public class V4OnDiskFormat extends V3OnDiskFormat
                                           PerIndexFiles indexFiles,
                                           SegmentMetadata segmentMetadata) throws IOException
     {
+        if (indexContext.isVector())
+            return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
         if (indexContext.isLiteral())
             return new V4InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
