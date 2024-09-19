@@ -28,6 +28,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v3.V3VectorIndexSearcher;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -41,6 +42,8 @@ public class V4OnDiskFormat extends V3OnDiskFormat
                                           PerIndexFiles indexFiles,
                                           SegmentMetadata segmentMetadata) throws IOException
     {
+        if (indexContext.isVector())
+            return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
         if (indexContext.isLiteral())
             return new V4InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
