@@ -153,8 +153,9 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             {
                 int checksum = (int) ChecksumType.CRC32.of(compressed);
                 compressed.limit(length);
-                if (compressed.getInt() != checksum)
-                    throw new CorruptBlockException(channel.filePath(), chunk);
+                int storedChecksum = compressed.getInt();
+                if (storedChecksum != checksum)
+                    throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
                 compressed.position(0).limit(chunk.length);
             }
             return compressed;
@@ -199,8 +200,9 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             {
                 int checksum = (int) ChecksumType.CRC32.of(compressed);
                 compressed.limit(length);
-                if (compressed.getInt() != checksum)
-                    throw new CorruptBlockException(channel.filePath(), chunk);
+                int storedChecksum = compressed.getInt();
+                if (storedChecksum != checksum)
+                    throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
                 compressed.position(0).limit(chunk.length);
             }
             return compressed;
@@ -306,9 +308,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         int checksum = (int) ChecksumType.CRC32.of(uncompressed);
 
                         ByteBuffer scratch = ByteBuffer.allocate(Integer.BYTES);
-                        if (channel.read(scratch, chunk.offset + chunk.length) != Integer.BYTES
-                                || scratch.getInt(0) != checksum)
+
+                        if (channel.read(scratch, chunkOffset + chunk.length) != Integer.BYTES)
                             throw new CorruptBlockException(channel.filePath(), chunk);
+                        int storedChecksum = scratch.getInt(0);
+                        if (storedChecksum != checksum)
+                            throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
                     }
                 }
                 uncompressed.flip();
@@ -380,8 +385,9 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         int checksum = (int) ChecksumType.CRC32.of(compressedChunk);
 
                         compressedChunk.limit(compressedChunk.capacity());
-                        if (compressedChunk.getInt() != checksum)
-                            throw new CorruptBlockException(channel.filePath(), chunk);
+                        int storedChecksum = compressedChunk.getInt();
+                        if (storedChecksum != checksum)
+                            throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
 
                         compressedChunk.position(chunkOffsetInSegment).limit(chunkOffsetInSegment + chunk.length);
                     }
