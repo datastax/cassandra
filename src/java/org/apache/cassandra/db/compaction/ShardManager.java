@@ -45,13 +45,6 @@ public interface ShardManager
     {
         List<Token> diskPositions = diskBoundaries.getPositions();
 
-        if (isNodeAware)
-        {
-            if (diskPositions != null && diskPositions.size() > 1)
-                throw new IllegalArgumentException("Cannot use node aware strategy with disk boundaries");
-            return new ShardManagerTokenAware(rs);
-        }
-
         SortedLocalRanges localRanges = diskBoundaries.getLocalRanges();
         IPartitioner partitioner = localRanges.getRealm().getPartitioner();
         // this should only happen in tests that change partitioners, but we don't want UCS to throw
@@ -70,7 +63,10 @@ public interface ShardManager
         if (diskPositions != null && diskPositions.size() > 1)
             return new ShardManagerDiskAware(localRanges, diskPositions);
         else if (partitioner.splitter().isPresent())
-            return new ShardManagerNoDisks(localRanges);
+            if (isNodeAware)
+                return new ShardManagerTokenAware(rs);
+            else
+                return new ShardManagerNoDisks(localRanges);
         else
             return new ShardManagerTrivial(partitioner);
     }
