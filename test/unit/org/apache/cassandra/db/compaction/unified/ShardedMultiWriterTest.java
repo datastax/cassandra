@@ -21,6 +21,9 @@ import java.util.Random;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -29,9 +32,19 @@ import org.apache.cassandra.service.StorageService;
 
 import static org.junit.Assert.assertEquals;
 
+@RunWith(Parameterized.class)
 public class ShardedMultiWriterTest extends CQLTester
 {
     private static final int ROW_PER_PARTITION = 10;
+
+    @Parameterized.Parameter
+    public String isNodeAware;
+
+    @Parameterized.Parameters(name = "isNodeAware={0}")
+    public static Object[] parameters()
+    {
+        return new Object[] { "true", "false" };
+    }
 
     @BeforeClass
     public static void beforeClass()
@@ -77,7 +90,8 @@ public class ShardedMultiWriterTest extends CQLTester
     private void testShardedCompactionWriter(int numShards, long totSizeBytes, int numOutputSSTables) throws Throwable
     {
         createTable(String.format("CREATE TABLE %%s (k int, t int, v blob, PRIMARY KEY (k, t)) with compaction = " +
-                                  "{'class':'UnifiedCompactionStrategy', 'base_shard_count' : '%d', 'min_sstable_size' : '0B'} ", numShards));
+                                  "{'class':'UnifiedCompactionStrategy', 'base_shard_count' : '%d', " +
+                                  "'min_sstable_size' : '0B', 'is_node_aware': '" + isNodeAware + "'} ", numShards));
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();
