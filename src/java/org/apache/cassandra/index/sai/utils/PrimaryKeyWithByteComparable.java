@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -47,7 +48,8 @@ public class PrimaryKeyWithByteComparable extends PrimaryKeyWithSortKey
         {
             ByteSource byteSource = byteComparable.asComparableBytes(ByteComparable.Version.OSS50);
             byte[] indexedValue = ByteSourceInverse.readBytes(byteSource);
-            return Arrays.compare(indexedValue, value.array()) == 0;
+            byte[] liveValue = ByteBufferUtil.getArray(value);
+            return Arrays.compare(indexedValue, liveValue) == 0;
         }
         else
         {
