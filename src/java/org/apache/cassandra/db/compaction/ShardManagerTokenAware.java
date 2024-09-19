@@ -88,6 +88,17 @@ public class ShardManagerTokenAware implements ShardManager
         return 1;
     }
 
+    // TODO this is only used by the ShardManagerTrivial implementation, but not the others. Adding it makes several
+    // tests pass. Not sure what is correct.
+    @Override
+    public double calculateCombinedDensity(Set<? extends CompactionSSTable> sstables)
+    {
+        double totalSize = 0;
+        for (CompactionSSTable sstable : sstables)
+            totalSize += sstable.onDiskLength();
+        return totalSize;
+    }
+
     @Override
     public ShardTracker boundaries(int shardCount)
     {
@@ -290,11 +301,15 @@ public class ShardManagerTokenAware implements ShardManager
             return nextShardIndex - 1;
         }
 
+        // TODO this is only used by the ShardManagerTrivial implementation, but not the others. Adding it makes several
+        // tests pass. Not sure what is correct.
         @Override
         public long shardAdjustedKeyCount(Set<SSTableReader> sstables)
         {
-            // Not sure if this needs a custom implementation yet
-            return ShardTracker.super.shardAdjustedKeyCount(sstables);
+            long shardAdjustedKeyCount = 0;
+            for (CompactionSSTable sstable : sstables)
+                shardAdjustedKeyCount += sstable.estimatedKeys();
+            return shardAdjustedKeyCount;
         }
 
         @Override
