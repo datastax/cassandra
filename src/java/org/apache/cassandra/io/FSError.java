@@ -41,7 +41,7 @@ public abstract class FSError extends IOError
     @Override
     public String getMessage()
     {
-        return String.valueOf(file);
+        return super.getMessage() + " on file " + String.valueOf(file);
     }
 
     /**
