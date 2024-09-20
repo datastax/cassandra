@@ -55,11 +55,11 @@ public abstract class IndexFcts
         {
             if (arguments.get(0) == null)
                 return null;
-            String text = UTF8Type.instance.compose(arguments.get(0));
+            String text = arguments.get(0);
 
             if (arguments.get(1) == null)
                 throw new InvalidRequestException("Function " + name + " requires a non-null json_analyzer parameter (2nd argument)");
-            String json = UTF8Type.instance.compose(arguments.get(1));
+            String json = arguments.get(1);
 
             LuceneAnalyzer luceneAnalyzer = null;
             List<String> tokens = new ArrayList<>();
