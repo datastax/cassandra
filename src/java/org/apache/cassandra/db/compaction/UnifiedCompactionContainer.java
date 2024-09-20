@@ -66,7 +66,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
         this.strategy = new UnifiedCompactionStrategy(factory, backgroundCompactions, params.options());
         this.enabled = new AtomicBoolean(enabled);
         this.enableAutoCompaction = enableAutoCompaction;
-        this.hasVector = factory.getRealm().metadata().hasVectorType();
+        this.hasVector = strategy.getController().hasVectorType();
 
         factory.getCompactionLogger().strategyCreated(this.strategy);
 

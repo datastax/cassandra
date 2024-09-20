@@ -225,6 +225,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testStartShutdown(controller);
@@ -250,6 +251,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testShutdownNotStarted(controller);
@@ -275,6 +277,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testStartAlreadyStarted(controller);

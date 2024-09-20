@@ -335,6 +335,7 @@ public abstract class Controller
     protected final Overlaps.InclusionMethod overlapInclusionMethod;
 
     final boolean l0ShardsEnabled;
+    final boolean hasVectorType;
 
     Controller(MonotonicClock clock,
                Environment env,
@@ -352,7 +353,8 @@ public abstract class Controller
                double sstableGrowthModifier,
                int reservedThreads,
                Reservations.Type reservationsType,
-               Overlaps.InclusionMethod overlapInclusionMethod)
+               Overlaps.InclusionMethod overlapInclusionMethod,
+               boolean hasVectorType)
     {
         this.clock = clock;
         this.env = env;
@@ -370,6 +372,7 @@ public abstract class Controller
         this.reservationsType = reservationsType;
         this.maxSpaceOverhead = maxSpaceOverhead;
         this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
+        this.hasVectorType = hasVectorType;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -751,6 +754,11 @@ public abstract class Controller
         logger.debug("Stopped compaction controller {}", this);
     }
 
+    public boolean hasVectorType()
+    {
+        return hasVectorType;
+    }
+
     /**
      * @return true if the controller is running
      */
@@ -873,10 +881,11 @@ public abstract class Controller
 
     public static Controller fromOptions(CompactionRealm realm, Map<String, String> options)
     {
+        boolean hasVectorType = realm.metadata().hasVectorType();
         boolean vectorOverride = options.containsKey(OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION)
                 ? Boolean.parseBoolean(options.get(OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION))
                 : DEFAULT_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES;
-        boolean useVectorOptions = realm.metadata().hasVectorType() && vectorOverride;
+        boolean useVectorOptions = hasVectorType && vectorOverride;
         if (useVectorOptions)
             logger.debug("Using UCS configuration optimized for vector.");
         boolean adaptive = options.containsKey(ADAPTIVE_OPTION) ? Boolean.parseBoolean(options.get(ADAPTIVE_OPTION)) : DEFAULT_ADAPTIVE;
@@ -1000,6 +1009,7 @@ public abstract class Controller
                                                 useVectorOptions ? vectorReservedThreadsPerLevel : reservedThreadsPerLevel,
                                                 reservationsType,
                                                 overlapInclusionMethod,
+                                                hasVectorType,
                                                 realm.getKeyspaceName(),
                                                 realm.getTableName(),
                                                 options)
@@ -1018,6 +1028,7 @@ public abstract class Controller
                                               useVectorOptions ? vectorReservedThreadsPerLevel : reservedThreadsPerLevel,
                                               reservationsType,
                                               overlapInclusionMethod,
+                                              hasVectorType,
                                               realm.getKeyspaceName(),
                                               realm.getTableName(),
                                               options,

@@ -58,7 +58,6 @@ public class CompactionStrategyFactory
     {
         // If we were called due to a metadata change but the compaction parameters are the same then
         // don't reload since we risk overriding parameters set via JMX
-        boolean hasVector = realm.metadata().hasVectorType();
         if (current != null && !current.shouldReload(compactionParams, reason))
             return current;
 
