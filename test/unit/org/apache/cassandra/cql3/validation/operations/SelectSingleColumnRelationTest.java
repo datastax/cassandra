@@ -1189,6 +1189,78 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
+    public void testNotInRestrictionsWithOrAndAllowFiltering() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c int, v int, PRIMARY KEY(pk, c))");
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 1, 1);
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 2, 2);
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 3, 3);
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 4, 4);
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 5, 5);
+
+        assertRows(execute("SELECT * FROM %s WHERE v = ? OR v not in ? ALLOW FILTERING", 0, list()),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? OR v NOT IN ? ALLOW FILTERING", list(), list(1, 2)),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE v = ? OR v NOT IN ? ALLOW FILTERING", 0, list(1, 2, 3)),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE v = ? OR v NOT IN ? ALLOW FILTERING", 1, list(1, 2, 3)),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        // Multiple NOT IN:
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? OR v NOT IN ? ALLOW FILTERING", list(1, 2), list(3, 4)),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? OR v NOT IN ? ALLOW FILTERING", list(1, 2, 3, 4), list()),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+
+        // Mixed IN / NOT IN with AND and OR:
+        assertRows(execute("SELECT * FROM %s WHERE v IN ? OR v NOT IN ? AND v NOT IN ? ALLOW FILTERING", list(1), list(1, 2, 3), list(2, 3, 4)),
+                   row(1, 1, 1),
+                   row(1, 5, 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? AND (v IN ? OR v NOT IN ?) ALLOW FILTERING", list(), list(3), list(5)),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4));
+
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? AND (v IN ? OR v NOT IN ?) ALLOW FILTERING", list(1, 2), list(3), list(5)),
+                   row(1, 3, 3),
+                   row(1, 4, 4));
+
+        assertRows(execute("SELECT * FROM %s WHERE v IN ? AND (v IN ? OR v NOT IN ?) ALLOW FILTERING", list(1, 3), list(5), list(3)),
+                   row(1, 1, 1));
+
+        assertRows(execute("SELECT * FROM %s WHERE v IN ? AND (v IN ? OR v NOT IN ?) ALLOW FILTERING", list(1, 3), list(5), list()),
+                   row(1, 1, 1),
+                   row(1, 3, 3));
+    }
+
+
+    @Test
     public void testNonEqualsRelationWithFiltering() throws Throwable
     {
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");

@@ -3514,4 +3514,5 @@ public class SelectTest extends CQLTester
         createTable(KEYSPACE, "CREATE TABLE %s (a blob, b blob, PRIMARY KEY ((a, b)))");
         execute("INSERT INTO %s (a, b) VALUES (?, ?)", ByteBuffer.allocate(Short.MAX_VALUE + 1), EMPTY_BYTE_BUFFER);
     }
+
 }
