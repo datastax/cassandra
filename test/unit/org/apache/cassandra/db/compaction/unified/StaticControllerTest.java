@@ -34,6 +34,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
@@ -151,6 +152,29 @@ public class StaticControllerTest extends ControllerTest
         addOptions(false, options);
 
         super.testValidateOptions(options, false);
+    }
+
+    @Test
+    public void testValidateVectorOptions()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(Controller.VECTOR_BASE_SHARD_COUNT_OPTION, "-1");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.VECTOR_SSTABLE_GROWTH_OPTION, "-1");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.VECTOR_RESERVED_THREADS_OPTION, "-1");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.VECTOR_MIN_SSTABLE_SIZE_OPTION, "10GiB");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.VECTOR_TARGET_SSTABLE_SIZE_OPTION, "-1MiB");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION, "not true");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
     }
 
     @Test
