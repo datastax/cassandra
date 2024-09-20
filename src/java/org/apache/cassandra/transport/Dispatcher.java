@@ -34,6 +34,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.net.FrameEncoder;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ClientResourceLimits.Overload;
 import org.apache.cassandra.transport.Flusher.FlushItem;
 import org.apache.cassandra.transport.messages.ErrorMessage;
@@ -76,11 +77,10 @@ public class Dispatcher
     {
         assert request.connection() instanceof ServerConnection;
         ServerConnection connection = (ServerConnection) request.connection();
-        Thread requestThread = Thread.currentThread();
         try
         {
             this.processRequest(connection, request, backpressure)
-                .whenCompleteAsync((response, ex) -> {
+                .whenComplete((response, ex) -> {
                     FlushItem<?> toFlush;
                     if (ex == null)
                     {
@@ -96,11 +96,14 @@ public class Dispatcher
                         toFlush = forFlusher.toFlushItem(channel, request, error);
                     }
                     flush(toFlush);
-                }, Thread.currentThread() == requestThread ? Stage.IMMEDIATE.executor() : Stage.NATIVE_TRANSPORT_REQUESTS.executor());
+                });
         }
         finally
         {
+            // As the warnings and trace state has been potentially propagated and "reset" in another stage, we do reset
+            // again here on the "originating" stage to make sure the next request starts from a clean slate:
             ClientWarn.instance.resetWarnings();
+            Tracing.instance.set(null);
         }
     }
 
@@ -133,10 +136,17 @@ public class Dispatcher
         connection.requests.inc();
         return request.maybeExecuteAync(qstate, queryStartNanoTime)
                       .whenComplete((result, ignored) -> {
-                          result.setStreamId(request.getStreamId());
-                          result.setWarnings(ClientWarn.instance.getWarnings());
-                          result.attach(connection);
-                          connection.applyStateTransition(request.type, result.type);
+                          try
+                          {
+                              result.setStreamId(request.getStreamId());
+                              result.setWarnings(ClientWarn.instance.getWarnings());
+                              result.attach(connection);
+                              connection.applyStateTransition(request.type, result.type);
+                          }
+                          finally
+                          {
+                              ClientWarn.instance.resetWarnings();
+                          }
                       });
     }
 
