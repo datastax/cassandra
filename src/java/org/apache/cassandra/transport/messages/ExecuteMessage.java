@@ -166,8 +166,11 @@ public class ExecuteMessage extends Message.Request
             if (asyncStage.isPresent())
             {
                 QueryHandler.Prepared finalPrepared = prepared;
-                return CompletableFuture.supplyAsync(() -> handleRequest(queryState, queryStartNanoTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime),
-                                                     asyncStage.get().executor());
+                return CompletableFuture.supplyAsync(() -> {
+                    if (traceRequest)
+                        Tracing.trace("Handed off to async stage");
+                    return handleRequest(queryState, queryStartNanoTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime);
+                }, asyncStage.get().executor());
             }
             else
                 return CompletableFuture.completedFuture(handleRequest(queryState, queryStartNanoTime, handler, queryOptions, statement, prepared, requestStartMillisTime));

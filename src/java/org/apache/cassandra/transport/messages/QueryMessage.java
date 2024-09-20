@@ -120,8 +120,11 @@ public class QueryMessage extends Message.Request
             if (asyncStage.isPresent())
             {
                 CQLStatement finalStatement = statement;
-                return CompletableFuture.supplyAsync(() -> handleRequest(state, queryHandler, queryStartNanoTime, finalStatement, requestStartMillisTime),
-                                                     asyncStage.get().executor());
+                return CompletableFuture.supplyAsync(() -> {
+                    if (traceRequest)
+                        Tracing.trace("Handed off to async stage");
+                    return handleRequest(state, queryHandler, queryStartNanoTime, finalStatement, requestStartMillisTime);
+                }, asyncStage.get().executor());
             }
             else
                 return CompletableFuture.completedFuture(handleRequest(state, queryHandler, queryStartNanoTime, statement, requestStartMillisTime));

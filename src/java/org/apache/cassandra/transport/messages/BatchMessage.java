@@ -233,8 +233,11 @@ public class BatchMessage extends Message.Request
             {
                 BatchStatement finalStatement = batch;
                 List<QueryHandler.Prepared> finalPrepared = prepared;
-                return CompletableFuture.supplyAsync(() -> handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime),
-                                                     asyncStage.get().executor());
+                return CompletableFuture.supplyAsync(() -> {
+                    if (traceRequest)
+                        Tracing.trace("Handed off to async stage");
+                    return handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
+                }, asyncStage.get().executor());
             }
             else
                 return CompletableFuture.completedFuture(handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, prepared, requestStartMillisTime));
