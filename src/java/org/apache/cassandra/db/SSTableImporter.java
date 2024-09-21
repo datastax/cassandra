@@ -117,7 +117,15 @@ public class SSTableImporter
                                     String keyspace = cfs.getKeyspaceName();
                                     String table = cfs.getTableName();
 
-                                    IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
+                                    SSTableReader reader = SSTableReader.open(cfs, descriptor);
+                                    StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+                                    if (group == null)
+                                        throw new IllegalStateException(String.format("Missing SAI index group to import for SSTable %s on %s.%s",
+                                                                                      descriptor.toString(),
+                                                                                      keyspace,
+                                                                                      table));
+
+                                    IndexDescriptor indexDescriptor = group.descriptorFor(reader);
                                     if (!indexDescriptor.perSSTableComponents().isComplete())
                                         throw new IllegalStateException(String.format("Missing SAI index to import for SSTable %s on %s.%s",
                                                                                       descriptor.toString(),
