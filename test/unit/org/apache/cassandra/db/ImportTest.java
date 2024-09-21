@@ -40,9 +40,18 @@ import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.BootStrapper;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -52,9 +61,9 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
-//import static org.apache.lucene.codecs.CodecUtil.FOOTER_MAGIC;
-//import static org.apache.lucene.codecs.CodecUtil.writeBEInt;
-//import static org.apache.lucene.codecs.CodecUtil.writeBELong;
+import static org.apache.lucene.codecs.CodecUtil.FOOTER_MAGIC;
+import static org.apache.lucene.codecs.CodecUtil.writeBEInt;
+import static org.apache.lucene.codecs.CodecUtil.writeBELong;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -883,62 +892,61 @@ public class ImportTest extends CQLTester
         }
     }
 
-// FIXME: CNDB-9099 CC 5.0 rebase: commented out part of CASSANDRA-18714 because of SAI differences    
-//    @Test
-//    public void skipIndexChecksumOnSAITest() throws Throwable
-//    {
-//        try
-//        {
-//            schemaChange(String.format("CREATE TABLE %s.%s (id int primary key, d int)", KEYSPACE, "sai_test"));
-//            createIndexAndWait(String.format("CREATE INDEX idx1 ON %s.%s (d) USING 'sai'", KEYSPACE, "sai_test"), "idx1");
-//
-//            for (int i = 0; i < 10; i++)
-//                execute(String.format("INSERT INTO %s.%s (id, d) values (?, ?)", KEYSPACE, "sai_test"), i, i);
-//
-//            ColumnFamilyStore cfs = getColumnFamilyStore(KEYSPACE, "sai_test");
-//            Util.flush(cfs);
-//
-//            Set<SSTableReader> sstables = cfs.getLiveSSTables();
-//            cfs.clearUnsafe();
-//
-//            File backupDir = moveToBackupDir(sstables);
-//
-//            File[] dataFiles = backupDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
-//
-//            IndexDescriptor indexDescriptor = IndexDescriptor.create(Descriptor.fromFile(dataFiles[0]),
-//                                                                     Murmur3Partitioner.instance,
-//                                                                     Schema.instance.getTableMetadata(KEYSPACE, "sai_test").comparator);
-//            IndexIdentifier indexIdentifier = new IndexIdentifier(KEYSPACE, "sai_test", "idx1");
-//
-//            // corrupt one of index files
-//            try (IndexOutputWriter output = indexDescriptor.openPerIndexOutput(IndexComponent.COLUMN_COMPLETION_MARKER, indexIdentifier))
-//            {
-//                SAICodecUtils.writeHeader(output);
-//                output.writeByte((byte) 0);
-//                // taken from SAICodecUtils#writeFooter
-//                writeBEInt(output, FOOTER_MAGIC);
-//                writeBEInt(output, 0);
-//                writeBELong(output, 123); // some garbage checksum value to prove the point
-//            }
-//
-//            assertEquals(0, execute(String.format("SELECT * FROM %s.%s", KEYSPACE, "sai_test")).size());
-//
-//            SSTableImporter importer = new SSTableImporter(cfs);
-//            SSTableImporter.Options options = SSTableImporter.Options.options(backupDir.toString())
-//                                                                     .copyData(true)
-//                                                                     .failOnMissingIndex(true)
-//                                                                     .validateIndexChecksum(false)
-//                                                                     .build();
-//
-//            // even with corrupted column completion marker (wrong checksum), it will import
-//            assertTrue(importer.importNewSSTables(options).isEmpty());
-//            assertEquals(10, execute(String.format("SELECT * FROM %s.%s", KEYSPACE, "sai_test")).size());
-//        }
-//        finally
-//        {
-//            execute(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, "sai_test"));
-//        }
-//    }
+    @Test
+    public void skipIndexChecksumOnSAITest() throws Throwable
+    {
+        try
+        {
+            schemaChange(String.format("CREATE TABLE %s.%s (id int primary key, d int)", KEYSPACE, "sai_test"));
+            createIndexAndWait(String.format("CREATE INDEX idx1 ON %s.%s (d) USING 'sai'", KEYSPACE, "sai_test"), "idx1");
+
+            for (int i = 0; i < 10; i++)
+                execute(String.format("INSERT INTO %s.%s (id, d) values (?, ?)", KEYSPACE, "sai_test"), i, i);
+
+            ColumnFamilyStore cfs = getColumnFamilyStore(KEYSPACE, "sai_test");
+            Util.flush(cfs);
+
+            Set<SSTableReader> sstables = cfs.getLiveSSTables();
+            cfs.clearUnsafe();
+
+            File backupDir = moveToBackupDir(sstables);
+
+            File[] dataFiles = backupDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
+
+            Descriptor descriptor = Descriptor.fromFile(dataFiles[0]);
+            IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
+            IndexContext indexContext = SAITester.createIndexContext("idx1", UTF8Type.instance);
+
+            // corrupt one of index files
+            IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+            try (IndexOutputWriter output = components.addOrGet(components.completionMarkerComponent()).openOutput())
+            {
+                SAICodecUtils.writeHeader(output);
+                output.writeByte((byte) 0);
+                // taken from SAICodecUtils#writeFooter
+                writeBEInt(output, FOOTER_MAGIC);
+                writeBEInt(output, 0);
+                writeBELong(output, 123); // some garbage checksum value to prove the point
+            }
+
+            assertEquals(0, execute(String.format("SELECT * FROM %s.%s", KEYSPACE, "sai_test")).size());
+
+            SSTableImporter importer = new SSTableImporter(cfs);
+            SSTableImporter.Options options = SSTableImporter.Options.options(backupDir.toString())
+                                                                     .copyData(true)
+                                                                     .failOnMissingIndex(true)
+                                                                     .validateIndexChecksum(false)
+                                                                     .build();
+
+            // even with corrupted column completion marker (wrong checksum), it will import
+            assertTrue(importer.importNewSSTables(options).isEmpty());
+            assertEquals(10, execute(String.format("SELECT * FROM %s.%s", KEYSPACE, "sai_test")).size());
+        }
+        finally
+        {
+            execute(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, "sai_test"));
+        }
+    }
 
     @Test
     public void skipEmptyIndexChecksumOnSAITest() throws Throwable
