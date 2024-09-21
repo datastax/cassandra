@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.service.reads;
 
+import java.util.Map;
+
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +29,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.transform.DuplicateRowChecker;
@@ -42,6 +45,11 @@ import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.metrics.ReadCoordinationMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy.LocalReadRunnable;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
@@ -75,6 +83,7 @@ public abstract class AbstractReadExecutor
     private   final int initialDataRequestCount;
     protected volatile PartitionIterator result = null;
     protected final QueryInfoTracker.ReadTracker readTracker;
+    private final RequestSensors requestSensors;
 
     static
     {
@@ -99,7 +108,7 @@ public abstract class AbstractReadExecutor
         this.traceState = Tracing.instance.get();
         this.queryStartNanoTime = queryStartNanoTime;
         this.readTracker = readTracker;
-
+        this.requestSensors = RequestTracker.instance.get();
 
         // Set the digest version (if we request some digests). This is the smallest version amongst all our target replicas since new nodes
         // knows how to produce older digest but the reverse is not true.
@@ -401,6 +410,7 @@ public abstract class AbstractReadExecutor
         {
             handler.awaitResults();
             assert digestResolver.isDataPresent() : "awaitResults returned with no data present.";
+            estimateAndIncrementReadSensor();
         }
         catch (ReadTimeoutException e)
         {
@@ -461,5 +471,34 @@ public abstract class AbstractReadExecutor
     {
         Preconditions.checkState(result != null, "Result must be set first");
         return result;
+    }
+
+    /**
+     * Estiamtes the read byte returned from all replicas and increments the {@link RequestSensors} with the estiamted
+     * value. The estimation is performed by multiplying the actual read bytes as retunred by one replica by the number
+     * of candiadte replicas. This avoids the cost of waiting for all replicas to response, and at the same time
+     * provides a consistent estimation of the same query between different requests.
+     */
+    private void estimateAndIncrementReadSensor()
+    {
+        if (this.requestSensors == null)
+            return;
+
+        if (!handler.resolver.isDataPresent())
+            return;
+
+        Message<ReadResponse> msg = handler.resolver.getMessages().get(0);
+        Map<String, byte[]> customParams = msg.header.customParams();
+        if (customParams == null)
+            return;
+
+        byte[] readBytes = msg.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST);
+        if (readBytes == null)
+            return;
+
+        int numCandidates = replicaPlan().candidates().size();
+        double adjustedSensorValue = SensorsCustomParams.sensorValueFromBytes(readBytes) * numCandidates;
+        Context context = Context.from(this.command);
+        this.requestSensors.incrementSensor(context, Type.READ_BYTES, adjustedSensorValue);
     }
 }

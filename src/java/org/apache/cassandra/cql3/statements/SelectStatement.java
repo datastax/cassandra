@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.math.IntMath;
 
 import org.apache.cassandra.cql3.Ordering;
@@ -44,6 +45,7 @@ import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -69,6 +71,11 @@ import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
@@ -568,12 +575,38 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset);
         }
 
+        // Propagate read sensor data
+        addReadSensorData(msg, options);
+
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
         if (!pager.isExhausted() && !pager.pager.isTopK())
             msg.result.metadata.setHasMorePages(pager.state());
 
         return msg;
+    }
+
+    private void addReadSensorData(ResultMessage.Rows msg, QueryOptions options)
+    {
+        // Custom payload is not supported for protocol versions < 4
+        if (options.getProtocolVersion().isSmallerThan(ProtocolVersion.V4))
+        {
+            return;
+        }
+
+        RequestSensors requestSensors = RequestTracker.instance.get();
+        if (requestSensors == null)
+        {
+            return;
+        }
+
+        Context contex = Context.from(this.table);
+        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(contex, Type.READ_BYTES);
+        readRequestSensor.ifPresent(sensor -> {
+            ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
+            Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(SensorsCustomParams.READ_BYTES_REQUEST, bytes);
+            msg.setCustomPayload(sensorHeader);
+        });
     }
 
     private void warn(String msg)

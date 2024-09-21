@@ -17,9 +17,14 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
@@ -30,8 +35,17 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -108,6 +122,17 @@ public class UpdateStatement extends ModificationStatement
     public void addUpdateForKey(PartitionUpdate.Builder update, Slice slice, UpdateParameters params)
     {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    {
+        ResultMessage result = super.execute(state, options, queryStartNanoTime);
+
+        if (result == null) result = new ResultMessage.Void();
+        addWriteSensorData(result, options);
+
+        return result;
     }
 
     public static class ParsedInsert extends ModificationStatement.Parsed
@@ -342,5 +367,29 @@ public class UpdateStatement extends ModificationStatement
     public AuditLogContext getAuditLogContext()
     {
         return new AuditLogContext(AuditLogEntryType.UPDATE, keyspace(), columnFamily());
+    }
+
+    private void addWriteSensorData(ResultMessage msg, QueryOptions options)
+    {
+        // Custom payload is not supported for protocol versions < 4
+        if (options.getProtocolVersion().isSmallerThan(ProtocolVersion.V4))
+        {
+            return;
+        }
+
+        RequestSensors requestSensors = RequestTracker.instance.get();
+        if (requestSensors == null)
+        {
+            return;
+        }
+
+        Context contex = Context.from(this.metadata());
+        Optional<Sensor> writeRequestSensor = RequestTracker.instance.get().getSensor(contex, Type.WRITE_BYTES);
+        writeRequestSensor.ifPresent(sensor -> {
+            ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
+            String headerName = SensorsCustomParams.encodeTableInWriteBytesRequestParam(this.metadata().name);
+            Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(headerName, bytes);
+            msg.setCustomPayload(sensorHeader);
+        });
     }
 }
