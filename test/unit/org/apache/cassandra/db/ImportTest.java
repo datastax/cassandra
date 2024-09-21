@@ -41,13 +41,14 @@ import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.BootStrapper;
-import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
-import org.apache.cassandra.index.sai.disk.v1.SAICodecUtils;
-import org.apache.cassandra.index.sai.utils.IndexIdentifier;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -926,13 +927,13 @@ public class ImportTest extends CQLTester
 
             File[] dataFiles = backupDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
 
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(Descriptor.fromFile(dataFiles[0]),
-                                                                     Murmur3Partitioner.instance,
-                                                                     Schema.instance.getTableMetadata(KEYSPACE, "sai_test").comparator);
-            IndexIdentifier indexIdentifier = new IndexIdentifier(KEYSPACE, "sai_test", "idx1");
+            Descriptor descriptor = Descriptor.fromFile(dataFiles[0]);
+            IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
+            IndexContext indexContext = SAITester.createIndexContext("idx1", UTF8Type.instance);
 
             // corrupt one of index files
-            try (IndexOutputWriter output = indexDescriptor.openPerIndexOutput(IndexComponent.COLUMN_COMPLETION_MARKER, indexIdentifier))
+            IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+            try (IndexOutputWriter output = components.addOrGet(components.completionMarkerComponent()).openOutput())
             {
                 SAICodecUtils.writeHeader(output);
                 output.writeByte((byte) 0);
