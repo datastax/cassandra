@@ -233,10 +233,10 @@ public class BatchMessage extends Message.Request
             {
                 BatchStatement finalStatement = batch;
                 List<QueryHandler.Prepared> finalPrepared = prepared;
-                Tracing.trace("Handing off to async stage {}", asyncStage.get());
+                Tracing.trace("Handing off to async stage {}; active={}, pending={}", asyncStage.get(), asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
                 return CompletableFuture.supplyAsync(() -> {
                     if (traceRequest)
-                        Tracing.trace("Handed off to async stage");
+                        Tracing.trace("Handed off to async stage; active={}, pending={}", asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
                     return handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
                 }, asyncStage.get().executor());
             }
