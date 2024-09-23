@@ -120,6 +120,7 @@ public class QueryMessage extends Message.Request
             if (asyncStage.isPresent())
             {
                 CQLStatement finalStatement = statement;
+                Tracing.trace("Handing off to async stage {}", asyncStage.get());
                 return CompletableFuture.supplyAsync(() -> {
                     if (traceRequest)
                         Tracing.trace("Handed off to async stage");
@@ -150,6 +151,10 @@ public class QueryMessage extends Message.Request
         catch (Exception ex)
         {
             return handleException(queryState, statement, ex);
+        }
+        finally
+        {
+            Tracing.trace("Executing query completed");
         }
     }
 

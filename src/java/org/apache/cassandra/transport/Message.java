@@ -242,6 +242,8 @@ public abstract class Message
                 }
             }
 
+            Tracing.trace("Initialized tracing in maybeExecuteAsync. Already elapsed {} ns", (System.nanoTime() - queryStartNanoTime));
+
             boolean finalShouldTrace = shouldTrace;
             UUID finalTracingSessionId = tracingSessionId;
             return executeAsync(queryState, queryStartNanoTime, shouldTrace)

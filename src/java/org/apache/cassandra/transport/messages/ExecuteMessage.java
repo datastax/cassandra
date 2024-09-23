@@ -166,6 +166,7 @@ public class ExecuteMessage extends Message.Request
             if (asyncStage.isPresent())
             {
                 QueryHandler.Prepared finalPrepared = prepared;
+                Tracing.trace("Handing off to async stage {}", asyncStage.get());
                 return CompletableFuture.supplyAsync(() -> {
                     if (traceRequest)
                         Tracing.trace("Handed off to async stage");
@@ -225,6 +226,10 @@ public class ExecuteMessage extends Message.Request
         catch (Exception e)
         {
             return handleException(queryState, prepared, e);
+        }
+        finally
+        {
+            Tracing.trace("Executing prepared message completed");
         }
     }
 

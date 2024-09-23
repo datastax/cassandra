@@ -233,6 +233,7 @@ public class BatchMessage extends Message.Request
             {
                 BatchStatement finalStatement = batch;
                 List<QueryHandler.Prepared> finalPrepared = prepared;
+                Tracing.trace("Handing off to async stage {}", asyncStage.get());
                 return CompletableFuture.supplyAsync(() -> {
                     if (traceRequest)
                         Tracing.trace("Handed off to async stage");
@@ -252,6 +253,7 @@ public class BatchMessage extends Message.Request
     {
         try
         {
+            Tracing.trace("Processing batch start");
             Response response = queryHandler.processBatch(batch, queryState, batchOptions, getCustomPayload(), queryStartNanoTime);
             if (queries != null)
                 QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, queryState, requestStartMillisTime, response);
@@ -261,6 +263,10 @@ public class BatchMessage extends Message.Request
         catch (Exception exception)
         {
             return handleException(queryState, preparedList, exception);
+        }
+        finally
+        {
+            Tracing.trace("Processing batch complete");
         }
     }
 
