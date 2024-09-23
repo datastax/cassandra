@@ -328,7 +328,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         {
             if (current.isDisjunction)
             {
-                // If we're in discujnction mode, we must not pass the current builder to addToRowFilter.
+                // If we're in disjunction mode, we must not pass the current builder to addToRowFilter.
                 // We create a new conjunction sub-builder instead and add all expressions there.
                 var builder = new Builder();
                 addToRowFilterDelegate.accept(builder);
