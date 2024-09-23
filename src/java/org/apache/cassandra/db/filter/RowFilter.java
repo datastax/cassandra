@@ -315,10 +315,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
          * regardless of the current mode (conjunction / disjunction) of the {@link RowFilter.Builder}.
          * <p>
          *
-         * This wrapper method makes sure we pass a {@code RowFilter.Builder}
-         * that is always in conjunction mode to the respective {@code addToRowFilter} method. If multiple expressions
-         * are added to the row filter, this method makes sure they are joined with AND in
-         * their own FilterElement.
+         * This wrapper method makes sure we pass a {@code RowFilter.Builder} that is always in conjunction mode to the
+         * respective {@code addToRowFilterDelegate} method. If multiple expressions are added to the row filter, this 
+         * method makes sure they are joined with AND in their own {@link FilterElement}.
          *
          * @param addToRowFilterDelegate a function that adds expressions / child filter elements
          *                               to a provided {@link RowFilter.Builder}, and expects all
