@@ -1585,7 +1585,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                              Ref<SSTableReader> ref = tryRef();
                              if (ref == null)
                              {
-                                 logger.error("Unable to reference sstable, will use pass-through bloom filter");
+                                 logger.error("Unable to reference sstable {}, will use pass-through bloom filter", descriptor.baseFileUri());
                                  bf = FilterFactory.AlwaysPresent;
                              }
                              else
