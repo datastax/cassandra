@@ -370,6 +370,17 @@ public class PartitionUpdate extends AbstractBTreePartition
     }
 
     /**
+     * The accumulated BTree size of the data contained in this update.
+     *
+     * @return the accumulated BTree size of the data contained in this update.
+     */
+    @VisibleForTesting
+    public long accumulatedDataSize()
+    {
+        return BTree.<Row>accumulate(holder.tree, (row, value) -> row.dataSize() + value, 0L);
+    }
+
+    /**
      * The size of the data contained in this update.
      *
      * @return the size of the data contained in this update.
