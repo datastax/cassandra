@@ -227,8 +227,12 @@ public class BatchMessage extends Message.Request
             {
                 BatchStatement finalStatement = batch;
                 List<QueryHandler.Prepared> finalPrepared = prepared;
-                return CompletableFuture.supplyAsync(() -> handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime),
-                                                     asyncStage.get().executor());
+                Tracing.trace("Handing off to async stage {}; active={}, pending={}", asyncStage.get(), asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
+                return CompletableFuture.supplyAsync(() -> {
+                    if (traceRequest)
+                        Tracing.trace("Handed off to async stage; active={}, pending={}", asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
+                    return handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
+                }, asyncStage.get().executor());
             }
             else
                 return CompletableFuture.completedFuture(handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, prepared, requestStartMillisTime));
@@ -243,6 +247,7 @@ public class BatchMessage extends Message.Request
     {
         try
         {
+            Tracing.trace("Processing batch start");
             Response response = queryHandler.processBatch(batch, queryState, batchOptions, getCustomPayload(), queryStartNanoTime);
             if (queries != null)
                 QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, queryState, requestStartMillisTime, response);
@@ -252,6 +257,10 @@ public class BatchMessage extends Message.Request
         catch (Exception exception)
         {
             return handleException(queryState, preparedList, exception);
+        }
+        finally
+        {
+            Tracing.trace("Processing batch complete");
         }
     }
 

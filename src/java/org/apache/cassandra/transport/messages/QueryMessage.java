@@ -114,8 +114,12 @@ public class QueryMessage extends Message.Request
             if (asyncStage.isPresent())
             {
                 CQLStatement finalStatement = statement;
-                return CompletableFuture.supplyAsync(() -> handleRequest(state, queryHandler, queryStartNanoTime, finalStatement, requestStartMillisTime),
-                                                     asyncStage.get().executor());
+                Tracing.trace("Handing off to async stage {}; active={}, pending={}", asyncStage.get(), asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
+                return CompletableFuture.supplyAsync(() -> {
+                    if (traceRequest)
+                        Tracing.trace("Handed off to async stage; active={}, pending={}", asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
+                    return handleRequest(state, queryHandler, queryStartNanoTime, finalStatement, requestStartMillisTime);
+                }, asyncStage.get().executor());
             }
             else
                 return CompletableFuture.completedFuture(handleRequest(state, queryHandler, queryStartNanoTime, statement, requestStartMillisTime));
@@ -141,6 +145,10 @@ public class QueryMessage extends Message.Request
         catch (Exception ex)
         {
             return handleException(queryState, statement, ex);
+        }
+        finally
+        {
+            Tracing.trace("Executing query completed");
         }
     }
 

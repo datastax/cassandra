@@ -160,8 +160,12 @@ public class ExecuteMessage extends Message.Request
             if (asyncStage.isPresent())
             {
                 QueryHandler.Prepared finalPrepared = prepared;
-                return CompletableFuture.supplyAsync(() -> handleRequest(queryState, queryStartNanoTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime),
-                                                     asyncStage.get().executor());
+                Tracing.trace("Handing off to async stage {}; active={}, pending={}", asyncStage.get(), asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
+                return CompletableFuture.supplyAsync(() -> {
+                    if (traceRequest)
+                        Tracing.trace("Handed off to async stage; active={}, pending={}", asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
+                    return handleRequest(queryState, queryStartNanoTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime);
+                }, asyncStage.get().executor());
             }
             else
                 return CompletableFuture.completedFuture(handleRequest(queryState, queryStartNanoTime, handler, queryOptions, statement, prepared, requestStartMillisTime));
@@ -216,6 +220,10 @@ public class ExecuteMessage extends Message.Request
         catch (Exception e)
         {
             return handleException(queryState, prepared, e);
+        }
+        finally
+        {
+            Tracing.trace("Executing prepared message completed");
         }
     }
 
