@@ -237,6 +237,8 @@ public abstract class Message
                 }
             }
 
+            Tracing.trace("Initialized tracing in execute. Already elapsed {} ns", (System.nanoTime() - queryStartNanoTime));
+
             Response response;
             try
             {

@@ -20,12 +20,8 @@ package org.apache.cassandra.transport.messages;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.cql3.Attributes;
@@ -49,7 +45,6 @@ import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
-import org.apache.cassandra.utils.NoSpamLogger;
 
 public class BatchMessage extends Message.Request
 {
@@ -223,6 +218,7 @@ public class BatchMessage extends Message.Request
             BatchStatement batch = new BatchStatement(null, batchType,
                                                       VariableSpecifications.empty(), statements, Attributes.none());
 
+            Tracing.trace("Processing batch start");
             long queryTime = System.currentTimeMillis();
             Message.Response response = handler.processBatch(batch, state, batchOptions, getCustomPayload(), queryStartNanoTime);
             if (queries != null)
@@ -234,6 +230,10 @@ public class BatchMessage extends Message.Request
             QueryEvents.instance.notifyBatchFailure(prepared, batchType, queryOrIdList, values, options, state, e);
             JVMStabilityInspector.inspectThrowable(e);
             return ErrorMessage.fromException(e);
+        }
+        finally
+        {
+            Tracing.trace("Processing batch complete");
         }
     }
 

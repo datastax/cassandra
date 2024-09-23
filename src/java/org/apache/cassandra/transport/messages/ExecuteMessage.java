@@ -154,6 +154,7 @@ public class ExecuteMessage extends Message.Request
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.statement.getBindVariables());
 
+            Tracing.trace("Executing prepared message started");
             long requestStartTime = System.currentTimeMillis();
 
             Message.Response response = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime);
@@ -198,6 +199,10 @@ public class ExecuteMessage extends Message.Request
             QueryEvents.instance.notifyExecuteFailure(prepared, options, state, e);
             JVMStabilityInspector.inspectThrowable(e);
             return ErrorMessage.fromException(e);
+        }
+        finally
+        {
+            Tracing.trace("Executing prepared message completed");
         }
     }
 
