@@ -55,6 +55,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.BF_RECREAT
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
+import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.v1.PrepareVerbHandler;
 import org.apache.cassandra.service.paxos.v1.ProposeVerbHandler;
 
@@ -197,6 +198,10 @@ public class SensorsWriteTest
                             .add("val", oneCharString)
                             .build();
 
+        PartitionUpdate singleRowPartitionUpdate = mutation.getPartitionUpdates().iterator().next();
+        long singleRowAccumulatedSize = singleRowPartitionUpdate.accumulatedDataSize();
+        long singleRowOtherSize = singleRowPartitionUpdate.dataSize() - singleRowAccumulatedSize;
+
         handleMutation(mutation);
         Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(localSensor.getValue()).isGreaterThan(0);
@@ -222,7 +227,8 @@ public class SensorsWriteTest
         handleMutation(mutation);
 
         localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
-        assertThat(localSensor.getValue()).isEqualTo(10 * singleRowWriteBytes);
+        double expectedSize = 10 * singleRowAccumulatedSize + singleRowOtherSize;
+        assertThat(localSensor.getValue()).isEqualTo(expectedSize);
 
         Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
@@ -315,6 +321,9 @@ public class SensorsWriteTest
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
 
+        // Needed so that PaxosState.maybeLoad will call SystemKeyspace.loadPaxosState and SystemKeyspace.transferPaxosSensorBytes
+        PaxosState.unsafeReset();
+
         // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
         handlePaxosPrepare(proposal);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
@@ -342,6 +351,9 @@ public class SensorsWriteTest
         assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
+
+        // Needed so that PaxosState.maybeLoad will call SystemKeyspace.loadPaxosState and SystemKeyspace.transferPaxosSensorBytes
+        PaxosState.unsafeReset();
 
         // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
         handlePaxosPropose(proposal);
