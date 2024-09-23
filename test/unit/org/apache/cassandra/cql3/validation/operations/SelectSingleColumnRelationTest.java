@@ -30,7 +30,7 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 public class SelectSingleColumnRelationTest extends CQLTester
 {
     @Test
-    public void testInvalidCollectionEqualityRelation() throws Throwable
+    public void testInvalidCollectionEqualityRelation()
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b set<int>, c list<int>, d map<int, int>)");
         createIndex("CREATE INDEX ON %s (b)");
@@ -46,7 +46,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidCollectionNonEQRelation() throws Throwable
+    public void testInvalidCollectionNonEQRelation()
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b set<int>, c int)");
         createIndex("CREATE INDEX ON %s (c)");
@@ -161,7 +161,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testPartitionKeyColumnRelations() throws Throwable
+    public void testPartitionKeyColumnRelations()
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key((a, b), c))");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "first", 1, 1, 1);
@@ -207,7 +207,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testClusteringColumnRelationsWithClusteringOrder() throws Throwable
+    public void testClusteringColumnRelationsWithClusteringOrder()
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key(a, b, c)) WITH CLUSTERING ORDER BY (b DESC, c ASC);");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "first", 1, 5, 1);
@@ -227,7 +227,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testAllowFilteringWithClusteringColumn() throws Throwable
+    public void testAllowFilteringWithClusteringColumn()
     {
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
 
@@ -266,7 +266,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testAllowFilteringWithIndexedColumn() throws Throwable
+    public void testAllowFilteringWithIndexedColumn()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int)");
         createIndex("CREATE INDEX ON %s(a)");
@@ -287,7 +287,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testAllowFilteringWithIndexedColumnAndStaticColumns() throws Throwable
+    public void testAllowFilteringWithIndexedColumnAndStaticColumns()
     {
         createTable("CREATE TABLE %s (a int, b int, c int, s int static, PRIMARY KEY(a, b))");
         createIndex("CREATE INDEX ON %s(c)");
@@ -306,7 +306,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testIndexQueriesOnComplexPrimaryKey() throws Throwable
+    public void testIndexQueriesOnComplexPrimaryKey()
     {
         createTable("CREATE TABLE %s (pk0 int, pk1 int, ck0 int, ck1 int, ck2 int, value int, PRIMARY KEY ((pk0, pk1), ck0, ck1, ck2))");
 
@@ -329,7 +329,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnClusteringColumns() throws Throwable
+    public void testIndexOnClusteringColumns()
     {
         createTable("CREATE TABLE %s (id1 int, id2 int, author text, time bigint, v1 text, v2 text, PRIMARY KEY ((id1, id2), author, time))");
         createIndex("CREATE INDEX ON %s(time)");
@@ -401,7 +401,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testRangeQueryOnIndex() throws Throwable
+    public void testRangeQueryOnIndex()
     {
         createTable("CREATE TABLE %s (id int primary key, row int, setid int);");
         createIndex("CREATE INDEX ON %s (setid)");
@@ -431,7 +431,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testINWithDuplicateValue() throws Throwable
+    public void testINWithDuplicateValue()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, v int, PRIMARY KEY (k1, k2))");
         execute("INSERT INTO %s (k1,  k2, v) VALUES (?, ?, ?)", 1, 1, 1);
@@ -447,7 +447,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testLargeClusteringINValues() throws Throwable
+    public void testLargeClusteringINValues()
     {
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
         execute("INSERT INTO %s (k, c, v) VALUES (0, 0, 0)");
@@ -459,7 +459,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testMultiplePartitionKeyWithIndex() throws Throwable
+    public void testMultiplePartitionKeyWithIndex()
     {
         Util.assumeLegacySecondaryIndex(); // SAI does not allow multi-column slice restrictions
 
@@ -499,18 +499,18 @@ public class SelectSingleColumnRelationTest extends CQLTester
                 row(0, 0, 1, 1, 1, 5),
                 row(0, 0, 2, 0, 0, 5));
 
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"),
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'),
                              "SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND f = ?", 0, 0, 1, 5);
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND f = ? ALLOW FILTERING", 0, 1, 3, 5),
                    row(0, 0, 1, 1, 1, 5));
 
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"),
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'),
                              "SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND f = ?", 0, 1, 2, 5);
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND f = ? ALLOW FILTERING", 0, 1, 2, 5),
                    row(0, 0, 1, 1, 1, 5),
                    row(0, 0, 2, 0, 0, 5));
 
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"),
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'),
                              "SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND d IN (?) AND f = ?", 0, 1, 3, 0, 3);
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND d IN (?) AND f = ? ALLOW FILTERING", 0, 1, 3, 0, 3),
                    row(0, 0, 1, 0, 0, 3));
@@ -521,7 +521,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
                 row(0, 0, 1, 1, 1, 5),
                 row(0, 0, 2, 0, 0, 5));
 
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"),
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'),
                              "SELECT * FROM %s WHERE a = ? AND c >= ? AND f = ?", 0, 1, 5);
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND b = ? AND c >= ? AND f = ?", 0, 0, 1, 5),
                    row(0, 0, 1, 1, 1, 5),
@@ -542,7 +542,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testFunctionCallWithUnset() throws Throwable
+    public void testFunctionCallWithUnset()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
 
@@ -553,7 +553,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testLimitWithUnset() throws Throwable
+    public void testLimitWithUnset()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, i int)");
         execute("INSERT INTO %s (k, i) VALUES (1, 1)");
@@ -565,7 +565,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testWithUnsetValues() throws Throwable
+    public void testWithUnsetValues()
     {
         createTable("CREATE TABLE %s (k int, i int, j int, s text, PRIMARY KEY(k,i,j))");
         createIndex("CREATE INDEX s_index ON %s (s)");
@@ -593,7 +593,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidSliceRestrictionOnPartitionKey() throws Throwable
+    public void testInvalidSliceRestrictionOnPartitionKey()
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b int, c text)");
         assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
@@ -603,7 +603,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidMulticolumnSliceRestrictionOnPartitionKey() throws Throwable
+    public void testInvalidMulticolumnSliceRestrictionOnPartitionKey()
     {
         createTable("CREATE TABLE %s (a int, b int, c text, PRIMARY KEY ((a, b)))");
         assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
@@ -621,7 +621,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidColumnNames() throws Throwable
+    public void testInvalidColumnNames()
     {
         createTable("CREATE TABLE %s (a int, b int, c map<int, int>, PRIMARY KEY (a, b))");
         assertInvalidMessage("Undefined column name d", "SELECT * FROM %s WHERE d = 0");
@@ -643,10 +643,10 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidNonFrozenUDTRelation() throws Throwable
+    public void testInvalidNonFrozenUDTRelation()
     {
         String type = createType("CREATE TYPE %s (a int)");
-        createTable("CREATE TABLE %s (a int PRIMARY KEY, b " + type + ")");
+        createTable("CREATE TABLE %s (a int PRIMARY KEY, b " + type + ')');
         Object udt = userType("a", 1);
 
         // All operators
@@ -669,7 +669,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInRestrictionWithClusteringColumn() throws Throwable
+    public void testInRestrictionWithClusteringColumn()
     {
         createTable("CREATE TABLE %s (key int, c1 int, c2 int, s1 text static, PRIMARY KEY ((key, c1), c2))");
 
@@ -703,7 +703,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInRestrictionsWithAllowFiltering() throws Throwable
+    public void testInRestrictionsWithAllowFiltering()
     {
         createTable("CREATE TABLE %s (pk1 int, pk2 int, c text, s int static, v int, primary key((pk1, pk2), c))");
         execute("INSERT INTO %s (pk1, pk2, c, s, v) values (?, ?, ?, ?, ?)", 1, 0, "5", 1, 3);
@@ -756,7 +756,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInRestrictionsWithAllowFilteringAndOrdering() throws Throwable
+    public void testInRestrictionsWithAllowFilteringAndOrdering()
     {
         createTable("CREATE TABLE %s (pk int, c text, v int, primary key(pk, c)) WITH CLUSTERING ORDER BY (c DESC)");
         execute("INSERT INTO %s (pk, c, v) values (?, ?, ?)", 1, "0", 5);
@@ -803,7 +803,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testClusteringSlicesWithNotIn() throws Throwable
+    public void testClusteringSlicesWithNotIn()
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key(a, b, c))");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 1, 4, 1);
@@ -961,7 +961,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testClusteringSlicesWithNotInAndReverseOrdering() throws Throwable
+    public void testClusteringSlicesWithNotInAndReverseOrdering()
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key(a, b, c)) with clustering order by (b desc, c desc)");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 1, 4, 1);
@@ -1108,7 +1108,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testNotInRestrictionsWithAllowFiltering() throws Throwable
+    public void testNotInRestrictionsWithAllowFiltering()
     {
         createTable("CREATE TABLE %s (pk int, c int, v int, primary key(pk, c))");
         execute("insert into %s (pk, c, v) values (?, ?, ?)", 1, 1, 1);
@@ -1202,7 +1202,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testNotInRestrictionsWithOrAndAllowFiltering() throws Throwable
+    public void testNotInRestrictionsWithOrAndAllowFiltering()
     {
         createTable("CREATE TABLE %s (pk int, c int, v int, PRIMARY KEY(pk, c))");
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 1, 1);
@@ -1274,7 +1274,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
 
 
     @Test
-    public void testNonEqualsRelationWithFiltering() throws Throwable
+    public void testNonEqualsRelationWithFiltering()
     {
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
