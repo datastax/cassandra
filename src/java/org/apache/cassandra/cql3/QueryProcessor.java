@@ -283,7 +283,10 @@ public class QueryProcessor implements QueryHandler
     {
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
         ClientState clientState = queryState.getClientState();
+
+        Tracing.trace("Authorizing against client state");
         statement.authorize(clientState);
+        Tracing.trace("Validating against query state");
         statement.validate(queryState);
 
         Tracing.setupTracedKeyspace(statement);
@@ -296,6 +299,7 @@ public class QueryProcessor implements QueryHandler
                 return result;
         }
 
+        Tracing.trace("Executing prepared statement");
         ResultMessage result = options.getConsistency() == ConsistencyLevel.NODE_LOCAL
                                ? processNodeLocalStatement(statement, queryState, options, queryStartNanoTime)
                                : statement.execute(queryState, options, queryStartNanoTime);
@@ -820,9 +824,11 @@ public class QueryProcessor implements QueryHandler
                 return result;
         }
 
+        Tracing.trace("Authorizing batch");
         batch.authorize(clientState);
         batch.validate();
         batch.validate(queryState);
+        Tracing.trace("Executing batch");
         return batch.execute(queryState, options, queryStartNanoTime);
     }
 
