@@ -1175,21 +1175,21 @@ public final class SystemKeyspace
         if (paxosStatePurging() == legacy)
         {
             String cql = "UPDATE system." + PAXOS + " USING TIMESTAMP ? AND TTL ? SET in_progress_ballot = ? WHERE row_key = ? AND cf_id = ?";
-            executeInternal(cql,
+            trackPaxosBytes(metadata, () -> executeInternal(cql,
                             ballot.unixMicros(),
                             legacyPaxosTtlSec(metadata),
                             ballot,
                             key.getKey(),
-                            metadata.id.asUUID());
+                            metadata.id.asUUID()));
         }
         else
         {
             String cql = "UPDATE system." + PAXOS + " USING TIMESTAMP ? SET in_progress_ballot = ? WHERE row_key = ? AND cf_id = ?";
-            executeInternal(cql,
+            trackPaxosBytes(metadata, () -> executeInternal(cql,
                             ballot.unixMicros(),
                             ballot,
                             key.getKey(),
-                            metadata.id.asUUID());
+                            metadata.id.asUUID()));
         }
     }
 
