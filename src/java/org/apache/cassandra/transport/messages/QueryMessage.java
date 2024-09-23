@@ -101,6 +101,7 @@ public class QueryMessage extends Message.Request
             if (traceRequest)
                 traceQuery(state);
 
+            Tracing.trace("Executing query started");
             long queryStartTime = System.currentTimeMillis();
 
             QueryHandler queryHandler = ClientState.getCQLQueryHandler();
@@ -120,6 +121,10 @@ public class QueryMessage extends Message.Request
             if (!((e instanceof RequestValidationException) || (e instanceof RequestExecutionException)))
                 logger.error("Unexpected error during query", e);
             return ErrorMessage.fromException(e);
+        }
+        finally
+        {
+            Tracing.trace("Executing query completed");
         }
     }
 
