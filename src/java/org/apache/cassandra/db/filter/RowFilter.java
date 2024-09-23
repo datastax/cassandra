@@ -719,7 +719,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         // the trouble for now)
         // VECTOR
         protected enum Kind {
-            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), VECTOR_RADIUS(100), TRUE(101);
+            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), VECTOR_RADIUS(100);
             private final int val;
             Kind(int v) { val = v; }
             public int getVal() { return val; }
@@ -733,7 +733,6 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     case 3: return CUSTOM;
                     case 4: return USER;
                     case 100: return VECTOR_RADIUS;
-                    case 101: return TRUE;
                     default: throw new IllegalArgumentException("Unknown index expression kind: " + val);
                 }
             }
