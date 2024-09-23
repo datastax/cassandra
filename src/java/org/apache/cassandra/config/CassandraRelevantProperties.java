@@ -492,6 +492,7 @@ public enum CassandraRelevantProperties
     NEVER_PURGE_TOMBSTONES("cassandra.never_purge_tombstones"),
     NIO_DATA_OUTPUT_STREAM_PLUS_BUFFER_SIZE("cassandra.nio_data_output_stream_plus_buffer_size", convertToString(32 * 1024)),
     NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE("cassandra.nodes.disablePersitingToSystemKeyspace", "false"),
+    NODES_PERSISTENCE_CLASS("cassandra.nodes.persistence_class"),
     NODETOOL_JMX_NOTIFICATION_POLL_INTERVAL_SECONDS("cassandra.nodetool.jmx_notification_poll_interval_seconds", convertToString(TimeUnit.SECONDS.convert(5, TimeUnit.MINUTES))),
     /** If set, {@link org.apache.cassandra.net.MessagingService} is shutdown abrtuptly without waiting for anything.
      * This is an optimization used in unit tests becuase we never restart a node there. The only node is stopoped
