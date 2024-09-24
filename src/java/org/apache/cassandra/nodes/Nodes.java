@@ -32,11 +32,11 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import org.apache.cassandra.concurrent.ExecutorFactory;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -44,6 +44,7 @@ import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.NODES_PERSISTENCE_CLASS;
 
 /**
  * Provides access and updates the locally stored information about this and other nodes. The information is cached in
@@ -139,6 +140,12 @@ public class Nodes
             return peers().update(endpoint, info -> (PeerInfo) update.apply(info), blocking, force);
     }
 
+    public void forcePersist()
+    {
+        local().forcePersist();
+        peers().forcePersist();
+    }
+
     /**
      * Checks whether the provided address is local or known peer address.
      */
@@ -146,7 +153,6 @@ public class Nodes
     {
         return localOrPeerInfo(endpoint) != null;
     }
-
 
     public static UUID getHostId(InetAddressAndPort endpoint, UUID defaultValue)
     {
@@ -197,10 +203,26 @@ public class Nodes
      */
     private Nodes()
     {
-        this(!DatabaseDescriptor.isDaemonInitialized() || NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.getBoolean()
-             ? INodesPersistence.NO_NODES_PERSISTENCE
-             : new NodesPersistence(),
-             ExecutorFactory.Global.executorFactory().sequential("nodes-info-persistence"));
+        this(createNodesPersistence(), ExecutorFactory.Global.executorFactory().sequential("nodes-info-persistence"));
+    }
+
+    private static INodesPersistence createNodesPersistence()
+    {
+        String nodesPersistenceClassName =  NODES_PERSISTENCE_CLASS.getString();
+        if (nodesPersistenceClassName != null)
+        {
+            try
+            {
+                return FBUtilities.instanceOrConstruct(nodesPersistenceClassName, "INodesPersistence implementation (" + NODES_PERSISTENCE_CLASS.getKey() + ")");
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException("Failed to instantiate " + nodesPersistenceClassName, e);
+            }
+        }
+        return !DatabaseDescriptor.isDaemonInitialized() || NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.getBoolean()
+               ? INodesPersistence.NO_NODES_PERSISTENCE
+               : new NodesPersistence();
     }
 
     @VisibleForTesting
@@ -246,6 +268,20 @@ public class Nodes
     public class Peers
     {
         private final NonBlockingHashMap<InetAddressAndPort, PeerInfo> internalMap = new NonBlockingHashMap<>();
+
+        public void forcePersist()
+        {
+            for (PeerInfo info : internalMap.values())
+            {
+                internalMap.computeIfPresent(info.getPeerAddressAndPort(), (key, existingPeerInfo) -> {
+                    if (existingPeerInfo.isExisting())
+                        save(existingPeerInfo, existingPeerInfo, true, true);
+                    else
+                        delete(info.getPeerAddressAndPort(), true);
+                    return existingPeerInfo;
+                });
+            }
+        }
 
         public IPeerInfo update(InetAddressAndPort peer, UnaryOperator<PeerInfo> update)
         {
@@ -380,6 +416,14 @@ public class Nodes
     {
         private final NonBlockingHashMap<InetAddressAndPort, LocalInfo> internalMap = new NonBlockingHashMap<>();
         private final InetAddressAndPort localInfoKey = InetAddressAndPort.getLoopbackAddress();
+
+        public void forcePersist()
+        {
+            internalMap.computeIfPresent(localInfoKey, (key, existingLocalInfo) -> {
+                save(existingLocalInfo, existingLocalInfo, true, true);
+                return existingLocalInfo;
+            });
+        }
 
         /**
          * @see #update(UnaryOperator, boolean, boolean)
