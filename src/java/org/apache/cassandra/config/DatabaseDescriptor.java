@@ -312,7 +312,6 @@ public class DatabaseDescriptor
         setConfig(config.get());
         applyAll();
 
-        // FIXME: CNDB-10296 StorageService.instance->SnapshotManager->SnapshotLoader requires created directories
         createAllDirectories();
 
         applyGuardrails(); // GuardrailsOptions.validateDataDiskUsageMaxDiskSize requires created directories
