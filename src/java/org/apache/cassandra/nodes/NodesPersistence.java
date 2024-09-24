@@ -38,7 +38,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,7 +56,6 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.RebufferingInputStream;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Throwables;
@@ -268,7 +266,7 @@ public class NodesPersistence implements INodesPersistence
     private Collection<Token> readTokens(Row row, String col)
     {
         Set<String> tokensStrings = row.has(col) ? row.getSet(col, UTF8Type.instance) : new HashSet<>();
-        Token.TokenFactory factory = StorageService.instance.getTokenFactory();
+        Token.TokenFactory factory = DatabaseDescriptor.getPartitioner().getTokenFactory();
         List<Token> tokens = new ArrayList<>(tokensStrings.size());
         for (String tk : tokensStrings)
             tokens.add(factory.fromString(tk));
@@ -350,10 +348,9 @@ public class NodesPersistence implements INodesPersistence
     {
         if (tokens.isEmpty())
             return Collections.emptySet();
-        Token.TokenFactory factory = StorageService.instance.getTokenFactory();
         Set<String> s = new HashSet<>(tokens.size());
         for (Token tk : tokens)
-            s.add(factory.toString(tk));
+            s.add(tk.getPartitioner().getTokenFactory().toString(tk));
         return s;
     }
 
