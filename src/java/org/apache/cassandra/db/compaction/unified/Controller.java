@@ -886,8 +886,13 @@ public abstract class Controller
                 ? Boolean.parseBoolean(options.get(OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION))
                 : DEFAULT_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES;
         boolean useVectorOptions = hasVectorType && vectorOverride;
-        if (useVectorOptions)
-            logger.debug("Using UCS configuration optimized for vector.");
+        if (logger.isTraceEnabled())
+        {
+            if (useVectorOptions)
+                logger.trace("Using UCS configuration optimized for vector for {}.{}", realm.getKeyspaceName(), realm.getTableName());
+            else
+                logger.trace("Using non-vector UCS configuration for {}.{}", realm.getKeyspaceName(), realm.getTableName());
+        }
         boolean adaptive = options.containsKey(ADAPTIVE_OPTION) ? Boolean.parseBoolean(options.get(ADAPTIVE_OPTION)) : DEFAULT_ADAPTIVE;
         long dataSetSize = getSizeWithAlt(options, DATASET_SIZE_OPTION, DATASET_SIZE_OPTION_GB, 30, DEFAULT_DATASET_SIZE);
         long flushSizeOverride = getSizeWithAlt(options, FLUSH_SIZE_OVERRIDE_OPTION, FLUSH_SIZE_OVERRIDE_OPTION_MB, 20, 0);
