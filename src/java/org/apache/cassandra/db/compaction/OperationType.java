@@ -60,8 +60,7 @@ public enum OperationType
     ROW_CACHE_SAVE("Row cache save", false, 6),
     COUNTER_CACHE_SAVE("Counter cache save", false, 6),
     INDEX_SUMMARY("Index summary redistribution", false, 6),
-    // FIXME STAR-979: Need to review values of `writesData` and `priority` for the operations below
-    // that were added by the rebase of CC on OSS 5.0
+    // FIXME CNDB-11008: Review port of STAR-979 to review values of `writesData` and `priority` for the added operations below
     RESTORE("Restore", false, 6),
     // operations used for sstables on remote storage
     REMOTE_RELOAD("Remote reload", false, 6, true), // reload locally sstables that already exist remotely
