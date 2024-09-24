@@ -344,14 +344,14 @@ public abstract class Selection
         return Arrays.asList(jsonRow);
     }
 
-    public static interface Selectors
+    public interface Selectors
     {
         /**
          * Returns the {@code ColumnFilter} corresponding to those selectors
          *
          * @return the {@code ColumnFilter} corresponding to those selectors
          */
-        public ColumnFilter getColumnFilter();
+        ColumnFilter getColumnFilter();
 
         /**
          * Checks if this Selectors perform some processing
@@ -363,19 +363,19 @@ public abstract class Selection
          * Checks if one of the selectors perform some aggregations.
          * @return {@code true} if one of the selectors perform some aggregations, {@code false} otherwise.
          */
-        public boolean isAggregate();
+        boolean isAggregate();
 
         /**
          * Returns the number of fetched columns
          * @return the number of fetched columns
          */
-        public int numberOfFetchedColumns();
+        int numberOfFetchedColumns();
 
         /**
          * Checks if one of the selectors collect TTLs.
          * @return {@code true} if one of the selectors collect TTLs, {@code false} otherwise.
          */
-        public boolean collectTTLs();
+        boolean collectTTLs();
 
         /**
          * Checks if one of the selectors collects write timestamps.
@@ -390,9 +390,9 @@ public abstract class Selection
          */
         public void addInputRow(InputRow input);
 
-        public List<ByteBuffer> getOutputRow();
+        List<ByteBuffer> getOutputRow();
 
-        public void reset();
+        void reset();
     }
 
     // Special cased selection for when only columns are selected.
