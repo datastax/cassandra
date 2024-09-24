@@ -40,7 +40,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class ShardManagerTokenAwareTest
+public class ShardManagerReplicaAwareTest
 {
 
     @Test
@@ -50,7 +50,7 @@ public class ShardManagerTokenAwareTest
         {
             var rs = buildStrategy(numTokens, 1, 1, 1);
             var expectedTokens = rs.getTokenMetadata().sortedTokens();
-            var shardManager = new ShardManagerTokenAware(rs);
+            var shardManager = new ShardManagerReplicaAware(rs);
 
             var shardCount = numTokens + 1;
             var iterator = shardManager.boundaries(shardCount);
@@ -82,7 +82,7 @@ public class ShardManagerTokenAwareTest
                     // Confirm test set up is correct.
                     assertEquals(numTokensPerNode * nodeCount, initialSplitPoints.size());
                     // Use a shared instance to
-                    var shardManager = new ShardManagerTokenAware(rs);
+                    var shardManager = new ShardManagerReplicaAware(rs);
 
                     // The tokens for one level lower.
                     var lowerTokens = new ArrayList<Token>();

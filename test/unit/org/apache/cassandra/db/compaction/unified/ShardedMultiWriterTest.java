@@ -39,9 +39,9 @@ public class ShardedMultiWriterTest extends CQLTester
     private static final int ROW_PER_PARTITION = 10;
 
     @Parameterized.Parameter
-    public boolean isNodeAware;
+    public boolean isReplicaAware;
 
-    @Parameterized.Parameters(name = "isNodeAware={0}")
+    @Parameterized.Parameters(name = "isReplicaAware={0}")
     public static Object[] parameters()
     {
         return new Object[] { true, false };
@@ -92,7 +92,7 @@ public class ShardedMultiWriterTest extends CQLTester
     {
         createTable(String.format("CREATE TABLE %%s (k int, t int, v blob, PRIMARY KEY (k, t)) with compaction = " +
                                   "{'class':'UnifiedCompactionStrategy', 'base_shard_count' : '%d', " +
-                                  "'min_sstable_size' : '0B', 'is_node_aware': '%s'} ", numShards, isNodeAware));
+                                  "'min_sstable_size' : '0B', 'is_replica_aware': '%s'} ", numShards, isReplicaAware));
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();
@@ -102,7 +102,7 @@ public class ShardedMultiWriterTest extends CQLTester
 
         assertEquals(numOutputSSTables, cfs.getLiveSSTables().size());
 
-        if (isNodeAware)
+        if (isReplicaAware)
         {
             // Assert that the space does not cross token boundaries
             var tokenMetadata = StorageService.instance.getTokenMetadataForKeyspace(keyspace());

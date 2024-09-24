@@ -39,9 +39,10 @@ import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.TokenMetadata;
 
 /**
- * A {@link ShardManager} implementation that takes an {@link AbstractReplicationStrategy} as input and uses it
- * to determine current and future token boundaries to use as sharding split points to ensure that for current and
- * future states of the cluster, the generated sstable ranges will not span multiple nodes for sufficiently high
+ * A {@link ShardManager} implementation that aligns UCS and replica shards to limit the amount of sstables that are
+ * partially owned by replicas. It takes an {@link AbstractReplicationStrategy} as input and uses it to determine
+ * current and future replica token boundaries to use as sharding split points to ensure that for current and
+ * future states of the cluster, the generated sstable shard ranges will not span multiple nodes for sufficiently high
  * levels of compaction.
  * <p>
  * If more compaction requires more shards than the already allocated tokens can satisfy, use the
@@ -49,16 +50,16 @@ import org.apache.cassandra.locator.TokenMetadata;
  * as split points. This implementation relies on the fact that token allocation is deterministic after the first
  * token has been selected.
  */
-public class ShardManagerTokenAware implements ShardManager
+public class ShardManagerReplicaAware implements ShardManager
 {
-    private static final Logger logger = LoggerFactory.getLogger(ShardManagerTokenAware.class);
+    private static final Logger logger = LoggerFactory.getLogger(ShardManagerReplicaAware.class);
     public static final Token[] EMPTY_TOKENS = new Token[0];
     private final AbstractReplicationStrategy rs;
     private final TokenMetadata tokenMetadata;
     private final IPartitioner partitioner;
     private final ConcurrentHashMap<Integer, Token[]> splitPointCache;
 
-    public ShardManagerTokenAware(AbstractReplicationStrategy rs)
+    public ShardManagerReplicaAware(AbstractReplicationStrategy rs)
     {
         this.rs = rs;
         // Clone the map to ensure it has a consistent view of the tokenMetadata. UCS creates a new instance of the
@@ -93,8 +94,9 @@ public class ShardManagerTokenAware implements ShardManager
     {
         try
         {
+            logger.debug("Creating shard boundaries for {} shards", shardCount);
             var splitPoints = splitPointCache.computeIfAbsent(shardCount, this::computeBoundaries);
-            return new TokenAlignedShardTracker(splitPoints);
+            return new ReplicaAlignedShardTracker(splitPoints);
         }
         catch (Throwable t)
         {
@@ -193,14 +195,14 @@ public class ShardManagerTokenAware implements ShardManager
         return tokens;
     }
 
-    private class TokenAlignedShardTracker implements ShardTracker
+    private class ReplicaAlignedShardTracker implements ShardTracker
     {
         private final Token minToken;
         private final Token[] sortedTokens;
         private int nextShardIndex = 0;
         private Token currentEnd;
 
-        TokenAlignedShardTracker(Token[] sortedTokens)
+        ReplicaAlignedShardTracker(Token[] sortedTokens)
         {
             this.sortedTokens = sortedTokens;
             this.minToken = partitioner.getMinimumToken();

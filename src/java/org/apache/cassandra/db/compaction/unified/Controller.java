@@ -164,8 +164,8 @@ public abstract class Controller
     public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
-    static final String IS_NODE_AWARE_OPTION = "is_node_aware";
-    public static final boolean DEFAULT_IS_NODE_AWARE = Boolean.parseBoolean(System.getProperty(PREFIX + IS_NODE_AWARE_OPTION));
+    static final String IS_REPLICA_AWARE_OPTION = "is_replica_aware";
+    public static final boolean DEFAULT_IS_REPLICA_AWARE = Boolean.parseBoolean(System.getProperty(PREFIX + IS_REPLICA_AWARE_OPTION));
 
     /**
      * Provision for growth of the constructed SSTables as the size of the data grows. By default the target SSTable
@@ -299,7 +299,7 @@ public abstract class Controller
     protected String tableName;
 
     protected final int baseShardCount;
-    private final boolean isNodeAware;
+    private final boolean isReplicaAware;
 
     protected final long targetSSTableSize;
     protected final double sstableGrowthModifier;
@@ -326,7 +326,7 @@ public abstract class Controller
                long expiredSSTableCheckFrequency,
                boolean ignoreOverlapsInExpirationCheck,
                int baseShardCount,
-               boolean isNodeAware,
+               boolean isReplicaAware,
                long targetSStableSize,
                double sstableGrowthModifier,
                int reservedThreads,
@@ -342,7 +342,7 @@ public abstract class Controller
         this.currentFlushSize = currentFlushSize;
         this.expiredSSTableCheckFrequency = TimeUnit.MILLISECONDS.convert(expiredSSTableCheckFrequency, TimeUnit.SECONDS);
         this.baseShardCount = baseShardCount;
-        this.isNodeAware = isNodeAware;
+        this.isReplicaAware = isReplicaAware;
         this.targetSSTableSize = targetSStableSize;
         this.overlapInclusionMethod = overlapInclusionMethod;
         this.sstableGrowthModifier = sstableGrowthModifier;
@@ -550,9 +550,9 @@ public abstract class Controller
         }
     }
 
-    public boolean isNodeAware()
+    public boolean isReplicaAware()
     {
-        return isNodeAware;
+        return isReplicaAware;
     }
 
     /**
@@ -881,9 +881,9 @@ public abstract class Controller
             baseShardCount = DEFAULT_BASE_SHARD_COUNT;
         }
 
-        boolean isNodeAware = options.containsKey(IS_NODE_AWARE_OPTION)
-                              ? Boolean.parseBoolean(options.get(IS_NODE_AWARE_OPTION))
-                              : DEFAULT_IS_NODE_AWARE;
+        boolean isReplicaAware = options.containsKey(IS_REPLICA_AWARE_OPTION)
+                                 ? Boolean.parseBoolean(options.get(IS_REPLICA_AWARE_OPTION))
+                                 : DEFAULT_IS_REPLICA_AWARE;
 
         long targetSStableSize = options.containsKey(TARGET_SSTABLE_SIZE_OPTION)
                                  ? FBUtilities.parseHumanReadableBytes(options.get(TARGET_SSTABLE_SIZE_OPTION))
@@ -956,7 +956,7 @@ public abstract class Controller
                                                 expiredSSTableCheckFrequency,
                                                 ignoreOverlapsInExpirationCheck,
                                                 baseShardCount,
-                                                isNodeAware,
+                                                isReplicaAware,
                                                 targetSStableSize,
                                                 sstableGrowthModifier,
                                                 reservedThreadsPerLevel,
@@ -975,7 +975,7 @@ public abstract class Controller
                                               expiredSSTableCheckFrequency,
                                               ignoreOverlapsInExpirationCheck,
                                               baseShardCount,
-                                              isNodeAware,
+                                              isReplicaAware,
                                               targetSStableSize,
                                               sstableGrowthModifier,
                                               reservedThreadsPerLevel,
@@ -1028,7 +1028,7 @@ public abstract class Controller
         }
 
         adaptive = validateBoolean(options, ADAPTIVE_OPTION, DEFAULT_ADAPTIVE);
-        validateBoolean(options, IS_NODE_AWARE_OPTION, DEFAULT_IS_NODE_AWARE);
+        validateBoolean(options, IS_REPLICA_AWARE_OPTION, DEFAULT_IS_REPLICA_AWARE);
 
         minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, DEFAULT_MIN_SSTABLE_SIZE);
         validateSizeWithAlt(options, FLUSH_SIZE_OVERRIDE_OPTION, FLUSH_SIZE_OVERRIDE_OPTION_MB, 20);
