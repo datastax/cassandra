@@ -336,38 +336,40 @@ public abstract class Selection
         return Arrays.asList(jsonRow);
     }
 
-    public static interface Selectors
+    public interface Selectors
     {
         /**
          * Returns the {@code ColumnFilter} corresponding to those selectors
          *
          * @return the {@code ColumnFilter} corresponding to those selectors
          */
-        public ColumnFilter getColumnFilter();
+        ColumnFilter getColumnFilter();
 
         /**
          * Checks if one of the selectors perform some aggregations.
          * @return {@code true} if one of the selectors perform some aggregations, {@code false} otherwise.
          */
-        public boolean isAggregate();
+        boolean isAggregate();
+
+        List<ColumnMetadata> getColumns();
 
         /**
          * Returns the number of fetched columns
          * @return the number of fetched columns
          */
-        public int numberOfFetchedColumns();
+        int numberOfFetchedColumns();
 
         /**
          * Checks if one of the selectors collect TTLs.
          * @return {@code true} if one of the selectors collect TTLs, {@code false} otherwise.
          */
-        public boolean collectTTLs();
+        boolean collectTTLs();
 
         /**
          * Checks if one of the selectors collect timestamps.
          * @return {@code true} if one of the selectors collect timestamps, {@code false} otherwise.
          */
-        public boolean collectTimestamps();
+        boolean collectTimestamps();
 
         /**
          * Adds the current row of the specified <code>ResultSetBuilder</code>.
@@ -375,11 +377,11 @@ public abstract class Selection
          * @param rs the <code>ResultSetBuilder</code>
          * @throws InvalidRequestException
          */
-        public void addInputRow(ResultSetBuilder rs);
+        void addInputRow(ResultSetBuilder rs);
 
-        public List<ByteBuffer> getOutputRow();
+        List<ByteBuffer> getOutputRow();
 
-        public void reset();
+        void reset();
     }
 
     // Special cased selection for when only columns are selected.
@@ -475,6 +477,12 @@ public abstract class Selection
                 public boolean isAggregate()
                 {
                     return false;
+                }
+
+                @Override
+                public List<ColumnMetadata> getColumns()
+                {
+                    return SimpleSelection.this.getColumns();
                 }
 
                 @Override
@@ -585,7 +593,13 @@ public abstract class Selection
                 public void addInputRow(ResultSetBuilder rs) throws InvalidRequestException
                 {
                     for (Selector selector : selectors)
-                        selector.addInput(options.getProtocolVersion(), rs);
+                        selector.addInput(rs);
+                }
+
+                @Override
+                public List<ColumnMetadata> getColumns()
+                {
+                    return SelectionWithProcessing.this.getColumns();
                 }
 
                 @Override

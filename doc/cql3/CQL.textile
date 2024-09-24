@@ -1081,9 +1081,9 @@ bc(syntax)..
 
 <selector> ::= <identifier>
              | <term>
-             | WRITETIME '(' <identifier> ')'
+             | WRITETIME '(' <selector> ')'
              | COUNT '(' '*' ')'
-             | TTL '(' <identifier> ')'
+             | TTL '(' <selector> ')'
              | CAST '(' <selector> AS <type> ')'
              | <function> '(' (<selector> (',' <selector>)*)? ')'
              | <selector> '.' <identifier>

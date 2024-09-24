@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3.selection;
 
 import java.nio.ByteBuffer;
 
+import com.google.common.collect.Range;
+
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
@@ -36,11 +38,18 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  */
 abstract class ElementsSelector extends Selector
 {
+    /**
+     * An empty collection is composed of an int size of zero.
+     */
+    private static final ByteBuffer EMPTY_FROZEN_COLLECTION = ByteBufferUtil.bytes(0);
+
     protected final Selector selected;
+    protected final CollectionType<?> type;
 
     protected ElementsSelector(Selector selected)
     {
         this.selected = selected;
+        this.type = getCollectionType(selected);
     }
 
     private static boolean isUnset(ByteBuffer bb)
@@ -229,9 +238,14 @@ abstract class ElementsSelector extends Selector
 
     protected abstract ByteBuffer extractSelection(ByteBuffer collection);
 
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(ResultSetBuilder rs) throws InvalidRequestException
     {
-        selected.addInput(protocolVersion, rs);
+        selected.addInput(rs);
+    }
+
+    protected Range<Integer> getIndexRange(ByteBuffer output, ByteBuffer fromKey, ByteBuffer toKey)
+    {
+        return type.getSerializer().getIndexesRangeFromSerialized(output, fromKey, toKey, keyType(type));
     }
 
     public void reset()
@@ -241,13 +255,11 @@ abstract class ElementsSelector extends Selector
 
     private static class ElementSelector extends ElementsSelector
     {
-        private final CollectionType<?> type;
         private final ByteBuffer key;
 
         private ElementSelector(Selector selected, ByteBuffer key)
         {
             super(selected);
-            this.type = getCollectionType(selected);
             this.key = key;
         }
 
@@ -267,6 +279,31 @@ abstract class ElementsSelector extends Selector
         protected ByteBuffer extractSelection(ByteBuffer collection)
         {
             return type.getSerializer().getSerializedValue(collection, key, keyType(type));
+        }
+
+        @Override
+        protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+        {
+            return getElementTimestamps(protocolVersion, selected.getWritetimes(protocolVersion));
+        }
+
+        @Override
+        protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+        {
+            return getElementTimestamps(protocolVersion, selected.getTTLs(protocolVersion));
+        }
+
+        private ColumnTimestamps getElementTimestamps(ProtocolVersion protocolVersion,
+                                                      ColumnTimestamps timestamps)
+        {
+            int index = getElementIndex(protocolVersion, key);
+            return index == -1 ? ColumnTimestamps.NO_TIMESTAMP : timestamps.get(index);
+        }
+
+        protected int getElementIndex(ProtocolVersion protocolVersion, ByteBuffer key)
+        {
+            ByteBuffer output = selected.getOutput(protocolVersion);
+            return output == null ? -1 : type.getSerializer().getIndexFromSerialized(output, key, keyType(type));
         }
 
         public AbstractType<?> getType()
@@ -314,6 +351,36 @@ abstract class ElementsSelector extends Selector
         protected ByteBuffer extractSelection(ByteBuffer collection)
         {
             return type.getSerializer().getSliceFromSerialized(collection, from, to, type.nameComparator(), !type.isMultiCell());
+        }
+
+        @Override
+        protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+        {
+            return getTimestampsSlice(protocolVersion, selected.getWritetimes(protocolVersion));
+        }
+
+        @Override
+        protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+        {
+            return getTimestampsSlice(protocolVersion, selected.getTTLs(protocolVersion));
+        }
+
+        protected ColumnTimestamps getTimestampsSlice(ProtocolVersion protocolVersion, ColumnTimestamps timestamps)
+        {
+            ByteBuffer output = selected.getOutput(protocolVersion);
+            return (output == null || isCollectionEmpty(output))
+                   ? ColumnTimestamps.NO_TIMESTAMP
+                   : timestamps.slice(getIndexRange(output, from, to) );
+        }
+
+        /**
+         * Checks if the collection is empty. Only frozen collection can be empty.
+         * @param output the serialized collection
+         * @return {@code true} if the collection is empty {@code false} otherwise.
+         */
+        private boolean isCollectionEmpty(ByteBuffer output)
+        {
+            return EMPTY_FROZEN_COLLECTION.equals(output);
         }
 
         public AbstractType<?> getType()

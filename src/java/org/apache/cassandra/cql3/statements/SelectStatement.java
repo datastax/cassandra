@@ -41,7 +41,6 @@ import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.SingleRestriction;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
-import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -62,7 +61,6 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.View;
@@ -994,9 +992,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               int userLimit,
                               int userOffset) throws InvalidRequestException
     {
+        ProtocolVersion protocolVersion = options.getProtocolVersion();
         GroupMaker groupMaker = aggregationSpec == null ? null : aggregationSpec.newGroupMaker();
         SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset == NO_OFFSET ? 0 : userOffset, options);
-        ResultSetBuilder result = new ResultSetBuilder(getResultMetadata(), selectors, groupMaker, rows);
+        ResultSetBuilder result = new ResultSetBuilder(protocolVersion, getResultMetadata(), selectors, groupMaker, rows);
 
         while (partitions.hasNext())
         {
@@ -1057,10 +1056,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                             result.add(keyComponents[def.position()]);
                             break;
                         case STATIC:
-                            addValue(result, def, staticRow, nowInSec, protocolVersion);
+                            result.add(partition.staticRow().getColumnData(def), nowInSec);
                             break;
                         default:
-                            result.add((ByteBuffer)null);
+                            result.add(null);
                     }
                 }
             }
@@ -1083,30 +1082,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                         result.add(row.clustering().bufferAt(def.position()));
                         break;
                     case REGULAR:
-                        addValue(result, def, row, nowInSec, protocolVersion);
+                        result.add(row.getColumnData(def), nowInSec);
                         break;
                     case STATIC:
-                        addValue(result, def, staticRow, nowInSec, protocolVersion);
+                        result.add(staticRow.getColumnData(def), nowInSec);
                         break;
                 }
             }
-        }
-    }
-
-    private static void addValue(ResultSetBuilder result, ColumnMetadata def, Row row, int nowInSec, ProtocolVersion protocolVersion)
-    {
-        if (def.isComplex())
-        {
-            assert def.type.isMultiCell();
-            ComplexColumnData complexData = row.getComplexColumnData(def);
-            if (complexData == null)
-                result.add(null);
-            else
-                result.add(((MultiCellCapableType<?>) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
-        }
-        else
-        {
-            result.add(row.getCell(def), nowInSec);
         }
     }
 
