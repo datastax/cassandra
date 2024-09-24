@@ -171,7 +171,7 @@ public abstract class Controller
      */
     static final String TARGET_SSTABLE_SIZE_OPTION = "target_sstable_size";
     static final String VECTOR_TARGET_SSTABLE_SIZE_OPTION = "vector_target_sstable_size";
-    public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
+    public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(TARGET_SSTABLE_SIZE_OPTION, "1GiB"));
     public static final long VECTOR_DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + VECTOR_TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
@@ -203,7 +203,7 @@ public abstract class Controller
      */
     static final String SSTABLE_GROWTH_OPTION = "sstable_growth";
     static final String VECTOR_SSTABLE_GROWTH_OPTION = "vector_sstable_growth";
-    static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(getSystemProperty(SSTABLE_GROWTH_OPTION, "0.5"));
+    static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(getSystemProperty(SSTABLE_GROWTH_OPTION, "0.333"));
     static final double VECTOR_DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(System.getProperty(PREFIX + VECTOR_SSTABLE_GROWTH_OPTION, "1.0"));
 
     /**
