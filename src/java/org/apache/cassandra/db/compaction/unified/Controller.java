@@ -156,8 +156,8 @@ public abstract class Controller
     static final String BASE_SHARD_COUNT_OPTION = "base_shard_count";
     static final String VECTOR_BASE_SHARD_COUNT_OPTION = "vector_base_shard_count";
     /**
-     * Default base shard count, used when a base count is not explicitly supplied. This value applies as long as the
-     * table is not a system one, and directories are not defined.
+     * Default base shard count, used when a base count is not explicitly supplied. This value applies to all tables as
+     * long as they are larger than the minimum sstable size.
      *
      * For others a base count of 1 is used as system tables are usually small and do not need as much compaction
      * parallelism, while having directories defined provides for parallelism in a different way.
