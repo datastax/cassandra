@@ -96,7 +96,7 @@ public interface CompactionRealm
     Directories getDirectories();
 
     /**
-     * @return the {@DiskBoundaries} that are currently applied to the directories backing table.
+     * @return the {@link DiskBoundaries} that are currently applied to the directories backing table.
      */
     DiskBoundaries getDiskBoundaries();
 
@@ -105,6 +105,21 @@ public interface CompactionRealm
      * but should be set when the strategy is asked to select or run compactions.
      */
     TableMetrics metrics();
+
+    /**
+     * Return the estimated partition count, used when the number of partitions in an sstable is not sufficient to give
+     * a sensible range estimation.
+     */
+    default long estimatedPartitionCount()
+    {
+        final long INITIAL_ESTIMATED_PARTITION_COUNT = 1 << 16; // If we don't yet have a count, use a sensible default.
+        if (metrics() == null)
+            return INITIAL_ESTIMATED_PARTITION_COUNT;
+        final Long estimation = metrics().estimatedPartitionCount.getValue();
+        if (estimation == null || estimation == 0)
+            return INITIAL_ESTIMATED_PARTITION_COUNT;
+        return estimation;
+    }
 
     /**
      * @return the secondary index manager, which is responsible for all secondary indexes.
