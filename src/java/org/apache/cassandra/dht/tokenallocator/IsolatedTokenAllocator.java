@@ -153,7 +153,7 @@ public class IsolatedTokenAllocator
     }
 
     /**
-     * A
+     * A snitch that doesn't gossip.
      */
     private static class QuietSnitch implements IEndpointSnitch
     {
