@@ -117,6 +117,7 @@ final class WritetimeOrTTLSelector extends Selector
         };
     }
 
+    @Override
     public void addFetchedColumns(ColumnFilter.Builder builder)
     {
         selected.addFetchedColumns(builder);
@@ -146,11 +147,13 @@ final class WritetimeOrTTLSelector extends Selector
         }
     }
 
+    @Override
     public ByteBuffer getOutput(ProtocolVersion protocolVersion)
     {
         return current;
     }
 
+    @Override
     public void reset()
     {
         selected.reset();
@@ -158,6 +161,7 @@ final class WritetimeOrTTLSelector extends Selector
         current = null;
     }
 
+    @Override
     public AbstractType<?> getType()
     {
         AbstractType<?> type = kind.returnType;

@@ -69,7 +69,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
 
 public interface Selectable extends AssignmentTestable
 {
-    public Selector.Factory newSelectorFactory(TableMetadata table, AbstractType<?> expectedType, List<ColumnMetadata> defs, VariableSpecifications boundNames);
+    Selector.Factory newSelectorFactory(TableMetadata table, AbstractType<?> expectedType, List<ColumnMetadata> defs, VariableSpecifications boundNames);
 
     /**
      * The type of the {@code Selectable} if it can be infered.
@@ -81,14 +81,14 @@ public interface Selectable extends AssignmentTestable
      * literals, the exact type is not inferrable since they are valid for many
      * different types and so this will return {@code null} too).
      */
-    public AbstractType<?> getExactTypeIfKnown(String keyspace);
+    AbstractType<?> getExactTypeIfKnown(String keyspace);
 
     /**
      * Checks if this {@code Selectable} select columns matching the specified predicate.
      * @return {@code true} if this {@code Selectable} select columns matching the specified predicate,
      * {@code false} otherwise.
      */
-    public boolean selectColumns(Predicate<ColumnMetadata> predicate);
+    boolean selectColumns(Predicate<ColumnMetadata> predicate);
 
     /**
      * Checks if the specified Selectables select columns matching the specified predicate.
@@ -96,7 +96,7 @@ public interface Selectable extends AssignmentTestable
      * @return {@code true} if the specified Selectables select columns matching the specified predicate,
       {@code false} otherwise.
      */
-    public static boolean selectColumns(List<Selectable> selectables, Predicate<ColumnMetadata> predicate)
+    static boolean selectColumns(List<Selectable> selectables, Predicate<ColumnMetadata> predicate)
     {
         for (Selectable selectable : selectables)
         {
@@ -110,21 +110,21 @@ public interface Selectable extends AssignmentTestable
      * Checks if any processing is performed on the selected columns, {@code false} otherwise.
      * @return {@code true} if any processing is performed on the selected columns, {@code false} otherwise.
      */
-    public default boolean processesSelection()
+    default boolean processesSelection()
     {
         // ColumnMetadata is the only case that returns false (if the column is not masked) and overrides this
         return true;
     }
 
     // Term.Raw overrides this since some literals can be WEAKLY_ASSIGNABLE
-    default public TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+    default TestResult testAssignment(String keyspace, ColumnSpecification receiver)
     {
         AbstractType<?> type = getExactTypeIfKnown(keyspace);
         return type == null ? TestResult.NOT_ASSIGNABLE : type.testAssignment(keyspace, receiver);
     }
 
     @Override
-    public default AbstractType<?> getCompatibleTypeIfKnown(String keyspace)
+    default AbstractType<?> getCompatibleTypeIfKnown(String keyspace)
     {
         return getExactTypeIfKnown(keyspace);
     }
@@ -168,12 +168,12 @@ public interface Selectable extends AssignmentTestable
             throw invalidRequest("%s is not of the expected type: %s", this, type.asCQL3Type());
     }
 
-    public interface Raw
+    interface Raw
     {
-        public Selectable prepare(TableMetadata table);
+        Selectable prepare(TableMetadata table);
     }
 
-    public static class WithTerm implements Selectable
+    class WithTerm implements Selectable
     {
         /**
          * The names given to unamed bind markers found in selection. In selection clause, we often don't have a good
@@ -282,7 +282,7 @@ public interface Selectable extends AssignmentTestable
         }
     }
 
-    public static class WritetimeOrTTL implements Selectable
+    class WritetimeOrTTL implements Selectable
     {
         // The order of the variants in the Kind enum matters as they are used in ser/deser
         public enum Kind
@@ -379,7 +379,7 @@ public interface Selectable extends AssignmentTestable
         }
     }
 
-    public static class WithFunction implements Selectable
+    class WithFunction implements Selectable
     {
         public final Function function;
         public final List<Selectable> args;
@@ -477,7 +477,7 @@ public interface Selectable extends AssignmentTestable
         }
     }
 
-    public static class WithCast implements Selectable
+    class WithCast implements Selectable
     {
         private final CQL3Type type;
         private final Selectable arg;
@@ -549,7 +549,7 @@ public interface Selectable extends AssignmentTestable
     /**
      * Represents the selection of the field of a UDT (eg. t.f).
      */
-    public static class WithFieldSelection implements Selectable
+    class WithFieldSelection implements Selectable
     {
         public final Selectable selected;
         public final FieldIdentifier field;
@@ -601,7 +601,7 @@ public interface Selectable extends AssignmentTestable
         public AbstractType<?> getExactTypeIfKnown(String keyspace)
         {
             AbstractType<?> selectedType = selected.getExactTypeIfKnown(keyspace);
-            if (selectedType == null || !(selectedType instanceof UserType))
+            if (!(selectedType instanceof UserType))
                 return null;
 
             UserType ut = (UserType) selectedType;
@@ -641,7 +641,7 @@ public interface Selectable extends AssignmentTestable
      * <p>The parser cannot differentiate between a single element between parentheses or a single element tuple.
      * By consequence, we are forced to wait until the type is known to be able to differentiate them.</p>
      */
-    public static class BetweenParenthesesOrWithTuple implements Selectable
+    class BetweenParenthesesOrWithTuple implements Selectable
     {
         /**
          * The tuple elements or the element between the parentheses
@@ -915,18 +915,6 @@ public interface Selectable extends AssignmentTestable
         {
             return Lists.getPreferredCompatibleType(selectables, p -> p.getCompatibleTypeIfKnown(keyspace));
         }
-
-        @Override
-        public boolean selectColumns(Predicate<ColumnMetadata> predicate)
-        {
-            return Selectable.selectColumns(selectables, predicate);
-        }
-
-        @Override
-        public String toString()
-        {
-            return Lists.listToString(selectables);
-        }
     }
 
     public static class WithVector extends WithArrayLiteral
@@ -984,24 +972,12 @@ public interface Selectable extends AssignmentTestable
         {
             return Vectors.getPreferredCompatibleType(selectables, p -> p.getCompatibleTypeIfKnown(keyspace));
         }
-
-        @Override
-        public boolean selectColumns(Predicate<ColumnMetadata> predicate)
-        {
-            return Selectable.selectColumns(selectables, predicate);
-        }
-
-        @Override
-        public String toString()
-        {
-            return Lists.listToString(selectables);
-        }
     }
 
     /**
      * <code>Selectable</code> for literal Sets.
      */
-    public static class WithSet implements Selectable
+    class WithSet implements Selectable
     {
         /**
          * The set elements
@@ -1104,7 +1080,7 @@ public interface Selectable extends AssignmentTestable
      * {@code ColumnIdentifier} is equivalent to a {@code FieldIdentifier} from a syntax point of view.
      * By consequence, we are forced to wait until the type is known to be able to differentiate them.</p>
      */
-    public static class WithMapOrUdt implements Selectable
+    class WithMapOrUdt implements Selectable
     {
         /**
          * The column family metadata. We need to store them to be able to build the proper data once the type has been
@@ -1289,7 +1265,7 @@ public interface Selectable extends AssignmentTestable
     /**
      * <code>Selectable</code> for type hints (e.g. (int) ?).
      */
-    public static class WithTypeHint implements Selectable
+    class WithTypeHint implements Selectable
     {
 
         /**
@@ -1401,7 +1377,7 @@ public interface Selectable extends AssignmentTestable
      * identifier have the same syntax. By consequence, we need to wait until the type is known to create the proper
      * Object: {@code ColumnMetadata} or {@code FieldIdentifier}.
      */
-    public static final class RawIdentifier implements Selectable.Raw
+    final class RawIdentifier implements Selectable.Raw
     {
         private final String text;
 
@@ -1456,7 +1432,7 @@ public interface Selectable extends AssignmentTestable
     /**
      * Represents the selection of an element of a collection (eg. c[x]).
      */
-    public static class WithElementSelection implements Selectable
+    class WithElementSelection implements Selectable
     {
         public final Selectable selected;
         // Note that we can't yet prepare the Term.Raw yet as we need the ColumnSpecificiation corresponding to Selectable, which
@@ -1487,20 +1463,20 @@ public interface Selectable extends AssignmentTestable
             if (!(type instanceof CollectionType))
                 throw new InvalidRequestException(String.format("Invalid element selection: %s is of type %s is not a collection", selected, type.asCQL3Type()));
 
-            ColumnSpecification boundSpec = specForElementOrSlice(selected, receiver, ((CollectionType) type).kind, "Element");
+            ColumnSpecification boundSpec = specForElementOrSlice(selected, receiver, ((CollectionType<?>) type).kind, "Element");
 
             Term elt = element.prepare(cfm.keyspace, boundSpec);
             elt.collectMarkerSpecification(boundNames);
-            return ElementsSelector.newElementFactory(toString(), factory, (CollectionType)type, elt);
+            return ElementsSelector.newElementFactory(toString(), factory, (CollectionType<?>)type, elt);
         }
 
         public AbstractType<?> getExactTypeIfKnown(String keyspace)
         {
             AbstractType<?> selectedType = selected.getExactTypeIfKnown(keyspace);
-            if (selectedType == null || !(selectedType instanceof CollectionType))
+            if (!(selectedType instanceof CollectionType))
                 return null;
 
-            return ElementsSelector.valueType((CollectionType) selectedType);
+            return ElementsSelector.valueType((CollectionType<?>) selectedType);
         }
 
         @Override
@@ -1536,7 +1512,7 @@ public interface Selectable extends AssignmentTestable
     /**
      * Represents the selection of a slice of a collection (eg. c[x..y]).
      */
-    public static class WithSliceSelection implements Selectable
+    class WithSliceSelection implements Selectable
     {
         public final Selectable selected;
         // Note that we can't yet prepare the Term.Raw yet as we need the ColumnSpecificiation corresponding to Selectable, which
@@ -1570,7 +1546,7 @@ public interface Selectable extends AssignmentTestable
             if (!(type instanceof CollectionType))
                 throw new InvalidRequestException(String.format("Invalid slice selection: %s of type %s is not a collection", selected, type.asCQL3Type()));
 
-            ColumnSpecification boundSpec = specForElementOrSlice(selected, receiver, ((CollectionType) type).kind, "Slice");
+            ColumnSpecification boundSpec = specForElementOrSlice(selected, receiver, ((CollectionType<?>) type).kind, "Slice");
 
             // If from or to are null, this means the user didn't provide on in the syntax (we had c[x..] or c[..x]).
             // The equivalent of doing this when preparing values would be to use UNSET.
@@ -1578,13 +1554,13 @@ public interface Selectable extends AssignmentTestable
             Term t = to == null ? Constants.UNSET_VALUE : to.prepare(cfm.keyspace, boundSpec);
             f.collectMarkerSpecification(boundNames);
             t.collectMarkerSpecification(boundNames);
-            return ElementsSelector.newSliceFactory(toString(), factory, (CollectionType)type, f, t);
+            return ElementsSelector.newSliceFactory(toString(), factory, (CollectionType<?>) type, f, t);
         }
 
         public AbstractType<?> getExactTypeIfKnown(String keyspace)
         {
             AbstractType<?> selectedType = selected.getExactTypeIfKnown(keyspace);
-            if (selectedType == null || !(selectedType instanceof CollectionType))
+            if (!(selectedType instanceof CollectionType))
                 return null;
 
             return selectedType;
