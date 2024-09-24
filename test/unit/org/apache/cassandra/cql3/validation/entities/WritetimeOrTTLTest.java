@@ -164,7 +164,7 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     @Test
-    public void testSet() throws Throwable
+    public void testSet()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, s set<int>)");
 
@@ -257,7 +257,7 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     @Test
-    public void testFrozenSet() throws Throwable
+    public void testFrozenSet()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, s frozen<set<int>>)");
 
@@ -349,7 +349,7 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     @Test
-    public void testMap() throws Throwable
+    public void testMap()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, m map<int, int>)");
 
@@ -443,7 +443,7 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     @Test
-    public void testFrozenMap() throws Throwable
+    public void testFrozenMap()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, m frozen<map<int,int>>)");
 
@@ -691,7 +691,7 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     @Test
-    public void testUDT() throws Throwable
+    public void testUDT()
     {
         String type = createType("CREATE TYPE %s (f1 int, f2 int)");
         createTable("CREATE TABLE %s (k int PRIMARY KEY, t " + type + ')');
@@ -750,7 +750,7 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     @Test
-    public void testFrozenUDT() throws Throwable
+    public void testFrozenUDT()
     {
         String type = createType("CREATE TYPE %s (f1 int, f2 int)");
         createTable("CREATE TABLE %s (k int PRIMARY KEY, t frozen<" + type + ">)");
@@ -924,7 +924,7 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     @Test
-    public void testFrozenNestedUDTs() throws Throwable
+    public void testFrozenNestedUDTs()
     {
         String nestedType = createType("CREATE TYPE %s (f1 int, f2 int)");
         String type = createType(format("CREATE TYPE %%s (f1 frozen<%s>, f2 frozen<%<s>)", nestedType));
@@ -1051,7 +1051,7 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     @Test
-    public void testFunctions() throws Throwable
+    public void testFunctions()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int, s set<int>, fs frozen<set<int>>)");
         execute("INSERT INTO %s (k, v, s, fs) VALUES (0, 0, {1, 2, 3}, {1, 2, 3}) USING TIMESTAMP 1 AND TTL 1000");
@@ -1097,23 +1097,22 @@ public class WritetimeOrTTLTest extends CQLTester
         return Arrays.asList(a);
     }
 
-    private void assertRows(String query, Object[]... rows) throws Throwable
+    private void assertRows(String query, Object[]... rows)
     {
         assertRows(execute(query), rows);
     }
 
-    private void assertWritetimeAndTTL(String column, Long timestamp, Integer ttl) throws Throwable
+    private void assertWritetimeAndTTL(String column, Long timestamp, Integer ttl)
     {
         assertWritetimeAndTTL(column, null, timestamp, ttl);
     }
 
-    private void assertWritetimeAndTTL(String column, List<Long> timestamps, List<Integer> ttls) throws Throwable
+    private void assertWritetimeAndTTL(String column, List<Long> timestamps, List<Integer> ttls)
     {
         assertWritetimeAndTTL(column, null, timestamps, ttls);
     }
 
     private void assertWritetimeAndTTL(String column, String where, Long timestamp, Integer ttl)
-    throws Throwable
     {
         where = where == null ? "" : " WHERE " + where;
 
@@ -1143,7 +1142,6 @@ public class WritetimeOrTTLTest extends CQLTester
     }
 
     private void assertWritetimeAndTTL(String column, String where, List<Long> timestamps, List<Integer> ttls)
-    throws Throwable
     {
         where = where == null ? "" : " WHERE " + where;
 
@@ -1199,7 +1197,7 @@ public class WritetimeOrTTLTest extends CQLTester
         }
     }
 
-    private void assertInvalidPrimaryKeySelection(String column) throws Throwable
+    private void assertInvalidPrimaryKeySelection(String column)
     {
         assertInvalidThrowMessage("Cannot use selection function writetime on PRIMARY KEY part " + column,
                                   InvalidRequestException.class,
