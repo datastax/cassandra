@@ -94,7 +94,6 @@ public class ShardManagerReplicaAware implements ShardManager
     {
         try
         {
-            logger.debug("Creating shard boundaries for {} shards", shardCount);
             var splitPoints = splitPointCache.computeIfAbsent(shardCount, this::computeBoundaries);
             return new ReplicaAlignedShardTracker(splitPoints);
         }
@@ -107,6 +106,7 @@ public class ShardManagerReplicaAware implements ShardManager
 
     private Token[] computeBoundaries(int shardCount)
     {
+        logger.debug("Creating shard boundaries for {} shards", shardCount);
         // Because sstables do not wrap around, we need shardCount - 1 splits.
         var splitPointCount = shardCount - 1;
         // Copy array list. The current token allocation logic doesn't consider our copy of tokenMetadata, so

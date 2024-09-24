@@ -46,8 +46,9 @@ import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 
 /**
- * A utility class for allocating a set number of new tokens given an existing {@link AbstractReplicationStrategy}
- * object without changing the source metadata.
+ * A utility class that allocates additional tokens for a given {@link AbstractReplicationStrategy} by creating mock
+ * nodes and then allocating tokens for them. The source metadata and replication strategy are not modified. This
+ * class relies on the detail that the allocation of new tokens for bootstrapping nodes is deterministic.
  */
 public class IsolatedTokenAllocator
 {
