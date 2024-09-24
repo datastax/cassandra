@@ -1216,9 +1216,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             }
         }
 
+        // maybeWarn requires the result set to be built
+        ResultSet cqlRows = result.build();
         maybeWarn(result, options);
 
-        return result.build();
+        return cqlRows;
     }
 
     public static ByteBuffer[] getComponents(TableMetadata metadata, DecoratedKey dk)
