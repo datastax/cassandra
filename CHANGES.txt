@@ -1,3 +1,6 @@
+5.0.2
+ * Use ParameterizedClass for all auth-related implementations (CASSANDRA-19946)
+
 Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 
