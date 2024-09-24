@@ -25,7 +25,6 @@ package org.apache.cassandra.db.guardrails;
 
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -54,7 +53,6 @@ public class GuardrailSASIIndexesPerTableTest extends GuardrailTester
     {
         createTable("CREATE TABLE %s (k int primary key, v1 int, v2 int)");
 
-        // FIXME: STAR-515 rebase on OS 5.0: this works for regular users, but see below comments in testExcludedUsers
         DatabaseDescriptor.setSASIIndexesEnabled(false);
         assertCreationDisabled("v1");
         assertNumIndexes(0);
@@ -68,17 +66,11 @@ public class GuardrailSASIIndexesPerTableTest extends GuardrailTester
     }
 
     @Test
-    @Ignore("STAR-515 rebase on OS 5.0 - see FIXME below")
     public void testExcludedUsers() throws Throwable
     {
         createTable("CREATE TABLE %s (k int primary key, v1 int, v2 int)");
 
-        // FIXME: STAR-515 rebase on OS 5.0: OS thresholds do not support 0 - it is not allowed for an int and
-        //        for a long it is still interpreted as disabled in Threshold.enabled due to >0 test.
-        //        Consider creating separate guardrail based on DatabaseDescriptor.sasi_indexes_enabled; Doing that
-        //        will provide the semantics of being overrided by privileged users if that's a desired behavior.
-        //        Alternatively, drop this guardrail and rely on DatabaseDescriptor.sasi_indexes_enabled.
-        DatabaseDescriptor.getGuardrailsConfig().setSasiIndexesPerTableThreshold(-1, 0);
+        DatabaseDescriptor.getGuardrailsConfig().setSasiIndexesPerTableThreshold(-1, 1);
         testExcludedUsers(() -> getCreateIndexStatement("excluded_1", "v1"),
                           () -> getCreateIndexStatement("excluded_2", "v2"),
                           () -> "DROP INDEX excluded_1",
