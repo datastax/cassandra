@@ -53,13 +53,17 @@ public class TokenAllocation
     private static final Logger logger = LoggerFactory.getLogger(TokenAllocation.class);
     final TokenMetadata tokenMetadata;
     final AbstractReplicationStrategy replicationStrategy;
+    // In order for the IsolatedTokenAllocator to work correctly, we need to allow for a different snitch than the
+    // one provided by the replicationStrategy.
+    final IEndpointSnitch snitch;
     final int numTokens;
     final Map<String, Map<String, StrategyAdapter>> strategyByRackDc = new HashMap<>();
 
-    private TokenAllocation(TokenMetadata tokenMetadata, AbstractReplicationStrategy replicationStrategy, int numTokens)
+    private TokenAllocation(TokenMetadata tokenMetadata, AbstractReplicationStrategy replicationStrategy, IEndpointSnitch snitch, int numTokens)
     {
         this.tokenMetadata = tokenMetadata.cloneOnlyTokenMap();
         this.replicationStrategy = replicationStrategy;
+        this.snitch = snitch;
         this.numTokens = numTokens;
     }
 
@@ -130,13 +134,18 @@ public class TokenAllocation
         options.put(snitch.getLocalDatacenter(), Integer.toString(replicas));
         NetworkTopologyStrategy fakeReplicationStrategy = new NetworkTopologyStrategy(null, tokenMetadata, snitch, options);
 
-        TokenAllocation allocator = new TokenAllocation(tokenMetadata, fakeReplicationStrategy, numTokens);
+        TokenAllocation allocator = new TokenAllocation(tokenMetadata, fakeReplicationStrategy, snitch, numTokens);
         return allocator;
     }
 
     static TokenAllocation create(TokenMetadata tokenMetadata, AbstractReplicationStrategy rs, int numTokens)
     {
-        return new TokenAllocation(tokenMetadata, rs, numTokens);
+        return new TokenAllocation(tokenMetadata, rs, rs.snitch, numTokens);
+    }
+
+    static TokenAllocation create(TokenMetadata tokenMetadata, AbstractReplicationStrategy rs, IEndpointSnitch snitch, int numTokens)
+    {
+        return new TokenAllocation(tokenMetadata, rs, snitch, numTokens);
     }
 
     Collection<Token> allocate(InetAddressAndPort endpoint)
@@ -241,8 +250,8 @@ public class TokenAllocation
 
     private StrategyAdapter getOrCreateStrategy(InetAddressAndPort endpoint)
     {
-        String dc = replicationStrategy.snitch.getDatacenter(endpoint);
-        String rack = replicationStrategy.snitch.getRack(endpoint);
+        String dc = snitch.getDatacenter(endpoint);
+        String rack = snitch.getRack(endpoint);
 
         try
         {
@@ -277,7 +286,7 @@ public class TokenAllocation
 
     private StrategyAdapter createStrategy(final SimpleStrategy rs)
     {
-        return createStrategy(rs.snitch, null, null, rs.getReplicationFactor().allReplicas, false);
+        return createStrategy(snitch, null, null, rs.getReplicationFactor().allReplicas, false);
     }
 
     private StrategyAdapter createStrategy(TokenMetadata tokenMetadata, NetworkTopologyStrategy strategy, String dc, String rack)
@@ -293,21 +302,21 @@ public class TokenAllocation
         if (replicas <= 1)
         {
             // each node is treated as separate and replicates once
-            return createStrategy(strategy.snitch, dc, null, 1, false);
+            return createStrategy(snitch, dc, null, 1, false);
         }
         else if (racks == replicas)
         {
             // each node is treated as separate and replicates once, with separate allocation rings for each rack
-            return createStrategy(strategy.snitch, dc, rack, 1, false);
+            return createStrategy(snitch, dc, rack, 1, false);
         }
         else if (racks > replicas)
         {
             // group by rack
-            return createStrategy(strategy.snitch, dc, null, replicas, true);
+            return createStrategy(snitch, dc, null, replicas, true);
         }
         else if (racks == 1)
         {
-            return createStrategy(strategy.snitch, dc, null, replicas, false);
+            return createStrategy(snitch, dc, null, replicas, false);
         }
 
         throw new ConfigurationException(String.format("Token allocation failed: the number of racks %d in datacenter %s is lower than its replication factor %d.",
