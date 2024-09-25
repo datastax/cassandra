@@ -44,6 +44,9 @@ public interface ShardTracker
      */
     boolean advanceTo(Token nextToken);
 
+    /**
+     * Returns the number of shards tracked by this tracker.
+     */
     int count();
 
     /**
@@ -54,6 +57,10 @@ public interface ShardTracker
 
     double rangeSpanned(PartitionPosition first, PartitionPosition last);
 
+    /**
+     * The index of the shard this tracker is currently on. By convention, the shard index starts at -1 for the
+     * minimum token and increases by one for each shard.
+     */
     int shardIndex();
 
     default long shardAdjustedKeyCount(Set<SSTableReader> sstables)
