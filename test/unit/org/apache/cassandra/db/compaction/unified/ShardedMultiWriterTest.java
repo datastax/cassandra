@@ -115,9 +115,12 @@ public class ShardedMultiWriterTest extends CQLTester
                     if (rdr.getBounds().contains(token))
                         spannedTokens++;
             }
-            // We don't have an even distribution because the first token is selected at random, but the coverage
-            // should add up to 1.
-            assertEquals(1.0, tokenSpaceCoverage, 0.05);
+            // We don't have an even distribution because the first token is selected at random and we split along
+            // token boundaries, so we don't assert even distribution. We do however konw that the coverage should
+            // add up to about 1 without crossing that boundary. The coverage is measured by measuring the distance
+            // between the min and the max token in each shard, so we have a large delta in the assertion.
+            assertTrue(tokenSpaceCoverage <= 1.0);
+            assertEquals(1.0, tokenSpaceCoverage, 0.1);
             // If we have more split points than tokens, the sstables must be split along token boundaries
             var numSplitPoints = numShards - 1;
             var expectedSpannedTokens = Math.max(0, tokenMetadata.sortedTokens().size() - numSplitPoints);
