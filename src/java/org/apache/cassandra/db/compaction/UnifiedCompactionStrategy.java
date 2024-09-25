@@ -351,7 +351,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
         ShardManager currentShardManager = getShardManager();
-        double flushDensity = realm.metrics().flushSizeOnDisk().get() * shardManager.shardSetCoverage() / currentShardManager.localSpaceCoverage();
+        double flushDensity = realm.metrics().flushSizeOnDisk().get() * currentShardManager.shardSetCoverage() / currentShardManager.localSpaceCoverage();
         ShardTracker boundaries = currentShardManager.boundaries(controller.getFlushShards(flushDensity));
         return new ShardedMultiWriter(realm,
                                       descriptor,
@@ -399,7 +399,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 return; // another thread beat us to the update
 
             DiskBoundaries currentBoundaries = realm.getDiskBoundaries();
-            shardManager = ShardManager.create(currentBoundaries);
+            shardManager = ShardManager.create(currentBoundaries, realm.getKeyspaceReplicationStrategy(), controller.isReplicaAware());
             arenaSelector = new ArenaSelector(controller, currentBoundaries);
             // Note: this can just as well be done without the synchronization (races would be benign, just doing some
             // redundant work). For the current usages of this blocking is fine and expected to perform no worse.
@@ -862,21 +862,22 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
                                              BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
-        maybeUpdateSelector();
+        // Copy to avoid race condition
+        var currentShardManager = getShardManager();
         Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter);
         Map<Arena, List<Level>> ret = new LinkedHashMap<>(); // should preserve the order of arenas
 
         for (Arena arena : arenas)
         {
             List<Level> levels = new ArrayList<>(MAX_LEVELS);
-            arena.sstables.sort(shardManager::compareByDensity);
+            arena.sstables.sort(currentShardManager::compareByDensity);
 
-            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / shardManager.localSpaceCoverage());
+            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / currentShardManager.localSpaceCoverage());
             int index = 0;
             Level level = new Level(controller, index, 0, maxSize);
             for (CompactionSSTable candidate : arena.sstables)
             {
-                final double size = shardManager.density(candidate);
+                final double size = currentShardManager.density(candidate);
                 if (size < level.max)
                 {
                     level.add(candidate);
