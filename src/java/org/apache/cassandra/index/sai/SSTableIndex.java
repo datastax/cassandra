@@ -50,6 +50,7 @@ import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -280,7 +281,7 @@ public class SSTableIndex implements Comparable<SSTableIndex>
              * components are not in use.
              */
             if (indexWasDropped.get())
-                perIndexComponents.forWrite().forceDeleteAllComponents();
+                SSTableWatcher.instance.onIndexDropped(perIndexComponents.forWrite());
         }
     }
 
