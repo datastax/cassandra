@@ -79,6 +79,7 @@ public class AdaptiveControllerTest extends ControllerTest
                                       Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
                                       Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
                                       numShards,
+                                      false,
                                       sstableSizeMB << 20,
                                       Controller.DEFAULT_SSTABLE_GROWTH,
                                       Controller.DEFAULT_RESERVED_THREADS,
