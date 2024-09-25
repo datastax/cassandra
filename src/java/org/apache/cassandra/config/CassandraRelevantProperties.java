@@ -807,6 +807,7 @@ public enum CassandraRelevantProperties
      */
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
     UCS_DATASET_SIZE("unified_compaction.dataset_size"),
+    UCS_IS_REPLICA_AWARE("unified_compaction.is_replica_aware"),
     UCS_L0_SHARDS_ENABLED("unified_compaction.l0_shards_enabled", "true"),
     UCS_MAX_ADAPTIVE_COMPACTIONS("unified_compaction.max_adaptive_compactions", "5"),
     UCS_MAX_SPACE_OVERHEAD("unified_compaction.max_space_overhead", "0.2"),
