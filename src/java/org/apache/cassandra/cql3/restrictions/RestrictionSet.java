@@ -234,7 +234,7 @@ public abstract class RestrictionSet implements Restrictions
                                    QueryOptions options) throws InvalidRequestException
         {
             for (SingleRestriction restriction : restrictionsMap.values())
-                restriction.addToRowFilter(rowFilter, indexRegistry, options);
+                rowFilter.addAllAsConjunction(b -> restriction.addToRowFilter(b, indexRegistry, options));
         }
 
         @Override

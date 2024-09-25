@@ -203,16 +203,21 @@ public class V2VectorPostingsWriter<T>
         return Pair.create(ordinalMap, maxRow);
     }
 
-    public static <T> V5VectorPostingsWriter.RemappedPostings remapPostings(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
-                                                                            boolean containsDeletes)
+    public static <T> V5VectorPostingsWriter.RemappedPostings remapForMemtable(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
+                                                                               boolean containsDeletes)
     {
         var p = buildOrdinalMap(postingsMap);
         int maxNewOrdinal = postingsMap.size() - 1; // no in-graph deletes in v2
         if (p == null || containsDeletes)
-            return V5VectorPostingsWriter.createGenericV2Mapping(postingsMap);
+            return V5VectorPostingsWriter.createGenericIdentityMapping(postingsMap);
 
         var ordinalMap = p.left;
         var maxRow = p.right;
-        return new V5VectorPostingsWriter.RemappedPostings(V5VectorPostingsWriter.Structure.ONE_TO_ONE, maxNewOrdinal, maxRow, ordinalMap, new Int2IntHashMap(Integer.MIN_VALUE));
+        return new V5VectorPostingsWriter.RemappedPostings(V5VectorPostingsWriter.Structure.ONE_TO_ONE,
+                                                           maxNewOrdinal,
+                                                           maxRow,
+                                                           ordinalMap,
+                                                           new Int2IntHashMap(Integer.MIN_VALUE),
+                                                           new V5VectorPostingsWriter.BiMapMapper(maxNewOrdinal, ordinalMap));
     }
 }

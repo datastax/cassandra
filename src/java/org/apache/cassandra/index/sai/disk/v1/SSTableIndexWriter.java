@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -44,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
@@ -381,13 +381,15 @@ public class SSTableIndexWriter implements PerIndexWriter
             for (Segment segment : index.getSegments())
             {
                 segmentsChecked++;
-                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                if (segment.getIndexSearcher() instanceof  V2VectorIndexSearcher)
+                    return true; // V2 doesn't know, so we err on the side of being optimistic.  See comments in CompactionGraph
+                var searcher = (V5VectorIndexSearcher) segment.getIndexSearcher();
                 var structure = searcher.getPostingsStructure();
                 if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
                     return false;
             }
         }
-        return segmentsChecked != 0;
+        return true;
     }
 
     private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException

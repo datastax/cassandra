@@ -20,16 +20,21 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
@@ -39,17 +44,37 @@ import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.utils.Glove;
 import org.assertj.core.data.Percentage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@RunWith(Parameterized.class)
 public class VectorLocalTest extends VectorTester
 {
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data()
+    {
+        return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v}).collect(Collectors.toList());
+    }
+
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private static Glove.WordVector word2vec;
+
+    @Before
+    public void setup() throws Throwable
+    {
+        super.setup();
+        SAIUtil.setLatestVersion(version);
+    }
 
     @BeforeClass
     public static void loadModel() throws Throwable

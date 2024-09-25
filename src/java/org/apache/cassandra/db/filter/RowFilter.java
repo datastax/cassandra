@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -286,12 +287,80 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 restrictionSet.addToRowFilter(this, indexManager, options);
 
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
-                expression.addToRowFilter(this, table, options);
+                addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));
 
             for (StatementRestrictions child : restrictions.children())
                 element.children.add(doBuild(child, indexManager, table, options));
 
+            // Optimize out any conjunctions / disjunctions with TRUE.
+            // This is not needed for correctness.
+            if (restrictions.isDisjunction())
+            {
+                // `OR TRUE` swallows all other restrictions in disjunctions.
+                // Therefore, replace this node with an always true element.
+                if (element.children.stream().anyMatch(FilterElement::isAlwaysTrue))
+                    element = new FilterElement.Builder(false);
+            }
+            else
+            {
+                // `AND TRUE` does nothing in conjunctions, so remove it.
+                element.children.removeIf(FilterElement::isAlwaysTrue);
+            }
+
             return element.build();
+        }
+
+        /**
+         * Adds multiple filter expressions to this {@link RowFilter.Builder} and joins them with AND (conjunction),
+         * regardless of the current mode (conjunction / disjunction) of the {@link RowFilter.Builder}.
+         * <p>
+         *
+         * This wrapper method makes sure we pass a {@code RowFilter.Builder} that is always in conjunction mode to the
+         * respective {@code addToRowFilterDelegate} method. If multiple expressions are added to the row filter, this 
+         * method makes sure they are joined with AND in their own {@link FilterElement}.
+         *
+         * @param addToRowFilterDelegate a function that adds expressions / child filter elements
+         *                               to a provided {@link RowFilter.Builder}, and expects all
+         *                               added expressions to be joined with AND operator
+         */
+        public void addAllAsConjunction(Consumer<Builder> addToRowFilterDelegate)
+        {
+            if (current.isDisjunction)
+            {
+                // If we're in disjunction mode, we must not pass the current builder to addToRowFilter.
+                // We create a new conjunction sub-builder instead and add all expressions there.
+                var builder = new Builder();
+                addToRowFilterDelegate.accept(builder);
+
+                if (builder.current.expressions.size() == 1 && builder.current.children.isEmpty())
+                {
+                    // Optimization:
+                    // if there is one expression, we can just add it directly to the current FilterElement
+                    // making the result tree flatter
+                    current.expressions.add(builder.current.expressions.get(0));
+                }
+                else if (builder.current.children.size() == 1 && builder.current.expressions.isEmpty())
+                {
+                    // Optimization:
+                    // if there is one child, we can just add it directly to the current FilterElement,
+                    // making the result tree flatter
+                    current.children.add(builder.current.children.get(0));
+                }
+                else
+                {
+                    // More expressions means we have to create a new child node (AND) for them.
+                    // Also note that we use this for adding zero expressions/children as well.
+                    // A conjunction with no restrictions means selecting everything, so if we didn't add an empty
+                    // AND node in such case, we could end up with a filter that misses to match some rows.
+                    current.children.add(builder.current.build());
+                }
+            }
+            else
+            {
+                // Just an optimisation. If we're already in the conjunction mode, we don't need to create
+                // a sub-builder; we can just use this one to collect the expressions.
+                addToRowFilterDelegate.accept(this);
+            }
         }
 
         public SimpleExpression add(ColumnMetadata def, Operator op, ByteBuffer value)
@@ -415,6 +484,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         public boolean isEmpty()
         {
             return expressions.isEmpty() && children.isEmpty();
+        }
+
+        public boolean isAlwaysTrue()
+        {
+            return !isDisjunction && isEmpty();
         }
 
         public boolean contains(Expression expression)

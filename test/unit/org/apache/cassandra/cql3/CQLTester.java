@@ -1934,6 +1934,29 @@ public abstract class CQLTester
         }
     }
 
+    /**
+     * Runs the given function before a flush, after a flush, and finally after a compaction of the table. This is
+     * useful for checking that behavior is the same whether data is in memtables, memtable-flushed-sstbales,
+     * compaction-built-sstables.
+     * @param runnable
+     * @throws Throwable
+     */
+    public void runThenFlushThenCompact(CheckedFunction runnable) throws Throwable
+    {
+        beforeAndAfterFlush(runnable);
+
+        compact();
+
+        try
+        {
+            runnable.apply();
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError("Test failed after compact:\n" + t, t);
+        }
+    }
+
     private static String replaceValues(String query, Object[] values)
     {
         StringBuilder sb = new StringBuilder();

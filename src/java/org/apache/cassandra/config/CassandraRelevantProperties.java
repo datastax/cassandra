@@ -491,7 +491,13 @@ public enum CassandraRelevantProperties
      * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
      * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
      */
-    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false");
+    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
+
+    /**
+     * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
+     * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
+     */
+    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

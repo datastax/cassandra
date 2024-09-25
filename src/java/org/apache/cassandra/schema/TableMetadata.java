@@ -421,6 +421,16 @@ public class TableMetadata implements SchemaElement
         return !staticColumns().isEmpty();
     }
 
+    public boolean hasVectorType()
+    {
+        for (ColumnMetadata column : columns.values())
+        {
+            if (column.type.isVector())
+                return true;
+        }
+        return false;
+    }
+
     public final void validate()
     {
         validate(false);

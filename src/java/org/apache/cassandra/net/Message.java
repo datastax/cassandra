@@ -19,7 +19,6 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
@@ -49,7 +48,6 @@ import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
 import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
@@ -201,32 +199,32 @@ public class Message<T>
 
     public static <T> Message<T> out(Verb verb, T payload, long expiresAtNanos)
     {
-        return outWithParam(nextId(), verb, expiresAtNanos, payload, 0, null, null);
+        return outWithParam(nextId(), verb, expiresAtNanos, payload, 0, null, null).build();
     }
 
     public static <T> Message<T> outWithFlag(Verb verb, T payload, MessageFlag flag)
     {
         assert !verb.isResponse();
-        return outWithParam(nextId(), verb, 0, payload, flag.addTo(0), null, null);
+        return outWithParam(nextId(), verb, 0, payload, flag.addTo(0), null, null).build();
     }
 
     public static <T> Message<T> outWithFlags(Verb verb, T payload, MessageFlag flag1, MessageFlag flag2)
     {
         assert !verb.isResponse();
-        return outWithParam(nextId(), verb, 0, payload, flag2.addTo(flag1.addTo(0)), null, null);
+        return outWithParam(nextId(), verb, 0, payload, flag2.addTo(flag1.addTo(0)), null, null).build();
     }
 
     static <T> Message<T> outWithParam(long id, Verb verb, T payload, ParamType paramType, Object paramValue)
     {
-        return outWithParam(id, verb, 0, payload, paramType, paramValue);
+        return outWithParam(id, verb, 0, payload, paramType, paramValue).build();
     }
 
-    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, ParamType paramType, Object paramValue)
+    private static <T> Builder<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, ParamType paramType, Object paramValue)
     {
         return outWithParam(id, verb, expiresAtNanos, payload, 0, paramType, paramValue);
     }
 
-    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
+    private static <T> Builder<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
     {
         if (payload == null)
             throw new IllegalArgumentException();
@@ -235,8 +233,14 @@ public class Message<T>
         long createdAtNanos = approxTime.now();
         if (expiresAtNanos == 0)
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
-
-        return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, buildParams(paramType, paramValue)), payload);
+        return new Builder<T>().ofVerb(verb)
+                               .withPayload(payload)
+                               .from(from)
+                               .withId(id)
+                               .withExpiresAt(expiresAtNanos)
+                               .withCreatedAt(createdAtNanos)
+                               .withFlags(flags)
+                               .withParams(buildParams(paramType, paramValue));
     }
 
     public static <T> Message<T> internalResponse(Verb verb, T payload)
@@ -260,6 +264,12 @@ public class Message<T>
     /** Builds a response Message with provided payload, and all the right fields inferred from request Message */
     public <T> Message<T> responseWith(T payload)
     {
+        return outWithParam(id(), verb().responseVerb, expiresAtNanos(), payload, null, null).build();
+    }
+
+    /** Builds a response Message builder with provided payload, and all the right fields inferred from request Message */
+    public <T> Builder<T> responseWithBuilder(T payload)
+    {
         return outWithParam(id(), verb().responseVerb, expiresAtNanos(), payload, null, null);
     }
 
@@ -267,6 +277,12 @@ public class Message<T>
     public Message<NoPayload> emptyResponse()
     {
         return responseWith(NoPayload.noPayload);
+    }
+
+    /** Builds a response Builder with no payload, to allow for adding custom params if needed */
+    public Builder<NoPayload> emptyResponseBuilder()
+    {
+        return responseWithBuilder(NoPayload.noPayload);
     }
 
     /** Builds a failure response Message with an explicit reason, and fields inferred from request Message */
@@ -277,7 +293,7 @@ public class Message<T>
 
     static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
     {
-        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null);
+        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null).build();
     }
 
     Message<T> withCallBackOnFailure()
@@ -481,6 +497,8 @@ public class Message<T>
 
         private boolean hasId;
 
+        private Message cachedMessage;
+
         private Builder()
         {
         }
@@ -588,7 +606,31 @@ public class Message<T>
             if (payload == null)
                 throw new IllegalArgumentException();
 
-            return new Message<>(new Header(hasId ? id : nextId(), verb, from, createdAtNanos, expiresAtNanos, flags, params), payload);
+            return doBuild(hasId ? id : nextId());
+        }
+
+        public int currentPayloadSize(int version)
+        {
+            // use dummy id just for the sake of computing the serialized size
+            Message<T> tmp = doBuild(0);
+            cachedMessage = tmp;
+            return tmp.payloadSize(version);
+        }
+
+        private Message<T> doBuild(long id)
+        {
+            if (verb == null)
+                throw new IllegalArgumentException();
+            if (from == null)
+                throw new IllegalArgumentException();
+            if (payload == null)
+                throw new IllegalArgumentException();
+
+            Message<T> tmp = new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, params), payload);
+            if (cachedMessage != null)
+                tmp.maybeCachePayloadSize(cachedMessage);
+
+            return tmp;
         }
     }
 
@@ -1439,7 +1481,7 @@ public class Message<T>
     private int payloadSizeSG10 = -1;
     private int payloadSizeDSE68 = -1;
 
-    private int payloadSize(int version)
+    public int payloadSize(int version)
     {
         switch (version)
         {
@@ -1469,6 +1511,25 @@ public class Message<T>
                 return payloadSizeDSE68;
             default:
                 throw new IllegalStateException();
+        }
+    }
+
+    protected void maybeCachePayloadSize(Message other)
+    {
+        if (payload == other.payload)
+        {
+            if (other.payloadSize30 > 0)
+                payloadSize30 = other.payloadSize30;
+            if (other.payloadSize3014 > 0)
+                payloadSize3014 = other.payloadSize3014;
+            if (other.payloadSize40 > 0)
+                payloadSize40 = other.payloadSize40;
+            if (other.payloadSize41 > 0)
+                payloadSize41 = other.payloadSize41;
+            if (other.payloadSizeSG10 > 0)
+                payloadSizeSG10 = other.payloadSizeSG10;
+            if (other.payloadSizeDSE68 > 0)
+                payloadSizeDSE68 = other.payloadSizeDSE68;
         }
     }
 

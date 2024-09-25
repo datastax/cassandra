@@ -181,9 +181,7 @@ public class GenericOrderByTest extends SAITester
             assertRows(execute("SELECT v FROM %s WHERE v >= 4 AND v <= 6 ORDER BY v ASC LIMIT 4"), row(4), row(5), row(6));
             assertRows(execute("SELECT v FROM %s WHERE v >= 7 ORDER BY v ASC LIMIT 4"), row(7), row(8));
             assertRows(execute("SELECT v FROM %s WHERE v >= 10 ORDER BY v ASC LIMIT 4"));
-        });
 
-        beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT v FROM %s WHERE v >= -10 ORDER BY v DESC LIMIT 4"), row(8), row(7), row(6), row(5));
             assertRows(execute("SELECT v FROM %s WHERE v > 1 ORDER BY v DESC LIMIT 4"), row(8), row(7), row(6), row(5));
             assertRows(execute("SELECT v FROM %s WHERE v <= 3 ORDER BY v DESC LIMIT 4"), row(3), row(2), row(1));
@@ -191,6 +189,48 @@ public class GenericOrderByTest extends SAITester
             assertRows(execute("SELECT v FROM %s WHERE v >= 7 ORDER BY v DESC LIMIT 4"), row(8), row(7));
             assertRows(execute("SELECT v FROM %s WHERE v >= 10 ORDER BY v DESC LIMIT 4"));
         });
+    }
+
+    private void testSelectionAndOrderByOnTheSameColumnWithLargeRowCount(boolean asc) throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, x int, v int, PRIMARY KEY (pk, x))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+
+        Object[][] rows = new Object[100][];
+        var lowerBound = asc ? 0 : 4900;
+        var upperBound = asc ? 100 : 5000;
+        for (int i = 0; i < 10000; i++)
+        {
+            execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", i, i, i);
+            if (i >= lowerBound && i < upperBound)
+            {
+                var pos = asc ? i - lowerBound : upperBound - i - 1;
+                rows[pos] = row(i);
+            }
+        }
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT v FROM %s WHERE v < 5000 ORDER BY v " + (asc ? "ASC" : "DESC") + " LIMIT 100"), rows);
+        });
+    }
+
+
+    /*
+     * The following two tests show that we can correctly select and order by a column for which the table contains
+     * sufficient rows to stress ranges within the backing data structure (e.g., BKDReader spanning multiple leaves).
+     */
+    @Test
+    public void testSelectionAndOrderByOnTheSameColumnWithLargeRowCountAsc() throws Throwable
+    {
+        testSelectionAndOrderByOnTheSameColumnWithLargeRowCount(true);
+    }
+
+    @Test
+    public void testSelectionAndOrderByOnTheSameColumnWithLargeRowCountDesc() throws Throwable
+    {
+        testSelectionAndOrderByOnTheSameColumnWithLargeRowCount(false);
     }
 
 }

@@ -58,6 +58,7 @@ import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.INotification;
@@ -143,7 +144,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             contextManager.clear();
 
             contexts.forEach(context -> {
-                context.usedPerSSTableComponents().forWrite().forceDeleteAllComponents();
+                SSTableWatcher.instance.onIndexDropped(context.usedPerSSTableComponents().forWrite());
             });
         }
     }

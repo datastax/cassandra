@@ -301,10 +301,19 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
     private static void prepareForRebuild(IndexComponents.ForRead components, Set<Component> replacedComponents)
     {
-        // The current components will be replaced by "other" components if either 1) we either use immutable components,
-        // or 2) the old components are from an old version. In the later cases, even if immutable components is not in
-        // use, then newly written components will have a different version and thus be different files.
-        if (components.version().useImmutableComponentFiles() || !components.version().equals(Version.latest()))
+        // The current components are "replaced" (by "other" components) if the build create different components than
+        // the existing ones. This will happen in the following cases:
+        // 1. if we use immutable components, that's the point of immutable components.
+        // 2. when we do not use immutable components, there is still 2 cases where this will happen:
+        //   a) the old components are from an older version: a new build will alawys be for `Version.latest()` and
+        //     so will create new files in that case.
+        //   b) the old components are from a non-0 generation: a new build will always be for generation 0 and so
+        //     here again new files will be created. Note that "normally" we should not have non-0 generation in the
+        //     first place if immutable components are not used, but we handle this case to better support "downgrades"
+        //     where immutable components was enabled, but then disabled for some reason. If that happens, we still
+        //     want to ensure a new build removes the old files both from disk (happens below) and from the sstable TOC
+        //     (which is what `replacedComponents` is about).
+        if (components.version().useImmutableComponentFiles() || !components.version().equals(Version.latest()) || components.generation() != 0)
             replacedComponents.addAll(components.allAsCustomComponents());
 
         if (!components.version().useImmutableComponentFiles())

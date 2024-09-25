@@ -26,7 +26,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -395,14 +394,14 @@ public class CassandraOnHeapGraph<T> implements Accountable
             deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
             deletedOrdinals.clear();
             builder.cleanup();
-            remappedPostings = V5VectorPostingsWriter.remapPostings(postingsMap);
+            remappedPostings = V5VectorPostingsWriter.remapForMemtable(postingsMap);
         }
         else
         {
             assert postingsMap.keySet().size() == vectorValues.size() : String.format("postings map entry count %d != vector count %d",
                                                                                       postingsMap.keySet().size(), vectorValues.size());
             builder.cleanup();
-            remappedPostings = V2VectorPostingsWriter.remapPostings(postingsMap, !deletedOrdinals.isEmpty());
+            remappedPostings = V2VectorPostingsWriter.remapForMemtable(postingsMap, !deletedOrdinals.isEmpty());
         }
 
         OrdinalMapper ordinalMapper = remappedPostings.ordinalMapper;
