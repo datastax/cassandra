@@ -174,6 +174,8 @@ public abstract class Controller
     public static final long VECTOR_DEFAULT_TARGET_SSTABLE_SIZE = UCS_VECTOR_TARGET_SSTABLE_SIZE.getSizeInBytes();
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
+    static final String IS_REPLICA_AWARE_OPTION = "is_replica_aware";
+    public static final boolean DEFAULT_IS_REPLICA_AWARE = UCS_IS_REPLICA_AWARE.getBoolean();
 
     /**
      * Provision for growth of the constructed SSTables as the size of the data grows. By default the target SSTable
@@ -328,6 +330,7 @@ public abstract class Controller
     protected String tableName;
 
     protected final int baseShardCount;
+    private final boolean isReplicaAware;
 
     protected final long targetSSTableSize;
     protected final double sstableGrowthModifier;
@@ -355,6 +358,7 @@ public abstract class Controller
                long expiredSSTableCheckFrequency,
                boolean ignoreOverlapsInExpirationCheck,
                int baseShardCount,
+               boolean isReplicaAware,
                long targetSStableSize,
                double sstableGrowthModifier,
                int reservedThreads,
@@ -371,6 +375,7 @@ public abstract class Controller
         this.currentFlushSize = currentFlushSize;
         this.expiredSSTableCheckFrequency = TimeUnit.MILLISECONDS.convert(expiredSSTableCheckFrequency, TimeUnit.SECONDS);
         this.baseShardCount = baseShardCount;
+        this.isReplicaAware = isReplicaAware;
         this.targetSSTableSize = targetSStableSize;
         this.overlapInclusionMethod = overlapInclusionMethod;
         this.sstableGrowthModifier = sstableGrowthModifier;
@@ -577,6 +582,11 @@ public abstract class Controller
             }
             return shards;
         }
+    }
+
+    public boolean isReplicaAware()
+    {
+        return isReplicaAware;
     }
 
     /**
@@ -932,6 +942,10 @@ public abstract class Controller
             vectorBaseShardCount = VECTOR_DEFAULT_BASE_SHARD_COUNT;
         }
 
+        boolean isReplicaAware = options.containsKey(IS_REPLICA_AWARE_OPTION)
+                                 ? Boolean.parseBoolean(options.get(IS_REPLICA_AWARE_OPTION))
+                                 : DEFAULT_IS_REPLICA_AWARE;
+
         long targetSStableSize = options.containsKey(TARGET_SSTABLE_SIZE_OPTION)
                                  ? FBUtilities.parseHumanReadableBytes(options.get(TARGET_SSTABLE_SIZE_OPTION))
                                  : DEFAULT_TARGET_SSTABLE_SIZE;
@@ -1015,6 +1029,7 @@ public abstract class Controller
                                                 expiredSSTableCheckFrequency,
                                                 ignoreOverlapsInExpirationCheck,
                                                 useVectorOptions ? vectorBaseShardCount : baseShardCount,
+                                                isReplicaAware,
                                                 useVectorOptions ? vectorTargetSStableSize : targetSStableSize,
                                                 useVectorOptions ? vectorSSTableGrowthModifier : sstableGrowthModifier,
                                                 useVectorOptions ? vectorReservedThreadsPerLevel : reservedThreadsPerLevel,
@@ -1034,6 +1049,7 @@ public abstract class Controller
                                               expiredSSTableCheckFrequency,
                                               ignoreOverlapsInExpirationCheck,
                                               useVectorOptions ? vectorBaseShardCount : baseShardCount,
+                                              isReplicaAware,
                                               useVectorOptions ? vectorTargetSStableSize : targetSStableSize,
                                               useVectorOptions ? vectorSSTableGrowthModifier : sstableGrowthModifier,
                                               useVectorOptions ? vectorReservedThreadsPerLevel : reservedThreadsPerLevel,
@@ -1089,15 +1105,8 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(ADAPTIVE_OPTION);
-        if (s != null)
-        {
-            if (!s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
-            {
-                throw new ConfigurationException(String.format(booleanParseErr, ADAPTIVE_OPTION, s));
-            }
-            adaptive = Boolean.parseBoolean(s);
-        }
+        adaptive = validateBoolean(options, ADAPTIVE_OPTION, DEFAULT_ADAPTIVE);
+        validateBoolean(options, IS_REPLICA_AWARE_OPTION, DEFAULT_IS_REPLICA_AWARE);
 
         minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, DEFAULT_MIN_SSTABLE_SIZE);
         vectorMinSSTableSize = validateSizeWithSpecial(options, VECTOR_MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, VECTOR_DEFAULT_MIN_SSTABLE_SIZE);
@@ -1161,12 +1170,7 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION);
-        if (s != null && !s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
-        {
-            throw new ConfigurationException(String.format(booleanParseErr,
-                                                           ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION, s));
-        }
+        validateBoolean(options, ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION, false);
 
         s = options.remove(OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION);
         if (s != null && !s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
@@ -1391,6 +1395,18 @@ public abstract class Controller
             return getSizeWithAlt(options, optionHumanReadable, optionAlt, altShift, defaultValue);
     }
 
+    private static boolean validateBoolean(Map<String, String> options, String option, boolean defaultValue) throws ConfigurationException
+    {
+        var s = options.remove(option);
+        if (s != null)
+        {
+            if (!s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
+                throw new ConfigurationException(String.format("%s should either be 'true' or 'false', not %s", option, s));
+            return Boolean.parseBoolean(s);
+        }
+        return defaultValue;
+    }
+
     private static long getSizeWithSpecial(Map<String, String> options, String optionHumanReadable, String specialText, long specialValue, long defaultValue)
     {
         if (specialText.equalsIgnoreCase(options.get(optionHumanReadable)))
@@ -1399,7 +1415,6 @@ public abstract class Controller
             return FBUtilities.parseHumanReadableBytes(options.get(optionHumanReadable));
         else
             return defaultValue;
-
     }
 
     private static void validateSizeWithAlt(Map<String, String> options, String optionHumanReadable, String optionAlt, int altShift)
