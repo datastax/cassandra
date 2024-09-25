@@ -49,6 +49,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     private final CompactionParams metadataParams;
     private final UnifiedCompactionStrategy strategy;
     private final boolean enableAutoCompaction;
+    private final boolean hasVector;
 
     AtomicBoolean enabled;
 
@@ -65,6 +66,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
         this.strategy = new UnifiedCompactionStrategy(factory, backgroundCompactions, params.options());
         this.enabled = new AtomicBoolean(enabled);
         this.enableAutoCompaction = enableAutoCompaction;
+        this.hasVector = strategy.getController().hasVectorType();
 
         factory.getCompactionLogger().strategyCreated(this.strategy);
 
@@ -139,6 +141,14 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
                                               ReloadReason reason)
     {
         return create(previous, factory, compactionParams, reason, enableAutoCompaction);
+    }
+
+    @Override
+    public boolean shouldReload(CompactionParams params, ReloadReason reason)
+    {
+        return reason != CompactionStrategyContainer.ReloadReason.METADATA_CHANGE
+               || !params.equals(getMetadataCompactionParams())
+               || hasVector != factory.getRealm().metadata().hasVectorType();
     }
 
     private static CompactionParams createMetadataParams(@Nullable CompactionStrategyContainer previous,

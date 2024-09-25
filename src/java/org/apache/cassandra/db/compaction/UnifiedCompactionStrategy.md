@@ -440,6 +440,10 @@ the span of the lower-density ones.
 
 UCS accepts these compaction strategy parameters:
 
+* `override_ucs_config_for_vector_tables` Allows different configurations for vector and non-vector tables.  When set
+  to `true`, if a table has a column of `VectorType`, the "vector" parameters will be used instead of the regular
+  parameters. For example, `vector_min_sstable_size` will be used, and `min_sstable_size` will be ignored.   
+  The default value is `false` which disables this feature.
 * `scaling_parameters` A list of per-level scaling parameters, specified as L*f*, T*f*, N, or an integer value
   specifying $w$ directly. If more levels are present than the length of this list, the last value is used for all
   higher levels. Often this will be a single parameter, specifying the behaviour for all levels of the
@@ -454,6 +458,8 @@ UCS accepts these compaction strategy parameters:
   compaction to be promoted to the next level) and a fan factor of 2. This can also be specified as T2 or L2.  
   The default value is T4, matching the default STCS behaviour with threshold 4. To select an equivalent of LCS
   with its default fan factor 10, use L10.
+* `vector_scaling_parameters` A list of per-level scaling parameters used for vector tables when `override_ucs_config_for_vector_tables=true`.   
+  The default value is -8 or L10.
 * `target_sstable_size` The target sstable size $t$, specified as a human-friendly size in bytes (e.g. 100 MiB =
   $100\cdot 2^{20}$ B or (10 MB = 10,000,000 B)). The strategy will split data in shards that aim to produce sstables
   of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.  
@@ -462,10 +468,14 @@ UCS accepts these compaction strategy parameters:
   Increase this if the memory pressure from the number of sstables in the system becomes too high. Also see
   `sstable_growth` below.  
   The default value is 1 GiB.
+* `vector_target_sstable_size` The target sstable size used for vector tables when `override_ucs_config_for_vector_tables=true`.   
+  The default value is 5GiB.
 * `base_shard_count` The minimum number of shards $b$, used for levels with the smallest density. This gives the
   minimum compaction concurrency for the lowest levels. A low number would result in larger L0 sstables but may limit
   the overall maximum write throughput (as every piece of data has to go through L0). The base shard count only applies after `min_sstable_size` is reached.  
   The default value is 4 for all tables.
+* `vector_base_shard_count` The base shard count used for vector tables when `override_ucs_config_for_vector_tables=true`.   
+  The default value is 1.
 * `sstable_growth` The sstable growth component $\lambda$, applied as a factor in the shard exponent calculation.
   This is a number between 0 and 1 that controls what part of the density growth should apply to individual sstable
   size and what part should increase the number of shards. Using a value of 1 has the effect of fixing the shard
@@ -480,10 +490,14 @@ UCS accepts these compaction strategy parameters:
   two can be further tweaked by increasing $\lambda$ to get fewer but bigger sstables on the top level, and decreasing
   it to favour a higher count of smaller sstables.  
   The default value is 0.333 meaning the sstable size grows with the square root of the growth of the shard count.
+* `vector_sstable_growth` The sstable growth component used for vector tables when `override_ucs_config_for_vector_tables=true`.   
+  The default value is 1 which means the shard count will be fixed to the base value.
 * `min_sstable_size` The minimum sstable size $m$, applicable when the base shard count will result is sstables
   that are considered too small. If set, the strategy will split the space into fewer than the base count shards, to
   make the estimated sstables size at least as large as this value. A value of 0 disables this feature. A value of `auto` sets the minimum sstable size to the size
   of sstables resulting from flushes. The default value is 100MiB.
+* `vector_min_sstable_size` The minimum sstable size used for vector tables when `override_ucs_config_for_vector_tables=true`.   
+  The default value is 1024MiB.
 * `reserved_threads` Specifies the number of threads to reserve per level. Any remaining threads will take
   work according to the prioritization mechanism (i.e. higher overlap first). Higher reservations mean better
   responsiveness of the compaction strategy to new work, or smoother performance, at the expense of reducing the
@@ -491,6 +505,8 @@ UCS accepts these compaction strategy parameters:
   The default value is `max`, which spreads all threads as close to evenly between levels as possible. It is recommended
   to keep this option and the next at their defaults, which should offer a good balance between responsiveness and
   thread utilization.
+* `vector_reserved_threads` Specifies the number of threads to reserve per level for vector tables when `override_ucs_config_for_vector_tables=true`.   
+  The default value is `max`.
 * `reservations_type` Specifies whether reservations can be used by lower levels. If set to `per_level`, the
   reservations are only used by the specific level. If set to `level_or_below`, the reservations can be used by this
   level as well as any one below it.  
