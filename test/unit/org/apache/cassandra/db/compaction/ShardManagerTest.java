@@ -192,7 +192,7 @@ public class ShardManagerTest
 
     CompactionSSTable mockedTable(double start, double end, double reportedCoverage)
     {
-        return mockedTable(start, end, reportedCoverage, 200L);
+        return mockedTable(start, end, reportedCoverage, ShardManager.PER_PARTITION_SPAN_THRESHOLD * 2);
     }
 
     CompactionSSTable mockedTable(double start, double end, double reportedCoverage, long estimatedKeys)
