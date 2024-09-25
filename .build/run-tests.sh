@@ -307,6 +307,7 @@ _main() {
 
   # jdk check
   local -r java_version=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | awk -F. '{print $1}')
+  local -r project_name=$(grep '<project\s*basedir=' build.xml |sed -ne 's/.*name=\"\([^"]*\)\".*/\1/p')
   local -r version=$(grep 'property\s*name=\"base.version\"' build.xml |sed -ne 's/.*value=\"\([^"]*\)\".*/\1/p')
   local -r java_version_default=`grep 'property\s*name="java.default"' build.xml |sed -ne 's/.*value="\([^"]*\)".*/\1/p'`
 
@@ -315,7 +316,7 @@ _main() {
   fi
 
   # check project is already built. no cleaning is done, so jenkins unstash works, beware.
-  [[ -f "${DIST_DIR}/apache-cassandra-${version}.jar" ]] || [[ -f "${DIST_DIR}/apache-cassandra-${version}-SNAPSHOT.jar" ]] || { error 1 "Project must be built first. Use \`ant jar\`. Build directory is ${DIST_DIR} with: $(ls ${DIST_DIR} | xargs)"; }
+  [[ -f "${DIST_DIR}/${project_name}-${version}.jar" ]] || [[ -f "${DIST_DIR}/${project_name}-${version}-SNAPSHOT.jar" ]] || { error 1 "Project must be built first. Use \`ant jar\`. Build directory is ${DIST_DIR} with: $(ls ${DIST_DIR} | xargs)"; }
 
   # check if dist artifacts exist, this breaks the dtests
   [[ -d "${DIST_DIR}/dist" ]] && { error 1 "tests don't work when build/dist ("${DIST_DIR}/dist") exists (from \`ant artifacts\`)"; }
