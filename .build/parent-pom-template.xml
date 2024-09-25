@@ -36,8 +36,8 @@
     </license>
   </licenses>
   <properties>
-    <bytebuddy.version>1.12.13</bytebuddy.version>
-    <byteman.version>4.0.20</byteman.version>
+    <bytebuddy.version>1.14.17</bytebuddy.version>
+    <byteman.version>4.0.23</byteman.version>
     <ohc.version>0.5.1</ohc.version>
 
     <!-- These are referenced in build.xml, so need to be propagated from there -->
@@ -943,7 +943,7 @@
       <dependency>
         <groupId>com.google.code.findbugs</groupId>
         <artifactId>jsr305</artifactId>
-        <version>2.0.2</version>
+        <version>3.0.0</version>
       </dependency>
       <dependency>
         <groupId>com.clearspring.analytics</groupId>
