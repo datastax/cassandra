@@ -503,7 +503,8 @@ public enum CassandraRelevantProperties
      * stages respectively; in other words, the native transport stage will not block, offloading request processing
      * (and any related blocking behaviour) to the specific read and write stages.
      */
-    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false");
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false"),
+    DEDICATED_READ_WRITE_POOLS_ENABLED("cassandra.dedicated.read_write.pools", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
