@@ -454,6 +454,16 @@ public class TableMetadata implements SchemaElement
         return !staticColumns().isEmpty();
     }
 
+    public boolean hasVectorType()
+    {
+        for (ColumnMetadata column : columns.values())
+        {
+            if (column.type.isVector())
+                return true;
+        }
+        return false;
+    }
+
     /**
      * @return {@code true} if the table has any masked column, {@code false} otherwise.
      */
