@@ -140,15 +140,15 @@
     <property name="jacoco.partials.dir" value="${jacoco.export.dir}/partials" />
     <property name="jacoco.partialexecfile" value="${jacoco.partials.dir}/partial.exec" />
     <property name="jacoco.finalexecfile" value="${jacoco.export.dir}/jacoco.exec" />
-    <property name="jacoco.version" value="0.8.8"/>
+    <property name="jacoco.version" value="0.8.12"/>
 
-    <property name="byteman.version" value="4.0.20"/>
+    <property name="byteman.version" value="4.0.23"/>
     <property name="jamm.version" value="0.3.2"/>
-    <property name="ecj.version" value="4.6.1"/>
+    <property name="ecj.version" value="3.33.0"/>
     <property name="ohc.version" value="0.5.1"/>
     <property name="asm.version" value="7.1"/>
     <property name="allocation-instrumenter.version" value="3.1.0"/>
-    <property name="bytebuddy.version" value="1.14.11"/>
+    <property name="bytebuddy.version" value="1.14.17"/>
     <property name="jflex.version" value="1.8.2"/>
 
     <!-- https://mvnrepository.com/artifact/net.openhft/chronicle-bom/2.24ea87 -->
@@ -565,7 +565,7 @@
           <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
           <dependency groupId="com.boundary" artifactId="high-scale-lib" version="1.0.6"/>
           <dependency groupId="com.github.jbellis" artifactId="jamm" version="${jamm.version}"/>
-          <dependency groupId="org.yaml" artifactId="snakeyaml" version="1.32"/>
+          <dependency groupId="org.yaml" artifactId="snakeyaml" version="1.33"/>
           <dependency groupId="junit" artifactId="junit" version="4.13" scope="test">
             <exclusion groupId="org.hamcrest" artifactId="hamcrest-core"/>
           </dependency>
@@ -600,11 +600,11 @@
           <dependency groupId="org.jboss.byteman" artifactId="byteman-submit" version="${byteman.version}" scope="provided"/>
           <dependency groupId="org.jboss.byteman" artifactId="byteman-bmunit" version="${byteman.version}" scope="provided"/>
 
-          <dependency groupId="net.bytebuddy" artifactId="byte-buddy" version="${bytebuddy.version}" />
-          <dependency groupId="net.bytebuddy" artifactId="byte-buddy-agent" version="${bytebuddy.version}" />
+          <dependency groupId="net.bytebuddy" artifactId="byte-buddy" version="${bytebuddy.version}" scope="test"/>
+          <dependency groupId="net.bytebuddy" artifactId="byte-buddy-agent" version="${bytebuddy.version}" scope="test"/>
 
-          <dependency groupId="org.openjdk.jmh" artifactId="jmh-core" version="1.21" scope="test"/>
-          <dependency groupId="org.openjdk.jmh" artifactId="jmh-generator-annprocess" version="1.21" scope="test"/>
+          <dependency groupId="org.openjdk.jmh" artifactId="jmh-core" version="1.37" scope="test"/>
+          <dependency groupId="org.openjdk.jmh" artifactId="jmh-generator-annprocess" version="1.37" scope="test"/>
 
           <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.10.12" scope="test"/>
 
@@ -642,7 +642,7 @@
             <exclusion groupId="net.java.dev.jna" artifactId="jna-platform" />
           </dependency>
           <dependency groupId="net.openhft" artifactId="chronicle-map" version="${chronicle-map.version}" />
-          <dependency groupId="com.google.code.findbugs" artifactId="jsr305" version="2.0.2" scope="provided"/>
+          <dependency groupId="com.google.code.findbugs" artifactId="jsr305" version="3.0.0" scope="provided"/>
           <dependency groupId="com.clearspring.analytics" artifactId="stream" version="2.5.2">
             <exclusion groupId="it.unimi.dsi" artifactId="fastutil" />
           </dependency>
@@ -656,7 +656,7 @@
             <exclusion groupId="com.github.jnr" artifactId="jnr-ffi"/>
             <exclusion groupId="com.github.jnr" artifactId="jnr-posix"/>
           </dependency>
-          <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj" version="${ecj.version}" />
+          <dependency groupId="org.eclipse.jdt" artifactId="ecj" version="${ecj.version}" />
           <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="${ohc.version}">
             <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
           </dependency>
@@ -863,7 +863,7 @@
         <dependency groupId="net.openhft" artifactId="chronicle-threads"/>
         <dependency groupId="net.openhft" artifactId="chronicle-map"/>
         <dependency groupId="org.fusesource" artifactId="sigar"/>
-        <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
+        <dependency groupId="org.eclipse.jdt" artifactId="ecj"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8"/>
         <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" />
