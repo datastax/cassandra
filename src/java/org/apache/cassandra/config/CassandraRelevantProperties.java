@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
@@ -505,7 +506,12 @@ public enum CassandraRelevantProperties
      * stages respectively; in other words, the native transport stage will not block, offloading request processing
      * (and any related blocking behaviour) to the specific read and write stages.
      */
-    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false");
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false"),
+    /**
+     * If true, a set of Stages will be created with dedicated executors, as opposed to shared "low latency" executor.
+     * @see Stage
+     */
+    DEDICATED_STAGE_EXECUTOR_ENABLED("cassandra.stage.dedicated_executor", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
