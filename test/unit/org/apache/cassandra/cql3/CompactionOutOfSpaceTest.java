@@ -95,6 +95,20 @@ public class CompactionOutOfSpaceTest extends CQLTester
     }
 
     @Test
+    @BMRule(name = "Simulate disk full during background compaction with only IOException",
+    targetClass = "CompactionTask",
+    targetMethod = "runMayThrow",
+    targetLocation = "AT ENTRY",
+    condition = "org.apache.cassandra.cql3.CompactionOutOfSpaceTest.isKillerForTestsInstalled()",
+    action = "throw new java.io.IOException(\"No space left on device\")")
+    public void testUcsBackgroundCompactionNoDiskSpaceIOExceptionIgnore() throws Throwable
+    {
+        String ucsCqlCompactionParams = "{'class':'UnifiedCompactionStrategy', 'num_shards':'1'}";
+        flush4SstablesAndEnableAutoCompaction(Config.DiskFailurePolicy.ignore, ucsCqlCompactionParams, "No space left on device");
+    }
+
+
+    @Test
     @BMRule(name = "Simulate disk full during background compaction",
     targetClass = "CompactionTask",
     targetMethod = "runMayThrow",
@@ -108,6 +122,19 @@ public class CompactionOutOfSpaceTest extends CQLTester
     }
 
     @Test
+    @BMRule(name = "Simulate disk full during background compaction with only IOException",
+    targetClass = "CompactionTask",
+    targetMethod = "runMayThrow",
+    targetLocation = "AT ENTRY",
+    condition = "org.apache.cassandra.cql3.CompactionOutOfSpaceTest.isKillerForTestsInstalled()",
+    action = "throw new java.io.IOException(\"No space left on device\")")
+    public void testUcsBackgroundCompactionNoDiskSpaceIOExceptionStop() throws Throwable
+    {
+        String ucsCqlCompactionParams = "{'class':'UnifiedCompactionStrategy', 'num_shards':'1'}";
+        flush4SstablesAndEnableAutoCompaction(Config.DiskFailurePolicy.stop, ucsCqlCompactionParams, "No space left on device");
+    }
+
+    @Test
     @BMRule(name = "Simulate disk full during background compaction",
     targetClass = "CompactionTask",
     targetMethod = "runMayThrow",
@@ -115,6 +142,19 @@ public class CompactionOutOfSpaceTest extends CQLTester
     condition = "org.apache.cassandra.cql3.CompactionOutOfSpaceTest.isKillerForTestsInstalled()",
     action = "throw new java.io.IOError(new java.io.IOException(\"No space left on device\"))")
     public void testUcsBackgroundCompactionNoDiskSpaceDie() throws Throwable
+    {
+        String ucsCqlCompactionParams = "{'class':'UnifiedCompactionStrategy', 'num_shards':'1'}";
+        flush4SstablesAndEnableAutoCompaction(Config.DiskFailurePolicy.die, ucsCqlCompactionParams, "No space left on device");
+    }
+
+    @Test
+    @BMRule(name = "Simulate disk full during background compaction with only IOException",
+    targetClass = "CompactionTask",
+    targetMethod = "runMayThrow",
+    targetLocation = "AT ENTRY",
+    condition = "org.apache.cassandra.cql3.CompactionOutOfSpaceTest.isKillerForTestsInstalled()",
+    action = "throw new java.io.IOException(\"No space left on device\")")
+    public void testUcsBackgroundCompactionNoDiskSpacIOExceptioneDie() throws Throwable
     {
         String ucsCqlCompactionParams = "{'class':'UnifiedCompactionStrategy', 'num_shards':'1'}";
         flush4SstablesAndEnableAutoCompaction(Config.DiskFailurePolicy.die, ucsCqlCompactionParams, "No space left on device");
