@@ -135,7 +135,7 @@ public abstract class SSTableReaderWithFilter extends SSTableReader
                              Ref<SSTableReader> ref = tryRef();
                              if (ref == null)
                              {
-                                 logger.error("Unable to reference sstable, will use pass-through bloom filter");
+                                 logger.error("Unable to reference sstable {}, will use pass-through bloom filter", descriptor.baseFileUri());
                                  filter = FilterFactory.AlwaysPresent;
                              }
                              else
