@@ -25,6 +25,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -42,7 +43,7 @@ public class MicrometerChunkCacheMetricsTest
 {
     private ChunkCache mockChunkCache;
 
-    private ChunkCacheMetrics chunkCacheMetrics;
+    private MicrometerChunkCacheMetrics chunkCacheMetrics;
 
     @BeforeClass
     public static void init()
@@ -58,8 +59,7 @@ public class MicrometerChunkCacheMetricsTest
         // Use micrometer metrics
         System.setProperty("cassandra.use_micrometer_metrics", "true");
 
-        chunkCacheMetrics = ChunkCacheMetrics.create(mockChunkCache);
-        assertTrue(chunkCacheMetrics instanceof MicrometerChunkCacheMetrics);
+        chunkCacheMetrics = (MicrometerChunkCacheMetrics) ChunkCacheMetrics.create(mockChunkCache);
     }
 
     @After
@@ -91,9 +91,7 @@ public class MicrometerChunkCacheMetricsTest
     @Test
     public void testCommonChunkCacheMetrics()
     {
-
-        // No-op
-        chunkCacheMetrics.recordEviction(1, null);
+        chunkCacheMetrics.recordEviction(1, RemovalCause.EXPIRED);
 
         // No-op
         chunkCacheMetrics.recordLoadFailure(25);
@@ -126,11 +124,22 @@ public class MicrometerChunkCacheMetricsTest
     public void testEvictionRecording()
     {
         long initialEvictionCount = chunkCacheMetrics.snapshot().evictionCount();
-        chunkCacheMetrics.recordEviction(4, null);
-        assertEquals(initialEvictionCount + 4, chunkCacheMetrics.snapshot().evictionCount());
+        chunkCacheMetrics.recordEviction(4, RemovalCause.EXPIRED);
+        assertEquals(initialEvictionCount + 1, chunkCacheMetrics.snapshot().evictionCount());
 
-        chunkCacheMetrics.recordEviction(1, null);
-        assertEquals(initialEvictionCount + 4 + 1, chunkCacheMetrics.snapshot().evictionCount());
+        chunkCacheMetrics.recordEviction(10, RemovalCause.EXPIRED);
+        assertEquals(initialEvictionCount + 1 + 1, chunkCacheMetrics.snapshot().evictionCount());
+
+        // replacing an entry is also an eviction but it doesn't increment the eviction count
+        chunkCacheMetrics.recordEviction(100, RemovalCause.REPLACED);
+        assertEquals(initialEvictionCount + 1 + 1, chunkCacheMetrics.snapshot().evictionCount());
+
+
+        assertEquals(2, chunkCacheMetrics.getEvictionCountByRemovalCause().get(RemovalCause.EXPIRED).intValue());
+        assertEquals(1, chunkCacheMetrics.getEvictionCountByRemovalCause().get(RemovalCause.REPLACED).intValue());
+        assertEquals(0, chunkCacheMetrics.getEvictionCountByRemovalCause().get(RemovalCause.COLLECTED).intValue());
+        assertEquals(0, chunkCacheMetrics.getEvictionCountByRemovalCause().get(RemovalCause.SIZE).intValue());
+        assertEquals(0, chunkCacheMetrics.getEvictionCountByRemovalCause().get(RemovalCause.EXPLICIT).intValue());
     }
 
     @Test
