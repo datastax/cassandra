@@ -20,7 +20,9 @@ package org.apache.cassandra.index.sai.disk.io;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.common.base.Throwables;
 import org.junit.Assert;
@@ -31,6 +33,7 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 public class TrackingIndexFileUtils extends IndexFileUtils
 {
     private final Map<TrackingIndexInput, String> openInputs = Collections.synchronizedMap(new HashMap<>());
+    private final Set<TrackingIndexInput> closedInputs = new HashSet<>();
 
     public TrackingIndexFileUtils(SequentialWriterOption writerOption)
     {
@@ -66,11 +69,15 @@ public class TrackingIndexFileUtils extends IndexFileUtils
         }
 
         @Override
-        public void close()
+        public synchronized void close()
         {
             super.close();
             final String creationStackTrace = openInputs.remove(this);
-            Assert.assertNotNull("Closed unregistered input: " + this, creationStackTrace);
+
+            if (closedInputs.add(this) && creationStackTrace == null)
+            {
+                Assert.fail("Closed unregistered input: " + this);
+            }
         }
     }
 
