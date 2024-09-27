@@ -35,6 +35,7 @@ import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.ListType;
@@ -44,6 +45,7 @@ import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -127,12 +129,12 @@ public class TypeUtilTest extends SaiRandomizedTest
         {
             TupleType type = new TupleType(Arrays.asList(elementType.getType(), elementType.getType()), true);
             assertFalse(TypeUtil.isFrozenCollection(type));
-            assertFalse(TypeUtil.isFrozen(type));
+            assertFalse(TypeUtil.isNonVectorFrozenMultivalued(type));
             assertFalse(TypeUtil.isLiteral(type));
 
             type = new TupleType(Arrays.asList(elementType.getType(), elementType.getType()), false);
             assertFalse(TypeUtil.isFrozenCollection(type));
-            assertTrue(TypeUtil.isFrozen(type));
+            assertTrue(TypeUtil.isNonVectorFrozenMultivalued(type));
             assertTrue(TypeUtil.isLiteral(type));
         }
     }
@@ -148,7 +150,7 @@ public class TypeUtilTest extends SaiRandomizedTest
                                          true);
 
             assertFalse(TypeUtil.isFrozenCollection(type));
-            assertFalse(TypeUtil.isFrozen(type));
+            assertFalse(TypeUtil.isNonVectorFrozenMultivalued(type));
             assertFalse(TypeUtil.isLiteral(type));
 
             type = new UserType("ks", ByteBufferUtil.bytes("myType"),
@@ -156,8 +158,21 @@ public class TypeUtilTest extends SaiRandomizedTest
                                 Arrays.asList(elementType.getType(), elementType.getType()),
                                 false);
             assertFalse(TypeUtil.isFrozenCollection(type));
-            assertTrue(TypeUtil.isFrozen(type));
+            assertTrue(TypeUtil.isNonVectorFrozenMultivalued(type));
             assertTrue(TypeUtil.isLiteral(type));
+        }
+    }
+
+    @Test
+    public void testVector()
+    {
+        for (int dimension = 1; dimension < 2; dimension++)
+        {
+            VectorType<Float> type = VectorType.getInstance(FloatType.instance, dimension);
+
+            assertFalse(TypeUtil.isFrozenCollection(type));
+            assertFalse(TypeUtil.isNonVectorFrozenMultivalued(type));
+            assertFalse(TypeUtil.isLiteral(type));
         }
     }
 
