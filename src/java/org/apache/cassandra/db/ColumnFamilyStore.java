@@ -216,20 +216,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     are finished. By having flushExecutor size the same size as each of the perDiskflushExecutors we make sure we can
     have that many flushes going at the same time.
     */
-    private static final ExecutorPlus flushExecutor = DatabaseDescriptor.isDaemonInitialized() 
+    private static final ExecutorPlus flushExecutor = DatabaseDescriptor.enableMemtableAndCommitLog()
                                                       ? executorFactory().withJmxInternal().pooled("MemtableFlushWriter", getFlushWriters())
                                                       : null;
 
     // post-flush executor is single threaded to provide guarantee that any flush Future on a CF will never return until prior flushes have completed
-    private static final ExecutorPlus postFlushExecutor = DatabaseDescriptor.isDaemonInitialized()
+    private static final ExecutorPlus postFlushExecutor = DatabaseDescriptor.enableMemtableAndCommitLog()
                                                           ? executorFactory().withJmxInternal().sequential("MemtablePostFlush")
                                                           : null;
 
-    private static final ExecutorPlus reclaimExecutor = DatabaseDescriptor.isDaemonInitialized()
+    private static final ExecutorPlus reclaimExecutor = DatabaseDescriptor.enableMemtableAndCommitLog()
                                                         ? executorFactory().withJmxInternal().sequential("MemtableReclaimMemory")
                                                         : null;
 
-    private static final PerDiskFlushExecutors perDiskflushExecutors = DatabaseDescriptor.isDaemonInitialized()
+    private static final PerDiskFlushExecutors perDiskflushExecutors = DatabaseDescriptor.enableMemtableAndCommitLog()
                                                                        ? new PerDiskFlushExecutors(DatabaseDescriptor.getFlushWriters(),
                                                                                                   DatabaseDescriptor.getNonLocalSystemKeyspacesDataFileLocations(),
                                                                                                   DatabaseDescriptor.useSpecificLocationForLocalSystemData())
@@ -466,7 +466,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         memtableFactory = metadata().params.memtable.factory();
 
-        if (DatabaseDescriptor.isDaemonInitialized())
+        if (DatabaseDescriptor.enableMemtableAndCommitLog())
             switchMemtableOrNotify(FlushReason.SCHEMA_CHANGE, Memtable::metadataUpdated);
 
         if (metric.metricsAggregation != TableMetrics.MetricsAggregation.fromMetadata(metadata()))
@@ -606,11 +606,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         TableMetrics.ReleasableMetric memtableMetrics = null;
         if (DatabaseDescriptor.enableMemtableAndCommitLog())
         {
-            if (DatabaseDescriptor.isDaemonInitialized())
-            {
-                initialMemtable = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
-                memtableMetrics = memtableFactory.createMemtableMetrics(metadata);
-            }
+            initialMemtable = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
+            memtableMetrics = memtableFactory.createMemtableMetrics(metadata);
             data = new Tracker(this, initialMemtable, loadSSTables);
         }
         else
