@@ -864,8 +864,8 @@ public final class SystemKeyspace
      */
     public static InetAddressAndPort getPreferredIP(InetAddressAndPort ep)
     {
-        Preconditions.checkState(DatabaseDescriptor.isDaemonInitialized()); // Make sure being used as a daemon, not a tool
-        
+        Preconditions.checkState(DatabaseDescriptor.enableMemtableAndCommitLog()); // Make sure being used as a daemon, not a tool
+
         IPeerInfo info = Nodes.peers().get(ep);
         if (info != null && info.getPreferredAddressAndPort() != null && info.isExisting())
             return info.getPreferredAddressAndPort();
