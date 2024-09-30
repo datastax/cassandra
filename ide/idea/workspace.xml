@@ -151,6 +151,7 @@
                                           -Dcassandra.storagedir=$PROJECT_DIR$/data
                                           -Djava.library.path=$PROJECT_DIR$/lib/sigar-bin
                                           -Dlogback.configurationFile=file://$PROJECT_DIR$/conf/logback.xml
+                                          -Dnet.bytebuddy.experimental=true
                                           -XX:HeapDumpPath=build/test
                                           -ea" />
       <option name="PROGRAM_PARAMETERS" value="" />
@@ -203,6 +204,7 @@
                                           -XX:HeapDumpPath=build/test
                                           -XX:MaxMetaspaceSize=2G
                                           -XX:SoftRefLRUPolicyMSPerMB=0
+                                          -Dnet.bytebuddy.experimental=true
                                           -Xmx4G
                                           -ea" />
       <option name="PARAMETERS" value="" />
@@ -234,6 +236,7 @@
                                           -Dcassandra.triggers_dir=$PROJECT_DIR$/conf/triggers
                                           -Djava.library.path=$PROJECT_DIR$/lib/sigar-bin
                                           -Dlogback.configurationFile=file://$PROJECT_DIR$/conf/logback.xml
+                                          -Dnet.bytebuddy.experimental=true
                                           -XX:HeapDumpPath=build/test
                                           -Xmx1G
                                           -ea" />
