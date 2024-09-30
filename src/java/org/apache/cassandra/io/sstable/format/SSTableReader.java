@@ -1717,6 +1717,17 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return dfile.onDiskLength;
     }
 
+    public long onDiskComponentsSize()
+    {
+        long total = 0;
+        for (Component component : components())
+        {
+            total += FileUtils.size(descriptor.pathFor(component));
+        }
+
+        return total;
+    }
+
     @VisibleForTesting
     public double getCrcCheckChance()
     {
