@@ -174,6 +174,120 @@ public class BKDReaderTest extends SaiRandomizedTest
     }
 
     @Test
+    public void testForwardIteration() throws IOException
+    {
+        final int numRows = between(100, 400);
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+        byte[] scratch = new byte[4];
+        for (int docID = 0; docID < numRows; docID++)
+        {
+            NumericUtils.intToSortableBytes(docID, scratch, 0);
+            buffer.addPackedValue(docID, new BytesRef(scratch));
+        }
+
+        try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.FORWARD, null))
+        {
+            int docId = 0;
+            while (iterator.hasNext())
+            {
+                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                assertEquals(docId++, value);
+                iterator.next();
+            }
+            assertEquals(numRows, docId);
+        }
+    }
+
+    @Test
+    public void testForwardIterationWithQuery() throws IOException
+    {
+        final int numRows = between(100, 400);
+        final int queryMin = between(2, 20);
+        final int queryMax = between(numRows - 20, numRows - 2);
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+        byte[] scratch = new byte[4];
+        for (int docID = 0; docID < numRows; docID++)
+        {
+            NumericUtils.intToSortableBytes(docID, scratch, 0);
+            buffer.addPackedValue(docID, new BytesRef(scratch));
+        }
+
+        try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.FORWARD, buildQuery(queryMin, queryMax)))
+        {
+            int docId = Math.max(0, queryMin);
+            while (iterator.hasNext())
+            {
+                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                assertEquals(docId++, value);
+                iterator.next();
+            }
+            assertEquals(Math.min(queryMax + 1, numRows), docId);
+        }
+    }
+
+
+    @Test
+    public void testBackwardIteration() throws IOException
+    {
+        final int numRows = between(100, 400);
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+        byte[] scratch = new byte[4];
+        for (int docID = 0; docID < numRows; docID++)
+        {
+            NumericUtils.intToSortableBytes(docID, scratch, 0);
+            buffer.addPackedValue(docID, new BytesRef(scratch));
+        }
+
+        try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.BACKWARD, null))
+        {
+            int docId = numRows;
+            while (iterator.hasNext())
+            {
+                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                assertEquals(--docId, value);
+                iterator.next();
+            }
+            assertEquals(0, docId);
+        }
+
+    }
+
+    @Test
+    public void testBackwardIterationWithQuery() throws IOException
+    {
+        final int numRows = between(100, 400);
+        final int queryMin = between(2, 20);
+        final int queryMax = between(numRows - 20, numRows - 2);
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+        byte[] scratch = new byte[4];
+        for (int docID = 0; docID < numRows; docID++)
+        {
+            NumericUtils.intToSortableBytes(docID, scratch, 0);
+            buffer.addPackedValue(docID, new BytesRef(scratch));
+        }
+
+        try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.BACKWARD, buildQuery(queryMin, queryMax)))
+        {
+            int docId = Math.min(numRows, queryMax);
+            while (iterator.hasNext())
+            {
+                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                assertEquals(docId--, value);
+                iterator.next();
+            }
+            assertEquals(Math.max(queryMin - 1, 0), docId);
+        }
+    }
+
+    @Test
     public void testAdvance() throws IOException
     {
         doTestAdvance(false);
