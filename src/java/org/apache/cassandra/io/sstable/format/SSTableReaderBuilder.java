@@ -28,11 +28,10 @@ import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cache.ChunkCache;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -44,12 +43,14 @@ import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.BloomFilter;
@@ -101,21 +102,20 @@ public abstract class SSTableReaderBuilder
 
     public abstract SSTableReader build();
 
-    @SuppressWarnings("resource")
     public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
     {
-        return new FileHandle.Builder(descriptor.fileFor(component))
-                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
-                .withChunkCache(ChunkCache.instance);
+        return StorageProvider.instance.fileHandleBuilderFor(descriptor, component);
+    }
+
+    public static FileHandle.Builder primaryIndexWriteTimeBuilder(Descriptor descriptor, Component component, OperationType operationType)
+    {
+        return StorageProvider.instance.primaryIndexWriteTimeFileHandleBuilderFor(descriptor, component, operationType);
     }
 
     @SuppressWarnings("resource")
     public static FileHandle.Builder defaultDataHandleBuilder(Descriptor descriptor, ZeroCopyMetadata zeroCopyMetadata)
     {
-        return new FileHandle.Builder(descriptor.fileFor(Component.DATA))
-               .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
-               .withChunkCache(ChunkCache.instance)
-               .slice(zeroCopyMetadata);
+        return StorageProvider.instance.fileHandleBuilderFor(descriptor, Component.DATA, zeroCopyMetadata);
     }
 
     /**
@@ -227,7 +227,18 @@ public abstract class SSTableReaderBuilder
         }
     }
 
-    public static IFilter loadBloomFilter(File file, boolean oldFormat)
+    public static IFilter loadBloomFilter(TableMetadata metadata, File file, boolean oldFormat)
+    {
+        if (BloomFilter.lazyLoading() && !SchemaConstants.isLocalSystemKeyspace(metadata.keyspace))
+        {
+            logger.debug("postponing bloom filter deserialization for {}", file);
+            return FilterFactory.AlwaysPresentForLazyLoading;
+        }
+
+        return doLoadBloomFilter(file, oldFormat);
+    }
+
+    public static IFilter doLoadBloomFilter(File file, boolean oldFormat)
     {
         if (file.exists())
         {
@@ -420,7 +431,7 @@ public abstract class SSTableReaderBuilder
             double desiredFPChance = metadata.params.bloomFilterFpChance;
 
             if (SSTableReader.shouldLoadBloomFilter(descriptor, components, currentFPChance, desiredFPChance))
-                bf = loadBloomFilter(descriptor.fileFor(Component.FILTER), descriptor.version.hasOldBfFormat());
+                bf = loadBloomFilter(metadata, descriptor.fileFor(Component.FILTER), descriptor.version.hasOldBfFormat());
 
             boolean recreateBloomFilter = bf == null && SSTableReader.mayRecreateBloomFilter(descriptor, components, currentFPChance, isOffline, desiredFPChance);
             load(recreateBloomFilter, !isOffline, optimizationStrategy, statsMetadata, components);

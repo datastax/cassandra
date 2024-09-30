@@ -17,10 +17,11 @@
  */
 package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
-import org.apache.cassandra.index.sai.disk.v1.DirectReaders;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
-import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.util.LongValues;
 
 public abstract class AbstractBlockPackedReader implements LongArray
 {
@@ -58,17 +59,37 @@ public abstract class AbstractBlockPackedReader implements LongArray
 
         final int block = (int) (index >>> blockShift);
         final int idx = (int) (index & blockMask);
-        final DirectReaders.Reader subReader = DirectReaders.getReaderForBitsPerValue(blockBitsPerValue[block]);
-        return delta(block, idx) + subReader.get(input, blockOffsetAt(block), idx);
+        final LongValues subReader = blockBitsPerValue[block] == 0 ? LongValues.ZEROES
+                                                                   : LuceneCompat.directReaderGetInstance(input, blockBitsPerValue[block], blockOffsetAt(block));
+        return delta(block, idx) + subReader.get(idx);
     }
 
     @Override
-    public long findTokenRowID(long targetValue)
+    public long ceilingRowId(long targetValue)
     {
         // already out of range
         if (lastIndex >= valueCount)
             return -1;
 
+        long rowId = findBlockRowId(targetValue);
+        lastIndex = rowId >= 0 ? rowId : -rowId - 1;
+        return lastIndex >= valueCount ? -1 : lastIndex;
+    }
+
+    @Override
+    public long indexOf(long targetValue)
+    {
+        // already out of range
+        if (lastIndex >= valueCount)
+            return Long.MIN_VALUE;
+
+        long rowId = findBlockRowId(targetValue);
+        lastIndex = rowId >= 0 ? rowId : -rowId - 1;
+        return rowId >= valueCount ? Long.MIN_VALUE : rowId;
+    }
+
+    private long findBlockRowId(long targetValue)
+    {
         // We keep track previous returned value in lastIndex, so searching backward will not return correct result.
         // Also it's logically wrong to search backward during token iteration in PostingListRangeIterator.
         if (targetValue < prevTokenValue)
@@ -97,8 +118,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
         }
 
         // Find the global (not block-specific) index of the target token, which is equivalent to its row ID:
-        lastIndex = findBlockRowID(targetValue, blockIndex, exactMatch);
-        return lastIndex >= valueCount ? -1 : lastIndex;
+        return findBlockRowID(targetValue, blockIndex, exactMatch);
     }
 
     /**
@@ -185,7 +205,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
     /**
      * binary search target value between low and high.
      *
-     * @return index if exact match is found, or *positive* insertion point if no exact match is found.
+     * @return index if exact match is found, or `-(insertion point) - 1` if no exact match is found.
      */
     private long binarySearchBlock(long target, long low, long high)
     {
@@ -222,7 +242,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
         }
 
         // target not found
-        return low;
+        return -(low + 1);
     }
 
     @Override

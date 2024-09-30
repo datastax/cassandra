@@ -18,21 +18,32 @@
 
 package org.apache.cassandra.io.storage;
 
+import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.INativeLibrary;
-import org.apache.cassandra.utils.NativeLibrary;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_STORAGE_PROVIDER;
 
@@ -118,6 +129,93 @@ public interface StorageProvider
      */
     void invalidateFileSystemCache(File file);
 
+    /**
+     * Remove the give sstable from any local cache, for example the OS page cache, or at least it tries to.
+     *
+     * @param descriptor the descriptor for the sstable that is no longer required in the file system caches
+     * @param tidied whether ReaderTidier has been run, aka. deleting sstable files.
+     */
+    void invalidateFileSystemCache(Descriptor descriptor, boolean tidied);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given sstable component.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor descriptor for the sstable whose handler is built.
+     * @param component sstable component for which to build the handler.
+     * @return a new {@link FileHandle.Builder} for the provided sstable component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given primary index component during primary index writing time.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor    descriptor for the sstable whose handler is built.
+     * @param component     sstable component for which to build the handler.
+     * @param operationType the operation for current primary index writer
+     * @return a new {@link FileHandle.Builder} for the provided primary index component with access mode and chunk cache
+     * configured as appropriate.
+     */
+    FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given sstable component.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor descriptor for the sstable whose handler is built.
+     * @param component sstable component for which to build the handler.
+     * @param zeroCopyMetadata zero copy metadata for the sstable
+     * @return a new {@link FileHandle.Builder} for the provided sstable component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component, ZeroCopyMetadata zeroCopyMetadata);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given SAI component.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param component index component for which to build the handler.
+     * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder fileHandleBuilderFor(IndexComponent.ForRead component);
+
+    /**
+     * Creates a new {@link FileChannel} to read the given file, that is suitable for reading the file "at write time",
+     * that is typcally for when we need to access the partially written file to complete checksum.
+     *
+     * @param file the file to be read
+     * @return a new {@link FileChannel} for the provided file
+     */
+    default FileChannel writeTimeReadFileChannelFor(File file) throws IOException
+    {
+        return FileChannel.open(file.toPath(), StandardOpenOption.READ);
+    }
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files),
+     * that is suitable for reading the component during index build, that is typcally for when we need to access the
+     * component to complete the writing of another related component.
+     * <p>
+     * Other the fact that this method will be called a different time, it's requirements are the same than for
+     * {@link #fileHandleBuilderFor(IndexComponent.ForRead)}.
+     *
+     * @param component index component for which to build the handler.
+     * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder indexBuildTimeFileHandleBuilderFor(IndexComponent.ForRead component);
+
     class DefaultProvider implements StorageProvider
     {
         @Override
@@ -157,6 +255,90 @@ public interface StorageProvider
         public void invalidateFileSystemCache(File file)
         {
             INativeLibrary.instance.trySkipCache(file, 0, 0);
+        }
+
+        @Override
+        public void invalidateFileSystemCache(Descriptor desc, boolean tidied)
+        {
+            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.DATA));
+            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.ROW_INDEX));
+            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.PARTITION_INDEX));
+        }
+
+        protected Config.DiskAccessMode accessMode(Component component)
+        {
+            switch (component.type)
+            {
+                case PRIMARY_INDEX:
+                case PARTITION_INDEX:
+                case ROW_INDEX:
+                    return DatabaseDescriptor.getIndexAccessMode();
+                default:
+                    return DatabaseDescriptor.getDiskAccessMode();
+            }
+        }
+
+        @Override
+        @SuppressWarnings("resource")
+        public FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component)
+        {
+            return new FileHandle.Builder(descriptor.fileFor(component))
+                   .mmapped(accessMode(component) == Config.DiskAccessMode.mmap)
+                   .withChunkCache(ChunkCache.instance);
+        }
+
+        @Override
+        public FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType)
+        {
+            // By default, no difference between accesses during sstable writing and "at query time", but subclasses may need
+            // to differenciate both.
+            return fileHandleBuilderFor(descriptor, component);
+        }
+
+        @Override
+        @SuppressWarnings("resource")
+        public FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component, ZeroCopyMetadata zeroCopyMetadata)
+        {
+            return new FileHandle.Builder(descriptor.fileFor(Component.DATA))
+                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
+                   .withChunkCache(ChunkCache.instance)
+                   .slice(zeroCopyMetadata);
+        }
+
+        @Override
+        @SuppressWarnings("resource")
+        public FileHandle.Builder fileHandleBuilderFor(IndexComponent.ForRead component)
+        {
+            File file = component.file();
+            if (logger.isTraceEnabled())
+            {
+                logger.trace(component.parent().logMessage("Opening {} file handle for {} ({})"),
+                             file, FBUtilities.prettyPrintMemory(file.length()));
+            }
+            var builder = new FileHandle.Builder(file);
+            // Comments on why we don't use adviseRandom for some components where you might expect it:
+            //
+            // KD_TREE: no adviseRandom because we do a large bulk read on startup, queries later may
+            //     benefit from adviseRandom but there's no way to split those apart
+            // POSTINGS_LISTS: for common terms with 1000s of rows, adviseRandom seems likely to
+            //     make it slower; no way to get cardinality at this point in the code
+            //     (and we already have shortcut code for the common 1:1 vector case)
+            //     so we leave it alone here
+            if (component.componentType() == IndexComponentType.TERMS_DATA
+                || component.componentType() == IndexComponentType.VECTOR
+                || component.componentType() == IndexComponentType.PRIMARY_KEY_TRIE)
+            {
+                builder = builder.adviseRandom();
+            }
+            return builder.mmapped(true);
+        }
+
+        @Override
+        public FileHandle.Builder indexBuildTimeFileHandleBuilderFor(IndexComponent.ForRead component)
+        {
+            // By default, no difference between accesses "at flush time" and "at query time", but subclasses may need
+            // to differenciate both.
+            return fileHandleBuilderFor(component);
         }
     }
 }

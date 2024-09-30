@@ -23,13 +23,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.assertj.core.util.VisibleForTesting;
 
 /**
 + * The SlabAllocator is a bump-the-pointer allocator that allocates
@@ -49,7 +49,8 @@ public class SlabAllocator extends MemtableBufferAllocator
 {
     private static final Logger logger = LoggerFactory.getLogger(SlabAllocator.class);
 
-    private final static int REGION_SIZE = 1024 * 1024;
+    @VisibleForTesting
+    public final static int REGION_SIZE = 1024 * 1024;
     private final static int MAX_CLONED_SIZE = 128 * 1024; // bigger than this don't go in the region
 
     // globally stash any Regions we allocate but are beaten to using, and use these up before allocating any more

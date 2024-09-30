@@ -108,7 +108,6 @@ public abstract class Selector
         /**
          * Checks if this factory creates <code>Selector</code>s that simply return a column value.
          *
-         * @param index the column index
          * @return <code>true</code> if this factory creates <code>Selector</code>s that simply return a column value,
          * <code>false</code> otherwise.
          */
@@ -185,11 +184,10 @@ public abstract class Selector
     /**
      * Add the current value from the specified <code>ResultSetBuilder</code>.
      *
-     * @param protocolVersion protocol version used for serialization
      * @param rs the <code>ResultSetBuilder</code>
      * @throws InvalidRequestException if a problem occurs while add the input value
      */
-    public abstract void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException;
+    public abstract void addInput(ResultSetBuilder rs) throws InvalidRequestException;
 
     /**
      * Returns the selector output.
@@ -199,6 +197,16 @@ public abstract class Selector
      * @throws InvalidRequestException if a problem occurs while computing the output value
      */
     public abstract ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException;
+
+    protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+    {
+        throw new UnsupportedOperationException();
+    }
 
     /**
      * Returns the <code>Selector</code> output type.

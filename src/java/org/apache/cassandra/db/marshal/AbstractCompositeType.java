@@ -45,6 +45,12 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
         super(ComparisonType.CUSTOM, false, subTypes);
     }
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
     {
         if (accessorL.isEmpty(left) || accessorR.isEmpty(right))
@@ -61,7 +67,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
         int offsetL = startingOffset(isStaticL);
         int offsetR = startingOffset(isStaticR);
 
-        while (!accessorL.isEmptyFromOffset(left, offsetL) && !accessorR.isEmptyFromOffset(right, offsetL))
+        while (!accessorL.isEmptyFromOffset(left, offsetL) && !accessorR.isEmptyFromOffset(right, offsetR))
         {
             AbstractType<?> comparator = getComparator(i, left, accessorL, right, accessorR, offsetL, offsetR);
             offsetL += getComparatorSize(left, accessorL, offsetL);
@@ -233,6 +239,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
             part = p.getRemainingPart();
 
             ByteBuffer component = type.fromString(unescape(part));
+            type.validate(component);
             totalLength += p.getComparatorSerializedSize() + 2 + component.remaining() + 1;
             components.add(component);
             comparators.add(p);
@@ -290,7 +297,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
 
             if (accessor.sizeFromOffset(input, offset) < 2)
                 throw new MarshalException("Not enough bytes to read value size of component " + i);
-            int length = accessor.getShort(input, offset);
+            int length = accessor.getUnsignedShort(input, offset);
             offset += 2;
 
             if (accessor.sizeFromOffset(input, offset) < length)
@@ -312,11 +319,6 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
     }
 
     public abstract ByteBuffer decompose(Object... objects);
-
-    public TypeSerializer<ByteBuffer> getSerializer()
-    {
-        return BytesSerializer.instance;
-    }
 
     abstract protected <V> int getComparatorSize(V value, ValueAccessor<V> accessor, int offset);
     /**

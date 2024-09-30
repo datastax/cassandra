@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.util;
 
+import java.nio.ByteOrder;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -54,6 +55,7 @@ public class FileHandle extends SharedCloseableImpl
     public final ChannelProxy channel;
 
     public final long onDiskLength;
+    private final ByteOrder order;
 
     public final SliceDescriptor sliceDescriptor;
 
@@ -71,6 +73,7 @@ public class FileHandle extends SharedCloseableImpl
                        ChannelProxy channel,
                        RebuffererFactory rebuffererFactory,
                        CompressionMetadata compressionMetadata,
+                       ByteOrder order,
                        long onDiskLength,
                        SliceDescriptor sliceDescriptor)
     {
@@ -78,6 +81,7 @@ public class FileHandle extends SharedCloseableImpl
         this.rebuffererFactory = rebuffererFactory;
         this.channel = channel;
         this.compressionMetadata = Optional.ofNullable(compressionMetadata);
+        this.order = order;
         this.onDiskLength = onDiskLength;
         this.sliceDescriptor = sliceDescriptor;
     }
@@ -88,6 +92,7 @@ public class FileHandle extends SharedCloseableImpl
         channel = copy.channel;
         rebuffererFactory = copy.rebuffererFactory;
         compressionMetadata = copy.compressionMetadata;
+        order = copy.order;
         onDiskLength = copy.onDiskLength;
         sliceDescriptor = copy.sliceDescriptor;
     }
@@ -163,7 +168,7 @@ public class FileHandle extends SharedCloseableImpl
         Rebufferer.BufferHolder bufferHolder = position > 0
                                                ? Rebufferer.emptyBufferHolderAt(position)
                                                : Rebufferer.EMPTY;
-        return new RandomAccessReader(instantiateRebufferer(limiter), bufferHolder);
+        return new RandomAccessReader(instantiateRebufferer(limiter), order, bufferHolder);
     }
 
     /**
@@ -268,11 +273,13 @@ public class FileHandle extends SharedCloseableImpl
         private ChunkCache chunkCache;
         private int bufferSize = RandomAccessReader.DEFAULT_BUFFER_SIZE;
         private BufferType bufferType = BufferType.OFF_HEAP;
+        private ByteOrder order = ByteOrder.BIG_ENDIAN;
 
         private SliceDescriptor sliceDescriptor = SliceDescriptor.NONE;
 
         private boolean mmapped = false;
         private boolean compressed = false;
+        private boolean adviseRandom = false;
         private long length = -1;
 
         public Builder(File file)
@@ -354,6 +361,17 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+        /**
+         * Set the byte order to apply to each buffer.
+         * @param order
+         * @return
+         */
+        public Builder order(ByteOrder order)
+        {
+            this.order = order;
+            return this;
+        }
+
         public Builder withLength(long length)
         {
             this.length = length;
@@ -363,6 +381,12 @@ public class FileHandle extends SharedCloseableImpl
         public Builder slice(SliceDescriptor sliceDescriptor)
         {
             this.sliceDescriptor = sliceDescriptor;
+            return this;
+        }
+
+        public Builder adviseRandom()
+        {
+            adviseRandom = true;
             return this;
         }
 
@@ -414,7 +438,7 @@ public class FileHandle extends SharedCloseableImpl
                 {
                     if (compressed)
                     {
-                        regions = MmappedRegions.map(channelCopy, compressionMetadata, sliceDescriptor.sliceStart);
+                        regions = MmappedRegions.map(channelCopy, compressionMetadata, sliceDescriptor.sliceStart, adviseRandom);
                         rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata, regions, sliceDescriptor.sliceStart));
                     }
                     else
@@ -425,6 +449,9 @@ public class FileHandle extends SharedCloseableImpl
                 }
                 else
                 {
+                    if (adviseRandom)
+                        logger.warn("adviseRandom ignored for non-mmapped FileHandle {}", file);
+
                     regions = null;
                     if (compressed)
                     {
@@ -441,7 +468,7 @@ public class FileHandle extends SharedCloseableImpl
                     }
                 }
                 Cleanup cleanup = new Cleanup(channelCopy, rebuffererFactory, compressionMetadata, chunkCache);
-                return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, length, sliceDescriptor);
+                return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, order, length, sliceDescriptor);
             }
             catch (Throwable t)
             {
@@ -490,7 +517,7 @@ public class FileHandle extends SharedCloseableImpl
             }
 
             if (regions == null)
-                regions = MmappedRegions.map(channel, length, startOffset);
+                regions = MmappedRegions.map(channel, length, startOffset, adviseRandom);
             else
                 regions.extend(length);
         }

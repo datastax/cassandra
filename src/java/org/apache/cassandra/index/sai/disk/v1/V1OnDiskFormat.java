@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -31,17 +33,22 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.AbstractMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
@@ -51,31 +58,40 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 
+/**
+ * The original SAI OnDiskFormat, found in DSE.  Because it has a simple token -> offsets map, queries
+ * against "wide partitions" are slow in proportion to the partition size, since we have to read
+ * the whole partition and post-filter the rows
+ */
 public class V1OnDiskFormat implements OnDiskFormat
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static final Set<IndexComponent> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponent.GROUP_COMPLETION_MARKER,
-                                                                                 IndexComponent.GROUP_META,
-                                                                                 IndexComponent.TOKEN_VALUES,
-                                                                                 IndexComponent.OFFSETS_VALUES);
-    private static final Set<IndexComponent> LITERAL_COMPONENTS = EnumSet.of(IndexComponent.COLUMN_COMPLETION_MARKER,
-                                                                             IndexComponent.META,
-                                                                             IndexComponent.TERMS_DATA,
-                                                                             IndexComponent.POSTING_LISTS);
-    private static final Set<IndexComponent> NUMERIC_COMPONENTS = EnumSet.of(IndexComponent.COLUMN_COMPLETION_MARKER,
-                                                                             IndexComponent.META,
-                                                                             IndexComponent.KD_TREE,
-                                                                             IndexComponent.KD_TREE_POSTING_LISTS);
+    private static final Set<IndexComponentType> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
+                                                                                     IndexComponentType.GROUP_META,
+                                                                                     IndexComponentType.TOKEN_VALUES,
+                                                                                     IndexComponentType.OFFSETS_VALUES);
+
+    private static final Set<IndexComponentType> LITERAL_COMPONENTS = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
+                                                                                 IndexComponentType.META,
+                                                                                 IndexComponentType.TERMS_DATA,
+                                                                                 IndexComponentType.POSTING_LISTS);
+    private static final Set<IndexComponentType> NUMERIC_COMPONENTS = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
+                                                                                 IndexComponentType.META,
+                                                                                 IndexComponentType.KD_TREE,
+                                                                                 IndexComponentType.KD_TREE_POSTING_LISTS);
 
     /**
      * Global limit on heap consumed by all index segment building that occurs outside the context of Memtable flush.
      *
-     * Note that to avoid flushing extremely small index segments, a segment is only flushed when
+     * Note that to avoid flushing extremly small index segments, a segment is only flushed when
      * both the global size of all building segments has breached the limit and the size of the
      * segment in question reaches (segment_write_buffer_space_mb / # currently building column indexes).
      *
@@ -91,6 +107,8 @@ public class V1OnDiskFormat implements OnDiskFormat
 
     static
     {
+        logger.debug("Segment build memory limit set to {} bytes", prettyPrintMemory(SEGMENT_BUILD_MEMORY_LIMIT));
+
         CassandraMetricsRegistry.MetricName bufferSpaceUsed = DefaultNameFactory.createMetricName(AbstractMetrics.TYPE, "SegmentBufferSpaceUsedBytes", null);
         CassandraMetricsRegistry.Metrics.register(bufferSpaceUsed, (Gauge<Long>) SEGMENT_BUILD_MEMORY_LIMITER::currentBytesUsed);
 
@@ -111,6 +129,12 @@ public class V1OnDiskFormat implements OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean hasVectorIndexChecksum()
+        {
+            return false;
+        }
     };
 
     protected V1OnDiskFormat()
@@ -123,134 +147,129 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator)
     {
         return new PartitionAwarePrimaryKeyFactory();
     }
 
     @Override
-    public boolean isPerSSTableBuildComplete(IndexDescriptor indexDescriptor)
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException
     {
-        return indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER);
+        return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(perSSTableComponents, sstable, primaryKeyFactory);
     }
 
     @Override
-    public boolean isPerIndexBuildComplete(IndexDescriptor indexDescriptor, IndexContext indexContext)
+    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        return indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER) &&
-               indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
+        return perIndexComponents.isEmpty()
+               ? new EmptyIndex()
+               : new V1SearchableIndex(sstableContext, perIndexComponents);
     }
 
     @Override
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException
+    public IndexSearcher newIndexSearcher(SSTableContext sstableContext,
+                                          IndexContext indexContext,
+                                          PerIndexFiles indexFiles,
+                                          SegmentMetadata segmentMetadata) throws IOException
     {
-        return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(indexDescriptor, sstable);
-    }
-
-    @Override
-    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
-    {
-        return new V1SearchableIndex(sstableContext, indexContext);
+        if (indexContext.isLiteral())
+            // We filter because the CA format wrote maps acording to a different order than their abstract type.
+            return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, Version.AA, true);
+        return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
     }
 
     @Override
     public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
     {
-        return new SSTableComponentsWriter(indexDescriptor);
+        return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
     }
 
     @Override
     public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
                                             IndexDescriptor indexDescriptor,
                                             LifecycleNewTracker tracker,
-                                            RowMapping rowMapping)
+                                            RowMapping rowMapping,
+                                            long keyCount)
     {
+        IndexContext context = index.getIndexContext();
+        IndexComponents.ForWrite perIndexComponents = indexDescriptor.newPerIndexComponentsForWrite(context);
         // If we're not flushing or we haven't yet started the initialization build, flush from SSTable contents.
         if (tracker.opType() != OperationType.FLUSH || !index.canFlushFromMemtableIndex())
         {
             NamedMemoryLimiter limiter = SEGMENT_BUILD_MEMORY_LIMITER;
-            logger.info(index.getIndexContext().logMessage("Starting a compaction index build. Global segment memory usage: {}"),
-                        prettyPrintMemory(limiter.currentBytesUsed()));
+            logger.debug(index.getIndexContext().logMessage("Starting a compaction index build. Global segment memory usage: {}"),
+                         prettyPrintMemory(limiter.currentBytesUsed()));
 
-            return new SSTableIndexWriter(indexDescriptor, index.getIndexContext(), limiter, index.isIndexValid());
+            return new SSTableIndexWriter(perIndexComponents, limiter, index.isIndexValid(), keyCount);
         }
 
-        return new MemtableIndexWriter(index.getIndexContext().getPendingMemtableIndex(tracker),
-                                       indexDescriptor,
-                                       index.getIndexContext(),
+        return new MemtableIndexWriter(context.getPendingMemtableIndex(tracker),
+                                       perIndexComponents,
+                                       context.keyFactory(),
                                        rowMapping);
     }
 
-    @Override
-    public boolean validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum)
+    protected Version getExpectedEarliestVersion(IndexContext context, IndexComponentType indexComponentType)
     {
-        for (IndexComponent indexComponent : perSSTableComponents())
+        Version earliest = Version.EARLIEST;
+        if (isVectorDataComponent(context, indexComponentType))
         {
-            if (!isBuildCompletionMarker(indexComponent))
+            if (!Version.latest().onOrAfter(Version.VECTOR_EARLIEST))
+                throw new IllegalStateException("Configured latest version " + Version.latest() + " is not compatible with vector index");
+            earliest = Version.VECTOR_EARLIEST;
+        }
+        return earliest;
+    }
+
+    @Override
+    public boolean validateIndexComponent(IndexComponent.ForRead component, boolean checksum)
+    {
+        if (component.isCompletionMarker())
+            return true;
+
+        // starting with v3, vector components include proper headers and checksum; skip for earlier versions
+        IndexContext context = component.parent().context();
+        if (isVectorDataComponent(context, component.componentType())
+            && !component.parent().version().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
+        {
+            return true;
+        }
+
+        Version earliest = getExpectedEarliestVersion(context, component.componentType());
+        try (IndexInput input = component.openInput())
+        {
+            if (checksum)
+                SAICodecUtils.validateChecksum(input);
+            else
+                SAICodecUtils.validate(input, earliest);
+        }
+        catch (Throwable e)
+        {
+            if (logger.isDebugEnabled())
             {
-                try (IndexInput input = indexDescriptor.openPerSSTableInput(indexComponent))
-                {
-                    if (checksum)
-                        SAICodecUtils.validateChecksum(input);
-                    else
-                        SAICodecUtils.validate(input);
-                }
-                catch (Throwable e)
-                {
-                    if (logger.isDebugEnabled())
-                    {
-                        logger.debug(indexDescriptor.logMessage("{} failed for index component {} on SSTable {}"),
-                                     (checksum ? "Checksum validation" : "Validation"),
-                                     indexComponent,
-                                     indexDescriptor.descriptor);
-                    }
-                    return false;
-                }
+                logger.debug(component.parent().logMessage("{} failed for index component {} on SSTable {}"),
+                             (checksum ? "Checksum validation" : "Validation"),
+                             component,
+                             component.parent().descriptor(),
+                             e);
             }
+            return false;
         }
         return true;
     }
 
     @Override
-    public boolean validatePerIndexComponents(IndexDescriptor indexDescriptor, IndexContext indexContext, boolean checksum)
-    {
-        for (IndexComponent indexComponent : perIndexComponents(indexContext))
-        {
-            if (!isBuildCompletionMarker(indexComponent))
-            {
-                try (IndexInput input = indexDescriptor.openPerIndexInput(indexComponent, indexContext))
-                {
-                    if (checksum)
-                        SAICodecUtils.validateChecksum(input);
-                    else
-                        SAICodecUtils.validate(input);
-                }
-                catch (Throwable e)
-                {
-                    if (logger.isDebugEnabled())
-                    {
-                        logger.debug(indexDescriptor.logMessage("{} failed for index component {} on SSTable {}"),
-                                     (checksum ? "Checksum validation" : "Validation"),
-                                     indexComponent,
-                                     indexDescriptor.descriptor);
-                    }
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    @Override
-    public Set<IndexComponent> perSSTableComponents()
+    public Set<IndexComponentType> perSSTableComponentTypes()
     {
         return PER_SSTABLE_COMPONENTS;
     }
 
     @Override
-    public Set<IndexComponent> perIndexComponents(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
     {
-        return TypeUtil.isLiteral(indexContext.getValidator()) ? LITERAL_COMPONENTS : NUMERIC_COMPONENTS;
+        if (TypeUtil.isLiteral(indexContext.getValidator()))
+            return LITERAL_COMPONENTS;
+        return NUMERIC_COMPONENTS;
     }
 
     @Override
@@ -266,9 +285,28 @@ public class V1OnDiskFormat implements OnDiskFormat
         return 2;
     }
 
-    protected boolean isBuildCompletionMarker(IndexComponent indexComponent)
+    @Override
+    public ByteOrder byteOrderFor(IndexComponentType indexComponentType, IndexContext context)
     {
-        return indexComponent == IndexComponent.GROUP_COMPLETION_MARKER ||
-               indexComponent == IndexComponent.COLUMN_COMPLETION_MARKER;
+        return ByteOrder.BIG_ENDIAN;
+    }
+
+    @Override
+    public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type)
+    {
+        return TypeUtil.isLiteral(type) ? ByteComparable.fixedLength(input)
+                                        : TypeUtil.asComparableBytes(input, type);
+    }
+
+    /** vector data components (that did not have checksums before v3) */
+    private boolean isVectorDataComponent(IndexContext context, IndexComponentType indexComponentType)
+    {
+        if (context == null || !context.isVector())
+            return false;
+
+        return indexComponentType == IndexComponentType.VECTOR ||
+               indexComponentType == IndexComponentType.PQ ||
+               indexComponentType == IndexComponentType.TERMS_DATA ||
+               indexComponentType == IndexComponentType.POSTING_LISTS;
     }
 }

@@ -42,6 +42,7 @@ import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.SizedInts;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -76,10 +77,12 @@ public class PartitionIndex implements Closeable
     /** Key to apply when a caller asks for a full index. Normally null, but set to last for zero-copied indexes. */
     private final DecoratedKey filterLast;
 
+    public final ByteComparable.Version version;
+
     public static final long NOT_FOUND = Long.MIN_VALUE;
     public static final int FOOTER_LENGTH = 3 * 8;
 
-    public PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, DecoratedKey filterFirst, DecoratedKey filterLast)
+    public PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, DecoratedKey filterFirst, DecoratedKey filterLast, ByteComparable.Version version)
     {
         this.keyCount = keyCount;
         this.fh = fh.sharedCopy();
@@ -88,11 +91,12 @@ public class PartitionIndex implements Closeable
         this.root = trieRoot;
         this.filterFirst = filterFirst;
         this.filterLast = filterLast;
+        this.version = version;
     }
 
     private PartitionIndex(PartitionIndex src)
     {
-        this(src.fh, src.root, src.keyCount, src.first, src.last, src.filterFirst, src.filterLast);
+        this(src.fh, src.root, src.keyCount, src.first, src.last, src.filterFirst, src.filterLast, src.version);
     }
 
     static class Payload
@@ -168,23 +172,29 @@ public class PartitionIndex implements Closeable
 
     public static PartitionIndex load(FileHandle.Builder fhBuilder,
                                       IPartitioner partitioner,
-                                      boolean preload) throws IOException
+                                      boolean preload,
+                                      ByteComparable.Version version) throws IOException
     {
-        return load(fhBuilder, partitioner, preload, null);
+        return load(fhBuilder, partitioner, preload, null, version);
     }
 
     public static PartitionIndex load(FileHandle.Builder fhBuilder,
                                       IPartitioner partitioner,
                                       boolean preload,
-                                      ZeroCopyMetadata zeroCopyMetadata) throws IOException
+                                      ZeroCopyMetadata zeroCopyMetadata,
+                                      ByteComparable.Version version) throws IOException
     {
         try (FileHandle fh = fhBuilder.complete())
         {
-            return load(fh, partitioner, preload, zeroCopyMetadata);
+            return load(fh, partitioner, preload, zeroCopyMetadata, version);
         }
     }
 
-    public static PartitionIndex load(FileHandle fh, IPartitioner partitioner, boolean preload, ZeroCopyMetadata zeroCopyMetadata) throws IOException
+    public static PartitionIndex load(FileHandle fh,
+                                      IPartitioner partitioner,
+                                      boolean preload,
+                                      ZeroCopyMetadata zeroCopyMetadata,
+                                      ByteComparable.Version version) throws IOException
     {
         try (FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
         {
@@ -225,7 +235,7 @@ public class PartitionIndex implements Closeable
                 keyCount = zeroCopyMetadata.estimatedKeys();
             }
 
-            return new PartitionIndex(fh, root, keyCount, first, last, filterFirst, filterLast);
+            return new PartitionIndex(fh, root, keyCount, first, last, filterFirst, filterLast, version);
         }
     }
 
@@ -237,7 +247,7 @@ public class PartitionIndex implements Closeable
 
     public Reader openReader()
     {
-        return new Reader(this);
+        return new Reader(this, version);
     }
 
     protected IndexPosIterator allKeysIterator()
@@ -283,9 +293,9 @@ public class PartitionIndex implements Closeable
      */
     public static class Reader extends Walker<Reader>
     {
-        protected Reader(PartitionIndex index)
+        protected Reader(PartitionIndex index, ByteComparable.Version version)
         {
-            super(index.instantiateRebufferer(), index.root);
+            super(index.instantiateRebufferer(), index.root, version);
         }
 
         /**
@@ -396,9 +406,6 @@ public class PartitionIndex implements Closeable
      */
     public static class IndexPosIterator extends ValueIterator<IndexPosIterator>
     {
-        static final long INVALID = -1;
-        long pos = INVALID;
-
         /**
          * @param index PartitionIndex to use for the iteration.
          *
@@ -407,12 +414,12 @@ public class PartitionIndex implements Closeable
          */
         public IndexPosIterator(PartitionIndex index)
         {
-            super(index.instantiateRebufferer(), index.root, index.filterFirst, index.filterLast, true);
+            super(index.instantiateRebufferer(), index.root, index.filterFirst, index.filterLast, LeftBoundTreatment.ADMIT_PREFIXES, index.version);
         }
 
         IndexPosIterator(PartitionIndex index, PartitionPosition start, PartitionPosition end)
         {
-            super(index.instantiateRebufferer(), index.root, start, end, true);
+            super(index.instantiateRebufferer(), index.root, start, end, LeftBoundTreatment.ADMIT_PREFIXES, index.version);
         }
 
         /**
@@ -420,18 +427,12 @@ public class PartitionIndex implements Closeable
          */
         protected long nextIndexPos()
         {
-            // without missing positions, we save and reuse the unreturned position.
-            if (pos == INVALID)
-            {
-                pos = nextPayloadedNode();
-                if (pos == INVALID)
-                    return NOT_FOUND;
-            }
+            return nextValueAsLong(this::getCurrentIndexPos, NOT_FOUND);
+        }
 
-            go(pos);
-
-            pos = INVALID; // make sure next time we call nextPayloadedNode() again
-            return getIndexPos(buf, payloadPosition(), payloadFlags()); // this should not throw
+        private long getCurrentIndexPos()
+        {
+            return getIndexPos(buf, payloadPosition(), payloadFlags());
         }
     }
 
@@ -447,7 +448,7 @@ public class PartitionIndex implements Closeable
         }
         catch (Throwable t)
         {
-            logger.warn("Failed to dump trie to {} due to exception {}", fileName, t);
+            logger.warn("Failed to dump trie to {} due to exception", fileName, t);
         }
     }
 

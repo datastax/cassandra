@@ -54,6 +54,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
 
@@ -278,7 +279,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         // TODO - we should perhaps consider executing this code less frequently than legacy strategies
         // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
 
-        return getNextBackgroundTasks(getNextCompactionAggregates(gcBefore), gcBefore);
+        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables. 
+        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction 
+        // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
+        Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
+                                                                     .instance
+                                                                     .consistent
+                                                                     .local
+                                                                     .getZombieRepairFinalizationTasks(realm, realm.getLiveSSTables());
+        if (!repairFinalizationTasks.isEmpty())
+            return repairFinalizationTasks;
+        else
+            return getNextBackgroundTasks(getNextCompactionAggregates(gcBefore), gcBefore);
     }
 
     /**
@@ -337,8 +349,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
         ShardManager currentShardManager = getShardManager();
-        double flushDensity = realm.metrics().flushSizeOnDisk().get() * shardManager.shardSetCoverage() / currentShardManager.localSpaceCoverage();
-        ShardTracker boundaries = currentShardManager.boundaries(controller.getNumShards(flushDensity));
+        double flushDensity = realm.metrics().flushSizeOnDisk().get() * currentShardManager.shardSetCoverage() / currentShardManager.localSpaceCoverage();
+        ShardTracker boundaries = currentShardManager.boundaries(controller.getFlushShards(flushDensity));
         return new ShardedMultiWriter(realm,
                                       descriptor,
                                       keyCount,
@@ -385,7 +397,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 return; // another thread beat us to the update
 
             DiskBoundaries currentBoundaries = realm.getDiskBoundaries();
-            shardManager = ShardManager.create(currentBoundaries);
+            shardManager = ShardManager.create(currentBoundaries, realm.getKeyspaceReplicationStrategy(), controller.isReplicaAware());
             arenaSelector = new ArenaSelector(controller, currentBoundaries);
             // Note: this can just as well be done without the synchronization (races would be benign, just doing some
             // redundant work). For the current usages of this blocking is fine and expected to perform no worse.
@@ -481,7 +493,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        spaceAvailable,
                                                        rateLimitLog,
                                                        remainingAdaptiveCompactions);
-        logger.debug("Selecting up to {} new compactions of up to {}, concurrency limit {}{}",
+        logger.trace("Selecting up to {} new compactions of up to {}, concurrency limit {}{}",
                      Math.max(0, limits.maxCompactions - limits.runningCompactions),
                      FBUtilities.prettyPrintMemory(limits.spaceAvailable),
                      limits.maxConcurrentCompactions,
@@ -848,21 +860,22 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
                                              BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
-        maybeUpdateSelector();
+        // Copy to avoid race condition
+        var currentShardManager = getShardManager();
         Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter);
         Map<Arena, List<Level>> ret = new LinkedHashMap<>(); // should preserve the order of arenas
 
         for (Arena arena : arenas)
         {
             List<Level> levels = new ArrayList<>(MAX_LEVELS);
-            arena.sstables.sort(shardManager::compareByDensity);
+            arena.sstables.sort(currentShardManager::compareByDensity);
 
-            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / shardManager.localSpaceCoverage());
+            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / currentShardManager.localSpaceCoverage());
             int index = 0;
             Level level = new Level(controller, index, 0, maxSize);
             for (CompactionSSTable candidate : arena.sstables)
             {
-                final double size = shardManager.density(candidate);
+                final double size = currentShardManager.density(candidate);
                 if (size < level.max)
                 {
                     level.add(candidate);
@@ -903,7 +916,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 logger.trace("Arena {} has {} levels", arena, levels.size());
         }
 
-        logger.debug("Found {} arenas with buckets for {}.{}", ret.size(), realm.getKeyspaceName(), realm.getTableName());
+        logger.trace("Found {} arenas with buckets for {}.{}", ret.size(), realm.getKeyspaceName(), realm.getTableName());
         return ret;
     }
 

@@ -29,7 +29,7 @@ import org.junit.Test;
 public class SelectSingleColumnRelationTest extends CQLTester
 {
     @Test
-    public void testInvalidCollectionEqualityRelation() throws Throwable
+    public void testInvalidCollectionEqualityRelation()
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b set<int>, c list<int>, d map<int, int>)");
         createIndex("CREATE INDEX ON %s (b)");
@@ -45,7 +45,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidCollectionNonEQRelation() throws Throwable
+    public void testInvalidCollectionNonEQRelation()
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b set<int>, c int)");
         createIndex("CREATE INDEX ON %s (c)");
@@ -62,7 +62,9 @@ public class SelectSingleColumnRelationTest extends CQLTester
                              "SELECT * FROM %s WHERE c = 0 AND b <= ?", set(0));
         assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a 'IN' relation",
                              "SELECT * FROM %s WHERE c = 0 AND b IN (?)", set(0));
-        assertInvalidMessage("Unsupported \"!=\" relation: b != 5",
+        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a 'NOT IN' relation",
+                             "SELECT * FROM %s WHERE c = 0 AND b NOT IN (?)", set(0));
+        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '!=' relation",
                 "SELECT * FROM %s WHERE c = 0 AND b != 5");
         assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
                 "SELECT * FROM %s WHERE c = 0 AND b IS NOT NULL");
@@ -158,7 +160,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testPartitionKeyColumnRelations() throws Throwable
+    public void testPartitionKeyColumnRelations()
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key((a, b), c))");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "first", 1, 1, 1);
@@ -204,7 +206,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testClusteringColumnRelationsWithClusteringOrder() throws Throwable
+    public void testClusteringColumnRelationsWithClusteringOrder()
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key(a, b, c)) WITH CLUSTERING ORDER BY (b DESC, c ASC);");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "first", 1, 5, 1);
@@ -224,7 +226,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testAllowFilteringWithClusteringColumn() throws Throwable
+    public void testAllowFilteringWithClusteringColumn()
     {
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
 
@@ -263,7 +265,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testAllowFilteringWithIndexedColumn() throws Throwable
+    public void testAllowFilteringWithIndexedColumn()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int)");
         createIndex("CREATE INDEX ON %s(a)");
@@ -284,7 +286,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testAllowFilteringWithIndexedColumnAndStaticColumns() throws Throwable
+    public void testAllowFilteringWithIndexedColumnAndStaticColumns()
     {
         createTable("CREATE TABLE %s (a int, b int, c int, s int static, PRIMARY KEY(a, b))");
         createIndex("CREATE INDEX ON %s(c)");
@@ -303,7 +305,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testIndexQueriesOnComplexPrimaryKey() throws Throwable
+    public void testIndexQueriesOnComplexPrimaryKey()
     {
         createTable("CREATE TABLE %s (pk0 int, pk1 int, ck0 int, ck1 int, ck2 int, value int, PRIMARY KEY ((pk0, pk1), ck0, ck1, ck2))");
 
@@ -326,7 +328,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnClusteringColumns() throws Throwable
+    public void testIndexOnClusteringColumns()
     {
         createTable("CREATE TABLE %s (id1 int, id2 int, author text, time bigint, v1 text, v2 text, PRIMARY KEY ((id1, id2), author, time))");
         createIndex("CREATE INDEX ON %s(time)");
@@ -388,7 +390,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testRangeQueryOnIndex() throws Throwable
+    public void testRangeQueryOnIndex()
     {
         createTable("CREATE TABLE %s (id int primary key, row int, setid int);");
         createIndex("CREATE INDEX ON %s (setid)");
@@ -418,7 +420,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testINWithDuplicateValue() throws Throwable
+    public void testINWithDuplicateValue()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, v int, PRIMARY KEY (k1, k2))");
         execute("INSERT INTO %s (k1,  k2, v) VALUES (?, ?, ?)", 1, 1, 1);
@@ -434,7 +436,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testLargeClusteringINValues() throws Throwable
+    public void testLargeClusteringINValues()
     {
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
         execute("INSERT INTO %s (k, c, v) VALUES (0, 0, 0)");
@@ -446,7 +448,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testMultiplePartitionKeyWithIndex() throws Throwable
+    public void testMultiplePartitionKeyWithIndex()
     {
         createTable("CREATE TABLE %s (a int, b int, c int, d int, e int, f int, PRIMARY KEY ((a, b), c, d, e))");
         createIndex("CREATE INDEX ON %s (c)");
@@ -484,18 +486,18 @@ public class SelectSingleColumnRelationTest extends CQLTester
                 row(0, 0, 1, 1, 1, 5),
                 row(0, 0, 2, 0, 0, 5));
 
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"),
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'),
                              "SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND f = ?", 0, 0, 1, 5);
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND f = ? ALLOW FILTERING", 0, 1, 3, 5),
                    row(0, 0, 1, 1, 1, 5));
 
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"),
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'),
                              "SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND f = ?", 0, 1, 2, 5);
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND f = ? ALLOW FILTERING", 0, 1, 2, 5),
                    row(0, 0, 1, 1, 1, 5),
                    row(0, 0, 2, 0, 0, 5));
 
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"),
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'),
                              "SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND d IN (?) AND f = ?", 0, 1, 3, 0, 3);
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND c IN (?, ?) AND d IN (?) AND f = ? ALLOW FILTERING", 0, 1, 3, 0, 3),
                    row(0, 0, 1, 0, 0, 3));
@@ -506,7 +508,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
                 row(0, 0, 1, 1, 1, 5),
                 row(0, 0, 2, 0, 0, 5));
 
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"),
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'),
                              "SELECT * FROM %s WHERE a = ? AND c >= ? AND f = ?", 0, 1, 5);
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND b = ? AND c >= ? AND f = ?", 0, 0, 1, 5),
                    row(0, 0, 1, 1, 1, 5),
@@ -527,7 +529,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testFunctionCallWithUnset() throws Throwable
+    public void testFunctionCallWithUnset()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
 
@@ -538,7 +540,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testLimitWithUnset() throws Throwable
+    public void testLimitWithUnset()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, i int)");
         execute("INSERT INTO %s (k, i) VALUES (1, 1)");
@@ -550,7 +552,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testWithUnsetValues() throws Throwable
+    public void testWithUnsetValues()
     {
         createTable("CREATE TABLE %s (k int, i int, j int, s text, PRIMARY KEY(k,i,j))");
         createIndex("CREATE INDEX s_index ON %s (s)");
@@ -559,11 +561,17 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertInvalidMessage("Invalid unset value for column k", "SELECT * from %s WHERE k IN ?", unset());
         assertInvalidMessage("Invalid unset value for column k", "SELECT * from %s WHERE k IN(?)", unset());
         assertInvalidMessage("Invalid unset value for column k", "SELECT * from %s WHERE k IN(?,?)", 1, unset());
+        assertInvalidMessage("Invalid unset value for column k", "SELECT * from %s WHERE k NOT IN ? ALLOW FILTERING", unset());
+        assertInvalidMessage("Unsupported unset value for column k", "SELECT * from %s WHERE k NOT IN(?) ALLOW FILTERING", unset());
+        assertInvalidMessage("Unsupported unset value for column k", "SELECT * from %s WHERE k NOT IN(?,?) ALLOW FILTERING", 1, unset());
         // clustering column
         assertInvalidMessage("Invalid unset value for column i", "SELECT * from %s WHERE k = 1 AND i = ?", unset());
         assertInvalidMessage("Invalid unset value for column i", "SELECT * from %s WHERE k = 1 AND i IN ?", unset());
         assertInvalidMessage("Invalid unset value for column i", "SELECT * from %s WHERE k = 1 AND i IN(?)", unset());
         assertInvalidMessage("Invalid unset value for column i", "SELECT * from %s WHERE k = 1 AND i IN(?,?)", 1, unset());
+        assertInvalidMessage("Invalid unset value for column i", "SELECT * from %s WHERE k = 1 AND i NOT IN ?", unset());
+        assertInvalidMessage("Invalid unset value for column i", "SELECT * from %s WHERE k = 1 AND i NOT IN(?)", unset());
+        assertInvalidMessage("Invalid unset value for column i", "SELECT * from %s WHERE k = 1 AND i NOT IN(?,?)", 1, unset());
         assertInvalidMessage("Invalid unset value for column i", "SELECT * from %s WHERE i = ? ALLOW FILTERING", unset());
         // indexed column
         assertInvalidMessage("Unsupported unset value for column s", "SELECT * from %s WHERE s = ?", unset());
@@ -572,7 +580,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidSliceRestrictionOnPartitionKey() throws Throwable
+    public void testInvalidSliceRestrictionOnPartitionKey()
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b int, c text)");
         assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
@@ -582,7 +590,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidMulticolumnSliceRestrictionOnPartitionKey() throws Throwable
+    public void testInvalidMulticolumnSliceRestrictionOnPartitionKey()
     {
         createTable("CREATE TABLE %s (a int, b int, c text, PRIMARY KEY ((a, b)))");
         assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
@@ -600,7 +608,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidColumnNames() throws Throwable
+    public void testInvalidColumnNames()
     {
         createTable("CREATE TABLE %s (a int, b int, c map<int, int>, PRIMARY KEY (a, b))");
         assertInvalidMessage("Undefined column name d", "SELECT * FROM %s WHERE d = 0");
@@ -608,19 +616,24 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertInvalidMessage("Undefined column name d", "SELECT * FROM %s WHERE d > 0 and d <= 2");
         assertInvalidMessage("Undefined column name d", "SELECT * FROM %s WHERE d CONTAINS 0");
         assertInvalidMessage("Undefined column name d", "SELECT * FROM %s WHERE d CONTAINS KEY 0");
+        assertInvalidMessage("Undefined column name d", "SELECT * FROM %s WHERE d NOT CONTAINS 0");
+        assertInvalidMessage("Undefined column name d", "SELECT * FROM %s WHERE d NOT CONTAINS KEY 0");
         assertInvalidMessage("Undefined column name d", "SELECT a AS d FROM %s WHERE d = 0");
         assertInvalidMessage("Undefined column name d", "SELECT b AS d FROM %s WHERE d IN (0, 1)");
+        assertInvalidMessage("Undefined column name d", "SELECT b AS d FROM %s WHERE d NOT IN (0, 1)");
         assertInvalidMessage("Undefined column name d", "SELECT b AS d FROM %s WHERE d > 0 and d <= 2");
         assertInvalidMessage("Undefined column name d", "SELECT c AS d FROM %s WHERE d CONTAINS 0");
         assertInvalidMessage("Undefined column name d", "SELECT c AS d FROM %s WHERE d CONTAINS KEY 0");
+        assertInvalidMessage("Undefined column name d", "SELECT c AS d FROM %s WHERE d NOT CONTAINS 0");
+        assertInvalidMessage("Undefined column name d", "SELECT c AS d FROM %s WHERE d NOT CONTAINS KEY 0");
         assertInvalidMessage("Undefined column name d", "SELECT d FROM %s WHERE a = 0");
     }
 
     @Test
-    public void testInvalidNonFrozenUDTRelation() throws Throwable
+    public void testInvalidNonFrozenUDTRelation()
     {
         String type = createType("CREATE TYPE %s (a int)");
-        createTable("CREATE TABLE %s (a int PRIMARY KEY, b " + type + ")");
+        createTable("CREATE TABLE %s (a int PRIMARY KEY, b " + type + ')');
         Object udt = userType("a", 1);
 
         // All operators
@@ -631,12 +644,672 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b >= ?", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b <= ?", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b IN (?)", udt);
+        assertInvalidMessage(msg, "SELECT * FROM %s WHERE b NOT IN (?)", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b LIKE ?", udt);
-        assertInvalidMessage("Unsupported \"!=\" relation: b != {a: 0}",
-                             "SELECT * FROM %s WHERE b != {a: 0}", udt);
+        assertInvalidMessage(msg, "SELECT * FROM %s WHERE b != {a: 0}", udt);
         assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
                              "SELECT * FROM %s WHERE b IS NOT NULL", udt);
         assertInvalidMessage("Cannot use CONTAINS on non-collection column b",
                              "SELECT * FROM %s WHERE b CONTAINS ?", udt);
+        assertInvalidMessage("Cannot use NOT CONTAINS on non-collection column b",
+                             "SELECT * FROM %s WHERE b NOT CONTAINS ?", udt);
     }
+
+    @Test
+    public void testInRestrictionWithClusteringColumn()
+    {
+        createTable("CREATE TABLE %s (key int, c1 int, c2 int, s1 text static, PRIMARY KEY ((key, c1), c2))");
+
+        execute("INSERT INTO %s (key, c1, c2, s1) VALUES ( 10, 11, 1, 's1')");
+        execute("INSERT INTO %s (key, c1, c2, s1) VALUES ( 10, 12, 2, 's2')");
+        execute("INSERT INTO %s (key, c1, c2, s1) VALUES ( 10, 13, 3, 's3')");
+        execute("INSERT INTO %s (key, c1, c2, s1) VALUES ( 10, 13, 4, 's4')");
+        execute("INSERT INTO %s (key, c1, c2, s1) VALUES ( 20, 21, 1, 's1')");
+        execute("INSERT INTO %s (key, c1, c2, s1) VALUES ( 20, 22, 2, 's2')");
+        execute("INSERT INTO %s (key, c1, c2, s1) VALUES ( 20, 22, 3, 's3')");
+
+        assertRows(execute("SELECT * from %s WHERE key = ? AND c1 IN (?, ?)", 10, 21, 13),
+                   row(10, 13, 3, "s4"),
+                   row(10, 13, 4, "s4"));
+
+        assertRows(execute("SELECT * from %s WHERE key = ? AND c2 IN (?, ?) ALLOW FILTERING", 20, 1, 2),
+                   row(20, 22, 2, "s3"),
+                   row(20, 21, 1, "s1"));
+
+        assertRows(execute("SELECT * from %s WHERE c1 = ? AND c2 IN (?, ?) ALLOW FILTERING", 13, 2, 3),
+                   row(10, 13, 3, "s4"));
+
+        assertRowsIgnoringOrder(execute("SELECT * from %s WHERE c2 IN (?, ?) ALLOW FILTERING", 1, 2),
+                                row(10, 11, 1, "s1"),
+                                row(10, 12, 2, "s2"),
+                                row(20, 21, 1, "s1"),
+                                row(20, 22, 2, "s3"));
+
+        assertInvalidMessage("Invalid null value in condition for column c2",
+                             "SELECT * from %s WHERE key = 10 AND c2 IN (1, null) ALLOW FILTERING");
+    }
+
+    @Test
+    public void testInRestrictionsWithAllowFiltering()
+    {
+        createTable("CREATE TABLE %s (pk1 int, pk2 int, c text, s int static, v int, primary key((pk1, pk2), c))");
+        execute("INSERT INTO %s (pk1, pk2, c, s, v) values (?, ?, ?, ?, ?)", 1, 0, "5", 1, 3);
+        execute("INSERT INTO %s (pk1, pk2, c, s, v) values (?, ?, ?, ?, ?)", 1, 0, "7", 1, 2);
+        execute("INSERT INTO %s (pk1, pk2, c, s, v) values (?, ?, ?, ?, ?)", 1, 1, "7", 1, 3);
+        execute("INSERT INTO %s (pk1, pk2, c, s, v) values (?, ?, ?, ?, ?)", 2, 0, "4", 2, 1);
+        execute("INSERT INTO %s (pk1, pk2, c, s, v) values (?, ?, ?, ?, ?)", 2, 3, "6", 2, 8);
+
+        // Test filtering on regular columns
+        assertRows(execute("SELECT * FROM %s WHERE v IN (?, ?) ALLOW FILTERING", 4, 3),
+                   row(1, 0, "5", 1, 3),
+                   row(1, 1, "7", 1, 3));
+
+        assertRows(execute("SELECT * FROM %s WHERE v IN ? ALLOW FILTERING", list(4, 3)),
+                   row(1, 0, "5", 1, 3),
+                   row(1, 1, "7", 1, 3));
+
+        // Test filtering on clustering columns
+        assertRows(execute("SELECT * FROM %s WHERE c IN (?, ?, ?) ALLOW FILTERING", "7", "6", "8"),
+                   row(2, 3, "6", 2, 8),
+                   row(1, 0, "7", 1, 2),
+                   row(1, 1, "7", 1, 3));
+
+        assertRows(execute("SELECT * FROM %s WHERE c IN ? ALLOW FILTERING", list("7", "6", "8")),
+                   row(2, 3, "6", 2, 8),
+                   row(1, 0, "7", 1, 2),
+                   row(1, 1, "7", 1, 3));
+
+        // Test filtering on partition keys
+        assertRows(execute("SELECT * FROM %s WHERE pk1 IN (?, ?) ALLOW FILTERING", 1, 3),
+                   row(1, 0, "5", 1, 3),
+                   row(1, 0, "7", 1, 2),
+                   row(1, 1, "7", 1, 3));
+
+        assertRows(execute("SELECT * FROM %s WHERE pk1 IN ? ALLOW FILTERING", list(1, 3)),
+                   row(1, 0, "5", 1, 3),
+                   row(1, 0, "7", 1, 2),
+                   row(1, 1, "7", 1, 3));
+
+        // Test filtering on static columns
+        assertRows(execute("SELECT * FROM %s WHERE s IN (?, ?) ALLOW FILTERING", 1, 3),
+                   row(1, 0, "5", 1, 3),
+                   row(1, 0, "7", 1, 2),
+                   row(1, 1, "7", 1, 3));
+
+        assertRows(execute("SELECT * FROM %s WHERE s IN ? ALLOW FILTERING", list(1, 3)),
+                   row(1, 0, "5", 1, 3),
+                   row(1, 0, "7", 1, 2),
+                   row(1, 1, "7", 1, 3));
+    }
+
+    @Test
+    public void testInRestrictionsWithAllowFilteringAndOrdering()
+    {
+        createTable("CREATE TABLE %s (pk int, c text, v int, primary key(pk, c)) WITH CLUSTERING ORDER BY (c DESC)");
+        execute("INSERT INTO %s (pk, c, v) values (?, ?, ?)", 1, "0", 5);
+        execute("INSERT INTO %s (pk, c, v) values (?, ?, ?)", 1, "1", 7);
+        execute("INSERT INTO %s (pk, c, v) values (?, ?, ?)", 1, "2", 7);
+        execute("INSERT INTO %s (pk, c, v) values (?, ?, ?)", 2, "0", 4);
+        execute("INSERT INTO %s (pk, c, v) values (?, ?, ?)", 2, "2", 6);
+
+        assertRows(execute("SELECT * FROM %s WHERE pk = ? AND c IN (?, ?, ?) ALLOW FILTERING", 1, "2", "0", "8"),
+                   row(1, "2", 7),
+                   row(1, "0", 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE pk = ? AND c IN ? ORDER BY c ASC ALLOW FILTERING", 2, list("2", "8", "0")),
+                   row(2, "0", 4),
+                   row(2, "2", 6));
+
+        assertRows(execute("SELECT * FROM %s WHERE pk IN (?, ?) AND c IN (?, ?, ?) ALLOW FILTERING", 1, 2, "2", "0", "8"),
+                   row(1, "2", 7),
+                   row(1, "0", 5),
+                   row(2, "2", 6),
+                   row(2, "0", 4));
+
+        assertRows(execute("SELECT * FROM %s WHERE pk IN ? AND c IN ? ORDER BY c ASC ALLOW FILTERING", list(1, 2), list("2", "8", "0")),
+                   row(1, "0", 5),
+                   row(2, "0", 4),
+                   row(1, "2", 7),
+                   row(2, "2", 6));
+    }
+
+    @Test
+    public void testInRestrictionsWithCountersAndAllowFiltering() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, v counter, primary key (pk))");
+
+        assertEmpty(execute("SELECT * FROM %s WHERE v IN (?, ?) ALLOW FILTERING", 0L, 1L));
+
+        execute("UPDATE %s SET v = v + 1 WHERE pk = 1");
+        execute("UPDATE %s SET v = v + 2 WHERE pk = 2");
+        execute("UPDATE %s SET v = v + 1 WHERE pk = 3");
+
+        assertRows(execute("SELECT * FROM %s WHERE v IN (?, ?) ALLOW FILTERING", 0L, 1L),
+                   row(1, 1L),
+                   row(3, 1L));
+    }
+
+    @Test
+    public void testClusteringSlicesWithNotIn()
+    {
+        createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key(a, b, c))");
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 1, 4, 1);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 2, 5, 2);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 2, 6, 3);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 2, 7, 4);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 3, 8, 5);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 3, 9, 6);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 4, 1, 7);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 4, 2, 8);
+
+        // restrict first clustering column by NOT IN
+        assertRows(execute("select * from %s where a = ? and b not in ?", "key", list(2, 4, 5)),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+        assertRows(execute("select * from %s where a = ? and b not in (?, ?, ?)", "key", 2, 4, 5),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+
+        // use different order of items in NOT IN list:
+        assertRows(execute("select * from %s where a = ? and b not in (?, ?, ?)", "key", 5, 2, 4),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+        assertRows(execute("select * from %s where a = ? and b not in (?, ?, ?)", "key", 5, 4, 2),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+
+        // restrict last clustering column by NOT IN
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in ?", "key", 2, list(5, 6)),
+                   row("key", 2, 7, 4));
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in (?, ?)", "key", 2, 5, 6),
+                   row("key", 2, 7, 4));
+
+        // empty NOT IN should have no effect:
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in ?", "key", 2, list()),
+                   row("key", 2, 5, 2),
+                   row("key", 2, 6, 3),
+                   row("key", 2, 7, 4));
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in ()", "key", 2),
+                   row("key", 2, 5, 2),
+                   row("key", 2, 6, 3),
+                   row("key", 2, 7, 4));
+
+        // NOT IN value that doesn't match any data should have no effect:
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in (?)", "key", 2, 0),
+                   row("key", 2, 5, 2),
+                   row("key", 2, 6, 3),
+                   row("key", 2, 7, 4));
+
+        // Duplicate NOT IN values:
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in (?, ?)", "key", 2, 5, 5),
+                   row("key", 2, 6, 3),
+                   row("key", 2, 7, 4));
+
+        // mix NOT IN and '<' and '<=' comparison on the same column
+        assertRows(execute("select * from %s where a = ? and b not in ? and b < ?", "key", list(2, 5), 1)); // empty
+        assertRows(execute("select * from %s where a = ? and b not in ? and b < ?", "key", list(2, 5), 3),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b <= ?", "key", list(2), 2),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b <= ?", "key", list(2), 3),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b <= ?", "key", list(2), 10),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+
+        // mix NOT IN and '>' and '>=' comparison on the same column
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ?", "key", list(2), 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ?", "key", list(2), 2),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ?", "key", list(2), 2),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ?", "key", list(2), 4),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ?", "key", list(2), 0),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+
+        // mix NOT IN and range slice
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ? and b < ?", "key", list(2), 1, 4),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ? and b < ?", "key", list(2), 1, 4),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ? and b <= ?", "key", list(2), 1, 4),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ? and b <= ?", "key", list(2), 1, 4),
+                   row("key", 1, 4, 1),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+
+        // Collision between a slice bound and NOT IN value:
+        assertRows(execute("select * from %s where a = ? and b not in ? and b < ?", "key", list(2), 2),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ?", "key", list(2), 2),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 4, 1, 7),
+                   row("key", 4, 2, 8));
+
+        // NOT IN value outside of the slice range:
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ? and b < ?", "key", list(0), 2, 4),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ? and b < ?", "key", list(10), 2, 4),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+
+        // multiple NOT IN on the same column, use different ways of passing a list
+        assertRows(execute("select * from %s where a = ? and b not in ? and b not in ?", "key", list(1, 2), list(4)),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+        assertRows(execute("select * from %s where a = ? and b not in (?, ?) and b not in (?)", "key", 1, 2, 4),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+        assertRows(execute("select * from %s where a = ? and b not in (?, ?) and b not in ?", "key", 1, 2, list(4)),
+                   row("key", 3, 8, 5),
+                   row("key", 3, 9, 6));
+
+        // mix IN and NOT IN
+        assertRows(execute("select * from %s where a = ? and b in ? and c not in ?", "key", list(2, 3), list(5, 6, 9)),
+                   row("key", 2, 7, 4),
+                   row("key", 3, 8, 5));
+
+    }
+
+    @Test
+    public void testClusteringSlicesWithNotInAndReverseOrdering()
+    {
+        createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key(a, b, c)) with clustering order by (b desc, c desc)");
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 1, 4, 1);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 2, 5, 2);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 2, 6, 3);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 2, 7, 4);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 3, 8, 5);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 3, 9, 6);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 4, 1, 7);
+        execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "key", 4, 2, 8);
+
+        // restrict first clustering column by NOT IN
+        assertRows(execute("select * from %s where a = ? and b not in ?", "key", list(2, 4, 5)),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in (?, ?, ?)", "key", 2, 4, 5),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5),
+                   row("key", 1, 4, 1));
+
+        // restrict last clustering column by NOT IN
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in ?", "key", 2, list(5, 6)),
+                   row("key", 2, 7, 4));
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in (?, ?)", "key", 2, 5, 6),
+                   row("key", 2, 7, 4));
+
+        // empty NOT IN should have no effect:
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in ?", "key", 2, list()),
+                   row("key", 2, 7, 4),
+                   row("key", 2, 6, 3),
+                   row("key", 2, 5, 2));
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in ()", "key", 2),
+                   row("key", 2, 7, 4),
+                   row("key", 2, 6, 3),
+                   row("key", 2, 5, 2));
+
+        // NOT IN value that doesn't match any data should have no effect:
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in (?)", "key", 2, 0),
+                   row("key", 2, 7, 4),
+                   row("key", 2, 6, 3),
+                   row("key", 2, 5, 2));
+
+        // Duplicate NOT IN values:
+        assertRows(execute("select * from %s where a = ? and b = ? and c not in (?, ?)", "key", 2, 5, 5),
+                   row("key", 2, 7, 4),
+                   row("key", 2, 6, 3));
+
+        // mix NOT IN and '<' and '<=' comparison on the same column
+        assertRows(execute("select * from %s where a = ? and b not in ? and b < ?", "key", list(2, 5), 1)); // empty
+        assertRows(execute("select * from %s where a = ? and b not in ? and b < ?", "key", list(2, 5), 3),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b <= ?", "key", list(2), 2),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b <= ?", "key", list(2), 3),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b <= ?", "key", list(2), 10),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5),
+                   row("key", 1, 4, 1));
+
+        // mix NOT IN and '>' and '>=' comparison on the same column
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ?", "key", list(2), 1),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ?", "key", list(2), 2),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ?", "key", list(2), 2),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ?", "key", list(2), 4),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ?", "key", list(2), 0),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5),
+                   row("key", 1, 4, 1));
+
+        // mix NOT IN and range slice
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ? and b < ?", "key", list(2), 1, 4),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ? and b < ?", "key", list(2), 1, 4),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ? and b <= ?", "key", list(2), 1, 4),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b >= ? and b <= ?", "key", list(2), 1, 4),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5),
+                   row("key", 1, 4, 1));
+
+        // Collision between a slice bound and NOT IN value:
+        assertRows(execute("select * from %s where a = ? and b not in ? and b < ?", "key", list(2), 2),
+                   row("key", 1, 4, 1));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ?", "key", list(2), 2),
+                   row("key", 4, 2, 8),
+                   row("key", 4, 1, 7),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+
+        // NOT IN value outside of the slice range:
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ? and b < ?", "key", list(0), 2, 4),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+        assertRows(execute("select * from %s where a = ? and b not in ? and b > ? and b < ?", "key", list(10), 2, 4),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+
+        // multiple NOT IN on the same column, use different ways of passing a list
+        assertRows(execute("select * from %s where a = ? and b not in ? and b not in ?", "key", list(1, 2), list(4)),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+        assertRows(execute("select * from %s where a = ? and b not in (?, ?) and b not in (?)", "key", 1, 2, 4),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+        assertRows(execute("select * from %s where a = ? and b not in (?, ?) and b not in ?", "key", 1, 2, list(4)),
+                   row("key", 3, 9, 6),
+                   row("key", 3, 8, 5));
+
+        // mix IN and NOT IN
+        assertRows(execute("select * from %s where a = ? and b in ? and c not in ?", "key", list(2, 3), list(5, 6, 9)),
+                   row("key", 3, 8, 5),
+                   row("key", 2, 7, 4));
+    }
+
+    @Test
+    public void testNotInRestrictionsWithAllowFiltering()
+    {
+        createTable("CREATE TABLE %s (pk int, c int, v int, primary key(pk, c))");
+        execute("insert into %s (pk, c, v) values (?, ?, ?)", 1, 1, 1);
+        execute("insert into %s (pk, c, v) values (?, ?, ?)", 1, 2, 2);
+        execute("insert into %s (pk, c, v) values (?, ?, ?)", 1, 3, 3);
+        execute("insert into %s (pk, c, v) values (?, ?, ?)", 1, 4, 4);
+        execute("insert into %s (pk, c, v) values (?, ?, ?)", 1, 5, 5);
+
+        // empty NOT IN set
+        assertRows(execute("select * from %s where pk = ? and v not in ? allow filtering", 1, list()),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("select * from %s where pk = ? and v not in () allow filtering", 1),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        // NOT IN with values that don't match any data
+        assertRows(execute("select * from %s where pk = ? and v not in (?, ?) allow filtering", 1, -6, 20),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        // NOT IN that excludes a few values
+        assertRows(execute("select * from %s where pk = ? and v not in ? allow filtering", 1, list(2, 3)),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("select * from %s where pk = ? and v not in (?, ?) allow filtering", 1, 2, 3),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        // NOT IN with one-sided slice filters:
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v < ? allow filtering", 1, list(2, 3), 5),
+                   row(1, 1, 1),
+                   row(1, 4, 4));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v < ? allow filtering", 1, list(2, 3, 10), 5),
+                   row(1, 1, 1),
+                   row(1, 4, 4));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v <= ? allow filtering", 1, list(2, 3), 5),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v <= ? allow filtering", 1, list(2, 3, 10), 5),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v > ? allow filtering", 1, list(2, 3), 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v > ? allow filtering", 1, list(0, 2, 3), 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v >= ? allow filtering", 1, list(2, 3), 1),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v >= ? allow filtering", 1, list(0, 2, 3), 1),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        // NOT IN with range filters:
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v > ? and v < ? allow filtering", 1, list(2, 3), 1, 4)); // empty
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v > ? and v < ? allow filtering", 1, list(2, 3), 1, 4)); // empty
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v > ? and v < ? allow filtering", 1, list(2, 3), 0, 5),
+                   row(1, 1, 1),
+                   row(1, 4, 4));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v >= ? and v < ? allow filtering", 1, list(2, 3), 1, 4),
+                   row(1, 1, 1));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v > ? and v <= ? allow filtering", 1, list(2, 3), 1, 4),
+                   row(1, 4, 4));
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v >= ? and v <= ? allow filtering", 1, list(2, 3), 1, 4),
+                   row(1, 1, 1),
+                   row(1, 4, 4));
+
+        // more than one NOT IN clause
+        assertRows(execute("select * from %s where pk = ? and v not in ? and v not in ? allow filtering", 1, list(2), list(3)),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+    }
+
+    @Test
+    public void testNotInRestrictionsWithOrAndAllowFiltering()
+    {
+        createTable("CREATE TABLE %s (pk int, c int, v int, PRIMARY KEY(pk, c))");
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 1, 1);
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 2, 2);
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 3, 3);
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 4, 4);
+        execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 5, 5);
+
+        assertRows(execute("SELECT * FROM %s WHERE v = ? OR v not in ? ALLOW FILTERING", 0, list()),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? OR v NOT IN ? ALLOW FILTERING", list(), list(1, 2)),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE v = ? OR v NOT IN ? ALLOW FILTERING", 0, list(1, 2, 3)),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE v = ? OR v NOT IN ? ALLOW FILTERING", 1, list(1, 2, 3)),
+                   row(1, 1, 1),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+        // Multiple NOT IN:
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? OR v NOT IN ? ALLOW FILTERING", list(1, 2), list(3, 4)),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? OR v NOT IN ? ALLOW FILTERING", list(1, 2, 3, 4), list()),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4),
+                   row(1, 5, 5));
+
+
+        // Mixed IN / NOT IN with AND and OR:
+        assertRows(execute("SELECT * FROM %s WHERE v IN ? OR v NOT IN ? AND v NOT IN ? ALLOW FILTERING", list(1), list(1, 2, 3), list(2, 3, 4)),
+                   row(1, 1, 1),
+                   row(1, 5, 5));
+
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? AND (v IN ? OR v NOT IN ?) ALLOW FILTERING", list(), list(3), list(5)),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, 3),
+                   row(1, 4, 4));
+
+        assertRows(execute("SELECT * FROM %s WHERE v NOT IN ? AND (v IN ? OR v NOT IN ?) ALLOW FILTERING", list(1, 2), list(3), list(5)),
+                   row(1, 3, 3),
+                   row(1, 4, 4));
+
+        assertRows(execute("SELECT * FROM %s WHERE v IN ? AND (v IN ? OR v NOT IN ?) ALLOW FILTERING", list(1, 3), list(5), list(3)),
+                   row(1, 1, 1));
+
+        assertRows(execute("SELECT * FROM %s WHERE v IN ? AND (v IN ? OR v NOT IN ?) ALLOW FILTERING", list(1, 3), list(5), list()),
+                   row(1, 1, 1),
+                   row(1, 3, 3));
+    }
+
+
+    @Test
+    public void testNonEqualsRelationWithFiltering()
+    {
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 1, 1);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 2, 2);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 3, 3);
+
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? ALLOW FILTERING", 0, 0),
+                   row(0, 1),
+                   row(0, 2),
+                   row(0, 3)
+        );
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? ALLOW FILTERING", 0, 1),
+                   row(0, 0),
+                   row(0, 2),
+                   row(0, 3)
+        );
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? ALLOW FILTERING", 0, -1),
+                   row(0, 0),
+                   row(0, 1),
+                   row(0, 2),
+                   row(0, 3)
+        );
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? ALLOW FILTERING", 0, 5),
+                   row(0, 0),
+                   row(0, 1),
+                   row(0, 2),
+                   row(0, 3)
+        );
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? AND c != ? ALLOW FILTERING", 0, 1, 2),
+                   row(0, 0),
+                   row(0, 3)
+        );
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? AND c < ? ALLOW FILTERING", 0, 1, 2),
+                   row(0, 0)
+        );
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? AND c <= ? ALLOW FILTERING", 0, 1, 2),
+                   row(0, 0),
+                   row(0, 2)
+        );
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? AND c > ? ALLOW FILTERING", 0, 2, 0),
+                   row(0, 1),
+                   row(0, 3)
+        );
+        assertRows(execute("SELECT a, b FROM %s WHERE a = ? AND c != ? AND c >= ? ALLOW FILTERING", 0, 2, 1),
+                   row(0, 1),
+                   row(0, 3)
+        );
+    }
+
 }

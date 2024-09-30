@@ -319,10 +319,9 @@ public abstract class SortedTableWriter extends SSTableWriter
         }
     }
 
-    public SSTableWriter setOpenResult(boolean openResult)
+    public void openResult()
     {
-        txnProxy().openResult = openResult;
-        return this;
+        txnProxy().openResult();
     }
 
     public SSTableReader finished()
@@ -341,7 +340,6 @@ public abstract class SortedTableWriter extends SSTableWriter
         // should be set during doPrepare()
         private SSTableReader finalReader;
         protected boolean finalReaderAccessed;
-        private boolean openResult;
 
         // finalise our state on disk, including renaming
         protected void doPrepare()
@@ -351,13 +349,13 @@ public abstract class SortedTableWriter extends SSTableWriter
             writeMetadata(descriptor, finalizeMetadata(), writerOption());
 
             // save the table of components
-            SSTable.appendTOC(descriptor, components);
+            SSTable.appendTOC(descriptor, components());
+        }
 
-            if (openResult)
-            {
-                finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
-                finalReaderAccessed = false;
-            }
+        private void openResult()
+        {
+            finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
+            finalReaderAccessed = false;
         }
 
         protected Throwable doCommit(Throwable accumulate)

@@ -70,6 +70,12 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
     }
 
     @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
+    @Override
     public TupleType with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
     {
         return new TupleType(subTypes, isMultiCell);

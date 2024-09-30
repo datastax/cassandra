@@ -23,12 +23,10 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.commons.lang3.mutable.MutableLong;
 
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.io.tries.IncrementalDeepTrieWriterPageAware;
 import org.apache.cassandra.io.tries.IncrementalTrieWriter;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -45,14 +43,15 @@ public class TrieTermsDictionaryWriter implements Closeable
     private final IndexOutputWriter termDictionaryOutput;
     private final long startOffset;
 
-    TrieTermsDictionaryWriter(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
+    TrieTermsDictionaryWriter(IndexComponents.ForWrite components) throws IOException
     {
-        termDictionaryOutput = indexDescriptor.openPerIndexOutput(IndexComponent.TERMS_DATA, indexContext, true);
+        termDictionaryOutput = components.addOrGet(IndexComponentType.TERMS_DATA).openOutput(true);
         startOffset = termDictionaryOutput.getFilePointer();
 
         SAICodecUtils.writeHeader(termDictionaryOutput);
         // we pass the output as SequentialWriter, but we keep IndexOutputWriter around to write footer on flush
-        termsDictionaryWriter = new IncrementalDeepTrieWriterPageAware<>(TrieTermsDictionaryReader.trieSerializer, termDictionaryOutput.asSequentialWriter());
+        var encodingVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
+        termsDictionaryWriter = IncrementalTrieWriter.open(TrieTermsDictionaryReader.trieSerializer, termDictionaryOutput.asSequentialWriter(), encodingVersion);
     }
 
     public void add(ByteComparable term, long postingListOffset) throws IOException

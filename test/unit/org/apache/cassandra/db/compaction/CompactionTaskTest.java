@@ -165,7 +165,7 @@ public class CompactionTaskTest
         assertEquals(Transactional.AbstractTransactional.State.ABORTED, txn.state());
     }
 
-    private static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
+    static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
     {
         sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, repairedAt, pendingRepair, isTransient);
         sstable.reloadSSTableMetadata();
@@ -200,27 +200,39 @@ public class CompactionTaskTest
         mutateRepaired(pending1, ActiveRepairService.UNREPAIRED_SSTABLE, UUIDGen.getTimeUUID(), false);
         mutateRepaired(pending2, ActiveRepairService.UNREPAIRED_SSTABLE, UUIDGen.getTimeUUID(), false);
 
-        LifecycleTransaction txn = null;
-        List<SSTableReader> toCompact = new ArrayList<>(sstables);
-        for (int i=0; i<sstables.size(); i++)
+        for (int mask = 1; mask < 16; ++mask) // test all combinations of two or more sstables with different repair marking
         {
-            try
+            if (Integer.bitCount(mask) <= 1)
+                continue;
+
+            List<SSTableReader> toCompact = new ArrayList<>(sstables);
+            for (int i = 3; i >= 0; i--)
             {
-                txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
-                Assert.assertNotNull(txn);
-                new CompactionTask(cfs, txn, 0, false, mockStrategy);
-                Assert.fail("Expected IllegalArgumentException");
+                if ((mask & (1<<i)) == 0)
+                    toCompact.remove(i);
             }
-            catch (IllegalArgumentException e)
+
+            LifecycleTransaction txn = null;
+            for (int order = 0; order < toCompact.size(); order++)
             {
-                // expected
+                try
+                {
+                    txn = cfs.getTracker().tryModify(toCompact, OperationType.COMPACTION);
+                    Assert.assertNotNull(txn);
+                    new CompactionTask(cfs, txn, 0, false, mockStrategy);
+                    Assert.fail("Expected IllegalArgumentException");
+                }
+                catch (IllegalArgumentException e)
+                {
+                    // expected
+                }
+                finally
+                {
+                    if (txn != null)
+                        txn.abort();
+                }
+                Collections.rotate(toCompact, 1);
             }
-            finally
-            {
-                if (txn != null)
-                    txn.abort();
-            }
-            Collections.rotate(toCompact, 1);
         }
     }
 

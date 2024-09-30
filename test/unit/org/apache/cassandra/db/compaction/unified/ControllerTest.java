@@ -105,6 +105,7 @@ public abstract class ControllerTest
 
     protected String keyspaceName = "TestKeyspace";
     protected int numDirectories = 1;
+    protected boolean useVector = false;
 
     @BeforeClass
     public static void setUpClass()
@@ -131,6 +132,8 @@ public abstract class ControllerTest
         when(executorService.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class))).thenReturn(fut);
 
         when(env.flushSize()).thenReturn((double) (sstableSizeMB << 20));
+        when(cfs.metadata()).thenReturn(metadata);
+        when(metadata.hasVectorType()).thenAnswer(invocation -> useVector);
     }
 
     Controller testFromOptions(boolean adaptive, Map<String, String> options)
@@ -161,6 +164,25 @@ public abstract class ControllerTest
             assertEquals(numShards, controller.getNumShards(numShards * minSSTableSize));
             assertEquals(numShards, controller.getNumShards(16 * 100 << 20));
         }
+
+        return controller;
+    }
+
+    Controller testFromOptionsVector(boolean adaptive, Map<String, String> options)
+    {
+        useVector = true;
+        addOptions(adaptive, options);
+        Controller.validateOptions(options);
+
+        Controller controller = Controller.fromOptions(cfs, options);
+        assertNotNull(controller);
+        assertNotNull(controller.toString());
+
+        assertEquals(dataSizeGB << 30, controller.getDataSetSizeBytes());
+        assertFalse(controller.isRunning());
+        for (int i = 0; i < 5; i++) // simulate 5 levels
+            assertEquals(Controller.DEFAULT_SURVIVAL_FACTOR, controller.getSurvivalFactor(i), epsilon);
+        assertNull(controller.getCalculator());
 
         return controller;
     }
@@ -306,7 +328,7 @@ public abstract class ControllerTest
         options.put(Controller.BASE_SHARD_COUNT_OPTION, Integer.toString(3));
         options.put(Controller.TARGET_SSTABLE_SIZE_OPTION, "100MiB");
         options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "10MiB");
-        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0.0");
         Controller controller = Controller.fromOptions(cfs, options);
         assertEquals(0.0, controller.sstableGrowthModifier, 0.0);
 
@@ -348,6 +370,7 @@ public abstract class ControllerTest
         options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "10MiB");
         options.put(Controller.SSTABLE_GROWTH_OPTION, "1.0");
         Controller controller = Controller.fromOptions(cfs, options);
+        assertEquals(1.0, controller.sstableGrowthModifier, 0.0);
 
         // Easy ones
         // x00 MiB = x * 100

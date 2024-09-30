@@ -77,6 +77,8 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaProvider;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.read.TrackingRowIterator;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
@@ -236,6 +238,12 @@ public abstract class ReadCommand extends AbstractReadQuery
     public Index.QueryPlan indexQueryPlan()
     {
         return indexQueryPlan;
+    }
+
+    @Override
+    public boolean isTopK()
+    {
+        return indexQueryPlan != null && indexQueryPlan.isTopK();
     }
 
     @VisibleForTesting
@@ -400,8 +408,10 @@ public abstract class ReadCommand extends AbstractReadQuery
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
         }
 
-        UnfilteredPartitionIterator iterator = (null == searcher) ? queryStorage(cfs, executionController)
-                                                                  : searchStorage(searcher, executionController);
+        Context context = Context.from(this);
+        UnfilteredPartitionIterator iterator = (null == searcher) ? Transformation.apply(queryStorage(cfs, executionController), new TrackingRowIterator(context))
+                                                                  : Transformation.apply(searchStorage(searcher, executionController), new TrackingRowIterator(context));
+
         iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 
         try
@@ -430,7 +440,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             if (executionController.isTrackingRepairedStatus())
             {
                 DataLimits.Counter limit =
-                    limits().newCounter(nowInSec(), false, selectsFullPartition(), metadata().enforceStrictLiveness());
+                limits().newCounter(nowInSec(), false, selectsFullPartition(), metadata().enforceStrictLiveness());
                 iterator = limit.applyTo(iterator);
                 // ensure that a consistent amount of repaired data is read on each replica. This causes silent
                 // overreading from the repaired data set, up to limits(). The extra data is not visible to
@@ -522,7 +532,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      */
     public PartitionIterator postReconciliationProcessing(PartitionIterator result)
     {
-        return indexQueryPlan == null ? result : indexQueryPlan.postProcessor().apply(result);
+        return indexQueryPlan == null ? result : indexQueryPlan.postProcessor(this).apply(result);
     }
 
     @Override

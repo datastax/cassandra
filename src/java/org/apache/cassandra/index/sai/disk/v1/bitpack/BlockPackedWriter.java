@@ -19,15 +19,16 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 import java.io.IOException;
 
-import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.packed.DirectWriter;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdapter;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 
 import static org.apache.lucene.util.BitUtil.zigZagEncode;
 
 /**
  * A writer for large sequences of longs.
  *
- * Modified copy of {@link org.apache.lucene.util.packed.BlockPackedWriter} to use {@link DirectWriter}
+ * Modified copy of {@link org.apache.lucene.util.packed.BlockPackedWriter} to use {@link DirectWriterAdapter}
  * for optimised reads that doesn't require seeking through the whole file to open a thread-exclusive reader.
  */
 public class BlockPackedWriter extends AbstractBlockPackedWriter
@@ -49,7 +50,7 @@ public class BlockPackedWriter extends AbstractBlockPackedWriter
         }
 
         final long delta = max - min;
-        int bitsRequired = delta == 0 ? 0 : DirectWriter.unsignedBitsRequired(delta);
+        int bitsRequired = delta == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(out.order(), delta);
 
         final int token = (bitsRequired << BPV_SHIFT) | (min == 0 ? MIN_VALUE_EQUALS_0 : 0);
         blockMetaWriter.writeByte((byte) token);

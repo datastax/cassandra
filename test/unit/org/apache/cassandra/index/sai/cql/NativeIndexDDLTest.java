@@ -24,7 +24,7 @@ package org.apache.cassandra.index.sai.cql;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -41,9 +41,7 @@ import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.exceptions.InvalidConfigurationInQueryException;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import com.datastax.driver.core.exceptions.ReadFailureException;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.restrictions.IndexRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -55,16 +53,19 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexBuilder;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.SuppressLeakCheck;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -82,6 +83,7 @@ import org.mockito.Mockito;
 
 import static java.util.Collections.singletonList;
 import static junit.framework.TestCase.fail;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -97,6 +99,11 @@ public class NativeIndexDDLTest extends SAITester
 
     private static final Injection failNDIInitialializaion = Injections.newCustom("fail_ndi_initialization")
                                                                        .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndexBuilder.class).onMethod("build"))
+                                                                       .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
+                                                                       .build();
+
+    private static final Injection failNumericIndexBuild = Injections.newCustom("fail_numeric_index_build")
+                                                                       .add(InvokePointBuilder.newInvokePoint().onClass(SegmentBuilder.KDTreeSegmentBuilder.class).onMethod("addInternal"))
                                                                        .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                        .build();
 
@@ -119,11 +126,10 @@ public class NativeIndexDDLTest extends SAITester
                                                                                                 .onMethod("<init>"))
                                                                          .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                          .build();
-
     @BeforeClass
     public static void init()
     {
-        System.setProperty(CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getKey(), Boolean.TRUE.toString());
+        System.setProperty("cassandra.sai.validate_max_term_size_at_coordinator", Boolean.TRUE.toString());
     }
 
     @Before
@@ -220,7 +226,7 @@ public class NativeIndexDDLTest extends SAITester
 
         assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) " +
                                             "USING 'StorageAttachedIndex' " +
-                                            "WITH OPTIONS = { 'case_sensitive' : true }")).isInstanceOf(InvalidQueryException.class);
+                                            "WITH OPTIONS = { 'case_sensitive' : false }")).isInstanceOf(InvalidQueryException.class);
     }
 
     @Test
@@ -302,6 +308,8 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
+        // Case sensitive search is the default, and as such, it does not make the SAI qualify as "analyzed".
+        // The queries below use '=' and not ':' because : is limited to analyzed indexes.
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }");
         waitForIndexQueryable();
 
@@ -322,6 +330,7 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'camel'").size());
         assertEquals(1, execute("SELECT id FROM %s WHERE val = 'camel'").size());
     }
 
@@ -346,6 +355,8 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
+        // Normalize search is disabled by default, and as such, it does not make the SAI qualify as "analyzed".
+        // The queries below use '=' and not ':' because : is limited to analyzed indexes.
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : false }");
         waitForIndexQueryable();
 
@@ -367,7 +378,7 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'Cam\u0061\u0301l'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'Cam\u0061\u0301l'").size());
     }
 
     @Test
@@ -380,7 +391,7 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'cam\u0061\u0301l'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'cam\u0061\u0301l'").size());
     }
 
     @Test
@@ -393,7 +404,7 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Éppinger')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'eppinger'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'eppinger'").size());
     }
 
     @Test
@@ -665,44 +676,29 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void testMaxTermSize() throws Throwable
+    public void testMaxTermSizeRejectionsAtWrite()
     {
-        createTable(KEYSPACE, "CREATE TABLE %s (k int PRIMARY KEY, v text, m map<text, text>,)");
+        createTable(KEYSPACE, "CREATE TABLE %s (k int PRIMARY KEY, v text, m map<text, text>, frozen_m frozen<map<text, text>>)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(m)) USING 'StorageAttachedIndex'");
-        waitForIndex(KEYSPACE, "REMOVE ME", "idx");
+        createIndex("CREATE CUSTOM INDEX ON %s(m) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(full(frozen_m)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
 
         String largeTerm = UTF8Type.instance.compose(ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 1));
-        ResultSet resultSet = executeNet("INSERT INTO %s (k, v, m) VALUES (0, ?, {'" + largeTerm + "': ''})", largeTerm);
-        List<String> warnings = CQLTester.warningsFromResultSet(Collections.emptyList(), resultSet);
-        warnings.sort(String::compareTo);
+        assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, v) VALUES (0, ?)", largeTerm))
+        .hasMessage(String.format("Term of column v exceeds the byte limit for index. Term size 32.000KiB. Max allowed size %s.",
+                                  FBUtilities.prettyPrintMemory(IndexContext.MAX_STRING_TERM_SIZE)))
+        .isInstanceOf(InvalidQueryException.class);
 
-        assertEquals(2, warnings.size());
-        assertTrue(warnings.get(0).contains("Can't add term of column m"));
-        assertTrue(warnings.get(1).contains("Can't add term of column v"));
+        assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, m) VALUES (0, {'key': '" + largeTerm + "'})"))
+        .hasMessage(String.format("Term of column m exceeds the byte limit for index. Term size 32.000KiB. Max allowed size %s.",
+                                  FBUtilities.prettyPrintMemory(IndexContext.MAX_STRING_TERM_SIZE)))
+        .isInstanceOf(InvalidQueryException.class);
 
-        // verify memtable index can not be read
-        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
-        flush();
-
-        // verify on-disk index can not be read
-        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
-
-
-        executeNet("INSERT INTO %s (k, v, m) VALUES (0, ?, {'" + largeTerm + "': ''})", largeTerm);
-        flush();
-
-        // max term size was applied during compaction or building index on existing sstable.
-        compact();
-
-        // verify on-disk index can not be read after compaction
-        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
-        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
+        assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, frozen_m) VALUES (0, {'key': '" + largeTerm + "'})"))
+        .hasMessage(String.format("Term of column frozen_m exceeds the byte limit for index. Term size 32.015KiB. Max allowed size %s.",
+                                  FBUtilities.prettyPrintMemory(IndexContext.MAX_FROZEN_TERM_SIZE)))
+        .isInstanceOf(InvalidQueryException.class);
     }
 
     @Test
@@ -906,6 +902,91 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
     }
 
+    /**
+     * Simulate SAI build error during index rebuild: index rebuild task should fail
+     */
+    @Test
+    public void testIndexRebuildAborted() throws Throwable
+    {
+        // prepare schema and data
+        createTable(CREATE_TABLE_TEMPLATE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+        flush();
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+        assertEquals(2, rows.all().size());
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        SecondaryIndexManager sim = cfs.getIndexManager();
+        StorageAttachedIndex sai = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        assertThat(sai.getIndexContext().getView().getIndexes()).hasSize(1);
+
+        StorageAttachedIndexGroup saiGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        assertThat(saiGroup.sstableContextManager().size()).isEqualTo(1);
+
+        // rebuild index with byteman error
+        Injections.inject(failNumericIndexBuild);
+
+        // rebuild should fail
+        assertThatThrownBy(() -> sim.buildIndexesBlocking(cfs.getLiveSSTables(), new HashSet<>(sim.listIndexes()), true))
+                          .isInstanceOf(RuntimeException.class).hasMessageContaining("Injected failure");
+
+        // index is no longer queryable
+        assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0"))
+        .isInstanceOf(ReadFailureException.class);
+    }
+
+    /**
+     * Simulate SAI build error during compaction: compaction task should abort
+     */
+    @Test
+    public void testIndexCompactionAborted() throws Throwable
+    {
+        // prepare schema and data
+        createTable(CREATE_TABLE_TEMPLATE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+        flush();
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('3', 1, '0');");
+        flush();
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+        assertEquals(4, rows.all().size());
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        assertThat(cfs.getLiveSSTables()).hasSize(2);
+
+        SecondaryIndexManager sim = cfs.getIndexManager();
+        StorageAttachedIndex sai = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        assertThat(sai.getIndexContext().getView().getIndexes()).hasSize(2);
+
+        StorageAttachedIndexGroup saiGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        assertThat(saiGroup.sstableContextManager().size()).isEqualTo(2);
+
+        // rebuild index with byteman error
+        Injections.inject(failNumericIndexBuild);
+
+        // compaction task should fail
+        assertThatThrownBy(cfs::forceMajorCompaction)
+        .isInstanceOf(RuntimeException.class).hasMessageContaining("Injected failure");
+
+        // verify sstables and indexes are the same
+        assertThat(cfs.getLiveSSTables()).hasSize(2);
+        assertThat(saiGroup.sstableContextManager().size()).isEqualTo(2);
+        assertThat(sai.getIndexContext().getView().getIndexes()).hasSize(2);
+
+        // index is still queryable
+        rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+        assertEquals(4, rows.all().size());
+    }
+
     @Test
     public void verifyRebuildCorruptedFiles() throws Throwable
     {
@@ -933,22 +1014,22 @@ public class NativeIndexDDLTest extends SAITester
                                              CorruptionType corruptionType,
                                              boolean rebuild) throws Throwable
     {
-        IndexContext numericIndexContext = createIndexContext(numericIndexName, Int32Type.instance);
-        IndexContext stringIndexContext = createIndexContext(stringIndexName, UTF8Type.instance);
+        IndexContext numericIndexContext = getIndexContext(numericIndexName);
+        IndexContext stringIndexContext = getIndexContext(stringIndexName);
 
-        for (IndexComponent component : Version.LATEST.onDiskFormat().perSSTableComponents())
+        for (IndexComponentType component : Version.latest().onDiskFormat().perSSTableComponentTypes())
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, null, corruptionType, true, true, rebuild);
 
-        for (IndexComponent component : Version.LATEST.onDiskFormat().perIndexComponents(numericIndexContext))
+        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponentTypes(numericIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, numericIndexContext, corruptionType, false, true, rebuild);
 
-        for (IndexComponent component : Version.LATEST.onDiskFormat().perIndexComponents(stringIndexContext))
+        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponentTypes(stringIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, stringIndexContext, corruptionType, true, false, rebuild);
     }
 
     private void verifyRebuildIndexComponent(IndexContext numericIndexContext,
                                              IndexContext stringIndexContext,
-                                             IndexComponent component,
+                                             IndexComponentType component,
                                              IndexContext corruptionContext,
                                              CorruptionType corruptionType,
                                              boolean failedStringIndex,
@@ -960,11 +1041,11 @@ public class NativeIndexDDLTest extends SAITester
         // that are encryptable unless they have been removed because encrypted components aren't
         // checksum validated.
 
-        if (component == IndexComponent.PRIMARY_KEY_TRIE || component == IndexComponent.PRIMARY_KEY_BLOCKS || component == IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)
+        if (component == IndexComponentType.PRIMARY_KEY_TRIE || component == IndexComponentType.PRIMARY_KEY_BLOCKS || component == IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)
             return;
 
-        if (((component == IndexComponent.GROUP_COMPLETION_MARKER) ||
-             (component == IndexComponent.COLUMN_COMPLETION_MARKER)) &&
+        if (((component == IndexComponentType.GROUP_COMPLETION_MARKER) ||
+             (component == IndexComponentType.COLUMN_COMPLETION_MARKER)) &&
             (corruptionType != CorruptionType.REMOVED))
             return;
 
@@ -973,7 +1054,7 @@ public class NativeIndexDDLTest extends SAITester
         // initial verification
         verifySSTableIndexes(numericIndexContext.getIndexName(), 1);
         verifySSTableIndexes(stringIndexContext.getIndexName(), 1);
-        verifyIndexFiles(numericIndexContext, stringIndexContext, 1, 1, 1, 1, 1);
+        verifyIndexComponentFiles(numericIndexContext, stringIndexContext);
         assertTrue(verifyChecksum(numericIndexContext));
         assertTrue(verifyChecksum(numericIndexContext));
 
@@ -988,15 +1069,38 @@ public class NativeIndexDDLTest extends SAITester
         else
             corruptIndexComponent(component, corruptionType);
 
-        // If we are removing completion markers then the rest of the components should still have
-        // valid checksums.
-        boolean expectedNumericState = !failedNumericIndex || isBuildCompletionMarker(component);
-        boolean expectedLiteralState = !failedStringIndex || isBuildCompletionMarker(component);
+        // Reload all SSTable indexes to manifest the corruption:
+        reloadSSTableIndex();
 
-        assertEquals("Checksum verification for " + component + " should be " + expectedNumericState + " but was " + !expectedNumericState,
-                     expectedNumericState,
-                     verifyChecksum(numericIndexContext));
-        assertEquals(expectedLiteralState, verifyChecksum(stringIndexContext));
+        try
+        {
+            // If the corruption is that a file is missing entirely, the index won't be marked non-queryable...
+            rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+            // If we corrupted the index (and it's still queryable), we get either 0 or 2, depending on whether
+            // there is previous build of the index that gets automatically picked up. But mostly, we want to ensure
+            // the index does work if it's not corrupted.
+            if (!failedNumericIndex)
+                assertEquals(rowCount, rows.all().size());
+
+            //assertEquals(failedNumericIndex ? 0 : rowCount, rows.all().size());
+        }
+        catch (ReadFailureException e)
+        {
+            // ...but most kind of corruption will result in the index being non-queryable.
+        }
+
+        try
+        {
+            // If the corruption is that a file is missing entirely, the index won't be marked non-queryable...
+            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+            // Same as above
+            if (!failedStringIndex)
+                assertEquals(rowCount, rows.all().size());
+        }
+        catch (ReadFailureException e)
+        {
+            // ...but most kind of corruption will result in the index being non-queryable.
+        }
 
         if (rebuild)
         {
@@ -1004,35 +1108,6 @@ public class NativeIndexDDLTest extends SAITester
         }
         else
         {
-            // Reload all SSTable indexes to manifest the corruption:
-            reloadSSTableIndex();
-
-            // Verify the index cannot be read:
-            verifySSTableIndexes(numericIndexContext.getIndexName(), Version.LATEST.onDiskFormat().perSSTableComponents().contains(component) ? 0 : 1, failedNumericIndex ? 0 : 1);
-            verifySSTableIndexes(stringIndexContext.getIndexName(), Version.LATEST.onDiskFormat().perSSTableComponents().contains(component) ? 0 : 1, failedStringIndex ? 0 : 1);
-
-            try
-            {
-                // If the corruption is that a file is missing entirely, the index won't be marked non-queryable...
-                rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
-                assertEquals(failedNumericIndex ? 0 : rowCount, rows.all().size());
-            }
-            catch (ReadFailureException e)
-            {
-                // ...but most kind of corruption will result in the index being non-queryable.
-            }
-
-            try
-            {
-                // If the corruption is that a file is missing entirely, the index won't be marked non-queryable...
-                rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
-                assertEquals(failedStringIndex ? 0 : rowCount, rows.all().size());
-            }
-            catch (ReadFailureException e)
-            {
-                // ...but most kind of corruption will result in the index being non-queryable.
-            }
-
             // Simulate the index repair that would occur on restart:
             runInitializationTask();
         }
@@ -1040,12 +1115,61 @@ public class NativeIndexDDLTest extends SAITester
         // verify indexes are recovered
         verifySSTableIndexes(numericIndexContext.getIndexName(), 1);
         verifySSTableIndexes(numericIndexContext.getIndexName(), 1);
-        verifyIndexFiles(numericIndexContext, stringIndexContext, 1, 1, 1, 1, 1);
+        verifyIndexComponentFiles(numericIndexContext, stringIndexContext);
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(rowCount, rows.all().size());
         rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
         assertEquals(rowCount, rows.all().size());
+    }
+
+
+    @Test
+    public void verifyCanRebuildAndReloadInPlaceToNewerVersion() throws Throwable
+    {
+        Version current = Version.latest();
+        try
+        {
+            SAIUtil.setLatestVersion(Version.AA);
+
+            // prepare schema and data
+            createTable(CREATE_TABLE_TEMPLATE);
+            String numericIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            String stringIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+            IndexContext numericIndexContext = getIndexContext(numericIndexName);
+            IndexContext stringIndexContext = getIndexContext(stringIndexName);
+
+            int rowCount = 2;
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+            flush();
+
+            // Sanity check first
+            ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+            assertEquals(rowCount, rows.all().size());
+            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+            assertEquals(rowCount, rows.all().size());
+
+            verifySAIVersionInUse(Version.AA, numericIndexContext, stringIndexContext);
+
+            SAIUtil.setLatestVersion(current);
+
+            rebuildIndexes(numericIndexName, stringIndexName);
+            reloadSSTableIndexInPlace();
+
+            // This should still work
+            rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+            assertEquals(rowCount, rows.all().size());
+            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+            assertEquals(rowCount, rows.all().size());
+
+            verifySAIVersionInUse(current, numericIndexContext, stringIndexContext);
+        }
+        finally
+        {
+            // If we haven't failed, we should already have done this, but if we did fail ...
+            SAIUtil.setLatestVersion(current);
+        }
     }
 
     @Test
@@ -1210,8 +1334,8 @@ public class NativeIndexDDLTest extends SAITester
         waitForIndexQueryable();
 
         populateData.run();
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 2, 0);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 2, 0);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 2, 2);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 2, 2);
         verifyIndexFiles(numericIndexContext, literalIndexContext, 2, 0, 0, 2, 2);
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
@@ -1221,8 +1345,8 @@ public class NativeIndexDDLTest extends SAITester
 
         // compact empty index
         compact();
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 1, 0);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 1, 0);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 1, 1);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 1, 1);
         waitForAssert(() -> verifyIndexFiles(numericIndexContext, literalIndexContext, 1, 0, 0, 1, 1));
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
@@ -1296,7 +1420,7 @@ public class NativeIndexDDLTest extends SAITester
 
         Injections.inject(delayIndexBuilderCompletion);
 
-        IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
+        IndexContext numericIndexContext = getIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
 
         waitForAssert(() -> assertTrue(getCompactionTasks() > 0), 1000, TimeUnit.MILLISECONDS);
 
@@ -1430,5 +1554,82 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(singletonList(4L), toSize.apply(iterator.next()));
         assertEquals(singletonList(3L), toSize.apply(iterator.next()));
         assertEquals(Arrays.asList(2L, 1L), toSize.apply(iterator.next()));
+    }
+
+    @Test
+    public void shouldRejectLargeStringTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+        // insert a text term with the max possible size
+        execute(insert, ByteBuffer.allocate(IndexContext.MAX_STRING_TERM_SIZE));
+
+        // insert a text term over the max possible size
+        assertThatThrownBy(() -> execute(insert, ByteBuffer.allocate(IndexContext.MAX_STRING_TERM_SIZE + 1)))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Term of column v exceeds the byte limit for index");
+    }
+
+    @Test
+    public void shouldRejectLargeFrozenTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<list<text>>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(full(v)) USING 'StorageAttachedIndex'");
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+        // insert a frozen term with the max possible size
+        // list serialization uses 4 bytes for the collection size, and then 4 bytes per each item size
+        String value1 = UTF8Type.instance.compose(ByteBuffer.allocate(IndexContext.MAX_FROZEN_TERM_SIZE / 2 - 8));
+        String value2 = UTF8Type.instance.compose(ByteBuffer.allocate(IndexContext.MAX_FROZEN_TERM_SIZE / 2 - 4));
+        execute(insert, Arrays.asList(value1, value2));
+
+        // insert a frozen term over the max possible size
+        assertThatThrownBy(() -> execute(insert, Arrays.asList(value1, value2, "x")))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Term of column v exceeds the byte limit for index");
+    }
+
+    @Test
+    public void shouldRejectLargeAnalyzedTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'" +
+                    " WITH OPTIONS = {'index_analyzer': 'whitespace'}");
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+
+        // insert an analyzed column with terms of cumulating up to the max possible size
+        String term = UTF8Type.instance.compose(ByteBuffer.allocate(IndexContext.MAX_ANALYZED_SIZE / 2));
+        execute(insert, term + ' ' + term);
+
+        // insert a frozen term over the max possible size
+        assertThatThrownBy(() -> execute(insert, term + ' ' + term + ' ' + term))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Term's analyzed size for column v exceeds the cumulative limit for index");
+    }
+
+    @Test
+    public void shouldRejectLargeVector()
+    {
+        String table = "CREATE TABLE %%s (k int PRIMARY KEY, v vector<float, %d>)";
+        String index = "CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}";
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+        // insert a vector term with the max possible size
+        int dimensions = IndexContext.MAX_VECTOR_TERM_SIZE / Float.BYTES;
+        createTable(String.format(table, dimensions));
+        createIndex(index);
+        execute(insert, vector(new float[dimensions]));
+
+        // create a vector index producing terms over the max possible size
+        createTable(String.format(table, dimensions + 1));
+        // VSTODO: uncomment when https://github.com/riptano/VECTOR-SEARCH/issues/85 is solved
+//        assertThatThrownBy(() -> execute(index))
+//        .isInstanceOf(InvalidRequestException.class)
+//        .hasMessageContaining("An index of vector<float, 4097> will produce terms of 16.004KiB, " +
+//                              "exceeding the max vector term size of 16.000KiB. " +
+//                              "That sets an implicit limit of 4096 dimensions for float vectors.");
     }
 }

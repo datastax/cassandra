@@ -23,6 +23,7 @@ package org.apache.cassandra.index;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -35,6 +36,8 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -46,6 +49,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -56,6 +60,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+
+import org.apache.commons.lang3.NotImplementedException;
 
 
 /**
@@ -221,7 +227,6 @@ public interface Index
     {
         return INDEX_BUILDER_SUPPORT;
     }
-    
     /**
      * Same as {@code getBuildTaskSupport} but can be overloaded with a specific 'recover' logic different than the index building one
      */
@@ -443,6 +448,54 @@ public interface Index
     public RowFilter getPostIndexQueryFilter(RowFilter filter);
 
     /**
+     * Returns a {@link Comparator} of CQL result rows, so they can be ordered by the
+     * coordinator before sending them to client.
+     *
+     * @param restriction restriction that requires current index
+     * @param columnIndex idx of the indexed column in returned row
+     * @param options     query options
+     * @return a comparator of rows
+     */
+    default Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
+    {
+        throw new NotImplementedException();
+    }
+
+    /**
+     * Returns a {@link Scorer} to give a similarity/proximity score to CQL result rows, so they can be ordered by the
+     * coordinator before sending them to client.
+     *
+     * @param restriction restriction that requires current index
+     * @param columnIndex idx of the indexed column in returned row
+     * @param options     query options
+     * @return a scorer to score the rows
+     */
+    default Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
+    {
+        throw new NotImplementedException();
+    }
+
+    /**
+     * Gives a similarity/proximity score to CQL result rows.
+     */
+    interface Scorer
+    {
+        /**
+         * @param row a CQL result row
+         * @return the similarity/proximity score for the row
+         */
+        float score(List<ByteBuffer> row);
+
+        /**
+         * @return {@code true} if higher scores are considered better, {@code false} otherwise
+         */
+        default boolean reversed()
+        {
+            return false;
+        }
+    }
+
+    /**
      * Return an estimate of the number of results this index is expected to return for any given
      * query that it can be used to answer. Used in conjunction with indexes() and supportsExpression()
      * to determine the most selective index for a given ReadCommand. Additionally, this is also used
@@ -477,16 +530,6 @@ public interface Index
      * @throws InvalidRequestException
      */
     public void validate(PartitionUpdate update) throws InvalidRequestException;
-
-    /**
-     * Returns the SSTable-attached {@link Component}s created by this index.
-     *
-     * @return the SSTable components created by this index
-     */
-    default Set<Component> getComponents()
-    {
-        return Collections.emptySet();
-    }
 
     /*
      * Update processing
@@ -618,10 +661,7 @@ public interface Index
 
     /**
      * Used to validate the various parameters of a supplied {@code}ReadCommand{@code},
-     * this is called prior to execution. In theory, any command instance may be checked
-     * by any {@code}Index{@code} instance, but in practice the index will be the one
-     * returned by a call to the {@code}getIndex(ColumnFamilyStore cfs){@code} method on
-     * the supplied command.
+     * this is called prior to execution.
      *
      * Custom index implementations should perform any validation of query expressions here and throw a meaningful
      * InvalidRequestException when any expression or other parameter is invalid.
@@ -736,7 +776,7 @@ public interface Index
          *
          * @return the indexes that are members of this group
          */
-        Set<Index> getIndexes();
+        Set<? extends Index> getIndexes();
 
         /**
          * Adds the specified {@link Index} as a member of this group.
@@ -800,13 +840,13 @@ public interface Index
         /**
          * Get flush observer to observe partition/cell events generated by flushing SSTable (memtable flush or compaction).
          *
-         * @param descriptor The descriptor of the sstable observer is requested for.
-         * @param tracker The {@link LifecycleNewTracker} associated with the SSTable being written
+         * @param descriptor    The descriptor of the sstable observer is requested for.
+         * @param tracker       The {@link LifecycleNewTracker} associated with the SSTable being written
          * @param tableMetadata The immutable metadata of the table at the moment the SSTable is flushed
-         *
+         * @param keyCount
          * @return SSTable flush observer.
          */
-        SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata);
+        SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount);
 
         /**
          * @param type index transaction type
@@ -830,11 +870,26 @@ public interface Index
         default void unload() { }
 
         /**
-         * Returns the SSTable-attached {@link Component}s created by this index group.
+         * Returns the set of sstable-attached components that this group will create for a newly flushed sstable.
          *
-         * @return the SSTable components created by this group
+         * Note that the result of this method is only valid for newly flushed/written sstables as the components
+         * returned will assume a version of {@link Version#latest()} and a generation of 0. SSTables for which some
+         * index have been rebuild may have index components that do not match what this method return in particular.
          */
-        Set<Component> getComponents();
+        Set<Component> componentsForNewSSTable();
+
+        /**
+         * Return the set of sstable-attached components belonging to the group that are currently "active" for the
+         * provided sstable.
+         * <p>
+         * The "active" components are the components that are currently in use, meaning that if a given component
+         * of the sstable exists with multiple versions or generation on disk, only the most recent version/generation
+         * is the active one.
+         *
+         * @param sstable the sstable to get components for.
+         * @return the set of the sstable-attached components of the provided sstable for this group.
+         */
+        Set<Component> activeComponents(SSTableReader sstable);
 
         /**
          * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise
@@ -962,8 +1017,10 @@ public interface Index
          * The function takes a PartitionIterator of the results from the replicas which has already been collated
          * and reconciled, along with the command being executed. It returns another PartitionIterator containing the results
          * of the transformation (which may be the same as the input if the transformation is a no-op).
+         *
+         * @param command the read command being executed
          */
-        default Function<PartitionIterator, PartitionIterator> postProcessor()
+        default Function<PartitionIterator, PartitionIterator> postProcessor(ReadCommand command)
         {
             return partitions -> partitions;
         }
@@ -984,6 +1041,14 @@ public interface Index
          * @return true if the indexes in this plan support querying multiple vnode ranges at once.
          */
         default boolean supportsMultiRangeReadCommand()
+        {
+            return false;
+        }
+
+        /**
+         * @return true if given index query plan is a top-k request
+         */
+        default boolean isTopK()
         {
             return false;
         }

@@ -39,10 +39,13 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     private final ClusteringComparator clusteringComparator;
+    private final boolean hasEmptyClustering;
+
 
     public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
     {
         this.clusteringComparator = clusteringComparator;
+        this.hasEmptyClustering = clusteringComparator.size() == 0;
     }
 
     @Override
@@ -114,6 +117,23 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public ByteSource asComparableBytes(ByteComparable.Version version)
         {
+            return asComparableBytes(version == ByteComparable.Version.LEGACY ? ByteSource.END_OF_STREAM : ByteSource.TERMINATOR, version, false);
+        }
+
+        @Override
+        public ByteSource asComparableBytesMinPrefix(ByteComparable.Version version)
+        {
+            return asComparableBytes(ByteSource.LT_NEXT_COMPONENT, version, true);
+        }
+
+        @Override
+        public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
+        {
+            return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, true);
+        }
+
+        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
+        {
             // We need to make sure that the key is loaded before returning a
             // byte comparable representation. If we don't we won't get a correct
             // comparison because we potentially won't be using the partition key
@@ -123,6 +143,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             ByteSource tokenComparable = token.asComparableBytes(version);
             ByteSource keyComparable = partitionKey == null ? null
                                                             : ByteSource.of(partitionKey.getKey(), version);
+
             // It is important that the ClusteringComparator.asBytesComparable method is used
             // to maintain the correct clustering sort order
             ByteSource clusteringComparable = clusteringComparator.size() == 0 ||
@@ -130,12 +151,16 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                                               clustering.isEmpty() ? null
                                                                    : clusteringComparator.asByteComparable(clustering)
                                                                                          .asComparableBytes(version);
-            return ByteSource.withTerminator(version == ByteComparable.Version.LEGACY
-                                             ? ByteSource.END_OF_STREAM
-                                             : ByteSource.TERMINATOR,
-                                             tokenComparable,
-                                             keyComparable,
-                                             clusteringComparable);
+
+            // prefix doesn't include null components
+            if (isPrefix)
+            {
+                if (keyComparable == null)
+                    return ByteSource.withTerminator(terminator, tokenComparable);
+                else if (clusteringComparable == null)
+                    return ByteSource.withTerminator(terminator, tokenComparable, keyComparable);
+            }
+            return ByteSource.withTerminator(terminator, tokenComparable, keyComparable, clusteringComparable);
         }
 
         @Override
@@ -163,7 +188,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int hashCode()
         {
-            return Objects.hash(token, partitionKey, clustering, clusteringComparator);
+            if (hasEmptyClustering)
+                return Objects.hash(token);
+            return Objects.hash(token, clustering());
         }
 
         @Override

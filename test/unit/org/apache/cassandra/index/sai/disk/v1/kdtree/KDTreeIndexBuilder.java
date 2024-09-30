@@ -30,7 +30,7 @@ import java.util.stream.Stream;
 
 import org.junit.Assert;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -41,10 +41,13 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.KDTreeIndexSearcher;
@@ -54,6 +57,8 @@ import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -62,6 +67,8 @@ import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class KDTreeIndexBuilder
 {
@@ -70,32 +77,56 @@ public class KDTreeIndexBuilder
         private final PrimaryKey.Factory primaryKeyFactory = new PartitionAwarePrimaryKeyFactory();
 
         @Override
+        public SSTableId<?> getSSTableId()
+        {
+            return new SequenceBasedSSTableId(0);
+        }
+
+        @Override
         public PrimaryKey primaryKeyFromRowId(long sstableRowId)
         {
             return primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(sstableRowId));
         }
 
         @Override
-        public long rowIdFromPrimaryKey(PrimaryKey key)
+        public long exactRowIdOrInvertedCeiling(PrimaryKey key)
         {
             return key.token().getLongValue();
         }
+
+        @Override
+        public long ceiling(PrimaryKey key)
+        {
+            return key.token().getLongValue();
+        }
+
+        @Override
+        public long floor(PrimaryKey key)
+        {
+            return key.token().getLongValue();
+        }
+
+        @Override
+        public long count()
+        {
+            return Long.MAX_VALUE;
+        }
     };
-    public static final PrimaryKeyMap.Factory TEST_PRIMARY_KEY_MAP_FACTORY = (context) -> TEST_PRIMARY_KEY_MAP;
+    public static final PrimaryKeyMap.Factory TEST_PRIMARY_KEY_MAP_FACTORY = () -> TEST_PRIMARY_KEY_MAP;
 
 
     private static final BigDecimal ONE_TENTH = BigDecimal.valueOf(1, 1);
 
     private final IndexDescriptor indexDescriptor;
     private final AbstractType<?> type;
-    private final AbstractIterator<Pair<ByteComparable, LongArrayList>> terms;
+    private final AbstractIterator<Pair<ByteComparable, IntArrayList>> terms;
     private final int size;
     private final int minSegmentRowId;
     private final int maxSegmentRowId;
 
     public KDTreeIndexBuilder(IndexDescriptor indexDescriptor,
                               AbstractType<?> type,
-                              AbstractIterator<Pair<ByteComparable, LongArrayList>> terms,
+                              AbstractIterator<Pair<ByteComparable, IntArrayList>> terms,
                               int size,
                               int minSegmentRowId,
                               int maxSegmentRowId)
@@ -115,9 +146,9 @@ public class KDTreeIndexBuilder
 
         final SegmentMetadata metadata;
 
-        IndexContext columnContext = SAITester.createIndexContext("test", Int32Type.instance);
-        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                columnContext,
+        IndexContext indexContext = SAITester.createIndexContext("test", Int32Type.instance);
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 TypeUtil.fixedSizeOf(type),
                                                                 maxSegmentRowId,
                                                                 size,
@@ -136,9 +167,13 @@ public class KDTreeIndexBuilder
                                            indexMetas);
         }
 
-        try (PerIndexFiles indexFiles = new PerIndexFiles(indexDescriptor, SAITester.createIndexContext("test", Int32Type.instance)))
+        try (PerIndexFiles indexFiles = new PerIndexFiles(components))
         {
-            IndexSearcher searcher = IndexSearcher.open(TEST_PRIMARY_KEY_MAP_FACTORY, indexFiles, metadata, indexDescriptor, columnContext);
+            SSTableContext sstableContext = mock(SSTableContext.class);
+            when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
+            when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
+
+            IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
             assertThat(searcher, is(instanceOf(KDTreeIndexSearcher.class)));
             return (KDTreeIndexSearcher) searcher;
         }
@@ -238,22 +273,22 @@ public class KDTreeIndexBuilder
      * Returns inverted index where each posting list contains exactly one element equal to the terms ordinal number +
      * given offset.
      */
-    public static AbstractIterator<Pair<ByteComparable, LongArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
+    public static AbstractIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
     {
-        return new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
+        return new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private long currentTerm = 0;
             private int currentSegmentRowId = segmentRowIdOffset;
 
             @Override
-            protected Pair<ByteComparable, LongArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 if (currentTerm++ >= size)
                 {
                     return endOfData();
                 }
 
-                LongArrayList postings = new LongArrayList();
+                IntArrayList postings = new IntArrayList();
                 postings.add(currentSegmentRowId++);
                 assertTrue(terms.hasNext());
 

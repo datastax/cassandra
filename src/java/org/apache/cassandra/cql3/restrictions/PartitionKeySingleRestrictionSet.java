@@ -25,15 +25,14 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.MultiCBuilder;
+import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.index.IndexRegistry;
-import org.apache.cassandra.service.QueryState;
 
 /**
  * A set of single restrictions on the partition key.
- * <p>This class can only contains <code>SingleRestriction</code> instances. Token restrictions will be handled by
+ * <p>This class can only contain <code>SingleRestriction</code> instances. Token restrictions will be handled by
  * <code>TokenRestriction</code> class or by the <code>TokenFilter</code> class if the query contains a mix of token
  * restrictions and single column restrictions on the partition key.
  */
@@ -42,7 +41,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     /**
      * The composite type.
      */
-    protected final ClusteringComparator comparator;
+    private final ClusteringComparator comparator;
 
     private PartitionKeySingleRestrictionSet(RestrictionSet restrictionSet, ClusteringComparator comparator)
     {
@@ -51,7 +50,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     }
 
     @Override
-    public PartitionKeyRestrictions mergeWith(Restriction restriction)
+    public PartitionKeyRestrictions mergeWith(Restriction restriction, IndexRegistry indexRegistry)
     {
         if (restriction.isOnToken())
         {
@@ -69,13 +68,13 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
             builder.addRestriction(r);
         }
         return builder.addRestriction(restriction)
-                      .build();
+                      .build(indexRegistry);
     }
 
     @Override
     public List<ByteBuffer> values(QueryOptions options, QueryState queryState)
     {
-        MultiCBuilder builder = MultiCBuilder.create(comparator, hasIN());
+        MultiClusteringBuilder builder = MultiClusteringBuilder.create(comparator);
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
@@ -85,7 +84,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
             if (hasIN() && Guardrails.inSelectCartesianProduct.enabled(queryState))
                 Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", false, queryState);
 
-            if (builder.hasMissingElements())
+            if (builder.buildIsEmpty())
                 break;
         }
         return builder.buildSerializedPartitionKeys();
@@ -94,14 +93,14 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     @Override
     public List<ByteBuffer> bounds(Bound bound, QueryOptions options)
     {
-        MultiCBuilder builder = MultiCBuilder.create(comparator, hasIN());
+        MultiClusteringBuilder builder = MultiClusteringBuilder.create(comparator);
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
             SingleRestriction r = restrictions.get(i);
             r.appendBoundTo(builder, bound, options);
-            if (builder.hasMissingElements())
-                return Collections.EMPTY_LIST;
+            if (builder.buildIsEmpty())
+                return Collections.emptyList();
         }
         return builder.buildSerializedPartitionKeys();
     }
@@ -162,7 +161,8 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
 
         private final List<Restriction> restrictions = new ArrayList<>();
 
-        private Builder(ClusteringComparator clusteringComparator) {
+        private Builder(ClusteringComparator clusteringComparator)
+        {
             this.clusteringComparator = clusteringComparator;
         }
 
@@ -172,36 +172,38 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
             return this;
         }
 
-        public PartitionKeyRestrictions build()
+        public PartitionKeyRestrictions build(IndexRegistry indexRegistry)
         {
-            return build(false);
+            return build(indexRegistry, false);
         }
 
-        public PartitionKeyRestrictions build(boolean isDisjunction)
+        public PartitionKeyRestrictions build(IndexRegistry indexRegistry, boolean isDisjunction)
         {
             RestrictionSet.Builder restrictionSet = RestrictionSet.builder();
 
-            for (int i = 0; i < restrictions.size(); i++) {
+            for (int i = 0; i < restrictions.size(); i++)
+            {
                 Restriction restriction = restrictions.get(i);
 
                 // restrictions on tokens are handled in a special way
                 if (restriction.isOnToken())
-                    return buildWithTokens(restrictionSet, i);
+                    return buildWithTokens(restrictionSet, i, indexRegistry);
 
-                restrictionSet.addRestriction((SingleRestriction) restriction, isDisjunction);
+                restrictionSet.addRestriction((SingleRestriction) restriction, isDisjunction, indexRegistry);
             }
 
             return buildPartitionKeyRestrictions(restrictionSet);
         }
 
-        private PartitionKeyRestrictions buildWithTokens(RestrictionSet.Builder restrictionSet, int i)
+        private PartitionKeyRestrictions buildWithTokens(RestrictionSet.Builder restrictionSet, int i, IndexRegistry indexRegistry)
         {
             PartitionKeyRestrictions merged = buildPartitionKeyRestrictions(restrictionSet);
 
-            for (; i < restrictions.size(); i++) {
+            for (; i < restrictions.size(); i++)
+            {
                 Restriction restriction = restrictions.get(i);
 
-                merged = merged.mergeWith(restriction);
+                merged = merged.mergeWith(restriction, indexRegistry);
             }
 
             return merged;

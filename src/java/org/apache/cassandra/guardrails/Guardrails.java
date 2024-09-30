@@ -109,6 +109,17 @@ public abstract class Guardrails
                                                                     what, v, t))
                                .setMinNotifyIntervalInMs(TimeUnit.MINUTES.toMillis(30));
 
+    /**
+     * Guardrail on the number of dimensions of vector columns.
+     */
+    public static final Threshold vectorDimensions =
+            factory.threshold("vector_dimensions",
+                    () -> config.vector_dimensions_warn_threshold,
+                    () -> config.vector_dimensions_failure_threshold,
+                    (isWarning, what, value, threshold) ->
+                    format("%s has a vector of %s dimensions, this exceeds the %s threshold of %s.",
+                          what, value, isWarning ? "warning" : "failure", threshold));
+
     public static final DisableFlag readBeforeWriteListOperationsEnabled =
             factory.disableFlag("read_before_write_list_operations",
                             () -> !config.read_before_write_list_operations_enabled,
@@ -242,6 +253,17 @@ public abstract class Guardrails
                                                     "against table%s %s. You should use a logged batch for " +
                                                     "atomicity, or asynchronous writes for performance.",
                                                     v, what.contains(", ") ? "s" : "", what));
+
+    /**
+     * Guardrail on the number of rows that a SELECT query with LIMIT/OFFSET can skip.
+     */
+    public static final Threshold offsetRows =
+    factory.threshold("offset_rows",
+                      () -> config.offset_rows_warn_threshold,
+                      () -> config.offset_rows_failure_threshold,
+                      (isWarning, what, value, threshold) ->
+                      format("%s requested to skip %s rows, this exceeds the %s threshold of %s.",
+                             what, value, isWarning ? "warning" : "failure", threshold));
 
     private static String formatSize(long size)
     {

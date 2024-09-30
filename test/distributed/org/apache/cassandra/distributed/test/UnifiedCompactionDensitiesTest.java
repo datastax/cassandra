@@ -64,6 +64,7 @@ public class UnifiedCompactionDensitiesTest extends TestBaseImpl
 
     private void testTargetSSTableSize(int nodeCount, int dataDirs) throws IOException
     {
+        System.setProperty("unified_compaction.l0_shards_enabled", "true");
         try (Cluster cluster = init(builder().withNodes(nodeCount)
                                              .withDataDirCount(dataDirs)
                                              .withConfig(cfg -> cfg.set("memtable_heap_space_in_mb", "100"))

@@ -71,6 +71,12 @@ public class EmptyType extends AbstractType<Void>
     private EmptyType() {super(ComparisonType.CUSTOM);} // singleton
 
     @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
+    @Override
     public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
     {
         return null;

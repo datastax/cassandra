@@ -24,7 +24,6 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -138,7 +137,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     private TrieIndexSSTableReader cloneInternal(DecoratedKey first, OpenReason openReason, IFilter bf)
     {
         TrieIndexSSTableReader clone = new TrieIndexSSTableReader(descriptor,
-                                                                  components,
+                                                                  components(),
                                                                   metadata,
                                                                   maxDataAge,
                                                                   sstableMetadata,
@@ -202,7 +201,11 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     public void setup(boolean trackHotness)
     {
-        tidy.setup(this, trackHotness, Arrays.asList(bf, dfile, partitionIndex, rowIndexFile));
+        tidy.setup(this, trackHotness);
+        tidy.addCloseable(bf);
+        tidy.addCloseable(dfile);
+        tidy.addCloseable(partitionIndex);
+        tidy.addCloseable(rowIndexFile);
         super.setup(trackHotness);
     }
 
@@ -324,10 +327,11 @@ public class TrieIndexSSTableReader extends SSTableReader
                                           SSTableReadsListener listener,
                                           boolean updateStats)
     {
-        if (!bf.isPresent(dk))
+        if (!inBloomFilter(dk))
         {
             listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
-            Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id);
+            if (Tracing.traceSinglePartitions())
+                Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id);
             if (updateStats)
                 getBloomFilterTracker().addTrueNegative();
             return null;
@@ -340,6 +344,8 @@ public class TrieIndexSSTableReader extends SSTableReader
             listener.onSSTableSkipped(this, SkippingReason.MIN_MAX_KEYS);
             return null;
         }
+
+        listener.onSSTablePartitionIndexAccessed(this);
 
         try (PartitionIndex.Reader reader = partitionIndex.openReader())
         {
@@ -955,7 +961,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         IFilter bf = null;
         if (SSTableReader.shouldLoadBloomFilter(descriptor, components, currentFPChance, desiredFPChance))
-            bf = SSTableReaderBuilder.loadBloomFilter(descriptor.fileFor(Component.FILTER), descriptor.version.hasOldBfFormat());
+            bf = SSTableReaderBuilder.loadBloomFilter(metadata, descriptor.fileFor(Component.FILTER), descriptor.version.hasOldBfFormat());
 
         boolean recreateBloomFilter = bf == null && SSTableReader.mayRecreateBloomFilter(descriptor, components, currentFPChance, isOffline, desiredFPChance);
         if (recreateBloomFilter)
@@ -1031,7 +1037,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                      FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX))
                 {
                     rowIdxFH = rowIdxFHBuilder.complete();
-                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, bloomFilter == FilterFactory.AlwaysPresent, statsMetadata.zeroCopyMetadata);
+                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, bloomFilter == FilterFactory.AlwaysPresent, statsMetadata.zeroCopyMetadata, descriptor.version.getByteComparableVersion());
                     sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                   components,
                                                                   metadata,

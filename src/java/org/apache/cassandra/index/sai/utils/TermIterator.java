@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.utils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,11 +29,14 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 
+/**
+ * TermIterator wraps RangeUnionIterator with code that tracks and releases the referenced indexes,
+ * and adds timeout checkpoints around expensive operations.
+ */
 public class TermIterator extends RangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(TermIterator.class);
@@ -44,19 +48,26 @@ public class TermIterator extends RangeIterator
 
     private TermIterator(RangeIterator union, Set<SSTableIndex> referencedIndexes, QueryContext queryContext)
     {
-        super(union.getMinimum(), union.getMaximum(), union.getCount());
+        super(union.getMinimum(), union.getMaximum(), union.getMaxKeys());
 
         this.union = union;
         this.referencedIndexes = referencedIndexes;
         this.context = queryContext;
     }
 
-    @SuppressWarnings("resource")
-    public static TermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer)
-    {
-        final List<RangeIterator> tokens = new ArrayList<>(1 + perSSTableIndexes.size());;
 
-        RangeIterator memtableIterator = e.context.searchMemtable(e, keyRange);
+    @SuppressWarnings("resource")
+    public static TermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
+    {
+        RangeIterator rangeIterator = buildRangeIterator(e, perSSTableIndexes, keyRange, queryContext, defer, limit);
+        return new TermIterator(rangeIterator, perSSTableIndexes, queryContext);
+    }
+
+    private static RangeIterator buildRangeIterator(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
+    {
+        final List<RangeIterator> tokens = new ArrayList<>(1 + perSSTableIndexes.size());
+
+        RangeIterator memtableIterator = e.context.searchMemtable(queryContext, e, keyRange, limit);
         if (memtableIterator != null)
             tokens.add(memtableIterator);
 
@@ -65,28 +76,31 @@ public class TermIterator extends RangeIterator
             try
             {
                 queryContext.checkpoint();
-                queryContext.incSstablesHit();
+                queryContext.addSstablesHit(1);
                 assert !index.isReleased();
 
-                SSTableQueryContext context = queryContext.getSSTableQueryContext(index.getSSTable());
-                List<RangeIterator> keyIterators = index.search(e, keyRange, context, defer);
 
-                if (keyIterators == null || keyIterators.isEmpty())
+
+                RangeIterator keyIterator = index.search(e, keyRange, queryContext, defer, limit);
+
+                if (keyIterator == null || !keyIterator.hasNext())
                     continue;
 
-                tokens.addAll(keyIterators);
+                tokens.add(keyIterator);
             }
             catch (Throwable e1)
             {
                 if (logger.isDebugEnabled() && !(e1 instanceof AbortedOperationException))
                     logger.debug(String.format("Failed search an index %s, skipping.", index.getSSTable()), e1);
 
+                // Close the iterators that were successfully opened before the error
+                FileUtils.closeQuietly(tokens);
+
                 throw Throwables.cleaned(e1);
             }
         }
 
-        RangeIterator ranges = RangeUnionIterator.build(tokens);
-        return new TermIterator(ranges, perSSTableIndexes, queryContext);
+        return RangeUnionIterator.build(tokens);
     }
 
     protected PrimaryKey computeNext()

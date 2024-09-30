@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v2;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -27,27 +28,40 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
+import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
+import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.lucene.store.IndexInput;
 
+/**
+ * Updates SAI OnDiskFormat to include full PK -> offset mapping, and adds vector components.
+ */
 public class V2OnDiskFormat extends V1OnDiskFormat
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static final Set<IndexComponent> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponent.GROUP_COMPLETION_MARKER,
-                                                                                 IndexComponent.GROUP_META,
-                                                                                 IndexComponent.TOKEN_VALUES,
-                                                                                 IndexComponent.PRIMARY_KEY_TRIE,
-                                                                                 IndexComponent.PRIMARY_KEY_BLOCKS,
-                                                                                 IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS);
+    private static final Set<IndexComponentType> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
+                                                                                     IndexComponentType.GROUP_META,
+                                                                                     IndexComponentType.TOKEN_VALUES,
+                                                                                     IndexComponentType.PRIMARY_KEY_TRIE,
+                                                                                     IndexComponentType.PRIMARY_KEY_BLOCKS,
+                                                                                     IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
+
+    public static final Set<IndexComponentType> VECTOR_COMPONENTS_V2 = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
+                                                                                  IndexComponentType.META,
+                                                                                  IndexComponentType.VECTOR,
+                                                                                  IndexComponentType.TERMS_DATA,
+                                                                                  IndexComponentType.POSTING_LISTS);
 
     public static final V2OnDiskFormat instance = new V2OnDiskFormat();
 
@@ -57,6 +71,12 @@ public class V2OnDiskFormat extends V1OnDiskFormat
         public boolean isRowAware()
         {
             return true;
+        }
+
+        @Override
+        public boolean hasVectorIndexChecksum()
+        {
+            return false;
         }
     };
 
@@ -70,54 +90,46 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator)
     {
         return new RowAwarePrimaryKeyFactory(comparator);
     }
 
     @Override
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(indexDescriptor, sstable);
+        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
+    }
+
+    @Override
+    public IndexSearcher newIndexSearcher(SSTableContext sstableContext,
+                                          IndexContext indexContext,
+                                          PerIndexFiles indexFiles,
+                                          SegmentMetadata segmentMetadata) throws IOException
+    {
+        if (indexContext.isVector())
+            throw new IllegalStateException("V2 (HNSW) vector index support has been removed");
+        if (indexContext.isLiteral())
+            return new V2InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
+        return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
     }
 
     @Override
     public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
     {
-        return new SSTableComponentsWriter(indexDescriptor);
+        return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
     }
 
     @Override
-    public boolean validatePerSSTableComponents(IndexDescriptor indexDescriptor, boolean checksum)
+    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
     {
-        for (IndexComponent indexComponent : perSSTableComponents())
-        {
-            if (isBuildCompletionMarker(indexComponent))
-                continue;
-            try (IndexInput input = indexDescriptor.openPerSSTableInput(indexComponent))
-            {
-                if (checksum)
-                    SAICodecUtils.validateChecksum(input);
-                else
-                    SAICodecUtils.validate(input);
-            }
-            catch (Throwable e)
-            {
-                if (logger.isDebugEnabled())
-                {
-                    logger.debug(indexDescriptor.logMessage("{} failed for index component {} on SSTable {}"),
-                                 (checksum ? "Checksum validation" : "Validation"),
-                                 indexComponent,
-                                 indexDescriptor.descriptor);
-                }
-                return false;
-            }
-        }
-        return true;
+        if (indexContext.isVector())
+            return VECTOR_COMPONENTS_V2;
+        return super.perIndexComponentTypes(indexContext);
     }
 
     @Override
-    public Set<IndexComponent> perSSTableComponents()
+    public Set<IndexComponentType> perSSTableComponentTypes()
     {
         return PER_SSTABLE_COMPONENTS;
     }
@@ -126,5 +138,25 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     public int openFilesPerSSTable()
     {
         return 4;
+    }
+
+    @Override
+    public ByteOrder byteOrderFor(IndexComponentType indexComponentType, IndexContext context)
+    {
+        // The little-endian files are written by Lucene, and the upgrade to Lucene 9 switched the byte order from big to little.
+        switch (indexComponentType)
+        {
+            case META:
+            case GROUP_META:
+            case TOKEN_VALUES:
+            case PRIMARY_KEY_BLOCK_OFFSETS:
+            case KD_TREE:
+            case KD_TREE_POSTING_LISTS:
+                return ByteOrder.LITTLE_ENDIAN;
+            case POSTING_LISTS:
+                return (context != null && context.isVector()) ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN;
+            default:
+                return ByteOrder.BIG_ENDIAN;
+        }
     }
 }

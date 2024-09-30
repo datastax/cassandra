@@ -206,7 +206,7 @@ parser.add_argument("--no-color", action='store_false', dest='color',
                     help='Never use color output')
 parser.add_argument("--browser", dest='browser', help="""The browser to use to display CQL help, where BROWSER can be:
                                                     - one of the supported browsers in https://docs.python.org/3/library/webbrowser.html.
-                                                    - browser path followed by %s, example: /usr/bin/google-chrome-stable %s""")
+                                                    - browser path followed by %%s, example: /usr/bin/google-chrome-stable %%s""")
 parser.add_argument('--ssl', action='store_true', help='Use SSL', default=False)
 parser.add_argument("-u", "--username", help="Authenticate as user.")
 parser.add_argument("-p", "--password", help="Authenticate using password.")
@@ -230,9 +230,9 @@ parser.add_argument("--protocol-version", type=int, default=None,
 
 parser.add_argument("-e", "--execute", help='Execute the statement and quit.')
 parser.add_argument("--connect-timeout", default=DEFAULT_CONNECT_TIMEOUT_SECONDS, dest='connect_timeout',
-                    help='Specify the connection timeout in seconds (default: %default seconds).')
+                    help='Specify the connection timeout in seconds (default: %(default)s seconds).')
 parser.add_argument("--request-timeout", default=DEFAULT_REQUEST_TIMEOUT_SECONDS, dest='request_timeout',
-                    help='Specify the default request timeout in seconds (default: %default seconds).')
+                    help='Specify the default request timeout in seconds (default: %(default)s seconds)')
 parser.add_argument("--consistency-level", dest='consistency_level',
                     help='Specify the initial consistency level.')
 parser.add_argument("--serial-consistency-level", dest='serial_consistency_level',
@@ -279,15 +279,22 @@ if os.path.exists(OLD_HISTORY):
     os.rename(OLD_HISTORY, HISTORY)
 # END history/config definition
 
-CQL_ERRORS = (
-    cassandra.AlreadyExists, cassandra.AuthenticationFailed, cassandra.CoordinationFailure,
-    cassandra.InvalidRequest, cassandra.Timeout, cassandra.Unauthorized, cassandra.OperationTimedOut,
-    cassandra.cluster.NoHostAvailable,
+CQL_TRACED_ERRORS = (
+    cassandra.CoordinationFailure,  # superclass of ReadFailure
+    cassandra.Timeout,              # superclass of ReadTimeout
+    cassandra.OperationTimedOut,
+    cassandra.protocol.InternalError,
+    cassandra.cluster.NoHostAvailable
+)
+CQL_ERRORS = CQL_TRACED_ERRORS + (
+    cassandra.AlreadyExists, cassandra.AuthenticationFailed,
+    cassandra.InvalidRequest, cassandra.Unauthorized,
     cassandra.connection.ConnectionBusy, cassandra.connection.ProtocolError, cassandra.connection.ConnectionException,
-    cassandra.protocol.ErrorMessage, cassandra.protocol.InternalError, cassandra.query.TraceUnavailable
+    cassandra.protocol.ErrorMessage, cassandra.query.TraceUnavailable
 )
 
 debug_completion = bool(os.environ.get('CQLSH_DEBUG_COMPLETION', '') == 'YES')
+trace_all_errors = bool(os.environ.get('CQLSH_TRACE_ALL_ERRORS', '') == 'YES')
 
 
 class NoKeyspaceError(Exception):
@@ -445,7 +452,7 @@ class Shell(cmd.Cmd):
                  cqlver=None, keyspace=None,
                  secure_connect_bundle=None,
                  consistency_level=None, serial_consistency_level=None,
-                 tracing_enabled=False, expand_enabled=False,
+                 tracing_style='off', expand_enabled=False,
                  display_nanotime_format=DEFAULT_NANOTIME_FORMAT,
                  display_timestamp_format=DEFAULT_TIMESTAMP_FORMAT,
                  display_date_format=DEFAULT_DATE_FORMAT,
@@ -473,7 +480,7 @@ class Shell(cmd.Cmd):
         self.username = username
         self.keyspace = keyspace
         self.ssl = ssl
-        self.tracing_enabled = tracing_enabled
+        self.tracing_style = tracing_style
         self.page_size = self.default_page_size
         self.expand_enabled = expand_enabled
 
@@ -647,7 +654,7 @@ class Shell(cmd.Cmd):
                   "Install Python 3.6+ or set %s to suppress this message.\n" % (py2_suppress_warn,))
 
     def show_session(self, sessionid, partial_session=False):
-        print_trace_session(self, self.session, sessionid, partial_session)
+        print_trace_session(self, self.tracing_style, self.session, sessionid, partial_session)
 
     def get_connection_versions(self):
         result, = self.session.execute("select * from system.local where key = 'local'")
@@ -1051,13 +1058,13 @@ class Shell(cmd.Cmd):
                 self.current_keyspace = ksname.lower()
 
     def do_select(self, parsed):
-        tracing_was_enabled = self.tracing_enabled
+        tracing_was_enabled = self.tracing_style
         ksname = parsed.get_binding('ksname')
         stop_tracing = ksname == 'system_traces' or (ksname is None and self.current_keyspace == 'system_traces')
-        self.tracing_enabled = self.tracing_enabled and not stop_tracing
+        self.tracing_style = "off" if stop_tracing else self.tracing_style
         statement = parsed.extract_orig()
         self.perform_statement(statement)
-        self.tracing_enabled = tracing_was_enabled
+        self.tracing_style = tracing_was_enabled
 
     def perform_statement(self, statement):
         statement = ensure_text(statement)
@@ -1069,10 +1076,10 @@ class Shell(cmd.Cmd):
             if future.warnings:
                 self.print_warnings(future.warnings)
 
-            if self.tracing_enabled:
+            if self.tracing_style:
                 try:
                     for trace in future.get_all_query_traces(max_wait_per=self.max_trace_wait, query_cl=self.consistency_level):
-                        print_trace(self, trace)
+                        print_trace(self, self.tracing_style, trace)
                 except TraceUnavailable:
                     msg = "Statement trace did not complete within %d seconds; trace data may be incomplete." % (self.session.max_trace_wait,)
                     self.writeresult(msg, color=RED)
@@ -1111,13 +1118,20 @@ class Shell(cmd.Cmd):
         if not statement:
             return False, None
 
-        future = self.session.execute_async(statement, trace=self.tracing_enabled)
-        result = None
-        try:
-            result = future.result()
-        except CQL_ERRORS as err:
+        def print_cql_error(err):
             err_msg = ensure_text(err.message if hasattr(err, 'message') else str(err))
             self.printerr(str(err.__class__.__name__) + ": " + err_msg)
+
+        future = self.session.execute_async(statement, trace=self.tracing_style in ["full", "compact"])
+        result = None
+        traced_err = None
+        try:
+            result = future.result()
+        except CQL_TRACED_ERRORS as err:
+            traced_err = err
+            print_cql_error(err)
+        except CQL_ERRORS as err:
+            print_cql_error(err)
         except Exception:
             import traceback
             self.printerr(traceback.format_exc())
@@ -1132,7 +1146,10 @@ class Shell(cmd.Cmd):
                 self.conn.refresh_schema_metadata(-1)
 
         if result is None:
-            return False, None
+            if traced_err or trace_all_errors:
+                return False, future
+            else:
+                return False, None
 
         if statement.query_string[:6].lower() == 'select':
             self.print_result(result, self.parse_for_select_meta(statement.query_string))
@@ -1208,7 +1225,7 @@ class Shell(cmd.Cmd):
         else:
             self.print_formatted_result(formatted_names, formatted_values, with_header, tty)
 
-    def print_formatted_result(self, formatted_names, formatted_values, with_header, tty):
+    def print_formatted_result(self, formatted_names, formatted_values, with_header, tty, justify_last=True):
         # determine column widths
         widths = [n.displaywidth for n in formatted_names]
         if formatted_values is not None:
@@ -1229,7 +1246,11 @@ class Shell(cmd.Cmd):
 
         # print row data
         for row in formatted_values:
-            line = ' | '.join(col.rjust(w, color=self.color) for (col, w) in zip(row, widths))
+            if justify_last:
+                line = ' | '.join(col.rjust(w, color=self.color) for (col, w) in zip(row, widths))
+            else:
+                line = ' | '.join(col.rjust(w, color=self.color) for (col, w) in zip(row[:-1], widths[:-1])) + ' | ' + \
+                       row[-1].coloredval
             self.writeresult(' ' + line)
 
         if tty:
@@ -1698,7 +1719,7 @@ class Shell(cmd.Cmd):
                          cqlver=self.cql_version, keyspace=self.current_keyspace,
                          consistency_level=self.consistency_level,
                          serial_consistency_level=self.serial_consistency_level,
-                         tracing_enabled=self.tracing_enabled,
+                         tracing_style=self.tracing_style,
                          display_nanotime_format=self.display_nanotime_format,
                          display_timestamp_format=self.display_timestamp_format,
                          display_date_format=self.display_date_format,
@@ -1791,19 +1812,36 @@ class Shell(cmd.Cmd):
 
           Enables or disables request tracing.
 
-        TRACING ON
+        TRACING FULL [synonym: ON]
 
-          Enables tracing for all further requests.
+          Enables full tracing for all further requests.
 
         TRACING OFF
 
           Disables tracing.
 
+        TRACING COMPACT
+
+          Enables compact tracing for all further requests.
+
         TRACING
 
           TRACING with no arguments shows the current tracing status.
         """
-        self.tracing_enabled = SwitchCommand("TRACING", "Tracing").execute(self.tracing_enabled, parsed, self.printerr)
+        switch = parsed.get_binding('switch')
+        if switch is None:
+            print(f"Tracing is currently set to {self.tracing_style.upper()}. Use TRACING [OFF|FULL|COMPACT] to change.")
+            return
+
+        switch = switch.upper()
+        if switch in ['ON', 'OFF', 'FULL', 'COMPACT']:
+            self.tracing_style = {'ON': 'full',
+                                    'FULL': 'full',
+                                    'OFF': 'off',
+                                    'COMPACT': 'compact'}[switch]
+            print(f"Tracing set to {self.tracing_style.upper()}.")
+        else:
+            self.printerr(f"Invalid tracing option: {switch}. Use TRACING [OFF|FULL|COMPACT].")
 
     def do_expand(self, parsed):
         """

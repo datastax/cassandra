@@ -113,15 +113,15 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         Set<Component> components = new HashSet<>();
         for (Index.Group group : indexGroups)
         {
-            components.addAll(group.getComponents());
+            components.addAll(group.componentsForNewSSTable());
         }
 
         return components;
     }
 
     public static SSTableWriter create(Descriptor descriptor,
-                                       Long keyCount,
-                                       Long repairedAt,
+                                       long keyCount,
+                                       long repairedAt,
                                        UUID pendingRepair,
                                        boolean isTransient,
                                        TableMetadataRef metadata,
@@ -131,7 +131,16 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        LifecycleNewTracker lifecycleNewTracker)
     {
         Factory writerFactory = descriptor.getFormat().getWriterFactory();
-        return writerFactory.open(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers(descriptor, indexGroups, lifecycleNewTracker, metadata.get()), lifecycleNewTracker,
+        return writerFactory.open(descriptor,
+                                  keyCount,
+                                  repairedAt,
+                                  pendingRepair,
+                                  isTransient,
+                                  metadata,
+                                  metadataCollector,
+                                  header,
+                                  observers(descriptor, indexGroups, lifecycleNewTracker, metadata.get(), keyCount),
+                                  lifecycleNewTracker,
                                   indexComponents(indexGroups));
     }
 
@@ -180,7 +189,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     private static Collection<SSTableFlushObserver> observers(Descriptor descriptor,
                                                               Collection<Index.Group> indexGroups,
                                                               LifecycleNewTracker tracker,
-                                                              TableMetadata metadata)
+                                                              TableMetadata metadata,
+                                                              long keyCount)
     {
         if (indexGroups == null)
             return Collections.emptyList();
@@ -188,7 +198,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         List<SSTableFlushObserver> observers = new ArrayList<>(indexGroups.size());
         for (Index.Group group : indexGroups)
         {
-            SSTableFlushObserver observer = group.getFlushObserver(descriptor, tracker, metadata);
+            SSTableFlushObserver observer = group.getFlushObserver(descriptor, tracker, metadata, keyCount);
             if (observer != null)
             {
                 observer.begin();
@@ -284,7 +294,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         return this;
     }
 
-    public abstract SSTableWriter setOpenResult(boolean openResult);
+    public abstract void openResult();
 
     /**
      * Open the resultant SSTableReader before it has been fully written
@@ -307,9 +317,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     public SSTableReader finish(boolean openResult)
     {
-        setOpenResult(openResult);
-        txnProxy().finish();
-        observers.forEach(SSTableFlushObserver::complete);
+        txnProxy().prepareToCommit();
+        if (openResult)
+            openResult();
+        txnProxy().commit();
+        observers.forEach(obs -> obs.complete(this));
         return finished();
     }
 
@@ -329,8 +341,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         finally
         {
             // need to generate all index files before commit, so they will be included in txn log
-            observers.forEach(SSTableFlushObserver::complete);
-        }
+            observers.forEach(obs -> obs.complete(this));
+         }
     }
 
     public final Throwable commit(Throwable accumulate)

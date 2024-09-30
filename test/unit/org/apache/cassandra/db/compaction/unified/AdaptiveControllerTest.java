@@ -79,11 +79,13 @@ public class AdaptiveControllerTest extends ControllerTest
                                       Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
                                       Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
                                       numShards,
+                                      false,
                                       sstableSizeMB << 20,
                                       Controller.DEFAULT_SSTABLE_GROWTH,
                                       Controller.DEFAULT_RESERVED_THREADS,
                                       Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                       Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                      false,
                                       interval,
                                       minW,
                                       maxW,
@@ -105,6 +107,7 @@ public class AdaptiveControllerTest extends ControllerTest
         options.put(AdaptiveController.MIN_COST, "5");
         options.put(AdaptiveController.MAX_ADAPTIVE_COMPACTIONS, "-1");
         options.put(Controller.SCALING_PARAMETERS_OPTION, "T5");
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
 
         int[] scalingParameters = new int[30];
         Arrays.fill(scalingParameters, 1);
@@ -139,6 +142,8 @@ public class AdaptiveControllerTest extends ControllerTest
         options2.put(AdaptiveController.MIN_COST, "5");
         options2.put(AdaptiveController.MAX_ADAPTIVE_COMPACTIONS, "-1");
         options2.put(Controller.SCALING_PARAMETERS_OPTION, "L5");
+        options2.put(Controller.SSTABLE_GROWTH_OPTION, "0");
+
         Controller controller3 = testFromOptions(true, options2);
         assertTrue(controller3 instanceof AdaptiveController);
 
@@ -156,6 +161,8 @@ public class AdaptiveControllerTest extends ControllerTest
         options3.put(AdaptiveController.MIN_COST, "5");
         options3.put(AdaptiveController.MAX_ADAPTIVE_COMPACTIONS, "-1");
         options3.put(Controller.STATIC_SCALING_FACTORS_OPTION, "4");
+        options3.put(Controller.SSTABLE_GROWTH_OPTION, "0");
+
         Controller controller4 = testFromOptions(true, options3);
         assertTrue(controller4 instanceof AdaptiveController);
 

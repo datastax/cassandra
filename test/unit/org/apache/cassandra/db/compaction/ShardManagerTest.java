@@ -21,6 +21,7 @@ package org.apache.cassandra.db.compaction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.junit.Assert;
@@ -35,6 +36,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
@@ -312,7 +314,8 @@ public class ShardManagerTest
         when(db.getLocalRanges()).thenReturn(sortedRanges);
         when(db.getPositions()).thenReturn(diskBoundaries);
 
-        final ShardTracker shardTracker = ShardManager.create(db)
+        var rs = Mockito.mock(AbstractReplicationStrategy.class);
+        final ShardTracker shardTracker = ShardManager.create(db, rs, false)
                                                       .boundaries(numShards);
         IntArrayList list = new IntArrayList();
         for (int i = 0; i < 100; ++i)
@@ -347,7 +350,9 @@ public class ShardManagerTest
             when(db.getLocalRanges()).thenReturn(sortedRanges);
             when(db.getPositions()).thenReturn(diskBoundaries);
 
-            ShardManager shardManager = ShardManager.create(db);
+            var rs = Mockito.mock(AbstractReplicationStrategy.class);
+
+            ShardManager shardManager = ShardManager.create(db, rs, false);
             for (int numShards = 1; numShards <= 3; ++numShards)
             {
                 ShardTracker iterator = shardManager.boundaries(numShards);

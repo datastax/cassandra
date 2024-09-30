@@ -17,14 +17,15 @@
  */
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
+import java.nio.ByteOrder;
+
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.disk.io.RAMIndexOutput;
-import org.apache.cassandra.index.sai.disk.v1.DirectReaders;
+import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
-import org.apache.lucene.store.ByteArrayIndexInput;
-import org.apache.lucene.util.packed.DirectWriter;
+import org.apache.lucene.util.LongValues;
 
 public class LeafOrderMapTest extends SaiRandomizedTest
 {
@@ -38,20 +39,20 @@ public class LeafOrderMapTest extends SaiRandomizedTest
         }
         shuffle(array);
 
-        RAMIndexOutput out = new RAMIndexOutput("");
+        var out = new ModernResettableByteBuffersIndexOutput(array.length, "");
 
-        LeafOrderMap.write(array, array.length, array.length - 1, out);
+        LeafOrderMap.write(ByteOrder.LITTLE_ENDIAN, array, array.length, array.length - 1, out);
 
-        ByteArrayIndexInput input = new ByteArrayIndexInput("", out.getBytes(), 0, (int)out.getFilePointer());
+        var input = out.toIndexInput();
 
-        final byte bits = (byte) DirectWriter.unsignedBitsRequired(array.length - 1);
-        DirectReaders.Reader reader = DirectReaders.getReaderForBitsPerValue(bits);
+        final byte bits = (byte) LuceneCompat.directWriterUnsignedBitsRequired(ByteOrder.LITTLE_ENDIAN, array.length - 1);
+        LongValues reader = LuceneCompat.directReaderGetInstance(new SeekingRandomAccessInput(input, ByteOrder.LITTLE_ENDIAN), bits, 0);
 
         for (int x=0; x < array.length; x++)
         {
-            int value = LeafOrderMap.getValue(new SeekingRandomAccessInput(input), 0, x, reader);
+            int value = LeafOrderMap.getValue(x, reader);
 
-            assertEquals(array[x], value);
+            assertEquals("disagreed at " + x, array[x], value);
         }
     }
 }

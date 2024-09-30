@@ -18,11 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.IOException;
-import java.util.Comparator;
-import java.util.List;
-import java.util.PriorityQueue;
 
-import com.google.common.collect.ImmutableList;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -31,27 +27,23 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
-import org.apache.cassandra.index.sai.disk.v1.MergeOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.index.PointValues.Relation;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
-import org.assertj.core.util.Lists;
 
 import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_BKD_LISTENER;
 import static org.apache.lucene.index.PointValues.Relation.CELL_CROSSES_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_INSIDE_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_OUTSIDE_QUERY;
 import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 
 public class BKDReaderTest extends SaiRandomizedTest
@@ -119,86 +111,6 @@ public class BKDReaderTest extends SaiRandomizedTest
         doTestInts1D();
     }
 
-    @Test
-    public void testMerge() throws Exception
-    {
-        // Start by testing that the iteratorState returns rowIds in order
-        BKDReader reader1 = createReader(10);
-        BKDReader.IteratorState it1 = reader1.iteratorState();
-        Long expectedRowId = 0L;
-        while (it1.hasNext())
-        {
-            assertEquals(expectedRowId++, it1.next());
-        }
-        it1.close();
-
-        // Next test that an intersection only returns the query values
-        List<Long> expected = Lists.list(8L, 9L);
-        int expectedCount = 0;
-        PostingList intersection = reader1.intersect(buildQuery(8, 9), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-        for (Long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
-        {
-            assertEquals(expected.get(expectedCount++), id);
-        }
-        intersection.close();
-        reader1.close();
-
-        // Finally test that merger returns the correct values
-        expected = Lists.list(8L, 9L, 18L, 19L);
-        expectedCount = 0;
-
-        reader1 = createReader(10);
-        BKDReader reader2 = createReader(10);
-
-        List<BKDReader.IteratorState> iterators = ImmutableList.of(reader1.iteratorState(), reader2.iteratorState((rowID) -> rowID + 10));
-        MergeOneDimPointValues merger = new MergeOneDimPointValues(iterators, Int32Type.instance);
-        final BKDReader reader = finishAndOpenReaderOneDim(2, merger, 20);
-
-        final int queryMin = 8;
-        final int queryMax = 9;
-
-        intersection = reader.intersect(buildQuery(queryMin, queryMax), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-
-        for (Long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
-        {
-            assertEquals(expected.get(expectedCount++), id);
-        }
-
-        intersection.close();
-
-        for (BKDReader.IteratorState iterator : iterators)
-        {
-            iterator.close();
-        }
-
-        reader1.close();
-        reader2.close();
-        reader.close();
-    }
-
-    private PostingList intersect(List<PostingList.PeekablePostingList> postings)
-    {
-        if (postings == null || postings.isEmpty())
-            return null;
-
-        PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
-        queue.addAll(postings);
-
-        return MergePostingList.merge(queue, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
-    }
-
-    private BKDReader createReader(int numRows) throws IOException
-    {
-        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
-        byte[] scratch = new byte[4];
-        for (int docID = 0; docID < numRows; docID++)
-        {
-            NumericUtils.intToSortableBytes(docID, scratch, 0);
-            buffer.addPackedValue(docID, new BytesRef(scratch));
-        }
-        return finishAndOpenReaderOneDim(2, buffer);
-    }
-
     private void doTestInts1D() throws IOException
     {
         final int numRows = between(100, 400);
@@ -225,7 +137,7 @@ public class BKDReaderTest extends SaiRandomizedTest
 
         try (PostingList intersection = reader.intersect(NONE_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext()))
         {
-            assertNull(intersection);
+            assertEquals(PostingList.EMPTY, intersection);
         }
 
         try (PostingList collectAllIntersection = reader.intersect(ALL_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
@@ -250,7 +162,6 @@ public class BKDReaderTest extends SaiRandomizedTest
 
         final PostingList intersection = reader.intersect(buildQuery(queryMin, queryMax), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
 
-        assertThat(intersection, is(instanceOf(MergePostingList.class)));
         long expectedRowID = queryMin;
         for (long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
         {
@@ -289,7 +200,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         final BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
 
         PostingList intersection = reader.intersect(NONE_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-        assertNull(intersection);
+        assertEquals(PostingList.EMPTY, intersection);
 
         intersection = reader.intersect(ALL_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
         assertEquals(numRows, intersection.size());
@@ -328,7 +239,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         final BKDReader reader = finishAndOpenReaderOneDim(50, buffer);
 
         final PostingList intersection = reader.intersect(buildQuery(1017, 1096), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-        assertNull(intersection);
+        assertEquals(PostingList.EMPTY, intersection);
     }
 
     private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)
@@ -368,8 +279,8 @@ public class BKDReaderTest extends SaiRandomizedTest
 
     private BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, BKDTreeRamBuffer buffer) throws IOException
     {
-        final NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                 indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        final NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                  maxPointsPerLeaf,
                                                                  Integer.BYTES,
                                                                  Math.toIntExact(buffer.numRows()),
@@ -377,13 +288,13 @@ public class BKDReaderTest extends SaiRandomizedTest
                                                                  new IndexWriterConfig("test", 2, 8));
 
         final SegmentMetadata.ComponentMetadataMap metadata = writer.writeAll(buffer.asPointValues());
-        final long bkdPosition = metadata.get(IndexComponent.KD_TREE).root;
+        final long bkdPosition = metadata.get(IndexComponentType.KD_TREE).root;
         assertThat(bkdPosition, is(greaterThan(0L)));
-        final long postingsPosition = metadata.get(IndexComponent.KD_TREE_POSTING_LISTS).root;
+        final long postingsPosition = metadata.get(IndexComponentType.KD_TREE_POSTING_LISTS).root;
         assertThat(postingsPosition, is(greaterThan(0L)));
 
-        FileHandle kdtreeHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
-        FileHandle kdtreePostingsHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
+        FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
+        FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
         return new BKDReader(indexContext,
                              kdtreeHandle,
                              bkdPosition,
@@ -393,8 +304,8 @@ public class BKDReaderTest extends SaiRandomizedTest
 
     private BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, MutableOneDimPointValues values, int numRows) throws IOException
     {
-        final NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                 indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        final NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                  maxPointsPerLeaf,
                                                                  Integer.BYTES,
                                                                  Math.toIntExact(numRows),
@@ -402,13 +313,13 @@ public class BKDReaderTest extends SaiRandomizedTest
                                                                  new IndexWriterConfig("test", 2, 8));
 
         final SegmentMetadata.ComponentMetadataMap metadata = writer.writeAll(values);
-        final long bkdPosition = metadata.get(IndexComponent.KD_TREE).root;
+        final long bkdPosition = metadata.get(IndexComponentType.KD_TREE).root;
         assertThat(bkdPosition, is(greaterThan(0L)));
-        final long postingsPosition = metadata.get(IndexComponent.KD_TREE_POSTING_LISTS).root;
+        final long postingsPosition = metadata.get(IndexComponentType.KD_TREE_POSTING_LISTS).root;
         assertThat(postingsPosition, is(greaterThan(0L)));
 
-        FileHandle kdtreeHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
-        FileHandle kdtreePostingsHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
+        FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
+        FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
         return new BKDReader(indexContext,
                              kdtreeHandle,
                              bkdPosition,

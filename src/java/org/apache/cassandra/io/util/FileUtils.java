@@ -914,4 +914,52 @@ public final class FileUtils
     {
         return PathUtils.listPaths(dir, filter);
     }
+
+    /**
+     * List paths that match this absolute path.
+     *
+     * This method is more efficient than {@link #listPaths(Path, Predicate)} if underlying file system can apply
+     * prefix filter earlier.
+     */
+    public static List<Path> listPathsWithAbsolutePath(String absolutePath)
+    {
+        return listPathsWithAbsolutePath(FileUtils.getPath(absolutePath));
+    }
+
+    public static List<Path> listPathsWithAbsolutePath(Path absolutePath)
+    {
+        Path parent = absolutePath.getParent();
+        String prefix = absolutePath.getFileName().toString();
+
+        return FileUtils.listPaths(parent, p -> FileUtils.fileNameMatchesPrefix(p.toString(), prefix));
+    }
+
+    /**
+     * Memory optimized, zero-copy version of the common {@code FileUtils.getFileName(path).startsW
+     * ith(prefix)} idiom.
+     *
+     * @param pathStr The path whose filename portion we want to match against.
+     * @param prefix The prefix to match.
+     *
+     * @return True if matching, false otherwise.
+     */
+    public static boolean fileNameMatchesPrefix(String pathStr, String prefix)
+    {
+        int pathLen = pathStr.length();
+        int prefixLen = prefix.length();
+        if (pathLen == 0)
+            return false;
+
+        int sepIndex = pathLen - 2; // Skip the separator if the strings ends with it
+        for (; sepIndex >= 0; sepIndex--)
+            if (pathStr.charAt(sepIndex) == '/')
+                break;
+
+        return pathStr.regionMatches(false, // Linux is case-sensitive, so let's optimize for that
+                                     sepIndex >= 0 ? sepIndex + 1 : 0,
+                                     prefix,
+                                     0,
+                                     prefixLen);
+    }
+
 }

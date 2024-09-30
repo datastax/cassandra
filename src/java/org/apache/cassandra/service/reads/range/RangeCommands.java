@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service.reads.range;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,13 +27,11 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
-import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.assertj.core.util.VisibleForTesting;
 
 public class RangeCommands
 {
@@ -74,7 +73,12 @@ public class RangeCommands
         Tracing.trace("Computing ranges to query");
 
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
-        ReplicaPlanIterator replicaPlans = new ReplicaPlanIterator(command.dataRange().keyRange(), command.indexQueryPlan(), keyspace, consistencyLevel);
+        ReplicaPlanIterator replicaPlans = new ReplicaPlanIterator(command.dataRange().keyRange(),
+                                                                   command.indexQueryPlan(),
+                                                                   keyspace,
+                                                                   consistencyLevel);
+        if (command.isTopK())
+            return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), queryStartNanoTime, readTracker);
 
         int maxConcurrencyFactor = Math.min(replicaPlans.size(), MAX_CONCURRENT_RANGE_REQUESTS);
         int concurrencyFactor = maxConcurrencyFactor;

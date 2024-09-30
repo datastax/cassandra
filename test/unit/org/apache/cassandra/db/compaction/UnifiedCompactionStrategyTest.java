@@ -58,7 +58,6 @@ import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Pair;
 import org.mockito.Mockito;
 
-import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;

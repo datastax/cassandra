@@ -19,6 +19,8 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.util.regex.Pattern;
 
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+
 
 /**
  * A set of feature flags associated with a SSTable format
@@ -150,4 +152,6 @@ public abstract class Version
      * See <a href="https://github.com/riptano/cndb/issues/8696">this</a> for reference.
      */
     public abstract boolean hasImplicitlyFrozenTuples();
+
+    public abstract ByteComparable.Version getByteComparableVersion();
 }

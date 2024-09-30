@@ -89,7 +89,6 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -970,7 +969,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public void executePreJoinTasksBlocking(boolean hadBootstrap)
     {
-        logger.info("Executing pre-join{} tasks for: {}", hadBootstrap ? " post-bootstrap" : "", this.baseCfs);
+        logger.debug("Executing pre-join{} tasks for: {}", hadBootstrap ? " post-bootstrap" : "", this.baseCfs);
         executeAllBlocking(indexes.values().stream(), (index) ->
         {
             return index.getPreJoinTask(hadBootstrap);
@@ -1760,7 +1759,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             if (notice.memtable().isEmpty())
             {
                 IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableAdded(notice);
-                build(decision, notice.added, false);
+                build(decision, notice.added);
             }
         }
         else if (notification instanceof SSTableListChangedNotification)
@@ -1768,11 +1767,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             SSTableListChangedNotification notice = (SSTableListChangedNotification) notification;
 
             IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableListChanged(notice);
-            build(decision, notice.added, false);
+            build(decision, notice.added);
         }
     }
 
-    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables, boolean onlyIndexWithComponents)
+    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables)
     {
         if (decision == IndexBuildDecider.Decision.ASYNC)
         {
@@ -1780,7 +1779,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                               indexes.values()
                                      .stream()
                                      .filter(Index::shouldBuildBlocking)
-                                     .filter(i -> !onlyIndexWithComponents || !i.getComponents().isEmpty())
                                      .collect(Collectors.toSet()),
                               false);
         }
@@ -1790,7 +1788,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                  indexes.values()
                                         .stream()
                                         .filter(Index::shouldBuildBlocking)
-                                        .filter(i -> !onlyIndexWithComponents || !i.getComponents().isEmpty())
                                         .collect(Collectors.toSet()),
                                  false);
         }
@@ -1944,6 +1941,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     private synchronized static void propagateLocalIndexStatus(String keyspace, String index, Index.Status status)
     {
+        if (!Gossiper.instance.isEnabled())
+            return;
+
         try
         {
             Map<String, Index.Status> states = peerIndexStatus.computeIfAbsent(FBUtilities.getBroadcastAddressAndPort(),

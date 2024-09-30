@@ -28,6 +28,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.lucene.index.IndexReader;
 
 /**
  *  A Cell Iterator over SSTable
@@ -83,7 +84,7 @@ class SSTableIterator extends AbstractSSTableIterator<RowIndexEntry>
         {
             super(file, shouldCloseFile);
             basePosition = indexEntry.position;
-            indexReader = new RowIndexReader(ifile, (TrieIndexEntry) indexEntry);
+            indexReader = new RowIndexReader(ifile, (TrieIndexEntry) indexEntry, sstable.descriptor.version.getByteComparableVersion());
         }
 
         @Override

@@ -120,19 +120,19 @@ public class KeyCacheCqlTest extends CQLTester
     }
 
     @Override
-    public UntypedResultSet execute(String query, Object... values) throws Throwable
+    public UntypedResultSet execute(String query, Object... values)
     {
         return executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
     }
 
     @Override
-    protected String createIndex(String query)
+    public String createIndex(String query)
     {
         return createFormattedIndex(formatQuery(KEYSPACE_PER_TEST, query));
     }
 
     @Override
-    protected void dropTable(String query)
+    public void dropTable(String query)
     {
         dropFormattedTable(String.format(query, KEYSPACE_PER_TEST + "." + currentTable()));
     }

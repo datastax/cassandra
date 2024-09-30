@@ -202,7 +202,7 @@ public class SSTablesSystemViewTest extends SAITester
                            maxSSTableRowId,
                            tokenFactory.toString(bounds.left),
                            tokenFactory.toString(bounds.right),
-                           sstableIndex.getSSTableContext().diskUsage(),
+                           sstableIndex.sizeOfPerSSTableComponents(),
                            sstableIndex.sizeOfPerColumnComponents());
             }
         }

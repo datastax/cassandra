@@ -50,6 +50,8 @@ public class FlushingTest extends SAITester
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(1, rows.all().size());
+
+        assertIndexFilesInToc(indexFiles());
     }
 
     @Test
@@ -66,16 +68,20 @@ public class FlushingTest extends SAITester
             flush();
         }
 
+        assertIndexFilesInToc(indexFiles());
+
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
         assertEquals(0, rows.all().size());
         verifyIndexFiles(numericIndexContext, null, sstables, 0, 0, sstables, 0);
-        verifySSTableIndexes(numericIndexContext.getIndexName(), sstables, 0);
+        verifySSTableIndexes(numericIndexContext.getIndexName(), sstables, sstables);
 
         compact();
         waitForAssert(() -> verifyIndexFiles(numericIndexContext, null, 1, 0, 0, 1, 0));
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
         assertEquals(0, rows.all().size());
-        verifySSTableIndexes(numericIndexContext.getIndexName(), 1, 0);
+        verifySSTableIndexes(numericIndexContext.getIndexName(), 1, 1);
+
+        assertIndexFilesInToc(indexFiles());
     }
 }

@@ -47,7 +47,7 @@ public class ResultSet
     public static final Codec codec = new Codec();
 
     public final ResultMetadata metadata;
-    public final List<List<ByteBuffer>> rows;
+    public List<List<ByteBuffer>> rows;
 
     public ResultSet(ResultMetadata resultMetadata)
     {
@@ -94,14 +94,11 @@ public class ResultSet
         Collections.reverse(rows);
     }
 
-    public void trim(int limit)
+    public ResultSet withMetadata(ResultMetadata newMetadata)
     {
-        int toRemove = rows.size() - limit;
-        if (toRemove > 0)
-        {
-            for (int i = 0; i < toRemove; i++)
-                rows.remove(rows.size() - 1);
-        }
+        if (newMetadata != metadata)
+            return new ResultSet(newMetadata, rows);
+        return this;
     }
 
     @Override
@@ -238,13 +235,21 @@ public class ResultSet
                 flags.add(Flag.GLOBAL_TABLES_SPEC);
         }
 
-        private ResultMetadata(MD5Digest resultMetadataId, EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingState pagingState)
+        @VisibleForTesting
+        ResultMetadata(MD5Digest resultMetadataId, EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingState pagingState)
         {
             this.resultMetadataId = resultMetadataId;
             this.flags = flags;
             this.names = names;
             this.columnCount = columnCount;
             this.pagingState = pagingState;
+        }
+
+        public ResultMetadata withRecomputedResultMetadataIdIfMissing()
+        {
+            if (this.resultMetadataId == null)
+                return new ResultMetadata(computeResultMetadataId(names), EnumSet.copyOf(flags), names, columnCount, pagingState);
+            return this;
         }
 
         public ResultMetadata copy()
@@ -457,7 +462,7 @@ public class ResultSet
                 if (hasMorePages)
                     CBUtil.writeValue(m.pagingState.serialize(version), dest);
 
-                if (version.isGreaterOrEqualTo(ProtocolVersion.V5)  && metadataChanged)
+                if (version.isGreaterOrEqualTo(ProtocolVersion.V5) && metadataChanged)
                 {
                     assert !noMetadata : "MetadataChanged and NoMetadata are mutually exclusive flags";
                     CBUtil.writeBytes(m.getResultMetadataId().bytes, dest);

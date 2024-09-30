@@ -30,6 +30,7 @@ import java.util.UUID;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -37,7 +38,6 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.TimeUUID;
 
 public class FunctionFactoryTest extends CQLTester
 {
@@ -48,7 +48,9 @@ public class FunctionFactoryTest extends CQLTester
     private static final FunctionFactory IDENTITY = new FunctionFactory("identity", FunctionParameter.anyType(true))
     {
         @Override
-        protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+        protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,
+                                                       List<AbstractType<?>> argTypes,
+                                                       AbstractType<?> receiverType)
         {
             return new NativeScalarFunction(name.name, argTypes.get(0), argTypes.get(0))
             {
@@ -68,7 +70,9 @@ public class FunctionFactoryTest extends CQLTester
     private static final FunctionFactory TO_STRING = new FunctionFactory("tostring", FunctionParameter.anyType(false))
     {
         @Override
-        protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+        protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,
+                                                       List<AbstractType<?>> argTypes,
+                                                       AbstractType<?> receiverType)
         {
             return new NativeScalarFunction(name.name, UTF8Type.instance, argTypes.get(0))
             {

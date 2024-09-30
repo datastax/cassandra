@@ -19,32 +19,38 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
-
-import org.apache.cassandra.utils.Throwables;
 
 /**
  * Interface for advancing on and consuming a posting list.
  */
-//TODO Need to check int and long usage throughout this post DSP-19608
 @NotThreadSafe
 public interface PostingList extends Closeable
 {
-    long OFFSET_NOT_FOUND = -1;
-    long END_OF_STREAM = Long.MAX_VALUE;
+    PostingList EMPTY = new EmptyPostingList();
+
+    int OFFSET_NOT_FOUND = -1;
+    int END_OF_STREAM = Integer.MAX_VALUE;
 
     @Override
     default void close() throws IOException {}
 
     /**
-     * Retrieves the next segment row ID, not including row IDs that have been returned by {@link #advance(long)}.
+     * Retrieves the next segment row ID, not including row IDs that have been returned by {@link #advance(int)}.
      *
      * @return next segment row ID
      */
-    long nextPosting() throws IOException;
+    int nextPosting() throws IOException;
 
-    long size();
+    int size();
+
+    /**
+     * @return {@code true} if this posting list contains no postings
+     */
+    default boolean isEmpty()
+    {
+        return size() == 0;
+    }
 
     /**
      * Advances to the first row ID beyond the current that is greater than or equal to the
@@ -58,140 +64,81 @@ public interface PostingList extends Closeable
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
-    long advance(long targetRowID) throws IOException;
+    int advance(int targetRowID) throws IOException;
+
+    class EmptyPostingList implements PostingList
+    {
+        @Override
+        public int nextPosting() throws IOException
+        {
+            return END_OF_STREAM;
+        }
+
+        @Override
+        public int size()
+        {
+            return 0;
+        }
+
+        @Override
+        public int advance(int targetRowID) throws IOException
+        {
+            return END_OF_STREAM;
+        }
+    }
 
     /**
-     * @return peekable wrapper of current posting list
+     * Returns a wrapper for this posting list that runs the specified {@link Closeable} when this posting list is closed,
+     * unless this posting list is empty, in which case the specified {@link Closeable} will be run immediately.
+     *
+     * @param onClose what to do on close
+     * @return a posting list that makes sure that {@code onClose} is run by the time it is closed.
      */
-    default PeekablePostingList peekable()
+    default PostingList onClose(Closeable onClose) throws IOException
     {
-        return new PeekablePostingList(this);
+        if (isEmpty())
+        {
+            onClose.close();
+            return EMPTY;
+        }
+
+        return new PostingListWithOnClose(this, onClose);
     }
 
-    class DeferredPostingList implements PostingList
+    class PostingListWithOnClose implements PostingList
     {
-        private Supplier<PostingList> supplier;
-        private PostingList postingList;
-        private boolean opened = false;
+        private final PostingList delegate;
+        private final Closeable onClose;
 
-        public DeferredPostingList(Supplier<PostingList> supplier)
+        public PostingListWithOnClose(PostingList delegate, Closeable onClose)
         {
-            this.supplier = supplier;
+            this.delegate = delegate;
+            this.onClose = onClose;
         }
 
         @Override
-        public long nextPosting() throws IOException
+        public int size()
         {
-            open();
-            return postingList == null ? END_OF_STREAM : postingList.nextPosting();
+            return delegate.size();
         }
 
         @Override
-        public long size()
+        public int advance(int targetRowID) throws IOException
         {
-            open();
-            return postingList == null ? 0 : postingList.size();
+            return delegate.advance(targetRowID);
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public int nextPosting() throws IOException
         {
-            open();
-            return postingList == null ? END_OF_STREAM : postingList.advance(targetRowID);
+            return delegate.nextPosting();
         }
 
         @Override
         public void close() throws IOException
         {
-            if (opened && (postingList != null))
-                postingList.close();
-        }
-
-        private void open()
-        {
-            if (!opened)
-            {
-                postingList = supplier.get();
-                opened = true;
-            }
-        }
-    }
-
-    public static class PeekablePostingList implements PostingList
-    {
-        private final PostingList wrapped;
-
-        private boolean peeked = false;
-        private long next;
-
-        public PeekablePostingList(PostingList wrapped)
-        {
-            this.wrapped = wrapped;
-        }
-
-        public long peek()
-        {
-            if (peeked)
-                return next;
-
-            try
-            {
-                peeked = true;
-                return next = wrapped.nextPosting();
-            }
-            catch (IOException e)
-            {
-                throw Throwables.cleaned(e);
-            }
-        }
-
-        public long advanceWithoutConsuming(long targetRowID) throws IOException
-        {
-            if (peek() == END_OF_STREAM)
-                return END_OF_STREAM;
-
-            if (peek() >= targetRowID)
-                return peek();
-
-            peeked = true;
-            next = wrapped.advance(targetRowID);
-            return next;
-        }
-
-        @Override
-        public long nextPosting() throws IOException
-        {
-            if (peeked)
-            {
-                peeked = false;
-                return next;
-            }
-            return wrapped.nextPosting();
-        }
-
-        @Override
-        public long size()
-        {
-            return wrapped.size();
-        }
-
-        @Override
-        public long advance(long targetRowID) throws IOException
-        {
-            if (peeked && next >= targetRowID)
-            {
-                peeked = false;
-                return next;
-            }
-
-            peeked = false;
-            return wrapped.advance(targetRowID);
-        }
-
-        @Override
-        public void close() throws IOException
-        {
-            wrapped.close();
+            delegate.close();
+            onClose.close();
         }
     }
 }

@@ -34,10 +34,22 @@ public class LexicalUUIDType extends AbstractType<UUID>
 {
     public static final LexicalUUIDType instance = new LexicalUUIDType();
 
+    // we just need it to be something different to UUIDSerializer
+    private static class Serializer extends UUIDSerializer
+    {
+        public static final Serializer instance = new Serializer();
+    }
+
     LexicalUUIDType()
     {
         super(ComparisonType.CUSTOM);
     } // singleton
+
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
 
     public boolean isEmptyValueMeaningless()
     {
@@ -123,7 +135,7 @@ public class LexicalUUIDType extends AbstractType<UUID>
 
     public TypeSerializer<UUID> getSerializer()
     {
-        return UUIDSerializer.instance;
+        return Serializer.instance;
     }
 
     @Override

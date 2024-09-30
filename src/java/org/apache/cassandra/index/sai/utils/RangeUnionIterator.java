@@ -19,7 +19,10 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+
+import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -29,91 +32,75 @@ import org.apache.cassandra.io.util.FileUtils;
 @SuppressWarnings("resource")
 public class RangeUnionIterator extends RangeIterator
 {
-    private final List<RangeIterator> ranges;
-
-    private final List<RangeIterator> toRelease;
-    private final List<RangeIterator> candidates = new ArrayList<>();
+    public final List<RangeIterator> ranges;
 
     private RangeUnionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
     {
         super(statistics);
-        this.ranges = ranges;
-        this.toRelease = new ArrayList<>(ranges);
+        this.ranges = new ArrayList<>(ranges);
     }
 
     public PrimaryKey computeNext()
     {
-        candidates.clear();
-        PrimaryKey candidate = null;
+        // Keep track of the next best candidate. If another candidate has the same value, advance it to prevent
+        // duplicate results. This design avoids unnecessary list operations.
+        RangeIterator candidate = null;
         for (RangeIterator range : ranges)
         {
-            if (range.hasNext())
+            if (!range.hasNext())
+                continue;
+
+            if (candidate == null)
             {
-                // Avoid repeated values but only if we have read at least one value
-                while (next != null && range.hasNext() && range.peek().compareTo(getCurrent()) == 0)
+                candidate = range;
+            }
+            else
+            {
+                int cmp = candidate.peek().compareTo(range.peek());
+                if (cmp == 0)
                     range.next();
-                if (!range.hasNext())
-                    continue;
-                if (candidate == null)
-                {
-                    candidate = range.peek();
-                    candidates.add(range);
-                }
-                else
-                {
-                    int cmp = candidate.compareTo(range.peek());
-                    if (cmp == 0)
-                        candidates.add(range);
-                    else if (cmp > 0)
-                    {
-                        candidates.clear();
-                        candidate = range.peek();
-                        candidates.add(range);
-                    }
-                }
+                else if (cmp > 0)
+                    candidate = range;
             }
         }
-        if (candidates.isEmpty())
+        if (candidate == null)
             return endOfData();
-        candidates.forEach(RangeIterator::next);
-        return candidate;
+        return candidate.next();
     }
 
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
+        // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.
+        // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
         for (RangeIterator range : ranges)
-        {
-            if (range.hasNext())
-                range.skipTo(nextKey);
-        }
+            range.skipTo(nextKey);
     }
 
     public void close() throws IOException
     {
         // Due to lazy key fetching, we cannot close iterator immediately
-        toRelease.forEach(FileUtils::closeQuietly);
         ranges.forEach(FileUtils::closeQuietly);
+    }
+
+    public static Builder builder(int size)
+    {
+        return new Builder(size);
     }
 
     public static Builder builder()
     {
-        return new Builder();
+        return builder(10);
     }
 
-    public static RangeIterator build(List<RangeIterator> tokens)
+    public static RangeIterator build(Iterable<RangeIterator> tokens)
     {
-        return new Builder(tokens.size()).add(tokens).build();
+        return RangeUnionIterator.builder(Iterables.size(tokens)).add(tokens).build();
     }
 
     public static class Builder extends RangeIterator.Builder
     {
         protected List<RangeIterator> rangeIterators;
-
-        public Builder()
-        {
-            super(IteratorType.UNION);
-            this.rangeIterators = new ArrayList<>();
-        }
 
         public Builder(int size)
         {
@@ -126,7 +113,7 @@ public class RangeUnionIterator extends RangeIterator
             if (range == null)
                 return this;
 
-            if (range.getCount() > 0)
+            if (range.getMaxKeys() > 0)
             {
                 rangeIterators.add(range);
                 statistics.update(range);
@@ -137,6 +124,7 @@ public class RangeUnionIterator extends RangeIterator
             return this;
         }
 
+        @Override
         public RangeIterator.Builder add(List<RangeIterator> ranges)
         {
             if (ranges == null || ranges.isEmpty())
@@ -146,9 +134,24 @@ public class RangeUnionIterator extends RangeIterator
             return this;
         }
 
+        public RangeIterator.Builder add(Iterable<RangeIterator> ranges)
+        {
+            if (ranges == null || Iterables.isEmpty(ranges))
+                return this;
+
+            ranges.forEach(this::add);
+            return this;
+        }
+
         public int rangeCount()
         {
             return rangeIterators.size();
+        }
+
+        @Override
+        public Collection<RangeIterator> ranges()
+        {
+            return rangeIterators;
         }
 
         protected RangeIterator buildIterator()

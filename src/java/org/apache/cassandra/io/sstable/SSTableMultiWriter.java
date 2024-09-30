@@ -40,7 +40,13 @@ public interface SSTableMultiWriter extends Transactional
     Collection<SSTableReader> finish(boolean openResult);
     Collection<SSTableReader> finished();
 
-    SSTableMultiWriter setOpenResult(boolean openResult);
+    /**
+     * Opens the resulting sstables after writing has finished. If those readers need to be accessed, then this must
+     * be called after `prepareToCommit` (so the writing is complete) but before `commit` (because committing closes
+     * some of the resources used to create the underlying readers). When used, the readers can then be accessed by
+     * calling `finished()`.
+     */
+    void openResult();
 
     String getFilename();
     long getBytesWritten();

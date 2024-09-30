@@ -106,12 +106,6 @@ public class ListType<T> extends CollectionType<List<T>>
         return (ListType<?>) super.withUpdatedUserType(udt);
     }
 
-    @Override
-    public boolean referencesDuration()
-    {
-        return getElementsType().referencesDuration();
-    }
-
     @SuppressWarnings("unchecked")
     public AbstractType<T> getElementsType()
     {
@@ -288,5 +282,10 @@ public class ListType<T> extends CollectionType<List<T>>
     public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
     {
         return setOrListToJsonString(buffer, getElementsType(), protocolVersion);
+    }
+
+    public boolean isList()
+    {
+        return true;
     }
 }

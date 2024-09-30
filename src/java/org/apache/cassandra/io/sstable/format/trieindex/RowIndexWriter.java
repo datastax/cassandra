@@ -39,13 +39,15 @@ class RowIndexWriter implements AutoCloseable
 {
     private final ClusteringComparator comparator;
     private final IncrementalTrieWriter<IndexInfo> trie;
+    private final ByteComparable.Version version;
     private ByteComparable prevMax = null;
     private ByteComparable prevSep = null;
 
-    RowIndexWriter(ClusteringComparator comparator, DataOutputPlus out)
+    RowIndexWriter(ClusteringComparator comparator, DataOutputPlus out, ByteComparable.Version version)
     {
         this.comparator = comparator;
-        this.trie = IncrementalTrieWriter.open(RowIndexReader.trieSerializer, out);
+        this.version = version;
+        this.trie = IncrementalTrieWriter.open(RowIndexReader.trieSerializer, out, version);
     }
 
     void reset()
@@ -77,8 +79,8 @@ class RowIndexWriter implements AutoCloseable
         // Add a separator after the last section, so that greater inputs can be quickly rejected.
         // To maximize its efficiency we add it with the length of the last added separator.
         int i = 0;
-        ByteSource max = prevMax.asComparableBytes(Walker.BYTE_COMPARABLE_VERSION);
-        ByteSource sep = prevSep.asComparableBytes(Walker.BYTE_COMPARABLE_VERSION);
+        ByteSource max = prevMax.asComparableBytes(version);
+        ByteSource sep = prevSep.asComparableBytes(version);
         int c;
         while ((c = max.next()) == sep.next() && c != ByteSource.END_OF_STREAM)
             ++i;

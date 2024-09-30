@@ -25,11 +25,11 @@ import java.util.Set;
 
 import com.carrotsearch.randomizedtesting.rules.TestRuleAdapter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.TrackingIndexFileUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.lucene.store.IndexInput;
 
 import static org.junit.Assert.assertTrue;
 
@@ -37,11 +37,11 @@ public class IndexInputLeakDetector extends TestRuleAdapter
 {
     private final static Set<TrackingIndexFileUtils> trackedIndexFileUtils = Collections.synchronizedSet(new HashSet<>());
 
-    public IndexDescriptor newIndexDescriptor(Descriptor descriptor, TableMetadata tableMetadata, SequentialWriterOption sequentialWriterOption)
+    public IndexDescriptor newIndexDescriptor(Descriptor descriptor, SequentialWriterOption sequentialWriterOption)
     {
         TrackingIndexFileUtils trackingIndexFileUtils = new TrackingIndexFileUtils(sequentialWriterOption);
         trackedIndexFileUtils.add(trackingIndexFileUtils);
-        return IndexDescriptor.create(descriptor, tableMetadata.partitioner, tableMetadata.comparator);
+        return IndexDescriptor.empty(descriptor);
     }
 
     @Override

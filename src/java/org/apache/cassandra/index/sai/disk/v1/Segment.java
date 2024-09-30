@@ -19,22 +19,31 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
+import org.slf4j.Logger;
+
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * Each segment represents an on-disk index structure (kdtree/terms/postings) flushed by memory limit or token boundaries,
@@ -43,6 +52,8 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 public class Segment implements Closeable
 {
+    private static final Logger logger = org.slf4j.LoggerFactory.getLogger(Segment.class);
+
     private final Token.KeyBound minKeyBound;
     private final Token.KeyBound maxKeyBound;
 
@@ -52,6 +63,7 @@ public class Segment implements Closeable
     public final PerIndexFiles indexFiles;
     // per-segment
     public final SegmentMetadata metadata;
+    public final SSTableContext sstableContext;
 
     private final IndexSearcher index;
 
@@ -60,11 +72,21 @@ public class Segment implements Closeable
         this.minKeyBound = metadata.minKey.token().minKeyBound();
         this.maxKeyBound = metadata.maxKey.token().maxKeyBound();
 
-        this.primaryKeyMapFactory = sstableContext.primaryKeyMapFactory;
+        this.sstableContext = sstableContext;
+        this.primaryKeyMapFactory = sstableContext.primaryKeyMapFactory();
         this.indexFiles = indexFiles;
         this.metadata = metadata;
 
-        this.index = IndexSearcher.open(primaryKeyMapFactory, indexFiles, metadata, sstableContext.indexDescriptor, indexContext);
+        var version = indexFiles.usedPerIndexComponents().version();
+        IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+        logger.info("Opened searcher {} for segment {}:{} for index [{}] on column [{}] at version {}",
+                    searcher.getClass().getSimpleName(),
+                    sstableContext.descriptor(),
+                    metadata.segmentRowIdOffset,
+                    indexContext.getIndexName(),
+                    indexContext.getColumnName(),
+                    version);
+        this.index = searcher;
     }
 
     @VisibleForTesting
@@ -79,6 +101,7 @@ public class Segment implements Closeable
         this.minKeyBound = null;
         this.maxKeyBound = null;
         this.index = null;
+        this.sstableContext = null;
     }
 
     @VisibleForTesting
@@ -90,6 +113,7 @@ public class Segment implements Closeable
         this.minKeyBound = minKey.minKeyBound();
         this.maxKeyBound = maxKey.maxKeyBound();
         this.index = null;
+        this.sstableContext = null;
     }
 
     /**
@@ -97,18 +121,7 @@ public class Segment implements Closeable
      */
     public boolean intersects(AbstractBounds<PartitionPosition> keyRange)
     {
-        if (keyRange instanceof Range && ((Range<?>)keyRange).isWrapAround())
-            return keyRange.contains(minKeyBound) || keyRange.contains(maxKeyBound);
-
-        int cmp = keyRange.right.compareTo(minKeyBound);
-        // if right is minimum, it means right is the max token and bigger than maxKey.
-        // if right bound is less than minKeyBound, no intersection
-        if (!keyRange.right.isMinimum() && (!keyRange.inclusiveRight() && cmp == 0 || cmp < 0))
-            return false;
-
-        cmp = keyRange.left.compareTo(maxKeyBound);
-        // if left bound is bigger than maxKeyBound, no intersection
-        return (keyRange.isStartInclusive() || cmp != 0) && cmp <= 0;
+        return RangeUtil.intersects(minKeyBound, maxKeyBound, keyRange);
     }
 
     public long indexFileCacheSize()
@@ -120,13 +133,34 @@ public class Segment implements Closeable
      * Search on-disk index synchronously
      *
      * @param expression to filter on disk index
-     * @param context to track per sstable cache and per query metrics
-     * @param defer create the iterator in a deferred state
-     * @return range iterator that matches given expression
+     * @param keyRange   key range specific in read command, used by ANN index
+     * @param context    to track per sstable cache and per query metrics
+     * @param defer      create the iterator in a deferred state
+     * @param limit      the num of rows to returned, used by ANN index
+     * @return range iterator of {@link PrimaryKey} that matches given expression
      */
-    public RangeIterator search(Expression expression, SSTableQueryContext context, boolean defer) throws IOException
+    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
     {
-        return index.search(expression, context, defer);
+        return index.search(expression, keyRange, context, defer, limit);
+    }
+
+    /**
+     * Order the on-disk index synchronously and produce an iterator in score order
+     *
+     * @param orderer    to filter on disk index
+     * @param keyRange   key range specific in read command, used by ANN index
+     * @param context    to track per sstable cache and per query metrics
+     * @param limit      the num of rows to returned, used by ANN index
+     * @return an iterator of {@link PrimaryKeyWithSortKey} in score order
+     */
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    {
+        return index.orderBy(orderer, slice, keyRange, context, limit);
+    }
+
+    public IndexSearcher getIndexSearcher()
+    {
+        return index;
     }
 
     @Override
@@ -144,6 +178,11 @@ public class Segment implements Closeable
         return Objects.hashCode(metadata);
     }
 
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
+    {
+        return index.orderResultsBy(sstableContext.sstable, context, keys, orderer, limit);
+    }
+
     @Override
     public void close()
     {
@@ -154,5 +193,41 @@ public class Segment implements Closeable
     public String toString()
     {
         return String.format("Segment{metadata=%s}", metadata);
+    }
+
+    /**
+     * Estimate how many nodes the index will visit to find the top `limit` results
+     * given the number of candidates that match other predicates and taking into
+     * account the size of the index itself.  (The smaller
+     * the number of candidates, the more nodes we expect to visit just to find
+     * results that are in that set.)
+     */
+    public double estimateAnnSearchCost(int limit, int candidates)
+    {
+        IndexSearcher searcher = getIndexSearcher();
+        return ((V2VectorIndexSearcher) searcher).estimateAnnSearchCost(limit, candidates);
+    }
+
+    /**
+     * Returns a modified LIMIT (top k) to use with the ANN index that is proportional
+     * to the number of rows in this segment, relative to the total rows in the sstable.
+     */
+    public int proportionalAnnLimit(int limit, long totalRows)
+    {
+        if (!V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES)
+            return limit;
+
+        // Note: it is tempting to think that we should max out results for the first segment
+        // since that's where we're establishing our rerank floor.  This *does* reduce the number
+        // of calls to resume, but it's 10-15% slower overall, so don't do it.
+        // if (context.getAnnRerankFloor() == 0 && V3OnDiskFormat.ENABLE_RERANK_FLOOR)
+        //    return limit;
+
+        // We expect the number of top results found in each segment to be proportional to its number of rows.
+        // (We don't pad this number more because resuming a search if we guess too low is very very inexpensive.)
+        long segmentRows = 1 + metadata.maxSSTableRowId - metadata.minSSTableRowId;
+        int proportionalLimit = (int) Math.ceil(limit * ((double) segmentRows / totalRows));
+        assert proportionalLimit >= 1 : proportionalLimit;
+        return proportionalLimit;
     }
 }

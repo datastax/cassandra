@@ -72,17 +72,10 @@ public class SaiRandomizedTest extends RandomizedTest
 
     public IndexDescriptor newIndexDescriptor() throws IOException
     {
-        String keyspace = randomSimpleString(5, 13);
-        String table = randomSimpleString(3, 17);
-        TableMetadata metadata = TableMetadata.builder(keyspace, table)
-                                              .addPartitionKeyColumn(randomSimpleString(3, 15), Int32Type.instance)
-                                              .partitioner(Murmur3Partitioner.instance)
-                                              .build();
         return indexInputLeakDetector.newIndexDescriptor(new Descriptor(new File(temporaryFolder.newFolder()),
                                                                         randomSimpleString(5, 13),
                                                                         randomSimpleString(3, 17),
                                                                         new SequenceBasedSSTableId(randomIntBetween(0, 128))),
-                                                         metadata,
                                                          SequentialWriterOption.newBuilder()
                                                                                .bufferSize(randomIntBetween(17, 1 << 13))
                                                                                .bufferType(randomBoolean() ? BufferType.ON_HEAP : BufferType.OFF_HEAP)
@@ -131,6 +124,11 @@ public class SaiRandomizedTest extends RandomizedTest
     public static long nextLong(long min, long max)
     {
         return between(min, max - 1);
+    }
+
+    public static double nextDouble()
+    {
+        return randomDoubleBetween(0, 1);
     }
 
     public static long between(long min, long max)

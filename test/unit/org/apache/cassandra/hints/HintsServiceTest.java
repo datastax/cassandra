@@ -39,6 +39,7 @@ import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -59,6 +60,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_REWRI
 import static org.apache.cassandra.net.Verb.HINT_REQ;
 import static org.apache.cassandra.net.Verb.HINT_RSP;
 import static org.apache.cassandra.net.MockMessagingService.verb;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -147,6 +149,43 @@ public class HintsServiceTest
                                     assertEquals(totalHints + numHints,
                                                  StorageMetrics.totalHints.getCount())
         );
+    }
+
+    @Test
+    public void testCountingCorruptedHints()
+    {
+        // pause the scheduled dispatch before writing hints
+        HintsService.instance.pauseDispatch();
+        try
+        {
+            long hintsOnDisk0 = HintsServiceMetrics.hintsOnDisk.getCount();
+            long corruptedHintsOnDisk0 = HintsServiceMetrics.corruptedHintsOnDisk.getCount();
+
+            UUID randomHost1 = UUID.randomUUID();
+            UUID randomHost2 = UUID.randomUUID();
+            int numHints = 10;
+
+            HintsStore store1 = writeAndFlushHints(randomHost1, numHints);
+            HintsStore store2 = writeAndFlushHints(randomHost2, numHints);
+
+            HintsDescriptor desc1 = store1.poll();
+            store1.markCorrupted(desc1);
+
+            assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(hintsOnDisk0 + 20);
+            assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isEqualTo(corruptedHintsOnDisk0 + 10);
+
+            store1.deleteAllHints();
+            store2.deleteAllHints();
+
+            assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(hintsOnDisk0);
+            assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isEqualTo(corruptedHintsOnDisk0);
+        }
+        finally
+        {
+            // re-enable dispatching
+            HintsService.instance.resumeDispatch();
+        }
+
     }
 
     @Test
@@ -249,15 +288,23 @@ public class HintsServiceTest
         assertTrue(storeToDeleteHints.hasFiles());
         HintsStore anotherStore = writeAndFlushHints(anotherHostId, numHints);
         assertTrue(anotherStore.hasFiles());
+        assertThat(HintsService.instance.getTotalFilesNum()).isEqualTo(2);
+        assertThat(HintsService.instance.getCorruptedFilesNum()).isEqualTo(0);
+        assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(20);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
 
         HintsService.instance.deleteAllHintsForEndpoint(endpointToDeleteHints);
         assertFalse(storeToDeleteHints.hasFiles());
         assertTrue(anotherStore.hasFiles());
         assertTrue(HintsService.instance.getCatalog().hasFiles());
+        assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(10);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
 
         HintsService.instance.deleteAllHints();
         assertEquals(0, HintsService.instance.getTotalHintsSize());
         assertFalse(anotherStore.hasFiles());
+        assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(0);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
     }
 
     private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)

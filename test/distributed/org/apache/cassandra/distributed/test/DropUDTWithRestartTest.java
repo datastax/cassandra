@@ -83,7 +83,7 @@ public class DropUDTWithRestartTest extends TestBaseImpl
     private final static Path DS_TRUNK_40_POST_UDT_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("ds-trunk-4.0-post-udt");
     private final static Path VSEARCH_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("vsearch");
     private final static Path DSE_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("dse");
-    private final static Path THIS_PRODUCT_PATH = DS_TRUNK_40_PRODUCT_PATH;
+    private final static Path THIS_PRODUCT_PATH = VSEARCH_PRODUCT_PATH;
     private final static String COMMITLOG_DIR = "commitlog";
     private final static String KS = "ks";
     private final static String SCHEMA_TXT = "schema.txt";

@@ -19,65 +19,98 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
+import java.io.UncheckedIOException;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.Map;
 
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.slf4j.Logger;
+
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 
 public class PerIndexFiles implements Closeable
 {
-    private final Map<IndexComponent, FileHandle> files = new EnumMap<>(IndexComponent.class);
-    private final IndexDescriptor indexDescriptor;
-    private final IndexContext indexContext;
+    private static final Logger logger = org.slf4j.LoggerFactory.getLogger(PerIndexFiles.class);
 
-    public PerIndexFiles(IndexDescriptor indexDescriptor, IndexContext indexContext)
+    private final Map<IndexComponentType, FileHandle> files = new EnumMap<>(IndexComponentType.class);
+    private final IndexComponents.ForRead perIndexComponents;
+
+    public PerIndexFiles(IndexComponents.ForRead perIndexComponents)
     {
-        this.indexDescriptor = indexDescriptor;
-        this.indexContext = indexContext;
-        if (TypeUtil.isLiteral(indexContext.getValidator()))
+        this.perIndexComponents = perIndexComponents;
+
+        var toOpen = new HashSet<>(perIndexComponents.expectedComponentsForVersion());
+        toOpen.remove(IndexComponentType.META);
+        toOpen.remove(IndexComponentType.COLUMN_COMPLETION_MARKER);
+
+        var componentsPresent = new HashSet<IndexComponentType>();
+        for (IndexComponentType component : toOpen)
         {
-            files.put(IndexComponent.POSTING_LISTS, indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext));
-            files.put(IndexComponent.TERMS_DATA, indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext));
+            try
+            {
+                files.put(component, perIndexComponents.get(component).createFileHandle());
+                componentsPresent.add(component);
+            }
+            catch (UncheckedIOException e)
+            {
+                // leave logging until we're done
+            }
         }
-        else
-        {
-            files.put(IndexComponent.KD_TREE, indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext));
-            files.put(IndexComponent.KD_TREE_POSTING_LISTS, indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext));
-        }
+
+        logger.info("Components present for {} are {}", perIndexComponents.indexDescriptor(), componentsPresent);
     }
 
+    public IndexComponents.ForRead usedPerIndexComponents()
+    {
+        return perIndexComponents;
+    }
+
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle termsData()
     {
-        return getFile(IndexComponent.TERMS_DATA);
+        return getFile(IndexComponentType.TERMS_DATA).sharedCopy();
     }
 
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle postingLists()
     {
-        return getFile(IndexComponent.POSTING_LISTS);
+        return getFile(IndexComponentType.POSTING_LISTS).sharedCopy();
     }
 
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle kdtree()
     {
-        return getFile(IndexComponent.KD_TREE);
+        return getFile(IndexComponentType.KD_TREE).sharedCopy();
     }
 
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle kdtreePostingLists()
     {
-        return getFile(IndexComponent.KD_TREE_POSTING_LISTS);
+        return getFile(IndexComponentType.KD_TREE_POSTING_LISTS).sharedCopy();
     }
 
-    private FileHandle getFile(IndexComponent indexComponent)
+    /** It is the caller's responsibility to close the returned file handle. */
+    public FileHandle vectors()
     {
-        FileHandle file = files.get(indexComponent);
+        return getFile(IndexComponentType.VECTOR).sharedCopy();
+    }
+
+    /** It is the caller's responsibility to close the returned file handle. */
+    public FileHandle pq()
+    {
+        return getFile(IndexComponentType.PQ).sharedCopy();
+    }
+
+    public FileHandle getFile(IndexComponentType indexComponentType)
+    {
+        FileHandle file = files.get(indexComponentType);
         if (file == null)
-            throw new IllegalArgumentException(String.format(indexContext.logMessage("Component %s not found for SSTable %s"),
-                                                             indexComponent,
-                                                             indexDescriptor.descriptor));
+            throw new IllegalArgumentException(String.format(perIndexComponents.logMessage("Component %s not found for SSTable %s"),
+                                                             indexComponentType,
+                                                             perIndexComponents.descriptor()));
 
         return file;
     }

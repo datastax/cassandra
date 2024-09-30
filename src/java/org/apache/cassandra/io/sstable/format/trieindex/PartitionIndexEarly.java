@@ -23,6 +23,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.TailOverridingRebufferer;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Early-opened partition index. Part of the data is already written to file, but some nodes, including the ones in the
@@ -35,9 +36,9 @@ class PartitionIndexEarly extends PartitionIndex
     final ByteBuffer tail;
 
     public PartitionIndexEarly(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last,
-                               long cutoff, ByteBuffer tail)
+                               long cutoff, ByteBuffer tail, ByteComparable.Version version)
     {
-        super(fh, trieRoot, keyCount, first, last, null, last);
+        super(fh, trieRoot, keyCount, first, last, null, last, version);
         this.cutoff = cutoff;
         this.tail = tail;
     }

@@ -24,17 +24,25 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.apache.cassandra.index.sai.disk.v1.kdtree.BKDQueries.bkdQueryFrom;
 
@@ -51,20 +59,19 @@ public class KDTreeIndexSearcher extends IndexSearcher
     KDTreeIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                         PerIndexFiles perIndexFiles,
                         SegmentMetadata segmentMetadata,
-                        IndexDescriptor indexDescriptor,
                         IndexContext indexContext) throws IOException
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
+        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexContext);
 
-        final long bkdPosition = metadata.getIndexRoot(IndexComponent.KD_TREE);
+        final long bkdPosition = metadata.getIndexRoot(IndexComponentType.KD_TREE);
         assert bkdPosition >= 0;
-        final long postingsPosition = metadata.getIndexRoot(IndexComponent.KD_TREE_POSTING_LISTS);
+        final long postingsPosition = metadata.getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS);
         assert postingsPosition >= 0;
 
         bkdReader = new BKDReader(indexContext,
-                                  indexFiles.kdtree().sharedCopy(),
+                                  indexFiles.kdtree(),
                                   bkdPosition,
-                                  indexFiles.kdtreePostingLists().sharedCopy(),
+                                  indexFiles.kdtreePostingLists(),
                                   postingsPosition);
         perColumnEventListener = (QueryEventListener.BKDIndexEventListener)indexContext.getColumnQueryMetrics();
     }
@@ -76,8 +83,13 @@ public class KDTreeIndexSearcher extends IndexSearcher
     }
 
     @Override
-    @SuppressWarnings("resource")
-    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer) throws IOException
+    public RangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    {
+        PostingList postingList = searchPosting(exp, context);
+        return toPrimaryKeyIterator(postingList, context);
+    }
+
+    private PostingList searchPosting(Expression exp, QueryContext context)
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
@@ -85,14 +97,22 @@ public class KDTreeIndexSearcher extends IndexSearcher
         if (exp.getOp().isEqualityOrRange())
         {
             final BKDReader.IntersectVisitor query = bkdQueryFrom(exp, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
-            QueryEventListener.BKDIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
-            PostingList postingList = bkdReader.intersect(query, listener, context.queryContext);
-            return toIterator(postingList, context, defer);
+            QueryEventListener.BKDIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
+            return bkdReader.intersect(query, listener, context);
         }
         else
         {
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during index query: " + exp));
         }
+    }
+
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    {
+        var query = slice != null && slice.getOp().isEqualityOrRange()
+                    ? bkdQueryFrom(slice, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension())
+                    : null;
+        var iter = new RowIdIterator(bkdReader.iteratorState(orderer.isAscending(), query));
+        return toMetaSortedIterator(iter, queryContext);
     }
 
     @Override
@@ -110,5 +130,35 @@ public class KDTreeIndexSearcher extends IndexSearcher
     public void close()
     {
         bkdReader.close();
+    }
+
+    private static class RowIdIterator extends AbstractIterator<RowIdWithByteComparable> implements CloseableIterator<RowIdWithByteComparable>
+    {
+        private final BKDReader.IteratorState iterator;
+        RowIdIterator(BKDReader.IteratorState iterator)
+        {
+            this.iterator = iterator;
+        }
+
+        @Override
+        public RowIdWithByteComparable computeNext()
+        {
+            if (!iterator.hasNext())
+                return endOfData();
+
+            var segmentRowId = iterator.next();
+            // We have to copy scratch to prevent it from being overwritten by the next call to computeNext()
+            var indexValue = new byte[iterator.scratch.length];
+            System.arraycopy(iterator.scratch, 0, indexValue, 0, iterator.scratch.length);
+            // We store the indexValue in an already encoded format, so we use the fixedLength method here
+            // to avoid re-encoding it.
+            return new RowIdWithByteComparable(Math.toIntExact(segmentRowId), (v) -> ByteSource.fixedLength(indexValue));
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(iterator);
+        }
     }
 }

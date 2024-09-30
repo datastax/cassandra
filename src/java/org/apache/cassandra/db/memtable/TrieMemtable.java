@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -53,6 +54,7 @@ import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
@@ -138,10 +140,23 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     @Unmetered
     private final TrieMemtableMetricsView metrics;
 
+    /**
+     * Keeps an estimate of the average row size in this memtable, computed from a small sample of rows.
+     * Because computing this estimate is potentially costly, as it requires iterating the rows,
+     * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
+     * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
+     */
+    private volatile MemtableAverageRowSize estimatedAverageRowSize;
+
     @VisibleForTesting
     public static final String SHARD_COUNT_PROPERTY = "cassandra.trie.memtable.shard.count";
 
-    public static volatile int SHARD_COUNT = Integer.getInteger(SHARD_COUNT_PROPERTY, FBUtilities.getAvailableProcessors());
+    public static volatile int SHARD_COUNT = Integer.getInteger(SHARD_COUNT_PROPERTY, autoShardCount());
+
+    private static int autoShardCount()
+    {
+        return 4 * FBUtilities.getAvailableProcessors();
+    }
 
     // only to be used by init(), to setup the very first memtable for the cfs
     TrieMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
@@ -151,7 +166,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics);
         this.mergedTrie = makeMergedTrie(shards);
-        logger.debug("Created memtable with {} shards", this.shards.length);
+        logger.trace("Created memtable with {} shards", this.shards.length);
     }
 
     private static MemtableShard[] generatePartitionShards(int splits,
@@ -281,6 +296,35 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return total;
     }
 
+    public int getShardCount()
+    {
+        return shards.length;
+    }
+
+    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
+    {
+        int total = 0;
+        for (MemtableUnfilteredPartitionIterator iter = makePartitionIterator(columnFilter, dataRange); iter.hasNext(); )
+        {
+            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
+            {
+                Unfiltered uRow = it.next();
+                if (uRow.isRow())
+                    total++;
+            }
+        }
+
+        return total;
+    }
+
+    @Override
+    public long getEstimatedAverageRowSize()
+    {
+        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
+            estimatedAverageRowSize = new MemtableAverageRowSize(this);
+        return estimatedAverageRowSize.rowSize;
+    }
+
     /**
      * Returns the minTS if one available, otherwise NO_MIN_TIMESTAMP.
      *
@@ -295,6 +339,30 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         for (MemtableShard shard : shards)
             min =  Long.min(min, shard.minTimestamp());
         return min != EncodingStats.NO_STATS.minTimestamp ? min : NO_MIN_TIMESTAMP;
+    }
+
+    @Override
+    public DecoratedKey minPartitionKey()
+    {
+        for (int i = 0; i < shards.length; i++)
+        {
+            MemtableShard shard = shards[i];
+            if (!shard.isEmpty())
+                return shard.minPartitionKey();
+        }
+        return null;
+    }
+
+    @Override
+    public DecoratedKey maxPartitionKey()
+    {
+        for (int i = shards.length - 1; i >= 0; i--)
+        {
+            MemtableShard shard = shards[i];
+            if (!shard.isEmpty())
+                return shard.maxPartitionKey();
+        }
+        return null;
     }
 
     @Override
@@ -456,6 +524,10 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         @Unmetered
         private final TrieMemtableMetricsView metrics;
 
+        private TableMetadataRef metadata;
+
+        private DecoratedKey maxPartitionKey;
+
         MemtableShard(int shardId, TableMetadataRef metadata, TrieMemtableMetricsView metrics)
         {
             this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator(), metrics);
@@ -469,6 +541,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             this.statsCollector = new AbstractMemtable.StatsCollector();
             this.allocator = allocator;
             this.metrics = metrics;
+            this.metadata = metadata;
         }
 
         public long put(DecoratedKey key, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
@@ -514,6 +587,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                     updateMinTimestamp(update.stats().minTimestamp);
                     updateLiveDataSize(updater.dataSize);
                     updateCurrentOperations(update.operationCount());
+                    updateMaxPartitionKey(key);
 
                     // TODO: lambov 2021-03-30: check if stats are further optimisable
                     columnsCollector.update(update.columns());
@@ -548,6 +622,12 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             currentOperations = currentOperations + op;
         }
 
+        private void updateMaxPartitionKey(DecoratedKey key)
+        {
+            if (maxPartitionKey == null || key.compareTo(maxPartitionKey) > 0)
+                maxPartitionKey = key;
+        }
+
         public int size()
         {
             return data.valuesCount();
@@ -566,6 +646,23 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         long currentOperations()
         {
             return currentOperations;
+        }
+
+        public DecoratedKey minPartitionKey()
+        {
+            Iterator<Map.Entry<ByteComparable, BTreePartitionData>> iter = data.entryIterator();
+            if (!iter.hasNext())
+                return null;
+
+            Map.Entry<ByteComparable, BTreePartitionData> entry = iter.next();
+            Partition partition = getPartitionFromTrieEntry(metadata.get(), allocator.ensureOnHeap(), entry);
+            return partition.partitionKey();
+        }
+
+        public DecoratedKey maxPartitionKey()
+        {
+            // Until we have a way to iterate the trie backwards, we need to update the max when putting data.
+            return maxPartitionKey;
         }
     }
 
@@ -738,7 +835,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         {
             if ("auto".equalsIgnoreCase(shardCount))
             {
-                SHARD_COUNT = FBUtilities.getAvailableProcessors();
+                SHARD_COUNT = autoShardCount();
             }
             else
             {
@@ -748,7 +845,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                 }
                 catch (NumberFormatException ex)
                 {
-                    logger.warn("Unable to parse {} as valid value for shard count", shardCount);
+                    logger.warn("Unable to parse {} as valid value for shard count; leaving it as {}",
+                                shardCount, SHARD_COUNT);
                     return;
                 }
             }

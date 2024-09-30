@@ -26,6 +26,7 @@ import java.net.MalformedURLException;
 import java.net.ServerSocket;
 import java.nio.ByteBuffer;
 import java.rmi.server.RMISocketFactory;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -44,6 +45,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -58,6 +60,7 @@ import javax.management.remote.JMXConnectorServer;
 import javax.management.remote.JMXServiceURL;
 import javax.management.remote.rmi.RMIConnectorServer;
 
+import com.datastax.shaded.netty.channel.EventLoopGroup;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -89,7 +92,6 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.SocketOptions;
 import com.datastax.driver.core.Statement;
-import com.datastax.shaded.netty.channel.EventLoopGroup;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.auth.CassandraAuthorizer;
@@ -125,11 +127,13 @@ import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.util.File;
@@ -166,6 +170,7 @@ import org.awaitility.Awaitility;
 import static com.datastax.driver.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_MILLIS;
 import static com.datastax.driver.core.SocketOptions.DEFAULT_READ_TIMEOUT_MILLIS;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.apache.cassandra.index.sai.SAITester.vector;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -256,6 +261,7 @@ public abstract class CQLTester
     private List<String> types = new ArrayList<>();
     private List<String> functions = new ArrayList<>();
     private List<String> aggregates = new ArrayList<>();
+    private List<String> indexes = new ArrayList<>();
     private User user;
 
     // We don't use USE_PREPARED_VALUES in the code below so some test can foce value preparation (if the result
@@ -784,6 +790,13 @@ public abstract class CQLTester
         return keyspaces.get(keyspaces.size() - 1);
     }
 
+    protected String currentIndex()
+    {
+        if (indexes.isEmpty())
+            return null;
+        return indexes.get(indexes.size() - 1);
+    }
+
     protected Collection<String> currentTables()
     {
         if (tables == null || tables.isEmpty())
@@ -990,7 +1003,7 @@ public abstract class CQLTester
         schemaChange(formattedQuery);
     }
 
-    protected String createIndex(String query)
+    public String createIndex(String query)
     {
         return createIndex(KEYSPACE, query);
     }
@@ -1005,6 +1018,7 @@ public abstract class CQLTester
     {
         logger.info(formattedQuery);
         String indexName = getCreateIndexName(formattedQuery);
+        indexes.add(indexName);
         schemaChange(formattedQuery);
         return indexName;
     }
@@ -1106,7 +1120,7 @@ public abstract class CQLTester
         QueryProcessor.executeOnceInternal(fullQuery);
     }
 
-    protected void dropIndex(String query) throws Throwable
+    public void dropIndex(String query)
     {
         String fullQuery = String.format(query, KEYSPACE);
         logger.info(fullQuery);
@@ -1181,7 +1195,9 @@ public abstract class CQLTester
         catch (Exception e)
         {
             logger.info("Error performing schema change", e);
-            throw new RuntimeException("Error setting schema for test (query was: " + query + ")", e);
+            if (e instanceof InvalidRequestException)
+                throw e;
+            throw new RuntimeException(String.format("Error setting schema for test (query was: %s)", query), e);
         }
     }
 
@@ -1190,12 +1206,12 @@ public abstract class CQLTester
         return Schema.instance.getTableMetadata(KEYSPACE, currentTable());
     }
 
-    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values) throws Throwable
+    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values)
     {
         return sessionNet(protocolVersion).execute(formatQuery(query), values);
     }
 
-    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values) throws Throwable
+    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values)
     {
         return sessionNet().execute(formatQuery(query), values);
     }
@@ -1367,12 +1383,12 @@ public abstract class CQLTester
         return QueryProcessor.instance.prepare(formatQuery(query), ClientState.forInternalCalls());
     }
 
-    public UntypedResultSet execute(String query, Object... values) throws Throwable
+    public UntypedResultSet execute(String query, Object... values)
     {
         return executeFormattedQuery(formatQuery(query), values);
     }
 
-    public UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
+    public UntypedResultSet executeFormattedQuery(String query, Object... values)
     {
         UntypedResultSet rs;
         if (usePrepared)
@@ -1489,6 +1505,24 @@ public abstract class CQLTester
 
     public static void assertRows(UntypedResultSet result, Object[]... rows)
     {
+        assertRows(result, false, rows);
+    }
+
+    public static void assertRows(UntypedResultSet result, boolean printAssertedRows, Object[]... rows)
+    {
+        // Useful for manual debugging, but generally unnecessary on
+        if (printAssertedRows)
+        {
+            // Print all the rows
+            for (Object[] row : rows)
+            {
+                System.out.print("Expected row:");
+                for (Object column : row)
+                    System.out.print("  " + column);
+                System.out.println();
+            }
+        }
+
         if (result == null)
         {
             if (rows.length > 0)
@@ -1745,28 +1779,28 @@ public abstract class CQLTester
         return expected;
     }
 
-    protected void assertEmpty(UntypedResultSet result) throws Throwable
+    protected void assertEmpty(UntypedResultSet result)
     {
         if (result != null && !result.isEmpty())
             throw new AssertionError(String.format("Expected empty result but got %d rows: %s \n", result.size(), makeRowStrings(result)));
     }
 
-    protected void assertInvalid(String query, Object... values) throws Throwable
+    protected void assertInvalid(String query, Object... values)
     {
         assertInvalidMessage(null, query, values);
     }
 
-    protected void assertInvalidMessage(String errorMessage, String query, Object... values) throws Throwable
+    protected void assertInvalidMessage(String errorMessage, String query, Object... values)
     {
         assertInvalidThrowMessage(errorMessage, null, query, values);
     }
 
-    protected void assertInvalidThrow(Class<? extends Throwable> exception, String query, Object... values) throws Throwable
+    protected void assertInvalidThrow(Class<? extends Throwable> exception, String query, Object... values)
     {
         assertInvalidThrowMessage(null, exception, query, values);
     }
 
-    protected void assertInvalidThrowMessage(String errorMessage, Class<? extends Throwable> exception, String query, Object... values) throws Throwable
+    protected void assertInvalidThrowMessage(String errorMessage, Class<? extends Throwable> exception, String query, Object... values)
     {
         assertInvalidThrowMessage(Optional.empty(), errorMessage, exception, query, values);
     }
@@ -1777,7 +1811,7 @@ public abstract class CQLTester
                                              String errorMessage,
                                              Class<? extends Throwable> exception,
                                              String query,
-                                             Object... values) throws Throwable
+                                             Object... values)
     {
         try
         {
@@ -1879,9 +1913,48 @@ public abstract class CQLTester
      */
     public void beforeAndAfterFlush(CheckedFunction runnable) throws Throwable
     {
-        runnable.apply();
+        try
+        {
+            runnable.apply();
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError("Test failed before flush:\n" + t, t);
+        }
+
         flush();
-        runnable.apply();
+
+        try
+        {
+            runnable.apply();
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError("Test failed after flush:\n" + t, t);
+        }
+    }
+
+    /**
+     * Runs the given function before a flush, after a flush, and finally after a compaction of the table. This is
+     * useful for checking that behavior is the same whether data is in memtables, memtable-flushed-sstbales,
+     * compaction-built-sstables.
+     * @param runnable
+     * @throws Throwable
+     */
+    public void runThenFlushThenCompact(CheckedFunction runnable) throws Throwable
+    {
+        beforeAndAfterFlush(runnable);
+
+        compact();
+
+        try
+        {
+            runnable.apply();
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError("Test failed after compact:\n" + t, t);
+        }
     }
 
     private static String replaceValues(String query, Object[] values)
@@ -2141,6 +2214,47 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
+    /** @return a normalized vector with the given dimension */
+    public static Vector<Float> randomVectorBoxed(int dimension)
+    {
+        var floats = randomVector(dimension);
+        return vector(floats);
+    }
+
+    public static ByteBuffer randomVectorSerialized(int dimension)
+    {
+        var rawVector = randomVectorBoxed(dimension);
+        return VectorType.getInstance(FloatType.instance, dimension).getSerializer().serialize(rawVector);
+    }
+
+    public static float[] randomVector(int dimension)
+    {
+        // this can be called from concurrent threads so don't use getRandom()
+        var R = ThreadLocalRandom.current();
+
+        var vector = new float[dimension];
+        for (int i = 0; i < dimension; i++)
+        {
+            vector[i] = R.nextFloat();
+        }
+        normalize(vector);
+        return vector;
+    }
+
+    /** Normalize the given vector in-place */
+    protected static void normalize(float[] v)
+    {
+        var sum = 0.0f;
+        for (int i = 0; i < v.length; i++)
+        {
+            sum += v[i] * v[i];
+        }
+
+        sum = (float) Math.sqrt(sum);
+        for (int i = 0; i < v.length; i++)
+            v[i] /= sum;
+    }
+
     protected Object set(Object...values)
     {
         return ImmutableSet.copyOf(values);
@@ -2187,6 +2301,28 @@ public abstract class CQLTester
             fail(String.format("Expected a single registered metric for paused client connections, found %s",
                                metrics.size()));
         return metrics.get(metricName);
+    }
+
+    public static class Vector<T> extends AbstractList<T>
+    {
+        private final T[] values;
+
+        public Vector(T[] values)
+        {
+            this.values = values;
+        }
+
+        @Override
+        public T get(int index)
+        {
+            return values[index];
+        }
+
+        @Override
+        public int size()
+        {
+            return values.length;
+        }
     }
 
     // Attempt to find an AbstracType from a value (for serialization/printing sake).
@@ -2240,6 +2376,13 @@ public abstract class CQLTester
 
         if (value instanceof TimeUUID)
             return TimeUUIDType.instance;
+
+        // vector impl list, so have to check first
+        if (value instanceof Vector)
+        {
+            Vector<?> v = (Vector<?>) value;
+            return VectorType.getInstance(typeFor(v.values[0]), v.values.length);
+        }
 
         if (value instanceof List)
         {
@@ -2386,6 +2529,11 @@ public abstract class CQLTester
             System.err.println("Randomized test failed. To rerun test use -Dcassandra.test.random.seed=" + seed);
         }
 
+        public Random getRandom()
+        {
+            return random;
+        }
+
         public int nextInt()
         {
             return random.nextInt();
@@ -2394,6 +2542,11 @@ public abstract class CQLTester
         public int nextIntBetween(int minValue, int maxValue)
         {
             return RandomInts.randomIntBetween(random, minValue, maxValue);
+        }
+
+        public float nextFloatBetween(int minValue, int maxValue)
+        {
+            return random.nextFloat() * (maxValue - minValue) + minValue;
         }
 
         public long nextLong()

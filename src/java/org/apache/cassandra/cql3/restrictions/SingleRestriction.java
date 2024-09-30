@@ -19,7 +19,8 @@ package org.apache.cassandra.cql3.restrictions;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
-import org.apache.cassandra.db.MultiCBuilder;
+import org.apache.cassandra.db.MultiClusteringBuilder;
+import org.apache.cassandra.index.IndexRegistry;
 
 /**
  * A single restriction/clause on one or multiple column.
@@ -32,6 +33,11 @@ public interface SingleRestriction extends Restriction
     }
 
     public default boolean isEQ()
+    {
+        return false;
+    }
+
+    public default boolean isAnalyzerMatches()
     {
         return false;
     }
@@ -61,6 +67,16 @@ public interface SingleRestriction extends Restriction
         return false;
     }
 
+    public default boolean isIndexBasedOrdering()
+    {
+        return false;
+    }
+
+    public default boolean isBoundedAnn()
+    {
+        return false;
+    }
+
     /**
      * Checks if the specified bound is set or not.
      * @param b the bound type
@@ -82,6 +98,17 @@ public interface SingleRestriction extends Restriction
     }
 
     /**
+     * Checks if this restriction shouldn't be merged with other restrictions.
+     *
+     * @param indexRegistry the index registry
+     * @return {@code true} if this shouldn't be merged with other restrictions
+     */
+    default boolean skipMerge(IndexRegistry indexRegistry)
+    {
+        return false;
+    }
+
+    /**
      * Merges this restriction with the specified one.
      *
      * <p>Restriction are immutable. Therefore merging two restrictions result in a new one.
@@ -100,7 +127,7 @@ public interface SingleRestriction extends Restriction
      * @param options the query options
      * @return the <code>MultiCBuilder</code>
      */
-    public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options);
+    public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options);
 
     /**
      * Appends the values of the <code>SingleRestriction</code> for the specified bound to the specified builder.
@@ -110,7 +137,7 @@ public interface SingleRestriction extends Restriction
      * @param options the query options
      * @return the <code>MultiCBuilder</code>
      */
-    public default MultiCBuilder appendBoundTo(MultiCBuilder builder, Bound bound, QueryOptions options)
+    public default MultiClusteringBuilder appendBoundTo(MultiClusteringBuilder builder, Bound bound, QueryOptions options)
     {
         return appendTo(builder, options);
     }

@@ -25,9 +25,9 @@ import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
@@ -114,17 +114,14 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @Setup(Level.Trial)
     public void perTrialSetup2() throws IOException
     {
-        try (IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
-             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-             MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
-             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
-                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
+        try (MetadataWriter metadataWriter = new MetadataWriter(components);
+             NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                          metadataWriter, true);
-             SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS),
+             SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                               metadataWriter,
-                                                              bytesWriter,
                                                               blockFPWriter,
-                                                              trieWriter))
+                                                              components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
         {
             for (int x = 0; x < NUM_ROWS; x++)
             {
@@ -169,12 +166,15 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         rowIds = new int[NUM_ROWS];
         tokenValues = new long[NUM_ROWS];
 
-        MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
-        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS)));
-        trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
-        termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
-        blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS);
+        IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
+        MetadataSource metadataSource = MetadataSource.loadMetadata(components);
+        IndexComponent.ForRead blocksComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCKS);
+        IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
+        NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent));
+        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(blocksComponent));
+        trieFile = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
+        termsData = blocksComponent.createFileHandle();
+        blockOffsets = blockOffsetsComponent.createFileHandle();
 
         sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, sortedTermsMeta, blockOffsetMeta);
 
@@ -222,7 +222,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void advance(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(SSTableQueryContext.forTest()))
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {
@@ -237,7 +237,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void seekToPointID(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(SSTableQueryContext.forTest()))
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {
@@ -252,9 +252,12 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void seekToTerm(Blackhole bh) throws IOException
     {
-        for (int i = 0; i < NUM_INVOCATIONS; i++)
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
         {
-            bh.consume(sortedTermsReader.getPointId(ByteComparable.fixedLength(this.bcIntBytes[i * skippingDistance])));
+            for (int i = 0; i < NUM_INVOCATIONS; i++)
+            {
+                bh.consume(cursor.ceiling(ByteComparable.fixedLength(this.bcIntBytes[i * skippingDistance])));
+            }
         }
     }
 
@@ -276,7 +279,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     {
         for (int i = 0; i < NUM_INVOCATIONS; i++)
         {
-            bh.consume(rowIdToToken.findTokenRowID(tokenValues[i * skippingDistance]));
+            bh.consume(rowIdToToken.ceilingRowId(tokenValues[i * skippingDistance]));
         }
     }
 }

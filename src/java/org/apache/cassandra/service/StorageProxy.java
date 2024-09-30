@@ -56,6 +56,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.CounterMutationCallback;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Keyspace;
@@ -1484,7 +1485,12 @@ public class StorageProxy implements StorageProxyMBean
 
         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
         AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
-        return rs.getWriteResponseHandler(replicaPlan, callback, writeType, queryStartNanoTime);
+        AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(replicaPlan, callback, writeType, queryStartNanoTime);
+        if (callback instanceof CounterMutationCallback)
+        {
+            ((CounterMutationCallback) callback).setReplicaCount(replicaPlan.contacts().size());
+        }
+        return responseHandler;
     }
 
     /**
@@ -1930,6 +1936,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       group.queries,
                                                                                       consistencyLevel);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
+        partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
         return PartitionIterators.doOnClose(partitions, readTracker::onDone);
     }
 
@@ -2298,6 +2305,8 @@ public class StorageProxy implements StorageProxyMBean
                                                                               consistencyLevel);
 
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
+        partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
+
         return PartitionIterators.doOnClose(partitions, readTracker::onDone);
     }
 

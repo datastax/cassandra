@@ -73,6 +73,12 @@ public final class IntegerType extends NumberType<BigInteger>
 
     IntegerType() {super(ComparisonType.CUSTOM);}/* singleton */
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public boolean isEmptyValueMeaningless()
     {
         return true;

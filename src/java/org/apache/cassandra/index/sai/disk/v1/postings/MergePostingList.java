@@ -17,16 +17,13 @@
  */
 package org.apache.cassandra.index.sai.disk.v1.postings;
 
-
-import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.IntMerger;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
@@ -34,93 +31,67 @@ import static com.google.common.base.Preconditions.checkArgument;
  * Merges multiple {@link PostingList} which individually contain unique items into a single list.
  */
 @NotThreadSafe
-public class MergePostingList implements PostingList
+public class MergePostingList extends IntMerger<PostingList> implements PostingList
 {
-    final PriorityQueue<PeekablePostingList> postingLists;
-    final List<PeekablePostingList> temp;
-    final Closeable onClose;
-    final long size;
-    private long lastRowId = -1;
+    final int size;
 
-    private MergePostingList(PriorityQueue<PeekablePostingList> postingLists, Closeable onClose)
+    private MergePostingList(List<? extends PostingList> postingLists)
     {
-        this.temp = new ArrayList<>(postingLists.size());
-        this.onClose = onClose;
-        this.postingLists = postingLists;
+        super(postingLists, PostingList.class);
+        checkArgument(!postingLists.isEmpty());
         long totalPostings = 0;
         for (PostingList postingList : postingLists)
-        {
             totalPostings += postingList.size();
-        }
-        this.size = totalPostings;
+
+        // We could technically "overflow" integer if enough row ids are duplicated in the source posting lists.
+        // The size does not affect correctness, so just use integer max if that happens.
+        this.size = (int) Math.min(totalPostings, Integer.MAX_VALUE);
     }
 
-    public static PostingList merge(PriorityQueue<PeekablePostingList> postings, Closeable onClose)
+    public static PostingList merge(List<PostingList> postings)
     {
-        checkArgument(!postings.isEmpty());
-        return postings.size() > 1 ? new MergePostingList(postings, onClose) : postings.poll();
-    }
+        if (postings.isEmpty())
+            return PostingList.EMPTY;
 
-    public static PostingList merge(PriorityQueue<PeekablePostingList> postings)
-    {
-        return merge(postings, () -> FileUtils.close(postings));
-    }
+        if (postings.size() == 1)
+            return postings.get(0);
 
-    @SuppressWarnings("resource")
-    @Override
-    public long nextPosting() throws IOException
-    {
-        while (!postingLists.isEmpty())
-        {
-            PeekablePostingList head = postingLists.poll();
-            long next = head.nextPosting();
-
-            if (next == END_OF_STREAM)
-            {
-                // skip current posting list
-            }
-            else if (next > lastRowId)
-            {
-                lastRowId = next;
-                postingLists.add(head);
-                return next;
-            }
-            else if (next == lastRowId)
-            {
-                postingLists.add(head);
-            }
-        }
-
-        return PostingList.END_OF_STREAM;
-    }
-
-    @SuppressWarnings("resource")
-    @Override
-    public long advance(long targetRowID) throws IOException
-    {
-        temp.clear();
-
-        while (!postingLists.isEmpty())
-        {
-            PeekablePostingList peekable = postingLists.poll();
-            peekable.advanceWithoutConsuming(targetRowID);
-            if (peekable.peek() != PostingList.END_OF_STREAM)
-                temp.add(peekable);
-        }
-        postingLists.addAll(temp);
-
-        return nextPosting();
+        return new MergePostingList(postings);
     }
 
     @Override
-    public long size()
+    public int nextPosting() throws IOException
+    {
+        return advance();
+    }
+
+    @Override
+    public int advance(int targetRowID) throws IOException
+    {
+        return skipTo(targetRowID);
+    }
+
+    @Override
+    public int size()
     {
         return size;
     }
 
     @Override
-    public void close() throws IOException
+    public void close()
     {
-        onClose.close();
+        applyToAllSources(FileUtils::closeQuietly);
+    }
+
+    @Override
+    public int advanceSource(PostingList s) throws IOException
+    {
+        return s.nextPosting();
+    }
+
+    @Override
+    protected int skipSource(PostingList s, int targetPosition) throws IOException
+    {
+        return s.advance(targetPosition);
     }
 }

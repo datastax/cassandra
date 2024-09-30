@@ -49,7 +49,7 @@ final class SetSelector extends Selector
 
     public static Factory newFactory(final AbstractType<?> type, final SelectorFactories factories)
     {
-        return new CollectionFactory(type, factories)
+        return new MultiElementFactory(type, factories)
         {
             protected String getColumnName()
             {
@@ -70,10 +70,10 @@ final class SetSelector extends Selector
             elements.get(i).addFetchedColumns(builder);
     }
 
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(ResultSetBuilder rs) throws InvalidRequestException
     {
         for (int i = 0, m = elements.size(); i < m; i++)
-            elements.get(i).addInput(protocolVersion, rs);
+            elements.get(i).addInput(rs);
     }
 
     public ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException

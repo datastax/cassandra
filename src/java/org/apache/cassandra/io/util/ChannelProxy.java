@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.util;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
@@ -52,7 +53,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new RuntimeException(e);
+            throw new UncheckedIOException(e);
         }
     }
 
@@ -180,6 +181,9 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
     }
 
+    /**
+     * Apply FADV_DONTNEED to the file region.
+     */
     public void trySkipCache(long offset, long length)
     {
         int fd = INativeLibrary.instance.getfd(channel);

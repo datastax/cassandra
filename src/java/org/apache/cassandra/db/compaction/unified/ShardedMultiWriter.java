@@ -179,12 +179,11 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     }
 
     @Override
-    public SSTableMultiWriter setOpenResult(boolean openResult)
+    public void openResult()
     {
         for (SSTableWriter writer : writers)
             if (writer != null)
-                writer.setOpenResult(openResult);
-        return this;
+                writer.openResult();
     }
 
     @Override

@@ -20,7 +20,6 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.List;
 import java.util.Set;
-import java.util.function.Consumer;
 
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
@@ -28,6 +27,7 @@ import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
 
 public interface ShardManager
 {
@@ -40,9 +40,10 @@ public interface ShardManager
      */
     static final double MINIMUM_TOKEN_COVERAGE = Math.scalb(1.0, -48);
 
-    static ShardManager create(DiskBoundaries diskBoundaries)
+    static ShardManager create(DiskBoundaries diskBoundaries, AbstractReplicationStrategy rs, boolean isReplicaAware)
     {
         List<Token> diskPositions = diskBoundaries.getPositions();
+
         SortedLocalRanges localRanges = diskBoundaries.getLocalRanges();
         IPartitioner partitioner = localRanges.getRealm().getPartitioner();
         // this should only happen in tests that change partitioners, but we don't want UCS to throw
@@ -61,7 +62,10 @@ public interface ShardManager
         if (diskPositions != null && diskPositions.size() > 1)
             return new ShardManagerDiskAware(localRanges, diskPositions);
         else if (partitioner.splitter().isPresent())
-            return new ShardManagerNoDisks(localRanges);
+            if (isReplicaAware)
+                return new ShardManagerReplicaAware(rs);
+            else
+                return new ShardManagerNoDisks(localRanges);
         else
             return new ShardManagerTrivial(partitioner);
     }

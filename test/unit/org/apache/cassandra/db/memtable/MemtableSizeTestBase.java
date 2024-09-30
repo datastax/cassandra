@@ -31,9 +31,14 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.memory.SlabAllocator;
 import org.github.jamm.MemoryMeter;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 // Note: This test can be run in idea with the allocation type configured in the test yaml and memtable using the
 // value memtableClass is initialized with.
@@ -68,8 +73,6 @@ public abstract class MemtableSizeTestBase extends CQLTester
     // Must be within 3% of the real usage. We are actually more precise than this, but the threshold is set higher to
     // avoid flakes. For on-heap allocators we allow for extra overheads below.
     final int MAX_DIFFERENCE_PERCENT = 3;
-    // Slab overhead, added when the memtable uses heap_buffers.
-    final int SLAB_OVERHEAD = 1024 * 1024;
     // Extra leniency for unslabbed buffers. We are not as precise there, and it's not a mode in real use.
     final int UNSLABBED_EXTRA_PERCENT = 2;
 
@@ -98,8 +101,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
         // overridden by instances
     }
 
-    @Test
-    public void testSize() throws Throwable
+    private void buildAndFillTable(String memtableClass) throws Throwable
     {
         // Make sure memtables use the correct allocation type, i.e. that setup has worked.
         // If this fails, make sure the test is not reusing an already-initialized JVM.
@@ -107,24 +109,34 @@ public abstract class MemtableSizeTestBase extends CQLTester
 
         CQLTester.disablePreparedReuseForTest();
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
+
+        table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))" +
+                                      " with compression = {'enabled': false}" +
+                                      " and memtable = { 'class': '" + memtableClass + "'}");
+        execute("use " + keyspace + ';');
+
+        forcePreparedValues();
+
+        cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
+        cfs.disableAutoCompaction();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+    }
+
+    @Test
+    public void testSize() throws Throwable
+    {
+
         try
         {
-            table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))" +
-                                          " with compression = {'enabled': false}" +
-                                          " and memtable = { 'class': '" + memtableClass + "'}");
-            execute("use " + keyspace + ';');
+            buildAndFillTable(memtableClass);
 
             String writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
-            forcePreparedValues();
-
-            cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
-            cfs.disableAutoCompaction();
-            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
             Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
             long deepSizeBefore = meter.measureDeep(memtable);
             System.out.println("Memtable deep size before " +
                                FBUtilities.prettyPrintMemory(deepSizeBefore));
+
             long i;
             long limit = partitions;
             System.out.println("Writing " + partitions + " partitions of " + rowsPerPartition + " rows");
@@ -155,7 +167,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
                               cfs.getTracker().getView().getCurrentMemtable());
 
             Memtable.MemoryUsage usage = Memtable.getMemoryUsage(memtable);
-            long actualHeap = usage.ownsOnHeap;
+            long calculatedHeap = usage.ownsOnHeap;
             System.out.println(String.format("Memtable in %s mode: %d ops, %s serialized bytes, %s",
                                              DatabaseDescriptor.getMemtableAllocationType(),
                                              memtable.getOperations(),
@@ -166,30 +178,74 @@ public abstract class MemtableSizeTestBase extends CQLTester
             System.out.println("Memtable deep size " +
                                FBUtilities.prettyPrintMemory(deepSizeAfter));
 
-            long expectedHeap = deepSizeAfter - deepSizeBefore;
-            long max_difference = MAX_DIFFERENCE_PERCENT * expectedHeap / 100;
-            long trie_overhead = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).unusedReservedMemory() : 0;
+            long actualHeap = deepSizeAfter - deepSizeBefore;
+            long maxDifference = MAX_DIFFERENCE_PERCENT * actualHeap / 100;
+            long trieOverhead = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).unusedReservedMemory() : 0;
+            calculatedHeap += trieOverhead;    // adjust trie memory with unused buffer space if on-heap
             switch (DatabaseDescriptor.getMemtableAllocationType())
             {
                 case heap_buffers:
-                    max_difference += SLAB_OVERHEAD;
-                    actualHeap += trie_overhead;    // adjust trie memory with unused buffer space if on-heap
+                    // MemoryUsage only counts the memory actually used by cells,
+                    // so add in the slab overhead to match what MemoryMeter sees
+                    int slabCount = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).getShardCount() : 1;
+                    maxDifference += (long) SlabAllocator.REGION_SIZE * slabCount;
                     break;
                 case unslabbed_heap_buffers:
-                    max_difference += expectedHeap * UNSLABBED_EXTRA_PERCENT / 100;   // We are not as precise for this
-                    actualHeap += trie_overhead;    // adjust trie memory with unused buffer space if on-heap
+                    // add a hardcoded slack factor
+                    maxDifference += actualHeap * UNSLABBED_EXTRA_PERCENT / 100;
                     break;
             }
-            String message = String.format("Expected heap usage close to %s, got %s, %s difference.\n",
-                                           FBUtilities.prettyPrintMemory(expectedHeap),
+            String message = String.format("Actual heap usage is %s, got %s, %s difference.\n",
                                            FBUtilities.prettyPrintMemory(actualHeap),
-                                           FBUtilities.prettyPrintMemory(expectedHeap - actualHeap));
+                                           FBUtilities.prettyPrintMemory(calculatedHeap),
+                                           FBUtilities.prettyPrintMemory(actualHeap - calculatedHeap));
             System.out.println(message);
-            Assert.assertTrue(message, Math.abs(actualHeap - expectedHeap) <= max_difference);
+            Assert.assertTrue(message, Math.abs(calculatedHeap - actualHeap) <= maxDifference);
         }
         finally
         {
             execute(String.format("DROP KEYSPACE IF EXISTS %s", keyspace));
         }
+    }
+
+    @Test
+    public void testRowCountInTrieMemtable() throws Throwable
+    {
+        buildAndFillTable("TrieMemtable");
+
+        String writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
+
+        Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
+        System.out.println("Writing " + partitions + " partitions of " + rowsPerPartition + " rows");
+        for (long i = 0; i < partitions; ++i)
+        {
+            for (long j = 0; j < rowsPerPartition; ++j)
+                execute(writeStatement, i, j, i + j);
+        }
+
+        assertThat(memtable).isExactlyInstanceOf(TrieMemtable.class);
+        ColumnFilter.Builder builder = ColumnFilter.allRegularColumnsBuilder(cfs.metadata(), true);
+        long rowCount = ((TrieMemtable)cfs.getTracker().getView().getCurrentMemtable()).rowCount(builder.build(), DataRange.allData(cfs.getPartitioner()));
+        Assert.assertEquals(rowCount, partitions*rowsPerPartition);
+    }
+
+    @Test
+    public void testRowSize() throws Throwable
+    {
+        buildAndFillTable(memtableClass);
+
+        String writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
+
+        Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
+        System.out.println("Writing " + partitions + " partitions of " + rowsPerPartition + " rows");
+        for (long i = 0; i < partitions; ++i)
+        {
+            for (long j = 0; j < rowsPerPartition; ++j)
+                execute(writeStatement, i, j, i + j);
+        }
+
+        long rowSize = memtable.getEstimatedAverageRowSize();
+        double expectedRowSize = (double) memtable.getLiveDataSize() / (partitions * rowsPerPartition);
+        Assert.assertEquals(expectedRowSize, rowSize, (partitions * rowsPerPartition) * 0.05);  // 5% accuracy
     }
 }
