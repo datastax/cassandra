@@ -42,7 +42,7 @@ public class RangeIntersectionIterator extends RangeIterator
 
     // The cassandra.sai.intersection_clause_limit (default: 2) controls the maximum number of range iterator that
     // will be used in the final intersection of a query operation.
-    public static final int INTERSECTION_CLAUSE_LIMIT = SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
+    public static int INTERSECTION_CLAUSE_LIMIT = SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
 
     static
     {

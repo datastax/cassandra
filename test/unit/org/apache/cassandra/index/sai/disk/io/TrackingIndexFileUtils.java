@@ -29,6 +29,7 @@ import org.junit.Assert;
 
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.utils.ReflectionUtils;
 
 public class TrackingIndexFileUtils extends IndexFileUtils
 {
