@@ -60,9 +60,23 @@ public class IndexFileUtils
                                                                                               .finishOnClose(true)
                                                                                               .build();
 
-    public static final IndexFileUtils instance = new IndexFileUtils();
+    private static final IndexFileUtils instance = new IndexFileUtils(defaultWriterOption);
+    private static IndexFileUtils overrideInstance = null;
 
-    private static final SequentialWriterOption writerOption = defaultWriterOption;
+    private final SequentialWriterOption writerOption;
+
+    public static synchronized void setOverrideInstance(IndexFileUtils overrideInstance)
+    {
+        IndexFileUtils.overrideInstance = overrideInstance;
+    }
+
+    public static IndexFileUtils instance()
+    {
+        if (overrideInstance == null)
+            return instance;
+        else
+            return overrideInstance;
+    }
 
     /**
      * Remembers checksums of files so we don't have to recompute them from the beginning of the file whenever appending
@@ -74,8 +88,10 @@ public class IndexFileUtils
                                                                                     .build();
 
     @VisibleForTesting
-    protected IndexFileUtils()
-    {}
+    protected IndexFileUtils(SequentialWriterOption writerOption)
+    {
+        this.writerOption = writerOption;
+    }
 
     public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append) throws IOException
     {
@@ -95,12 +111,12 @@ public class IndexFileUtils
         return out;
     }
 
-    public IndexInput openInput(FileHandle handle)
+    public IndexInputReader openInput(FileHandle handle)
     {
         return IndexInputReader.create(handle);
     }
 
-    public IndexInput openBlockingInput(FileHandle fileHandle)
+    public IndexInputReader openBlockingInput(FileHandle fileHandle)
     {
         final RandomAccessReader randomReader = fileHandle.createReader();
         return IndexInputReader.create(randomReader, fileHandle::close);

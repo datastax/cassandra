@@ -137,8 +137,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             scratch = new byte[packedBytesLength];
 
             final long firstLeafFilePointer = getMinLeafBlockFP();
-            bkdInput = IndexFileUtils.instance.openInput(kdtreeFile);
-            bkdPostingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            bkdInput = IndexFileUtils.instance().openInput(kdtreeFile);
+            bkdPostingsInput = IndexFileUtils.instance().openInput(postingsFile);
             bkdInput.seek(firstLeafFilePointer);
 
             leafCursor = new LeafCursor(direction, query);
@@ -320,9 +320,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
 
         listener.onSegmentHit();
-        IndexInput bkdInput = IndexFileUtils.instance.openInput(indexFile);
-        IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-        IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+        IndexInput bkdInput = IndexFileUtils.instance().openInput(indexFile);
+        IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
+        IndexInput postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
         PackedIndexTree index = new PackedIndexTree();
 
         Intersection completable =
