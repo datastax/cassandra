@@ -413,14 +413,18 @@
     <condition property="_std-test-jvmargs" value="${_jvm11_test_arg_items_concat}">
             <equals arg1="${ant.java.version}" arg2="11"/>
     </condition>
+    <condition property="_std-test-jvmargs" value="${_jvm17_test_arg_items_concat}">
+        <equals arg1="${ant.java.version}" arg2="17"/>
+    </condition>
     <resources id="_jvm22_test_arg_items">
     <string>-Djava.security.manager=allow</string>
     <string>-Dio.netty.tryReflectionSetAccessible=true</string>
         <!-- Enable vector incubator feature (simd support)-->
         <string>--add-modules jdk.incubator.vector</string>
     </resources>
-    <condition property="_std-test-jvmargs" value="${_jvm17_test_arg_items_concat}">
-        <equals arg1="${ant.java.version}" arg2="17"/>
+    <pathconvert property="_jvm22_test_arg_items_concat" refid="_jvm22_test_arg_items" pathsep=" "/>
+    <condition property="_std-test-jvmargs" value="${_jvm11_test_arg_items_concat}">
+        <equals arg1="${ant.java.version}" arg2="11"/>
     </condition>
     <condition property="_std-test-jvmargs" value="${_jvm22_test_arg_items_concat}">
     <equals arg1="${ant.java.version}" arg2="22"/>
