@@ -20,14 +20,13 @@ package org.apache.cassandra.transport.messages;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 import com.google.common.collect.ImmutableMap;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.cql3.Attributes;
 import org.apache.cassandra.cql3.BatchQueryOptions;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -49,7 +48,6 @@ import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
-import org.apache.cassandra.utils.NoSpamLogger;
 
 public class BatchMessage extends Message.Request
 {
@@ -166,7 +164,7 @@ public class BatchMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    public CompletableFuture<Response> maybeExecuteAsync(QueryState state, long queryStartNanoTime, boolean traceRequest)
     {
         List<QueryHandler.Prepared> prepared = null;
         try
@@ -223,18 +221,54 @@ public class BatchMessage extends Message.Request
             BatchStatement batch = new BatchStatement(null, batchType,
                                                       VariableSpecifications.empty(), statements, Attributes.none());
 
-            long queryTime = System.currentTimeMillis();
-            Message.Response response = handler.processBatch(batch, state, batchOptions, getCustomPayload(), queryStartNanoTime);
-            if (queries != null)
-                QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, state, queryTime, response);
-            return response;
+            long requestStartMillisTime = System.currentTimeMillis();
+            Optional<Stage> asyncStage = Stage.fromStatement(batch);
+            if (asyncStage.isPresent())
+            {
+                BatchStatement finalStatement = batch;
+                List<QueryHandler.Prepared> finalPrepared = prepared;
+                Tracing.trace("Handing off to async stage {}; active={}, pending={}", asyncStage.get(), asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
+                return CompletableFuture.supplyAsync(() -> {
+                    if (traceRequest)
+                        Tracing.trace("Handed off to async stage; active={}, pending={}", asyncStage.get().executor().getActiveTaskCount(), asyncStage.get().executor().getPendingTaskCount());
+                    return handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
+                }, asyncStage.get().executor());
+            }
+            else
+                return CompletableFuture.completedFuture(handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, prepared, requestStartMillisTime));
         }
         catch (Exception e)
         {
-            QueryEvents.instance.notifyBatchFailure(prepared, batchType, queryOrIdList, values, options, state, e);
-            JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
+            return CompletableFuture.completedFuture(handleException(state, prepared, e));
         }
+    }
+
+    private Response handleRequest(QueryState queryState, long queryStartNanoTime, QueryHandler queryHandler, BatchStatement batch, BatchQueryOptions batchOptions, List<String> queries, List<ModificationStatement> statements, List<QueryHandler.Prepared> preparedList, long requestStartMillisTime)
+    {
+        try
+        {
+            Tracing.trace("Processing batch start");
+            Response response = queryHandler.processBatch(batch, queryState, batchOptions, getCustomPayload(), queryStartNanoTime);
+            if (queries != null)
+                QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, queryState, requestStartMillisTime, response);
+
+            return response;
+        }
+        catch (Exception exception)
+        {
+            return handleException(queryState, preparedList, exception);
+        }
+        finally
+        {
+            Tracing.trace("Processing batch complete");
+        }
+    }
+
+    private ErrorMessage handleException(QueryState state, List<QueryHandler.Prepared> prepared, Exception e)
+    {
+        QueryEvents.instance.notifyBatchFailure(prepared, batchType, queryOrIdList, values, options, state, e);
+        JVMStabilityInspector.inspectThrowable(e);
+        return ErrorMessage.fromException(e);
     }
 
     private void traceQuery(QueryState state)

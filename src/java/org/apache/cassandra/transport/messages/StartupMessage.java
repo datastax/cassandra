@@ -19,6 +19,7 @@ package org.apache.cassandra.transport.messages;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import io.netty.buffer.ByteBuf;
 
@@ -72,7 +73,12 @@ public class StartupMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    protected CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    {
+        return CompletableFuture.completedFuture(executeSync(queryState, queryStartNanoTime, traceRequest));
+    }
+
+    private Message.Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
     {
         String cqlVersion = options.get(CQL_VERSION);
         if (cqlVersion == null)
