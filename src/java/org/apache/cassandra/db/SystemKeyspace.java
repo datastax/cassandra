@@ -42,7 +42,6 @@ import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -859,8 +858,6 @@ public final class SystemKeyspace
      */
     public static InetAddressAndPort getPreferredIP(InetAddressAndPort ep)
     {
-        Preconditions.checkState(DatabaseDescriptor.enableMemtableAndCommitLog()); // Make sure being used as a daemon, not a tool
-
         IPeerInfo info = Nodes.peers().get(ep);
         if (info != null && info.getPreferredAddressAndPort() != null && info.isExisting())
             return info.getPreferredAddressAndPort();
