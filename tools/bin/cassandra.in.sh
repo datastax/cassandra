@@ -76,17 +76,21 @@ if [ -z $JAVA ] ; then
     exit 1;
 fi
 
+java_versions_supported=11,17,22
+
 # Determine the sort of JVM we'll be running on.
 java_ver_output=`"${JAVA:-java}" -version 2>&1`
 jvmver=`echo "$java_ver_output" | grep '[openjdk|java] version' | awk -F'"' 'NR==1 {print $2}' | cut -d\- -f1`
 JVM_VERSION=${jvmver%_*}
 short=$(echo "${jvmver}" | cut -c1-2)
 
-JAVA_VERSION=17
+JAVA_VERSION=22
 if [ "$short" = "11" ] ; then
      JAVA_VERSION=11
-elif [ "$JVM_VERSION" \< "17" ] ; then
-    echo "Cassandra 5.0 requires Java 11 or Java 17(or newer)."
+elif [ "$short" = "17" ] ; then
+      JAVA_VERSION=17
+elif [ "$JVM_VERSION" \< "22" ] ; then
+    echo "Cassandra 5.0 requires Java 11, Java 17 or Java 22(or newer)."
 fi
 
 jvm=`echo "$java_ver_output" | grep -A 1 '[openjdk|java] version' | awk 'NR==2 {print $1}'`
@@ -110,7 +114,9 @@ esac
 
 # Read user-defined JVM options from jvm-server.options file
 JVM_OPTS_FILE=$CASSANDRA_CONF/jvm${jvmoptions_variant:--clients}.options
-if [ $JAVA_VERSION -ge 17 ] ; then
+if [ $JAVA_VERSION -ge 22 ] ; then
+    JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm22${jvmoptions_variant:--clients}.options
+elif [ $JAVA_VERSION -ge 17 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm17${jvmoptions_variant:--clients}.options
 elif [ $JAVA_VERSION -ge 11 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm11${jvmoptions_variant:--clients}.options
