@@ -74,10 +74,12 @@ public abstract class Guardrails
 
     public static final Threshold columnValueSize =
             factory.threshold("column_value_size",
-                              () -> -1L, // not needed so far
+                              () -> config.column_value_size_warn_threshold_in_kb * 1024L,
                               () -> config.column_value_size_failure_threshold_in_kb * 1024L,
-                              (x, what, v, t) -> format("Value of %s of size %s is greater than the maximum allowed (%s)",
-                                                        what, formatSize(v), formatSize(t)));
+                              (isWarning, what, v, t) -> isWarning ?
+                                      format("Value of %s of size %s is greater than the warn threshold (%s)", what, v, t )
+                                    : format("Value of %s of size %s is greater than the maximum allowed (%s)",
+                                            what, v, t));
 
     public static final Threshold columnsPerTable =
             factory.threshold("columns_per_table",

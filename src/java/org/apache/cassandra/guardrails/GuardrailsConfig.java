@@ -172,6 +172,7 @@ public class GuardrailsConfig
         enforceDefault(user_timestamps_enabled, v -> user_timestamps_enabled = v, true, true);
 
         enforceDefault(column_value_size_failure_threshold_in_kb, v -> column_value_size_failure_threshold_in_kb = v, -1L, 5 * 1024L);
+        enforceDefault(column_value_size_warn_threshold_in_kb, v -> column_value_size_warn_threshold_in_kb = v, -1L, -1L);
 
         enforceDefault(read_before_write_list_operations_enabled, v -> read_before_write_list_operations_enabled = v, true, false);
 
@@ -243,8 +244,12 @@ public class GuardrailsConfig
      */
     public void validate()
     {
+        validateStrictlyPositiveInteger(column_value_size_warn_threshold_in_kb,
+                                        "column_value_size_warn_threshold_in_kb");
         validateStrictlyPositiveInteger(column_value_size_failure_threshold_in_kb,
                                         "column_value_size_failure_threshold_in_kb");
+        validateWarnLowerThanFail(column_value_size_failure_threshold_in_kb,
+                                        column_value_size_failure_threshold_in_kb, "column_value");
 
         validateStrictlyPositiveInteger(columns_per_table_failure_threshold,
                                         "columns_per_table_failure_threshold");

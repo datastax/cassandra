@@ -125,6 +125,16 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
     }
 
     @Test
+    public void testRegularColumnWarning() throws Throwable
+    {
+        config().column_value_size_warn_threshold_in_kb = (long) WARN_THRESHOLD_IN_KB;
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+
+        testWarningThreshold("v", "INSERT INTO %s (k, v) VALUES (0, ?)");
+        testWarningThreshold("v", "UPDATE %s SET v = ? WHERE k = 0");
+    }
+
+    @Test
     public void testStaticColumn() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, s text STATIC, r int, PRIMARY KEY(k, c))");
@@ -186,12 +196,12 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
                                           "UPDATE %s SET v = {a: ?, b: {c: ?, d: ?}} WHERE k = 0"))
         {
             assertValid(query, allocate(0), allocate(0), allocate(0));
-            assertValid(query, allocate(THRESHOLD_IN_BYTES), allocate(0), allocate(0));
-            assertValid(query, allocate(0), allocate(THRESHOLD_IN_BYTES - 8), allocate(0));
-            assertValid(query, allocate(0), allocate(0), allocate(THRESHOLD_IN_BYTES - 8));
-            assertGuardrailFailed("v", query, allocate(THRESHOLD_IN_BYTES + 1), allocate(0), allocate(0));
-            assertGuardrailFailed("v", query, allocate(0), allocate(THRESHOLD_IN_BYTES - 7), allocate(0));
-            assertGuardrailFailed("v", query, allocate(0), allocate(0), allocate(THRESHOLD_IN_BYTES - 7));
+            assertValid(query, allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(0), allocate(0));
+            assertValid(query, allocate(0), allocate(FAILURE_THRESHOLD_IN_BYTES - 8), allocate(0));
+            assertValid(query, allocate(0), allocate(0), allocate(FAILURE_THRESHOLD_IN_BYTES - 8));
+            assertGuardrailFailed("v", query, allocate(FAILURE_THRESHOLD_IN_BYTES + 1), allocate(0), allocate(0));
+            assertGuardrailFailed("v", query, allocate(0), allocate(FAILURE_THRESHOLD_IN_BYTES - 7), allocate(0));
+            assertGuardrailFailed("v", query, allocate(0), allocate(0), allocate(FAILURE_THRESHOLD_IN_BYTES - 7));
         }
     }
 
@@ -205,17 +215,17 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
                                           "UPDATE %s SET v = v + ? WHERE k = 0"))
         {
             assertValid(query, list(allocate(1)));
-            assertValid(query, list(allocate(THRESHOLD_IN_BYTES)));
-            assertValid(query, list(allocate(THRESHOLD_IN_BYTES), allocate(THRESHOLD_IN_BYTES)));
-            assertGuardrailFailed("v", query, list(allocate(THRESHOLD_IN_BYTES + 1)));
+            assertValid(query, list(allocate(FAILURE_THRESHOLD_IN_BYTES)));
+            assertValid(query, list(allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(FAILURE_THRESHOLD_IN_BYTES)));
+            assertGuardrailFailed("v", query, list(allocate(FAILURE_THRESHOLD_IN_BYTES + 1)));
         }
 
         testThreshold("v", "UPDATE %s SET v[0] = ? WHERE k = 0");
 
         String query = "UPDATE %s SET v = v - ? WHERE k = 0";
         assertValid(query, list(allocate(1)));
-        assertValid(query, list(allocate(THRESHOLD_IN_BYTES)));
-        assertValid(query, list(allocate(THRESHOLD_IN_BYTES + 1))); // Doesn't write anything because we couldn't write
+        assertValid(query, list(allocate(FAILURE_THRESHOLD_IN_BYTES)));
+        assertValid(query, list(allocate(FAILURE_THRESHOLD_IN_BYTES + 1))); // Doesn't write anything because we couldn't write
     }
 
     @Test
@@ -230,10 +240,10 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
                                           "UPDATE %s SET v = ? WHERE k = 0"))
         {
             assertValid(query, list(allocate(1)));
-            assertValid(query, list(allocate(THRESHOLD_IN_BYTES - 8)));
-            assertValid(query, list(allocate((THRESHOLD_IN_BYTES - 12) / 2), allocate((THRESHOLD_IN_BYTES - 12) / 2)));
-            assertGuardrailFailed("v", query, list(allocate(THRESHOLD_IN_BYTES - 7)));
-            assertGuardrailFailed("v", query, list(allocate(THRESHOLD_IN_BYTES - 12), allocate(1)));
+            assertValid(query, list(allocate(FAILURE_THRESHOLD_IN_BYTES - 8)));
+            assertValid(query, list(allocate((FAILURE_THRESHOLD_IN_BYTES - 12) / 2), allocate((FAILURE_THRESHOLD_IN_BYTES - 12) / 2)));
+            assertGuardrailFailed("v", query, list(allocate(FAILURE_THRESHOLD_IN_BYTES - 7)));
+            assertGuardrailFailed("v", query, list(allocate(FAILURE_THRESHOLD_IN_BYTES - 12), allocate(1)));
         }
     }
 
@@ -248,9 +258,10 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
                                           "UPDATE %s SET v = v - ? WHERE k = 0"))
         {
             assertValid(query, set(allocate(0)));
-            assertValid(query, set(allocate(THRESHOLD_IN_BYTES)));
-            assertValid(query, set(allocate(THRESHOLD_IN_BYTES), allocate(THRESHOLD_IN_BYTES)));
-            assertGuardrailFailed("v", query, set(allocate(THRESHOLD_IN_BYTES + 1)));
+            assertValid(query, set(allocate(FAILURE_THRESHOLD_IN_BYTES)));
+            assertValid(query, set(allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(FAILURE_THRESHOLD_IN_BYTES)));
+            setGuardrailWarningAndAssert("v", query, set(allocate(WARN_THRESHOLD_IN_BYTES + 1)));
+            assertGuardrailFailed("v", query, set(allocate(FAILURE_THRESHOLD_IN_BYTES + 1)));
         }
     }
 
@@ -265,9 +276,10 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
                                           "UPDATE %s SET v = v - ? WHERE k = 0 AND c1 = 0 AND c2 = 0"))
         {
             assertValid(query, set(allocate(0)));
-            assertValid(query, set(allocate(THRESHOLD_IN_BYTES)));
-            assertValid(query, set(allocate(THRESHOLD_IN_BYTES), allocate(THRESHOLD_IN_BYTES)));
-            assertGuardrailFailed("v", query, set(allocate(THRESHOLD_IN_BYTES + 1)));
+            assertValid(query, set(allocate(FAILURE_THRESHOLD_IN_BYTES)));
+            assertValid(query, set(allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(FAILURE_THRESHOLD_IN_BYTES)));
+            setGuardrailWarningAndAssert("v", query, set(allocate(WARN_THRESHOLD_IN_BYTES + 1)));
+            assertGuardrailFailed("v", query, set(allocate(FAILURE_THRESHOLD_IN_BYTES + 1)));
         }
     }
 
@@ -283,10 +295,10 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
                                           "UPDATE %s SET v = ? WHERE k = 0"))
         {
             assertValid(query, set(allocate(1)));
-            assertValid(query, set(allocate(THRESHOLD_IN_BYTES - 8)));
-            assertValid(query, set(allocate((THRESHOLD_IN_BYTES - 12) / 2), allocate((THRESHOLD_IN_BYTES - 12) / 2)));
-            assertGuardrailFailed("v", query, set(allocate(THRESHOLD_IN_BYTES - 7)));
-            assertGuardrailFailed("v", query, set(allocate(THRESHOLD_IN_BYTES - 12), allocate(1)));
+            assertValid(query, set(allocate(FAILURE_THRESHOLD_IN_BYTES - 8)));
+            assertValid(query, set(allocate((FAILURE_THRESHOLD_IN_BYTES - 12) / 2), allocate((FAILURE_THRESHOLD_IN_BYTES - 12) / 2)));
+            assertGuardrailFailed("v", query, set(allocate(FAILURE_THRESHOLD_IN_BYTES - 7)));
+            assertGuardrailFailed("v", query, set(allocate(FAILURE_THRESHOLD_IN_BYTES - 12), allocate(1)));
         }
     }
 
@@ -300,20 +312,21 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
                                           "UPDATE %s SET v = v + ? WHERE k = 0"))
         {
             assertValid(query, map(allocate(0), allocate(0)));
-            assertValid(query, map(allocate(THRESHOLD_IN_BYTES), allocate(0)));
-            assertValid(query, map(allocate(0), allocate(THRESHOLD_IN_BYTES)));
-            assertValid(query, map(allocate(THRESHOLD_IN_BYTES), allocate(THRESHOLD_IN_BYTES)));
-            assertGuardrailFailed("v", query, map(allocate(THRESHOLD_IN_BYTES + 1), allocate(1)));
-            assertGuardrailFailed("v", query, map(allocate(1), allocate(THRESHOLD_IN_BYTES + 1)));
-            assertGuardrailFailed("v", query, map(allocate(THRESHOLD_IN_BYTES + 1), allocate(THRESHOLD_IN_BYTES + 1)));
+            assertValid(query, map(allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(0)));
+            assertValid(query, map(allocate(0), allocate(FAILURE_THRESHOLD_IN_BYTES)));
+            assertValid(query, map(allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(FAILURE_THRESHOLD_IN_BYTES)));
+            assertGuardrailFailed("v", query, map(allocate(FAILURE_THRESHOLD_IN_BYTES + 1), allocate(1)));
+            assertGuardrailFailed("v", query, map(allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES + 1)));
+            assertGuardrailFailed("v", query, map(allocate(FAILURE_THRESHOLD_IN_BYTES + 1), allocate(FAILURE_THRESHOLD_IN_BYTES + 1)));
         }
 
         testThreshold2("v", "UPDATE %s SET v[?] = ? WHERE k = 0");
 
         String query = "UPDATE %s SET v = v - ? WHERE k = 0";
         assertValid(query, set(allocate(0)));
-        assertValid(query, set(allocate(THRESHOLD_IN_BYTES)));
-        assertGuardrailFailed("v", query, set(allocate(THRESHOLD_IN_BYTES + 1)));
+        assertValid(query, set(allocate(FAILURE_THRESHOLD_IN_BYTES)));
+        setGuardrailWarningAndAssert("v", query, set(allocate(WARN_THRESHOLD_IN_BYTES + 1)));
+        assertGuardrailFailed("v", query, set(allocate(FAILURE_THRESHOLD_IN_BYTES + 1)));
     }
 
     @Test
@@ -323,10 +336,12 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
 
         String query = "INSERT INTO %s (k, c1, c2, v) VALUES (0, 0, 0, ?)";
         assertValid(query, map(allocate(1), allocate(1)));
-        assertValid(query, map(allocate(THRESHOLD_IN_BYTES), allocate(1)));
-        assertValid(query, map(allocate(1), allocate(THRESHOLD_IN_BYTES)));
-        assertGuardrailFailed("v", query, map(allocate(THRESHOLD_IN_BYTES + 1), allocate(1)));
-        assertGuardrailFailed("v", query, map(allocate(1), allocate(THRESHOLD_IN_BYTES + 1)));
+        assertValid(query, map(allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(1)));
+        assertValid(query, map(allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES)));
+        setGuardrailWarningAndAssert("v", query, map(allocate(WARN_THRESHOLD_IN_BYTES + 1), allocate(1)));
+        setGuardrailWarningAndAssert("v", query, map(allocate(1), allocate(WARN_THRESHOLD_IN_BYTES + 1)));
+        assertGuardrailFailed("v", query, map(allocate(FAILURE_THRESHOLD_IN_BYTES + 1), allocate(1)));
+        assertGuardrailFailed("v", query, map(allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES + 1)));
     }
 
     @Test
@@ -341,10 +356,10 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
                                           "UPDATE %s SET v = ? WHERE k = 0"))
         {
             assertValid(query, map(allocate(1), allocate(1)));
-            assertValid(query, map(allocate(THRESHOLD_IN_BYTES - 13), allocate(1)));
-            assertValid(query, map(allocate(1), allocate(THRESHOLD_IN_BYTES - 13)));
-            assertGuardrailFailed("v", query, map(allocate(THRESHOLD_IN_BYTES - 12), allocate(1)));
-            assertGuardrailFailed("v", query, map(allocate(1), allocate(THRESHOLD_IN_BYTES - 12)));
+            assertValid(query, map(allocate(FAILURE_THRESHOLD_IN_BYTES - 13), allocate(1)));
+            assertValid(query, map(allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES - 13)));
+            assertGuardrailFailed("v", query, map(allocate(FAILURE_THRESHOLD_IN_BYTES - 12), allocate(1)));
+            assertGuardrailFailed("v", query, map(allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES - 12)));
         }
     }
 
@@ -389,15 +404,15 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
 
         // static column
         assertValid("INSERT INTO %s (k, s) VALUES ('1', ?) IF NOT EXISTS", allocate(1));
-        assertValid("INSERT INTO %s (k, s) VALUES ('2', ?) IF NOT EXISTS", allocate(THRESHOLD_IN_BYTES));
-        assertValid("INSERT INTO %s (k, s) VALUES ('2', ?) IF NOT EXISTS", allocate(THRESHOLD_IN_BYTES + 1)); // not applied
-        assertGuardrailFailed("s", "INSERT INTO %s (k, s) VALUES ('3', ?) IF NOT EXISTS", allocate(THRESHOLD_IN_BYTES + 1));
+        assertValid("INSERT INTO %s (k, s) VALUES ('2', ?) IF NOT EXISTS", allocate(FAILURE_THRESHOLD_IN_BYTES));
+        assertValid("INSERT INTO %s (k, s) VALUES ('2', ?) IF NOT EXISTS", allocate(FAILURE_THRESHOLD_IN_BYTES + 1)); // not applied
+        assertGuardrailFailed("s", "INSERT INTO %s (k, s) VALUES ('3', ?) IF NOT EXISTS", allocate(FAILURE_THRESHOLD_IN_BYTES + 1));
 
         // regular column
         assertValid("INSERT INTO %s (k, c, v) VALUES ('4', '0', ?) IF NOT EXISTS", allocate(1));
-        assertValid("INSERT INTO %s (k, c, v) VALUES ('5', '0', ?) IF NOT EXISTS", allocate(THRESHOLD_IN_BYTES));
-        assertValid("INSERT INTO %s (k, c, v) VALUES ('5', '0', ?) IF NOT EXISTS", allocate(THRESHOLD_IN_BYTES + 1)); // not applied
-        assertGuardrailFailed("v", "INSERT INTO %s (k, c, v) VALUES ('6', '0', ?) IF NOT EXISTS", allocate(THRESHOLD_IN_BYTES + 1));
+        assertValid("INSERT INTO %s (k, c, v) VALUES ('5', '0', ?) IF NOT EXISTS", allocate(FAILURE_THRESHOLD_IN_BYTES));
+        assertValid("INSERT INTO %s (k, c, v) VALUES ('5', '0', ?) IF NOT EXISTS", allocate(FAILURE_THRESHOLD_IN_BYTES + 1)); // not applied
+        assertGuardrailFailed("v", "INSERT INTO %s (k, c, v) VALUES ('6', '0', ?) IF NOT EXISTS", allocate(FAILURE_THRESHOLD_IN_BYTES + 1));
     }
 
     @Test
@@ -437,15 +452,15 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
 
         // updates are always accepted for values equals to the threshold, independently of whether they are applied
         assertValid("DELETE FROM %s WHERE k = 0");
-        assertValid("UPDATE %s SET v = ? WHERE k = 0 IF v = '0'", allocate(THRESHOLD_IN_BYTES));
+        assertValid("UPDATE %s SET v = ? WHERE k = 0 IF v = '0'", allocate(FAILURE_THRESHOLD_IN_BYTES));
         assertValid("UPDATE %s SET v = '0' WHERE k = 0");
-        assertValid("UPDATE %s SET v = ? WHERE k = 0 IF v = '0'", allocate(THRESHOLD_IN_BYTES));
+        assertValid("UPDATE %s SET v = ? WHERE k = 0 IF v = '0'", allocate(FAILURE_THRESHOLD_IN_BYTES));
 
         // updates beyond the threshold fail only if the update is applied
         assertValid("DELETE FROM %s WHERE k = 0");
-        assertValid("UPDATE %s SET v = ? WHERE k = 0 IF v = '0'", allocate(THRESHOLD_IN_BYTES + 1));
+        assertValid("UPDATE %s SET v = ? WHERE k = 0 IF v = '0'", allocate(FAILURE_THRESHOLD_IN_BYTES + 1));
         assertValid("UPDATE %s SET v = '0' WHERE k = 0");
-        assertGuardrailFailed("v", "UPDATE %s SET v = ? WHERE k = 0 IF v = '0'", allocate(THRESHOLD_IN_BYTES + 1));
+        assertGuardrailFailed("v", "UPDATE %s SET v = ? WHERE k = 0 IF v = '0'", allocate(FAILURE_THRESHOLD_IN_BYTES + 1));
     }
 
     @Test
@@ -468,8 +483,8 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
     private void testNoThreshold(String query) throws Throwable
     {
         assertValid(query, allocate(1));
-        assertValid(query, allocate(THRESHOLD_IN_BYTES));
-        assertValid(query, allocate(THRESHOLD_IN_BYTES + 1));
+        assertValid(query, allocate(FAILURE_THRESHOLD_IN_BYTES));
+        assertValid(query, allocate(FAILURE_THRESHOLD_IN_BYTES + 1));
     }
 
     /**
@@ -480,11 +495,11 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
     private void testNoThreshold2(String query) throws Throwable
     {
         assertValid(query, allocate(1), allocate(1));
-        assertValid(query, allocate(THRESHOLD_IN_BYTES), allocate(1));
-        assertValid(query, allocate(1), allocate(THRESHOLD_IN_BYTES));
-        assertValid(query, allocate((THRESHOLD_IN_BYTES)), allocate((THRESHOLD_IN_BYTES)));
-        assertValid(query, allocate(THRESHOLD_IN_BYTES + 1), allocate(1));
-        assertValid(query, allocate(1), allocate(THRESHOLD_IN_BYTES + 1));
+        assertValid(query, allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(1));
+        assertValid(query, allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES));
+        assertValid(query, allocate((FAILURE_THRESHOLD_IN_BYTES)), allocate((FAILURE_THRESHOLD_IN_BYTES)));
+        assertValid(query, allocate(FAILURE_THRESHOLD_IN_BYTES + 1), allocate(1));
+        assertValid(query, allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES + 1));
     }
 
     /**
@@ -507,9 +522,8 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
      */
     private void testThreshold(String column, String query, int serializationBytes) throws Throwable
     {
-        int threshold = THRESHOLD_IN_BYTES - serializationBytes;
+        int threshold = FAILURE_THRESHOLD_IN_BYTES - serializationBytes;
         assertValid(query, allocate(1));
-        assertValid(query, allocate(threshold));
         assertGuardrailFailed(column, query, allocate(threshold + 1));
     }
 
@@ -522,11 +536,11 @@ public class GuardrailColumnValueSizeTest extends GuardrailTester
     private void testThreshold2(String column, String query) throws Throwable
     {
         assertValid(query, allocate(1), allocate(1));
-        assertValid(query, allocate(THRESHOLD_IN_BYTES), allocate(1));
-        assertValid(query, allocate(1), allocate(THRESHOLD_IN_BYTES));
-        assertValid(query, allocate((THRESHOLD_IN_BYTES)), allocate((THRESHOLD_IN_BYTES)));
-        assertGuardrailFailed(column, query, allocate(THRESHOLD_IN_BYTES + 1), allocate(1));
-        assertGuardrailFailed(column, query, allocate(1), allocate(THRESHOLD_IN_BYTES + 1));
+        assertValid(query, allocate(FAILURE_THRESHOLD_IN_BYTES), allocate(1));
+        assertValid(query, allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES));
+        assertValid(query, allocate((FAILURE_THRESHOLD_IN_BYTES)), allocate((FAILURE_THRESHOLD_IN_BYTES)));
+        assertGuardrailFailed(column, query, allocate(FAILURE_THRESHOLD_IN_BYTES + 1), allocate(1));
+        assertGuardrailFailed(column, query, allocate(1), allocate(FAILURE_THRESHOLD_IN_BYTES + 1));
     }
 
     /**

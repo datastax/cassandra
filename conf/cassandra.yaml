@@ -1495,9 +1495,22 @@ enable_drop_compact_storage: false
   # Default value is 10, may differ if emulate_dbaas_defaults is enabled
   # unlogged_batch_across_partitions_warn_threshold: 10
 
-  # Failure threshold to prevent writing large column value into Cassandra.
+  # Guardrail to warn or fail when writing column values larger than threshold into Cassandra.
+  # This guardrail is only applied to the values of regular columns because both the serialized partitions keys and the
+  # values of the components of the clustering key already have a fixed, relatively small size limit of 65535 bytes, which
+  # is probably lesser than the thresholds defined here.
+  # Deleting individual elements of non-frozen sets and maps involves creating tombstones that contain the value of the
+  # deleted element, independently on whether the element existed or not. That tombstone value is also guarded by this
+  # guardrail, to prevent the insertion of tombstones over the threshold. The downside is that enabling or raising this
+  # threshold can prevent users from deleting set/map elements that were written when the guardrail was disabled or with a
+  # lower value. Deleting the entire column, row or partition is always allowed, since the tombstones created for those
+  # operations don't contain the CQL column values.
+  # This guardrail is different to max_value_size. max_value_size is checked when deserializing any value to detect
+  # sstable corruption, whereas this guardrail is checked on the CQL layer at write time to reject regular user queries
+  # inserting too large columns.
   # Default -1 to disable, may differ if emulate_dbaas_defaults is enabled
   # column_value_size_failure_threshold_in_kb: -1
+  # column_value_size_warn_threshold_in_kb: -1
 
   # Failure threshold to prevent creating more columns per table than threshold.
   # Default -1 to disable, may differ if emulate_dbaas_defaults is enabled
