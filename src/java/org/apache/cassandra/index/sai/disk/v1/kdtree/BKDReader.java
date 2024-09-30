@@ -22,18 +22,16 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collection;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.NavigableMap;
-import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
-import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Predicates;
 import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,6 +69,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+    public enum Direction { FORWARD, BACKWARD }
+
     private final IndexContext indexContext;
     private final FileHandle postingsFile;
     private final FileHandle kdtreeFile;
@@ -99,20 +99,15 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         int oldToNew(int rowID);
     }
 
-    public IteratorState iteratorState(boolean isAscending, IntersectVisitor query) throws IOException
+    public IteratorState iteratorState(Direction direction, IntersectVisitor query) throws IOException
     {
-        return new IteratorState(rowID -> rowID, isAscending, query);
+        return new IteratorState(rowID -> rowID, direction, query);
     }
 
     @VisibleForTesting
     public IteratorState iteratorState() throws IOException
     {
-        return iteratorState(true, null);
-    }
-
-    public IteratorState iteratorState(DocMapper docMapper) throws IOException
-    {
-        return new IteratorState(docMapper);
+        return iteratorState(Direction.FORWARD, null);
     }
 
     public class IteratorState extends AbstractIterator<Integer> implements Comparable<IteratorState>, Closeable
@@ -125,23 +120,18 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         private final IntArrayList tempPostings = new IntArrayList();
         private final int[] postings = new int[maxPointsInLeafNode];
         private final DocMapper docMapper;
-        private final Iterator<Map.Entry<Long,Integer>> iterator;
+        private final LeafCursor leafCursor;
 
         private int leafPointCount;
         private int leafPointIndex = -1;
 
-        private final boolean ascending;
+        private final Direction direction;
         private final BKDReader.IntersectVisitor query;
 
-        public IteratorState(DocMapper docMapper) throws IOException
-        {
-            this(docMapper, true, null);
-        }
-
-        public IteratorState(DocMapper docMapper, boolean isAscending, BKDReader.IntersectVisitor query) throws IOException
+        public IteratorState(DocMapper docMapper, Direction direction, BKDReader.IntersectVisitor query) throws IOException
         {
             this.docMapper = docMapper;
-            this.ascending = isAscending;
+            this.direction = direction;
             this.query = query;
 
             scratch = new byte[packedBytesLength];
@@ -151,70 +141,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             bkdPostingsInput = IndexFileUtils.instance.openInput(postingsFile);
             bkdInput.seek(firstLeafFilePointer);
 
-            NavigableMap<Long, Integer> leafNodeToLeafFP = getLeafOffsets();
-            if (query != null)
-            {
-                var minLeafFP = findMinLeafFP(query);
-                var maxLeafFP = Math.max(minLeafFP, findMaxLeafFP(query));
-                // Inclusive on both ends because min/maxLeafFP return the offsets to the leaves
-                // that intersect the query (i.e. contain at least one point matching the query) and
-                // possible range query exclusiveness is handled by the query object.
-                leafNodeToLeafFP = leafNodeToLeafFP.subMap(minLeafFP, true, maxLeafFP, true);
-            }
-
-            // Delay choosing ordering of the map until we have restricted it to a submap, so that the submap code
-            // doesn't need to reason about differences between order-by order and the natural ordering in the query
-            // restriction.
-            leafNodeToLeafFP = isAscending ? leafNodeToLeafFP : leafNodeToLeafFP.descendingMap();
-
-            // init the first leaf
-            iterator = leafNodeToLeafFP.entrySet().iterator();
-            final Map.Entry<Long,Integer> entry = iterator.next();
-            leafPointCount = readLeaf(entry.getKey(), entry.getValue(), bkdInput, packedValues, bkdPostingsInput, postings, tempPostings);
-        }
-
-        /**
-         * Returns the file pointer to the left-most KD-tree leaf that intersects the query
-         */
-        private long findMinLeafFP(@Nonnull BKDReader.IntersectVisitor query)
-        {
-            return findLeafFP(split -> query.compare(minPackedValue, split) == Relation.CELL_OUTSIDE_QUERY);
-        }
-
-        /**
-         * Returns the file pointer to the right-most KD-tree leaf that intersects the query
-         */
-        private long findMaxLeafFP(@Nonnull BKDReader.IntersectVisitor query)
-        {
-            return findLeafFP(split -> query.compare(split, maxPackedValue) != Relation.CELL_OUTSIDE_QUERY);
-        }
-
-        /**
-         * Recursively goes down the KD-tree until it reaches a leaf node.
-         * At every non-leaf node, uses the provided function to decide the direction to go.
-         *
-         * @param shouldGoRight a function that takes the split point of a non-leaf node
-         *                      and returns true if the search path should follow to the right child
-         * @return file pointer of the found node
-         */
-        private long findLeafFP(Predicate<byte[]> shouldGoRight)
-        {
-            final PackedIndexTree index = new PackedIndexTree();
-            while (!index.isLeafNode())
-            {
-                // It is tempting to call index.getSplitPackedValue(), but that would return an empty array.
-                // It looks the user of the PackedIndexTree is supposed to build the splitPackedValue by themselves
-                // by assembling them from the values provided by getSplitDimValue for each dimension.
-                // Caution: This won't work if we ever support more than 1 dimension.
-                // But for 1 dimension, splitDimValue is the whole value we need.
-                byte[] splitPackedValue = index.getSplitDimValue().bytes;
-
-                if (shouldGoRight.test(splitPackedValue))
-                    index.pushRight();
-                else
-                    index.pushLeft();
-            }
-            return index.getLeafBlockFP();
+            leafCursor = new LeafCursor(direction, query);
+            leafPointCount = readLeaf(leafCursor.getFilePointer(), leafCursor.getNodeId(), bkdInput, packedValues, bkdPostingsInput, postings, tempPostings);
         }
 
         @Override
@@ -243,13 +171,14 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             {
                 if (leafPointIndex == leafPointCount - 1)
                 {
-                    if (!iterator.hasNext())
+                    if (!leafCursor.advance())
                         return endOfData();
 
-                    final Map.Entry<Long, Integer> entry = iterator.next();
                     try
                     {
-                        leafPointCount = readLeaf(entry.getKey(), entry.getValue(), bkdInput, packedValues, bkdPostingsInput, postings, tempPostings);
+                        int id = leafCursor.getNodeId();
+                        long fp = leafCursor.getFilePointer();
+                        leafPointCount = readLeaf(fp, id, bkdInput, packedValues, bkdPostingsInput, postings, tempPostings);
                     }
                     catch (IOException e)
                     {
@@ -261,40 +190,11 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
                 leafPointIndex++;
                 // If we're ascending, we need to read the leaf from the start, otherwise we need to read it from the end
-                int pointer = ascending ? leafPointIndex : leafPointCount - leafPointIndex - 1;
+                int pointer = direction == Direction.FORWARD ? leafPointIndex : leafPointCount - leafPointIndex - 1;
 
                 System.arraycopy(packedValues, pointer * packedBytesLength, scratch, 0, packedBytesLength);
                 if (query == null || query.visit(scratch))
                     return docMapper.oldToNew(postings[pointer]);
-            }
-        }
-
-        private TreeMap<Long,Integer> getLeafOffsets()
-        {
-            final TreeMap<Long,Integer> map = new TreeMap<>();
-            final PackedIndexTree index = new PackedIndexTree();
-            getLeafOffsets(index, map);
-            return map;
-        }
-
-        private void getLeafOffsets(final IndexTree index, Map<Long, Integer> map)
-        {
-            if (index.isLeafNode())
-            {
-                if (index.nodeExists())
-                {
-                    map.put(index.getLeafBlockFP(), index.getNodeID());
-                }
-            }
-            else
-            {
-                index.pushLeft();
-                getLeafOffsets(index, map);
-                index.pop();
-
-                index.pushRight();
-                getLeafOffsets(index, map);
-                index.pop();
             }
         }
     }
@@ -879,5 +779,229 @@ public class BKDReader extends TraversingBKDReader implements Closeable
          * determine how to further recurse down the tree.
          */
         Relation compare(byte[] minPackedValue, byte[] maxPackedValue);
+    }
+
+    /**
+     * Iterates the leaves of the KD-tree forward or backwards.
+     * Makes no heap allocations on iteration.
+     */
+    private class LeafCursor
+    {
+        private final @Nullable IntersectVisitor query;
+        private final Direction direction;
+
+        // This is not just the index tree, but actually a tree + some state like current node pointer
+        // This remembers the current position of the cursor
+        private final PackedIndexTree tree;
+
+        // Remembers which nodes of the tree on the current path from the root were already fully explored.
+        // The set stores their level numbers.
+        //
+        // Because the index is a binary tree, a node can have at most 2 child nodes.
+        // When we visit the node for the first time, and we go down to its first child,
+        // and we see there is another child we must visit later,
+        // we consider this node as uncompleted (we're removing its level from this set).
+        // When we go back up to that node for the second time, we consult this set, and
+        // we see the node has one more child to visit. So we go down again to the second child, but this time we mark
+        // the node as complete, that is, we store its level in this set. So when we visit the node again for the third
+        // time, we know it's done, and we have to go up at least one more level.
+        //
+        // Note that we're storing levels, because we're interested only in the nodes on the current path from
+        // the root of the tree, as those are the only nodes that could be explored. A more obvious alternative
+        // would be to keep a set of all already visited node ids in the tree, but that would have worse memory
+        // complexity and would likely require a larger set and some heap allocations.
+        //
+        // Class invariant: this structure must contain up-to-date information
+        // for all the levels above the current level, up to the root.
+        private final BitSet completedLevels;
+
+        /**
+         * Creates the cursor over the KD-tree leaves and positions it on the first leaf
+         * appropriate for the given query and traversal direction.
+         * Even if the query does not match any data, the cursor is positioned on one of the tree leaves,
+         * so {@link #getFilePointer()} and {@link #getNodeId()} can be always called immediately after the construction.
+         *
+         * @param query restricts the leaves to the ones that might contain the data that match the query,
+         *              null query means the range is not restricted
+         */
+        LeafCursor(Direction direction, @Nullable IntersectVisitor query)
+        {
+            this.query = query;
+            this.direction = direction;
+
+            completedLevels = new BitSet(64); // physically impossible to have a tree bigger than 2^64 nodes
+            tree = new PackedIndexTree();  // this positions the tree at node id 1 and level 1 (not 0)
+
+            if (direction == Direction.FORWARD)
+                pushToMinLeaf(query);
+            else
+                pushToMaxLeaf(query);
+        }
+
+        /**
+         * Returns the id of the node the cursor is positioned at.
+         * Valid only immediately after construction or after a call to {@link #advance()} which returned {@code true}.
+         */
+        int getNodeId()
+        {
+            assert tree.isLeafNode() : "Cursor not on a leaf node; end of data reached";
+            return tree.nodeID;
+        }
+
+        /**
+         * Returns the file pointer of the node the cursor is positioned at
+         * Valid only immediately after construction or after a call to {@link #advance()} which returned {@code true}.
+         */
+        long getFilePointer()
+        {
+            assert tree.isLeafNode() : "Cursor not on a leaf node; end of data reached";
+            return tree.getLeafBlockFP();
+        }
+
+        /**
+         * Advances the cursor to the next leaf.
+         * If there are no more leaves in the tree at all, positions the index tree at node 0.
+         * If there exist leaves, but they are out of the query range, positions the index tree at a non-leaf node.
+         * Calling this again after the cursor reached the end of the data is not allowed.
+         *
+         * @return true if the cursor was moved to the next leaf, false if there are no more leaves to iterate
+         */
+        boolean advance()
+        {
+            assert tree.isLeafNode() : "Cursor not on a leaf node; end of data reached";
+
+            // Mark the current node as completed, so that the call to `popToFirstUncompletedLevel`
+            // won't stop on this level immediately but goes up instead.
+            completedLevels.set(tree.level);
+
+            // Go up to the closest parent node that has a child we haven't visited yet.
+            if (!popToFirstUncompletedLevel())
+                return false;
+
+            assert tree.nodeExists() : "Node does not exist";
+            assert !tree.isLeafNode() : "Expected a non-leaf node";
+            assert !completedLevels.get(tree.level) : "Expected an uncompleted node";
+
+            // Go to the next leaf
+            if (direction == Direction.FORWARD)
+            {
+                if (query != null && query.compare(tree.getSplitDimValue().bytes, maxPackedValue) == Relation.CELL_OUTSIDE_QUERY)
+                    return false;
+                pushRight();
+                pushToMinLeaf();
+            }
+            else // Direcion.BACKWARD
+            {
+                if (query != null && query.compare(minPackedValue, tree.getSplitDimValue().bytes) == Relation.CELL_OUTSIDE_QUERY)
+                    return false;
+                pushLeft();
+                pushToMaxLeaf();
+            }
+            assert tree.isLeafNode() : "Cursor ended up on a non-leaf node";
+            return true;
+        }
+
+        /**
+         * Goes up the tree until it finds the first node for which we haven't exhausted all the paths down.
+         *
+         * @return true if uncompleted node is found, false if it reaches the top of the tree
+         */
+        boolean popToFirstUncompletedLevel()
+        {
+            while (completedLevels.get(tree.level) && tree.level > 0)
+                tree.pop();
+
+            // 0 level is special; you cannot go down from level 0, so if we hit level 0, the traversal ended,
+            // so we must signal it to the caller by returning false
+            return tree.level != 0;
+        }
+
+        /**
+         * Positions the index on the left-most leaf.
+         */
+        void pushToMinLeaf()
+        {
+            pushToLeaf(Predicates.alwaysFalse());
+        }
+
+        /**
+         * Positions the index on the left-most leaf that intersects the query
+         */
+        void pushToMinLeaf(BKDReader.IntersectVisitor query)
+        {
+            pushToLeaf(split -> query != null && query.compare(minPackedValue, split) == Relation.CELL_OUTSIDE_QUERY);
+        }
+
+        /**
+         * Positions the index on the right-most leaf.
+         */
+        void pushToMaxLeaf()
+        {
+            pushToLeaf(Predicates.alwaysTrue());
+        }
+
+        /**
+         * Positions the index on the right-most leaf that intersects the query
+         */
+        void pushToMaxLeaf(BKDReader.IntersectVisitor query)
+        {
+            pushToLeaf(split -> query == null || query.compare(split, maxPackedValue) != Relation.CELL_OUTSIDE_QUERY);
+        }
+
+        /**
+         * Recursively goes down the KD-tree until it reaches a leaf node.
+         * At every non-leaf node, uses the provided function to decide the direction to go.
+         *
+         * @param shouldGoRight a function that takes the split point of a non-leaf node
+         *                      and returns true if the search path should follow to the right child
+         */
+        void pushToLeaf(Predicate<byte[]> shouldGoRight)
+        {
+            while (!tree.isLeafNode())
+            {
+                // It is tempting to call index.getSplitPackedValue(), but that would return an empty array.
+                // It looks the user of the PackedIndexTree is supposed to build the splitPackedValue by themselves
+                // by assembling them from the values provided by getSplitDimValue for each dimension.
+                // Caution: This won't work if we ever support more than 1 dimension.
+                // But for 1 dimension, splitDimValue is the whole value we need.
+                byte[] splitPackedValue = tree.getSplitDimValue().bytes;
+                boolean goRight = shouldGoRight.test(splitPackedValue);
+
+                if (goRight)
+                    pushRight();
+                else
+                    pushLeft();
+            }
+        }
+
+        /**
+         * Goes to the right child of the current node.
+         * Updates the status of completeness of the current level based on the direction of the traversal.
+         */
+        void pushRight()
+        {
+            // In FORWARD direction we process the left child before the right.
+            // In BACKWARD direction we process the right child before the left.
+            // Therefore, if we're going right in FORWARD direction, this node is completed.
+            // Otherwise, if we're going right in BACKWARD direction, the left child remains to be processed, so this
+            // node is uncompleted.
+            completedLevels.set(tree.level, direction == Direction.FORWARD);
+            tree.pushRight();
+        }
+
+        /**
+         * Goes to the left child of the current node.
+         * Updates the status of completeness of the current level based on the direction of the traversal.
+         */
+        void pushLeft()
+        {
+            // In FORWARD direction we process the left child before the right.
+            // In BACKWARD direction we process the right child before the left.
+            // Therefore, if we're going left in BACKWARD direction, this node is completed.
+            // Otherwise, if we're going left in FORWARD direction, the right child remains to be processed, so this
+            // node is uncompleted.
+            completedLevels.set(tree.level, direction == Direction.BACKWARD);
+            tree.pushLeft();
+        }
     }
 }
