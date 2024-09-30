@@ -74,7 +74,12 @@ public interface CompactionSSTable
     Bounds<Token> getBounds();
 
     /**
-     * @return the length in bytes of the on disk size for this SSTable. For compressed files, this is not the same
+     * @return the length in bytes of the all on-disk components' file size for this SSTable.
+     */
+    long onDiskComponentsSize();
+
+    /**
+     * @return the length in bytes of the on disk data file size for this SSTable. For compressed files, this is not the same
      * thing as the data length (see {@link #uncompressedLength})
      */
     long onDiskLength();

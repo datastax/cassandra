@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -1056,7 +1058,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         void add(CompactionSSTable sstable)
         {
             this.sstables.add(sstable);
-            this.avg += (sstable.onDiskLength() - avg) / sstables.size();
+            // consider size of all components to reduce chance of out-of-disk
+            long size = CassandraRelevantProperties.UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE.getBoolean()
+                        ? sstable.onDiskComponentsSize() : sstable.onDiskLength();
+            this.avg += (size - avg) / sstables.size();
         }
 
         void complete()
@@ -1206,12 +1211,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             {
                 /**
                  * Happy path. We are not late or (for levelled) we are only so late that a compaction now will
-                 * have the  same effect as doing levelled compactions one by one. Compact all. We do not cap
+                 * have the same effect as doing levelled compactions one by one. Compact all. We do not cap
                  * this pick at maxSSTablesToCompact due to an assumption that maxSSTablesToCompact is much
                  * greater than F. See {@link Controller#MAX_SSTABLES_TO_COMPACT_OPTION} for more details.
                  */
                 return CompactionAggregate.createUnified(allSSTablesSorted,
-                                                         count,
+                                                         maxOverlap,
                                                          CompactionPick.create(index, allSSTablesSorted),
                                                          Collections.emptySet(),
                                                          arena,
@@ -1227,7 +1232,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // case to cap compaction pick at maxSSTablesToCompact.
                 if (count <= maxSSTablesToCompact)
                     return CompactionAggregate.createUnified(allSSTablesSorted,
-                                                             count,
+                                                             maxOverlap,
                                                              CompactionPick.create(index, allSSTablesSorted),
                                                              Collections.emptySet(),
                                                              arena,
@@ -1242,7 +1247,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                     count -= maxSSTablesToCompact;
                 }
 
-                return CompactionAggregate.createUnified(allSSTablesSorted, count, pick, pending, arena, level);
+                return CompactionAggregate.createUnified(allSSTablesSorted, maxOverlap, pick, pending, arena, level);
             }
             // We may, however, have accumulated a lot more than T if compaction is very late, or a set of small
             // tables was dumped on us (e.g. when converting from legacy LCS or for tests).
@@ -1260,7 +1265,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // dump.
                 assert !picks.isEmpty();  // we only enter this if count > F: layoutCompactions must have selected something to run
                 CompactionPick selected = picks.remove(controller.random().nextInt(picks.size()));
-                return CompactionAggregate.createUnified(allSSTablesSorted, count, selected, picks, arena, level);
+                return CompactionAggregate.createUnified(allSSTablesSorted, maxOverlap, selected, picks, arena, level);
             }
         }
 

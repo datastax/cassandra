@@ -19,9 +19,11 @@ package org.apache.cassandra.db.compaction.unified;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ExpMovingAverage;
@@ -140,7 +142,15 @@ class RealEnvironment implements Environment
     @Override
     public long getOverheadSizeInBytes(CompactionPick compactionPick)
     {
-        // The estimate the compaction overhead to be the same as the size of the input sstables
+        if (CassandraRelevantProperties.UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE.getBoolean())
+        {
+            // The estimate the compaction overhead to be the same as the size of the input sstables
+            long total = 0;
+            for (CompactionSSTable sstable : compactionPick.sstables())
+                total += sstable.onDiskComponentsSize();
+            return total;
+        }
+        // only includes data file size
         return compactionPick.totSizeInBytes();
     }
 

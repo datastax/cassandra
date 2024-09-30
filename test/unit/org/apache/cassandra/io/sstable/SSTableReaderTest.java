@@ -86,6 +86,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.MmappedRegions;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.CompressionParams;
@@ -107,6 +108,7 @@ import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
@@ -1126,6 +1128,21 @@ public class SSTableReaderTest
             if (target != null)
                 target.selfRef().release();
         }
+    }
+
+    @Test
+    public void testOnDiskComponentsSize()
+    {
+        final int numKeys = 1000;
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
+
+        SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
+        assertEquals(sstable.onDiskLength(), FileUtils.size(sstable.descriptor.pathFor(Component.DATA)));
+
+        assertTrue(sstable.components().contains(Component.DATA));
+        assertTrue(sstable.components().size() > 1);
+        assertTrue(sstable.onDiskComponentsSize() > sstable.onDiskLength());
     }
 
     private static ValidationMetadata getValidationMetadata(Descriptor descriptor)

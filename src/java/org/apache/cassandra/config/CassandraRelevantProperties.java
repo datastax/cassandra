@@ -208,6 +208,11 @@ public enum CassandraRelevantProperties
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
 
     /**
+     * whether to include non-data files size into compaction space estimaton in UCS
+     */
+    UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
+
+    /**
      * The handler of the storage of sstables, and possibly other files such as txn logs.
      */
     REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
