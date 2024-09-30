@@ -36,7 +36,7 @@
     </license>
   </licenses>
   <properties>
-    <bytebuddy.version>1.14.17</bytebuddy.version>
+    <bytebuddy.version>1.15.3</bytebuddy.version>
     <byteman.version>4.0.23</byteman.version>
     <ohc.version>0.5.1</ohc.version>
 
