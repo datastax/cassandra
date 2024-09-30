@@ -111,7 +111,8 @@ public class KDTreeIndexSearcher extends IndexSearcher
         var query = slice != null && slice.getOp().isEqualityOrRange()
                     ? bkdQueryFrom(slice, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension())
                     : null;
-        var iter = new RowIdIterator(bkdReader.iteratorState(orderer.isAscending(), query));
+        var direction = orderer.isAscending() ? BKDReader.Direction.FORWARD : BKDReader.Direction.BACKWARD;
+        var iter = new RowIdIterator(bkdReader.iteratorState(direction, query));
         return toMetaSortedIterator(iter, queryContext);
     }
 
