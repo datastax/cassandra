@@ -37,6 +37,8 @@ import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.security.EncryptionUtils;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.SYNC_MARKER_SIZE;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
@@ -46,6 +48,8 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
  */
 public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.SyncSegment>
 {
+    private final static Logger logger = LoggerFactory.getLogger(CommitLogSegmentReader.class);
+
     private final CommitLogReadHandler handler;
     private final CommitLogDescriptor descriptor;
     private final RandomAccessReader reader;
@@ -105,6 +109,7 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                 }
                 catch(CommitLogSegmentReader.SegmentReadException e)
                 {
+                    logger.debug("Error reading commit log", e);
                     try
                     {
                         handler.handleUnrecoverableError(new CommitLogReadException(
@@ -119,6 +124,7 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                 }
                 catch (IOException e)
                 {
+                    logger.debug("Error reading commit log", e);
                     try
                     {
                         boolean tolerateErrorsInSection = tolerateTruncation & segmenter.tolerateSegmentErrors(end, reader.length());

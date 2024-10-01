@@ -287,11 +287,11 @@ public enum CassandraRelevantProperties
      * when the JVM terminates. Therefore, we can use such optimization and not wait unnecessarily. */
     NON_GRACEFUL_SHUTDOWN("cassandra.test.messagingService.nonGracefulShutdown"),
 
-    /** Flush changes of {@link org.apache.cassandra.schema.SchemaKeyspace} after each schema modification. In production,
-     * we always do that. However, tests which do not restart nodes may disable this functionality in order to run
-     * faster. Note that this is disabled for unit tests but if an individual test requires schema to be flushed, it
-     * can be also done manually for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
-    FLUSH_LOCAL_SCHEMA_CHANGES("cassandra.test.flush_local_schema_changes", "true"),
+    /** Disables flush changes to local and schema keyspaces. Also, disables recycling all segments of commitlog after
+     * dropping a table. Tests which do not restart nodes may enable this option in order to run faster. Note that this
+     * is enabled for unit tests but if an individual test requires schema to be flushed, it can be also done manually
+     * for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
+    UNSAFE_SYSTEM("cassandra.unsafesystem", "false"),
 
     /**
      * Delay before checking if gossip is settled.
