@@ -70,7 +70,7 @@ public interface ShardManager
             return new ShardManagerDiskAware(localRanges, diskPositions);
         else if (partitioner.splitter().isPresent())
             if (isReplicaAware)
-                return new ShardManagerReplicaAware(rs);
+                return new ShardManagerReplicaAware(rs, localRanges.getRealm().estimatedPartitionCount());
             else
                 return new ShardManagerNoDisks(localRanges);
         else
@@ -139,9 +139,9 @@ public interface ShardManager
         if (partitionCount >= PER_PARTITION_SPAN_THRESHOLD && span >= MINIMUM_TOKEN_COVERAGE)
             return span;
 
-        // Too small ranges are expected to be the result of either a single-partition sstable or falling outside
-        // the local token ranges. In these cases we substitute use a per-partition minimum calculated from the number
-        // of partitions in the table.
+        // Too small ranges are expected to be the result of either an sstable with a very small number of partitions,
+        // or falling outside the local token ranges. In these cases we apply a per-partition minimum calculated from
+        // the number of partitions in the table.
         double perPartitionMinimum = Math.min(partitionCount * minimumPerPartitionSpan(), 1.0);
         return span > perPartitionMinimum ? span : perPartitionMinimum; // The latter will be chosen if span is NaN too.
     }
