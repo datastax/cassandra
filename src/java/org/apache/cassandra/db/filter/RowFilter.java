@@ -251,6 +251,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         return root.toString();
     }
 
+    public String toStringRedacted()
+    {
+        return root.toStringRedacted();
+    }
+
     private void warnIfFilterIsATree()
     {
         if (!root.children.isEmpty())
@@ -552,19 +557,37 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         @Override
         public String toString()
         {
+            return toStringInternal(false);
+        }
+
+        public String toStringRedacted()
+        {
+            return toStringInternal(true);
+        }
+
+        private String toStringInternal(boolean redacted)
+        {
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < expressions.size(); i++)
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
-                sb.append(expressions.get(i));
+
+                if (!redacted)
+                    sb.append(expressions.get(i));
+                else
+                    sb.append(expressions.get(i).toStringRedacted());
+
             }
             for (int i = 0; i < children.size(); i++)
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
                 sb.append("(");
-                sb.append(children.get(i));
+                if (!redacted)
+                    sb.append(children.get(i));
+                else
+                    sb.append(children.get(i).toStringRedacted());
                 sb.append(")");
             }
             return sb.toString();
@@ -859,6 +882,16 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 && Objects.equal(this.value, that.value);
         }
 
+        public String toString()
+        {
+            return "";
+        }
+
+        public String toStringRedacted()
+        {
+            return "<redacted>";
+        }
+
         @Override
         public int hashCode()
         {
@@ -1120,8 +1153,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             }
         }
 
-        @Override
-        public String toString()
+
+        private String toStringInternal(boolean redacted)
         {
             AbstractType<?> type = column.type;
             switch (operator)
@@ -1148,10 +1181,30 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 default:
                     break;
             }
-            var valueString = type.getString(value);
-            if (valueString.length() > 9)
-                valueString = valueString.substring(0, 6) + "...";
+
+            String valueString;
+            if(redacted)
+                valueString = "<redacted>";
+            else
+            {
+                valueString = type.getString(value);
+                if (valueString.length() > 9)
+                    valueString = valueString.substring(0, 6) + "...";
+            }
+
             return String.format("%s %s %s", column.name, operator, valueString);
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringInternal(false);
+        }
+
+        @Override
+        public String toStringRedacted()
+        {
+            return toStringInternal(true);
         }
 
         @Override
@@ -1260,8 +1313,23 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         @Override
         public String toString()
         {
+            return toStringInternal(false);
+        }
+
+        @Override
+        public String toStringRedacted()
+        {
+            return toStringInternal(true);
+        }
+
+        private String toStringInternal(boolean redacted)
+        {
             MapType<?, ?> mt = (MapType<?, ?>)column.type;
-            return String.format("%s[%s] %s %s", column.name, mt.nameComparator().getString(key), operator, mt.valueComparator().getString(value));
+
+            if(!redacted)
+                return String.format("%s[%s] %s %s", column.name, mt.nameComparator().getString(key), operator, mt.valueComparator().getString(value));
+
+            return String.format("%s[%s] %s %s", column.name, mt.nameComparator().getString(key), operator, "<redacted>");
         }
 
         @Override
@@ -1437,6 +1505,13 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
+        public String toStringRedacted()
+        {
+            return String.format("GEO_DISTANCE(%s, %s) %s %s", column.name, "<redacted>",
+                                 distanceOperator, "<redacted>");
+        }
+
+        @Override
         public boolean equals(Object o)
         {
             if (this == o)
@@ -1506,6 +1581,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return value;
         }
 
+        @Override
         public String toString()
         {
             return String.format("expr(%s, %s)",

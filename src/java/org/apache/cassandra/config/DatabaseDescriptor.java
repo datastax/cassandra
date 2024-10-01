@@ -976,6 +976,8 @@ public class DatabaseDescriptor
             throw new ConfigurationException("aggregation_subpage_size_in_kb must be greater than 0");
 
         setAggregationSubPageSize(getAggregationSubPageSize());
+
+        validateSaiSlowLogNumSlowestQueries();
     }
 
     @VisibleForTesting
@@ -1774,6 +1776,11 @@ public class DatabaseDescriptor
     public static long getSlowQueryTimeout(TimeUnit units)
     {
         return units.convert(conf.slow_query_log_timeout_in_ms, MILLISECONDS);
+    }
+
+    public static int getSaiSlowLogNumSlowestQueries()
+    {
+        return conf.sai_slow_log_num_slowest_queries;
     }
 
     /**
@@ -3688,6 +3695,13 @@ public class DatabaseDescriptor
         Preconditions.checkArgument(!pageSize.isDefined() || pageSize.getUnit() == PageSize.PageUnit.BYTES);
         Preconditions.checkArgument(pageSize.bytes() >= 1024);
         conf.aggregation_subpage_size_in_kb = pageSize.bytes() / 1024;
+    }
+
+    public static void validateSaiSlowLogNumSlowestQueries()
+    {
+        // KATE the error message to be corrected after we decide on configuration/tooling
+        if (conf.sai_slow_log_num_slowest_queries < 1)
+            throw new ConfigurationException("sai_slow_log_num_slowest_queries must be greater than 0. To disable the slow log - use the enable/disable flag instead.");
     }
 
     public static ParameterizedClass getDefaultCompaction()

@@ -497,7 +497,13 @@ public enum CassandraRelevantProperties
      * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class");
+    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+
+    /**
+     * SAI slow log parameters
+     */
+    SLOW_SAI_QUERY_BUFFER_SIZE("cassandra.slow_sai_query_buffer_size", "8192"),
+    SLOW_SAI_QUERY_BUFFER_PROCESSING_DELAY_MS("cassandra.slow_sai_query_buffer_processing_delay_ms", "1000");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

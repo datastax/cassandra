@@ -48,7 +48,7 @@
       <pattern>%-5level [%thread] %date{ISO8601} %F:%L - %msg%n</pattern>
     </encoder>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-      <level>DEBUG</level>
+      <level>TRACE</level>
     </filter>
   </appender>
 
@@ -59,7 +59,7 @@
 
   <logger name="org.apache.hadoop" level="WARN"/>
 
-  <logger name="org.apache.cassandra.db.monitoring" level="DEBUG"/>
+  <logger name="org.apache.cassandra.db.monitoring" level="TRACE"/>
 
   <!-- Do not change the name of this appender. LogbackStatusListener uses the thread name
        tied to the appender name to know when to write to real stdout/stderr vs forwarding to logback -->
@@ -72,7 +72,7 @@
     <filter class="org.apache.cassandra.ForbiddenLogEntriesFilter"/>
   </appender>
 
-  <root level="DEBUG">
+  <root level="TRACE">
     <appender-ref ref="ASYNC"/>
   </root>
 </configuration>

@@ -60,6 +60,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.monitoring.SaiSlowLog;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -364,8 +365,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (optimizedPlan.contains(node -> node instanceof Plan.KeysSort))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
 
+        // KATE: revert below, it was just for dirty testing and printing in the logs, we should not redact here
         if (logger.isTraceEnabled())
-            logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
+            logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursiveRedacted());
 
         if (Tracing.isTracing())
         {
@@ -691,12 +693,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
-     * Used to release all resources and record metrics when query finishes.
+     * Used to release all resources, record metrics, and update SAI slow query log when a query finishes.
      */
     public void finish()
     {
         closeUnusedIterators();
         if (tableQueryMetrics != null) tableQueryMetrics.record(queryContext);
+
+        SaiSlowLog.maybeRecord(queryContext);
     }
 
     private void closeUnusedIterators()
