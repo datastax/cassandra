@@ -34,9 +34,16 @@ public interface ShardManager
     /**
      * Single-partition, and generally sstables with very few partitions, can cover very small sections of the token
      * space, resulting in very high densities.
-     * Additionally, sstables that have completely fallen outside of the local token ranges will end up with a zero
+     * When the number of partitions in an sstable is smaller than this threshold, we will use a per-partition minimum
+     * span, calculated from the total number of partitions in this table.
+     */
+    static final long PER_PARTITION_SPAN_THRESHOLD = 100;
+
+    /**
+     * Additionally, sstables that have completely fallen outside the local token ranges will end up with a zero
      * coverage.
-     * To avoid problems with both we check if coverage is below the minimum, and replace it with 1.
+     * To avoid problems with this we check if coverage is below the minimum, and replace it using the per-partition
+     * calculation.
      */
     static final double MINIMUM_TOKEN_COVERAGE = Math.scalb(1.0, -48);
 
@@ -63,7 +70,7 @@ public interface ShardManager
             return new ShardManagerDiskAware(localRanges, diskPositions);
         else if (partitioner.splitter().isPresent())
             if (isReplicaAware)
-                return new ShardManagerReplicaAware(rs);
+                return new ShardManagerReplicaAware(rs, localRanges.getRealm().estimatedPartitionCount());
             else
                 return new ShardManagerNoDisks(localRanges);
         else
@@ -86,6 +93,12 @@ public interface ShardManager
      * If no disks are defined, this is the same as localSpaceCoverage(). Otherwise, it is the token coverage of a disk.
      */
     double shardSetCoverage();
+
+    /**
+     * The minimum token space share per partition that should be assigned to sstables with small numbers of partitions
+     * or which have fallen outside the local token ranges.
+     */
+    double minimumPerPartitionSpan();
 
     /**
      * Construct a boundary/shard iterator for the given number of shards.
@@ -115,19 +128,22 @@ public interface ShardManager
     default double rangeSpanned(CompactionSSTable rdr)
     {
         double reported = rdr.tokenSpaceCoverage();
+
         double span;
         if (reported > 0)   // also false for NaN
             span = reported;
         else
             span = rangeSpanned(rdr.getFirst(), rdr.getLast());
 
-        if (span >= MINIMUM_TOKEN_COVERAGE)
+        long partitionCount = rdr.estimatedKeys();
+        if (partitionCount >= PER_PARTITION_SPAN_THRESHOLD && span >= MINIMUM_TOKEN_COVERAGE)
             return span;
 
-        // Too small ranges are expected to be the result of either a single-partition sstable or falling outside
-        // of the local token ranges. In these cases we substitute it with 1 because for them sharding and density
-        // tiering does not make sense.
-        return 1.0;  // This will be chosen if span is NaN too.
+        // Too small ranges are expected to be the result of either an sstable with a very small number of partitions,
+        // or falling outside the local token ranges. In these cases we apply a per-partition minimum calculated from
+        // the number of partitions in the table.
+        double perPartitionMinimum = Math.min(partitionCount * minimumPerPartitionSpan(), 1.0);
+        return span > perPartitionMinimum ? span : perPartitionMinimum; // The latter will be chosen if span is NaN too.
     }
 
     default double rangeSpanned(PartitionPosition first, PartitionPosition last)
