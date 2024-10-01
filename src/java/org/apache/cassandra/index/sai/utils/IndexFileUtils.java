@@ -47,8 +47,9 @@ public class IndexFileUtils
 {
     protected static final Logger logger = LoggerFactory.getLogger(IndexFileUtils.class);
 
+    // KATE non-final only because we need to set it for testing...
     @VisibleForTesting
-    protected static final SequentialWriterOption defaultWriterOption = SequentialWriterOption.newBuilder()
+    protected static SequentialWriterOption defaultWriterOption = SequentialWriterOption.newBuilder()
                                                                                               .trickleFsync(DatabaseDescriptor.getTrickleFsync())
                                                                                               .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
                                                                                               .bufferType(BufferType.OFF_HEAP)
@@ -57,7 +58,8 @@ public class IndexFileUtils
 
     public static final IndexFileUtils instance = new IndexFileUtils();
 
-    private static final SequentialWriterOption writerOption = defaultWriterOption;
+    // KATE non-final only because we need to set it for testing...
+    private static SequentialWriterOption writerOption = defaultWriterOption;
 
     @VisibleForTesting
     protected IndexFileUtils()

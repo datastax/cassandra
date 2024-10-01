@@ -79,7 +79,7 @@ if [ -f "$CASSANDRA_HOME"/lib/jsr223/scala/scala-compiler.jar ] ; then
 fi
 
 # set JVM javaagent opts to avoid warnings/errors
-JAVA_AGENT="$JAVA_AGENT -javaagent:$CASSANDRA_HOME/lib/jamm-0.3.2.jar"
+JAVA_AGENT="$JAVA_AGENT -javaagent:$CASSANDRA_HOME/lib/jamm-0.4.0.jar"
 
 # Added sigar-bin to the java.library.path CASSANDRA-7838
 JAVA_OPTS="$JAVA_OPTS:-Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"
@@ -153,7 +153,9 @@ esac
 
 # Read user-defined JVM options from jvm-server.options file
 JVM_OPTS_FILE=$CASSANDRA_CONF/jvm${jvmoptions_variant:--clients}.options
-if [ $JAVA_VERSION -ge 17 ] ; then
+if [ $JAVA_VERSION -ge 22 ] ; then
+    JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm22${jvmoptions_variant:--clients}.options
+elif [ $JAVA_VERSION -ge 17 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm17${jvmoptions_variant:--clients}.options
 elif [ $JAVA_VERSION -ge 11 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm11${jvmoptions_variant:--clients}.options
