@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
@@ -497,7 +498,12 @@ public enum CassandraRelevantProperties
      * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class");
+    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+    /**
+     * If provided, this custom factor class will be used to create NTR stage executor.
+     * @see Stage
+     */
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
