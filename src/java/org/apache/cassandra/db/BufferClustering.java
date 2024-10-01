@@ -53,7 +53,7 @@ public class BufferClustering extends AbstractBufferClusteringPrefix implements 
     {
         if (this == Clustering.EMPTY || this == Clustering.STATIC_CLUSTERING)
             return 0;
-        return EMPTY_SIZE + ObjectSizes.sizeOnHeapExcludingDataOf(values);
+        return EMPTY_SIZE + ObjectSizes.sizeOnHeapExcludingData(values);
     }
 
     public static BufferClustering make(ByteBuffer... values)
