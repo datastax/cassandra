@@ -39,7 +39,6 @@ import org.apache.cassandra.db.transform.RTBoundValidator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
@@ -649,6 +648,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
                 @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
                 UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition);
+                iter = controller.observer().observeUnmergedPartition(iter);
 
                 var wrapped = rowTransformer != null ? Transformation.apply(iter, rowTransformer.apply(memtable)) : iter;
 
@@ -707,6 +707,8 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                 UnfilteredRowIterator iter = intersects
                                              ? makeIterator(cfs, sstable, metricsCollector)
                                              : makeIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector);
+
+                iter = controller.observer().observeUnmergedPartition(iter);
                 if (!intersects)
                 {
                     nonIntersectingSSTables++;
@@ -887,7 +889,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             if (partition == null)
                 continue;
 
-            try (UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition))
+            try (UnfilteredRowIterator iter = controller.observer().observeUnmergedPartition(filter.getUnfilteredRowIterator(columnFilter(), partition)))
             {
                 if (iter.isEmpty())
                     continue;
@@ -932,13 +934,13 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                 continue;
             }
 
-            try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs,
-                                                                                   sstable,
-                                                                                   partitionKey(),
-                                                                                   intersects ? filter.getSlices(metadata()) : Slices.NONE,
-                                                                                   columnFilter(),
-                                                                                   filter.isReversed(),
-                                                                                   metricsCollector))
+            try (UnfilteredRowIterator iter = controller.observer().observeUnmergedPartition(StorageHook.instance.makeRowIterator(cfs,
+                                                                                                                     sstable,
+                                                                                                                     partitionKey(),
+                                                                                                         intersects ? filter.getSlices(metadata()) : Slices.NONE,
+                                                                                                                     columnFilter(),
+                                                                                                                     filter.isReversed(),
+                                                                                                                     metricsCollector)))
             {
                 if (!hasRequiredStatics && !intersects && !iter.partitionLevelDeletion().isLive()) // => partitionLevelDelections == true
                 {
