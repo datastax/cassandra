@@ -34,9 +34,19 @@ import static org.github.jamm.utils.ArrayMeasurementUtils.computeArraySize;
  */
 public class ObjectSizes
 {
+<<<<<<< HEAD
+    private static final MemoryMeter meter = new MemoryMeter().omitSharedBufferOverhead()
+                                                              .withGuessing(MemoryMeter.Guess.FALLBACK_UNSAFE)
+                                                              .ignoreKnownSingletons();
+
+    private static final long EMPTY_HEAP_BUFFER_SIZE = measure(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+    private static final long EMPTY_BYTE_ARRAY_SIZE = measure(new byte[0]);
+    private static final long EMPTY_STRING_SIZE = measure("");
+=======
     private static final MemoryMeter meter = MemoryMeter.builder().withGuessing(Guess.INSTRUMENTATION_AND_SPECIFICATION,
                                                                                 Guess.UNSAFE)
                                                                   .build();
+>>>>>>> 600f4d9a69 (Upgrade Jamm version to 0.4.0)
 
     private static final long HEAP_BUFFER_SHALLOW_SIZE = measure(ByteBufferUtil.EMPTY_BYTE_BUFFER);
     private static final long DIRECT_BUFFER_SHALLOW_SIZE = measure(ByteBuffer.allocateDirect(0));
@@ -227,8 +237,6 @@ public class ObjectSizes
         return meter.measureDeep(pojo);
     }
 
-
-    // Kate: I think we don't need this one after jamm upgrade, check back later
     /**
      * @param pojo the object to measure
      * @return The size on the heap of the instance and all retained heap referenced by it, excluding portions of
