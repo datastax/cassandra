@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
@@ -495,7 +496,12 @@ public enum CassandraRelevantProperties
      * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
      * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
      */
-    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false");
+    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
+    /**
+     * If provided, this custom factor class will be used to create NTR stage executor.
+     * @see Stage
+     */
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
