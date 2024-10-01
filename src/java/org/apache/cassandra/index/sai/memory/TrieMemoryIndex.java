@@ -28,11 +28,14 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
 
@@ -74,9 +77,11 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-
     private final MemtableTrie<PrimaryKeys> data;
-    private final PrimaryKeysReducer primaryKeysReducer;
+    private final LongAdder heapAllocations;
+    private final PrimaryKeysAccumulator primaryKeysAccumulator;
+    private final PrimaryKeysRemover primaryKeysRemover;
+    private final boolean analyzerTransformsValue;
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -103,7 +108,10 @@ public class TrieMemoryIndex extends MemoryIndex
         super(indexContext);
         this.keyBounds = keyBounds;
         this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
-        this.primaryKeysReducer = new PrimaryKeysReducer();
+        this.heapAllocations = new LongAdder();
+        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations);
+        this.primaryKeysRemover = new PrimaryKeysRemover(heapAllocations);
+        this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
         this.memtable = memtable;
     }
 
@@ -113,20 +121,103 @@ public class TrieMemoryIndex extends MemoryIndex
                                  LongConsumer onHeapAllocationsTracker,
                                  LongConsumer offHeapAllocationsTracker)
     {
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        applyTransformer(primaryKey, value, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+    }
+
+    public synchronized void update(DecoratedKey key,
+                                    Clustering clustering,
+                                    ByteBuffer oldValue,
+                                    ByteBuffer newValue,
+                                    LongConsumer onHeapAllocationsTracker,
+                                    LongConsumer offHeapAllocationsTracker)
+    {
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        try
+        {
+            if (analyzerTransformsValue)
+            {
+                // Because an update can add and remove the same term, we collect the set of the modified PrimaryKeys
+                // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
+                // the PrimaryKeys object if it was updated during the add part of this update.
+                var modifiedPrimaryKeys = new HashSet<PrimaryKeys>();
+                primaryKeysAccumulator.setPrimaryKeysConsumer(modifiedPrimaryKeys::add);
+                primaryKeysRemover.setModifiedPrimaryKeys(modifiedPrimaryKeys);
+            }
+
+            // Add before removing to prevent a period where the value is not available in the index
+            if (newValue != null && newValue.hasRemaining())
+                applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+            if (oldValue != null && oldValue.hasRemaining())
+                applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysRemover);
+        }
+        finally
+        {
+            // Return the accumulator and remover to their default state.
+            primaryKeysAccumulator.setPrimaryKeysConsumer(null);
+            primaryKeysRemover.setModifiedPrimaryKeys(null);
+        }
+    }
+
+    public synchronized void update(DecoratedKey key,
+                                    Clustering clustering,
+                                    Iterator<ByteBuffer> oldValues,
+                                    Iterator<ByteBuffer> newValues,
+                                    LongConsumer onHeapAllocationsTracker,
+                                    LongConsumer offHeapAllocationsTracker)
+    {
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        try
+        {
+            // Because an update can add and remove the same term, we collect the set of the modified PrimaryKeys
+            // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
+            // the PrimaryKeys object if it was updated during the add part of this update.
+            var modifiedPrimaryKeys = new HashSet<PrimaryKeys>();
+            primaryKeysAccumulator.setPrimaryKeysConsumer(modifiedPrimaryKeys::add);
+            primaryKeysRemover.setModifiedPrimaryKeys(modifiedPrimaryKeys);
+
+            // Add before removing to prevent a period where the values are not available in the index
+            while (newValues != null && newValues.hasNext())
+            {
+                ByteBuffer newValue = newValues.next();
+                if (newValue != null && newValue.hasRemaining())
+                    applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+            }
+
+            while (oldValues != null && oldValues.hasNext())
+            {
+                ByteBuffer oldValue = oldValues.next();
+                if (oldValue != null && oldValue.hasRemaining())
+                    applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysRemover);
+            }
+        }
+        finally
+        {
+            // Return the accumulator and remover to their default state.
+            primaryKeysAccumulator.setPrimaryKeysConsumer(null);
+            primaryKeysRemover.setModifiedPrimaryKeys(null);
+        }
+    }
+
+    private void applyTransformer(PrimaryKey primaryKey,
+                                  ByteBuffer value,
+                                  LongConsumer onHeapAllocationsTracker,
+                                  LongConsumer offHeapAllocationsTracker,
+                                  MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey> transformer)
+    {
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
         try
         {
             value = TypeUtil.encode(value, indexContext.getValidator());
             analyzer.reset(value);
-            final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
             final long initialSizeOffHeap = data.sizeOffHeap();
-            final long reducerHeapSize = primaryKeysReducer.heapAllocations();
+            final long reducerHeapSize = heapAllocations.longValue();
 
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
-                if (!indexContext.validateMaxTermSize(key, term))
+                if (!indexContext.validateMaxTermSize(primaryKey.partitionKey(), term))
                     continue;
 
                 // Note that this term is already encoded once by the TypeUtil.encode call above.
@@ -138,11 +229,11 @@ public class TrieMemoryIndex extends MemoryIndex
                 {
                     if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
                     {
-                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
+                        data.putRecursive(encodedTerm, primaryKey, transformer);
                     }
                     else
                     {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
+                        data.apply(Trie.singleton(encodedTerm, primaryKey), transformer);
                     }
                 }
                 catch (MemtableTrie.SpaceExhaustedException e)
@@ -152,7 +243,7 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
-                                            (primaryKeysReducer.heapAllocations() - reducerHeapSize));
+                                            (heapAllocations.longValue() - reducerHeapSize));
             offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
         }
         finally
@@ -295,6 +386,10 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         assert term != null;
 
+        // Note that an update to a term could make these inaccurate, but they err in the correct direction.
+        // An alternative solution could use the trie to find the min/max term, but the trie has ByteComparable
+        // objects, not the ByteBuffer, and we would need to implement a custom decoder to undo the encodeForTrie
+        // mapping.
         minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator(), Version.latest());
         maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
     }
@@ -305,9 +400,29 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
 
-    class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    /**
+     * Accumulator that adds a primary key to the primary keys set.
+     */
+    static class PrimaryKeysAccumulator implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
-        private final LongAdder heapAllocations = new LongAdder();
+        private final LongAdder heapAllocations;
+        private Consumer<PrimaryKeys> consumer;
+
+        PrimaryKeysAccumulator(LongAdder heapAllocations)
+        {
+            this.heapAllocations = heapAllocations;
+        }
+
+        /**
+         * Set the PrimaryKeys consumer to call for each PrimaryKeys object updated by this transformer.
+         * Warning: This method is not thread-safe and should only be called from within the synchronized block
+         * of the TrieMemoryIndex class.
+         * @param consumer the consumer to call
+         */
+        private void setPrimaryKeysConsumer(Consumer<PrimaryKeys> consumer)
+        {
+            this.consumer = consumer;
+        }
 
         @Override
         public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
@@ -315,15 +430,56 @@ public class TrieMemoryIndex extends MemoryIndex
             if (existing == null)
             {
                 existing = new PrimaryKeys();
-                heapAllocations.add(existing.unsharedHeapSize());
+                heapAllocations.add(PrimaryKeys.unsharedHeapSize());
             }
             heapAllocations.add(existing.add(neww));
+            if (consumer != null)
+                consumer.accept(existing);
             return existing;
         }
+    }
 
-        long heapAllocations()
+    /**
+     * Transformer that removes a primary key from the primary keys set, if present.
+     */
+    static class PrimaryKeysRemover implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    {
+        private final LongAdder heapAllocations;
+        private Set<PrimaryKeys> modifiedPrimaryKeys;
+
+        PrimaryKeysRemover(LongAdder heapAllocations)
         {
-            return heapAllocations.longValue();
+            this.heapAllocations = heapAllocations;
+        }
+
+        /**
+         * Set the set of modifiedPrimaryKeys.
+         * Warning: This method is not thread-safe and should only be called from within the synchronized block
+         * of the TrieMemoryIndex class.
+         * @param modifiedPrimaryKeys
+         */
+        private void setModifiedPrimaryKeys(Set<PrimaryKeys> modifiedPrimaryKeys)
+        {
+            this.modifiedPrimaryKeys = modifiedPrimaryKeys;
+        }
+
+        @Override
+        public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
+        {
+            if (existing == null)
+                return null;
+
+            // This PrimaryKeys object was updated during the add part of this update,
+            // so we skip removing the PrimaryKey from the PrimaryKeys class.
+            if (modifiedPrimaryKeys.contains(existing))
+                return existing;
+
+            heapAllocations.add(existing.remove(neww));
+            if (!existing.isEmpty())
+                return existing;
+
+            heapAllocations.add(-PrimaryKeys.unsharedHeapSize());
+            return null;
         }
     }
 

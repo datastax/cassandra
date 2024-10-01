@@ -393,22 +393,26 @@ public class IndexContext
 
     public void update(DecoratedKey key, Row oldRow, Row newRow, Memtable memtable, OpOrder.Group opGroup)
     {
-        if (!isVector())
-        {
-            index(key, newRow, memtable, opGroup);
-            return;
-        }
-
         MemtableIndex target = liveMemtables.get(memtable);
         if (target == null)
             return;
-        // Use 0 for nowInSecs to get the value from the oldRow regardless of its liveness status. To get to this point,
+
+        // Use 0 for nowInSecs to get the value(s) from the oldRow regardless of its liveness status. To get to this point,
         // C* has already determined this is the current represntation of the oldRow in the memtable, and that means
         // we need to add the newValue to the index and remove the oldValue from it, even if it has already expired via
         // TTL.
-        ByteBuffer oldValue = getValueOf(key, oldRow, 0);
-        ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
-        target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
+        if (isNonFrozenCollection())
+        {
+            Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, 0);
+            Iterator<ByteBuffer> newValues = getValuesOf(newRow, FBUtilities.nowInSeconds());
+            target.update(key, oldRow.clustering(), oldValues, newValues, memtable, opGroup);
+        }
+        else
+        {
+            ByteBuffer oldValue = getValueOf(key, oldRow, 0);
+            ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
+            target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
+        }
     }
 
     public void renewMemtable(Memtable renewed)

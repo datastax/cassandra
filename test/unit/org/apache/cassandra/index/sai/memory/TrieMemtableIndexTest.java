@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Iterators;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -42,6 +43,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -56,6 +58,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
@@ -82,8 +85,12 @@ public class TrieMemtableIndexTest extends SAITester
                                                                                                   .onMethod("search"))
                                                                            .build();
 
+    // A non-frozen list of integers
+    private final ListType<Integer> integerListType = ListType.getInstance(Int32Type.instance, true);
+
     private ColumnFamilyStore cfs;
     private IndexContext indexContext;
+    private IndexContext integerListIndexContext;
     private TrieMemtableIndex memtableIndex;
     private AbstractAllocatorMemtable memtable;
     private IPartitioner partitioner;
@@ -107,11 +114,13 @@ public class TrieMemtableIndexTest extends SAITester
         TableMetadata tableMetadata = TableMetadata.builder("ks", "tb")
                                                    .addPartitionKeyColumn("pk", Int32Type.instance)
                                                    .addRegularColumn("val", Int32Type.instance)
+                                                   .addRegularColumn("vals", integerListType)
                                                    .build();
         cfs = MockSchema.newCFS(tableMetadata);
         partitioner = cfs.getPartitioner();
         memtable = (AbstractAllocatorMemtable) cfs.getCurrentMemtable();
         indexContext = SAITester.createIndexContext("index", Int32Type.instance, cfs);
+        integerListIndexContext = SAITester.createIndexContext("collection_index", integerListType, cfs);
         indexSearchCounter.reset();
         keyMap = new TreeMap<>();
         rowMap = new HashMap<>();
@@ -256,6 +265,90 @@ public class TrieMemtableIndexTest extends SAITester
         }
     }
 
+    @Test
+    public void updateCollectionTest()
+    {
+        // Use one shard to test shared keys in the trie
+        memtableIndex = new TrieMemtableIndex(integerListIndexContext, memtable, 1);
+        assertEquals(0, memtable.getAllocator().onHeap().owns());
+        assertEquals(0, memtableIndex.estimatedOnHeapMemoryUsed() + memtableIndex.estimatedOffHeapMemoryUsed());
+
+        addRowWithCollection(1, 1, 2, 3); // row 1, values 1, 2, 3
+        addRowWithCollection(2, 4, 5, 6); // row 2, values 4, 5, 6
+        addRowWithCollection(3, 2, 6);    // row 3, values 2, 6
+
+        // 8 total pk entries at 36 bytes, 6 unique trie keys at 4 bytes, 6 PrimaryKeys objects with
+        var expectedOnHeap = 8 * 36 + 6 * 4 + 6 * PrimaryKeys.unsharedHeapSize();
+        assertEquals(expectedOnHeap, memtableIndex.estimatedOnHeapMemoryUsed());
+        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+        // Hard coded cost from trie
+        assertEquals(96, memtableIndex.estimatedOffHeapMemoryUsed());
+
+        // Query values
+        assertEqualsQuery(2, 1, 3);
+        assertEqualsQuery(4, 2);
+        assertEqualsQuery(3, 1);
+        assertEqualsQuery(6, 2, 3);
+
+        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+
+        // Update row 1 to remove 2 and 3, keep 1, add 7 and 8 (note we have to manually match the 1,2,3 from above)
+        updateRowWithCollection(1, List.of(1, 2, 3).iterator(), List.of(1, 7, 8).iterator());
+
+        // We net 1 new PrimaryKeys object and 2 new trie memtable entries. The current implementation
+        // does not remove trie keys, so those are still present.
+        expectedOnHeap += PrimaryKeys.unsharedHeapSize() + 4 * 2;
+        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+
+        updateRowWithCollection(1, List.of(1, 7, 8).iterator(), List.of(1, 4, 8).iterator());
+
+        // We remove a PrimaryKeys object without adding any new keys to the trie.
+        expectedOnHeap -= PrimaryKeys.unsharedHeapSize();
+        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+
+        // Run additional queries to ensure values
+        assertEqualsQuery(1, 1);
+        assertEqualsQuery(4, 1, 2);
+        assertEqualsQuery(2, 3);
+        assertEqualsQuery(3);
+
+        // Show that iteration works as expected and does not include any of the deleted terms.
+        var iter = memtableIndex.iterator(makeKey(cfs.metadata(), 1), makeKey(cfs.metadata(), 3));
+        assertNextEntryInIterator(iter, 1, 1);
+        assertNextEntryInIterator(iter, 2, 3);
+        assertNextEntryInIterator(iter, 4, 1, 2);
+        assertNextEntryInIterator(iter, 5, 2);
+        assertNextEntryInIterator(iter, 6, 2, 3);
+        assertNextEntryInIterator(iter, 8, 1);
+        assertFalse(iter.hasNext());
+    }
+
+    private void assertEqualsQuery(int value, int... partitionKeys)
+    {
+        // Build eq expression to search for the value
+        Expression expression = new Expression(integerListIndexContext);
+        expression.add(Operator.EQ, Int32Type.instance.decompose(value));
+        AbstractBounds<PartitionPosition> keyRange = new Range<>(partitioner.getMinimumToken().minKeyBound(),
+                                                                 partitioner.getMinimumToken().minKeyBound());
+        var result = memtableIndex.search(new QueryContext(), expression, keyRange, 0);
+        // Confirm the partition keys are as expected in the provided order and that we have no more results
+        for (int partitionKey : partitionKeys)
+            assertEquals(makeKey(cfs.metadata(), partitionKey), result.next().partitionKey());
+        assertFalse(result.hasNext());
+    }
+
+    private void assertNextEntryInIterator(Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iter, int term, int... primaryKeys)
+    {
+        assertTrue(iter.hasNext());
+        Pair<ByteComparable, Iterator<PrimaryKey>> entry = iter.next();
+        assertEquals(term, termFromComparable(entry.left));
+        for (int value : primaryKeys)
+        {
+            assertTrue(entry.right.hasNext());
+            assertEquals(makeKey(cfs.metadata(), value), entry.right.next().partitionKey());
+        }
+    }
+
     private Expression generateRandomExpression()
     {
         Expression expression = new Expression(indexContext);
@@ -350,6 +443,23 @@ public class TrieMemtableIndexTest extends SAITester
                             cfs.getCurrentMemtable(),
                             new OpOrder().start());
         keyMap.put(key, pk);
+    }
+
+    private void addRowWithCollection(int pk, Integer... value)
+    {
+        for (Integer v : value)
+            addRow(pk, v);
+    }
+
+    private void updateRowWithCollection(int pk, Iterator<Integer> oldValues, Iterator<Integer> newValues)
+    {
+        DecoratedKey key = makeKey(cfs.metadata(), pk);
+        memtableIndex.update(key,
+                             Clustering.EMPTY,
+                             Iterators.transform(oldValues, Int32Type.instance::decompose),
+                             Iterators.transform(newValues, Int32Type.instance::decompose),
+                             cfs.getCurrentMemtable(),
+                             new OpOrder().start());
     }
 
     private DecoratedKey makeKey(TableMetadata table, Integer partitionKey)
