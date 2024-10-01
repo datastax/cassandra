@@ -671,12 +671,12 @@ public class AbstractTypeTest
         return version -> type.asComparableBytes(bb, version);
     }
 
-    @Test // TODO fix this test - it seems like something is broken with DateRange and geometric types comparisons
+    @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void ordering()
     {
         TypeGenBuilder baseline = genBuilder()
-                                  .withoutPrimitive(DurationType.instance) // this uses byte ordering and vint, which makes the ordering effectivlly random from a user's point of view
+                                  .withoutPrimitive(DurationType.instance) // this uses byte ordering and vint, which makes the ordering effectively random from a user's point of view
                                   .withoutTypeKinds(COUNTER); // counters don't allow ordering
         // composite requires all elements fit into Short.MAX_VALUE bytes
         // so try to limit the possible expansion of types

@@ -175,10 +175,10 @@ public final class AbstractTypeGenerators
                                                                                               .thenComparingLong(Duration::getNanoseconds)),
               TypeSupport.of(IntegerType.instance, Generators.bigInt()),
               TypeSupport.of(DecimalType.instance, Generators.bigDecimal()),
-              TypeSupport.of(DateRangeType.instance, Generators.DATE_RANGE_GEN, Comparator.comparing(DateRangeType.instance::decompose)),
-              TypeSupport.of(LineStringType.instance, Generators.LINE_STRING_GEN, Comparator.comparing(LineStringType.instance::decompose)),
-              TypeSupport.of(PolygonType.instance, Generators.POLYGON_GEN, Comparator.comparing(PolygonType.instance::decompose)),
-              TypeSupport.of(PointType.instance, Generators.POINT_GEN, Comparator.comparing(PointType.instance::decompose))
+              TypeSupport.ofNotComparableValues(DateRangeType.instance, Generators.DATE_RANGE_GEN), // DateRangeType is not comparable
+              TypeSupport.ofNotComparableValues(LineStringType.instance, Generators.LINE_STRING_GEN), // LineStringType is not comparable
+              TypeSupport.ofNotComparableValues(PolygonType.instance, Generators.POLYGON_GEN), // PolygonType is not comparable
+              TypeSupport.ofNotComparableValues(PointType.instance, Generators.POINT_GEN) // PointType is not comparable
     ).collect(Collectors.toMap(t -> t.type, t -> t));
     // NOTE not supporting reversed as CQL doesn't allow nested reversed types
     // when generating part of the clustering key, it would be good to allow reversed types as the top level
@@ -1329,6 +1329,11 @@ public final class AbstractTypeGenerators
         public static <A, B> TypeSupport<A> of(AbstractType<A> type, Serde<A, B> serde, Gen<B> valueGen, Comparator<B> valueComparator)
         {
             return of(type, valueGen.map(serde::from), (a, b) -> valueComparator.compare(serde.to(a), serde.to(b)));
+        }
+
+        public static <T> TypeSupport<T> ofNotComparableValues(AbstractType<T> type, Gen<T> valueGen)
+        {
+            return new TypeSupport<>(type, valueGen, (x, y) -> type.compare(type.decompose(x), type.decompose(y)));
         }
 
         /**
