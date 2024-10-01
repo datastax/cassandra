@@ -50,7 +50,7 @@ public class ShardManagerReplicaAwareTest
         {
             var rs = buildStrategy(numTokens, 1, 1, 1);
             var expectedTokens = rs.getTokenMetadata().sortedTokens();
-            var shardManager = new ShardManagerReplicaAware(rs);
+            var shardManager = new ShardManagerReplicaAware(rs, 1L<<16);
 
             var shardCount = numTokens + 1;
             var iterator = shardManager.boundaries(shardCount);
@@ -82,7 +82,7 @@ public class ShardManagerReplicaAwareTest
                     // Confirm test set up is correct.
                     assertEquals(numTokensPerNode * nodeCount, initialSplitPoints.size());
                     // Use a shared instance to
-                    var shardManager = new ShardManagerReplicaAware(rs);
+                    var shardManager = new ShardManagerReplicaAware(rs, 1L<<16);
 
                     // The tokens for one level lower.
                     var lowerTokens = new ArrayList<Token>();
