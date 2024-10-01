@@ -27,6 +27,7 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.compaction.ShardManager;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageService;
 
@@ -110,7 +111,14 @@ public class ShardedMultiWriterTest extends CQLTester
             var spannedTokens = 0;
             for (SSTableReader rdr : cfs.getLiveSSTables())
             {
-                tokenSpaceCoverage += rdr.tokenSpaceCoverage();
+                final double coverage = rdr.first.getToken().size(rdr.last.getToken());
+                // the coverage reported by rdr.tokenSpaceCoverage() may be adjusted upwards if the sstable spans too
+                // few partitions
+                if (rdr.estimatedKeys() >= ShardManager.PER_PARTITION_SPAN_THRESHOLD
+                    && coverage >= ShardManager.MINIMUM_TOKEN_COVERAGE)
+                    assertEquals(coverage, rdr.tokenSpaceCoverage(), 0.01);
+
+                tokenSpaceCoverage += coverage;
                 for (var token : tokenMetadata.sortedTokens())
                     if (rdr.getBounds().contains(token))
                         spannedTokens++;
