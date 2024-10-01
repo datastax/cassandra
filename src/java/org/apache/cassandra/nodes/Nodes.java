@@ -80,6 +80,8 @@ import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.msgpack.jackson.dataformat.MessagePackFactory;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.PERSIST_PEER_NODES_TO_DISK;
+
 /**
  * Manages information about the local node and peers.
  *
@@ -113,6 +115,8 @@ import org.msgpack.jackson.dataformat.MessagePackFactory;
 public class Nodes
 {
     private static final Logger logger = LoggerFactory.getLogger(Nodes.class);
+
+    private static final boolean PERSIST_PEER_NODES = PERSIST_PEER_NODES_TO_DISK.getBoolean();
 
     private final ExecutorService updateExecutor;
 
@@ -478,6 +482,7 @@ public class Nodes
 
         private synchronized void saveToDisk()
         {
+            logger.debug("Saving local node info at {}", localPath);
             // called via updateExecutor
             // This one takes about 80µs to serialize
             transactionalWrite(localPath, localBackupPath, localTempPath, this::write, baseDirectory);
@@ -681,6 +686,12 @@ public class Nodes
             peerReader = objectMapper.readerFor(new TypeReference<Collection<PeerInfo>>() {});
             peerWriter = objectMapper.writerFor(new TypeReference<Collection<PeerInfo>>() {});
 
+            if (!PERSIST_PEER_NODES)
+            {
+                peers = new ConcurrentHashMap<>();
+                return;
+            }
+
             try
             {
                 peers = transactionalRead(peersPath, peersBackupPath, peersTempPath, this::read, ConcurrentHashMap::new);
@@ -692,23 +703,39 @@ public class Nodes
             }
         }
 
-        private synchronized void saveToDisk()
+        private void saveToDisk()
         {
-            // called via updateExecutor
-            transactionalWrite(peersPath, peersBackupPath, peersTempPath, this::write, baseDirectory);
+            if (!PERSIST_PEER_NODES)
+            {
+                logger.debug("Skipping saveToDisk() for peers at {}, as it is disabled", peersPath);
+                return;
+            }
+
+            synchronized (this)
+            {
+                // called via updateExecutor
+                transactionalWrite(peersPath, peersBackupPath, peersTempPath, this::write, baseDirectory);
+            }
         }
 
-        private synchronized void snapshot(Path snapshotPath) throws IOException
+        private void snapshot(Path snapshotPath) throws IOException
         {
-            // Needs to be synchronized to avoid snapshotting in the middle of
-            // a write
-            Path peersSnapshot = snapshotPath.resolve(peersPath.getFileName());
-            if (Files.exists(peersPath) && !Files.exists(peersSnapshot))
-                Files.createLink(peersSnapshot, peersPath);
+            if (!PERSIST_PEER_NODES)
+                return;
+
+            synchronized (this)
+            {
+                // Needs to be synchronized to avoid snapshotting in the middle of
+                // a write
+                Path peersSnapshot = snapshotPath.resolve(peersPath.getFileName());
+                if (Files.exists(peersPath) && !Files.exists(peersSnapshot))
+                    Files.createLink(peersSnapshot, peersPath);
+            }
         }
 
         private void write(OutputStream output) throws IOException
         {
+            assert PERSIST_PEER_NODES;
             peers.values().forEach(NodeInfo::resetDirty);
             peerWriter.writeValue(output, peers.values());
         }
