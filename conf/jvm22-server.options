@@ -86,9 +86,13 @@
 --add-opens java.base/java.net=ALL-UNNAMED
 --add-opens java.base/jdk.internal.math=ALL-UNNAMED
 --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+--add-opens java.base/jdk.internal.vm=ALL-UNNAMED
+--add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED
 
 # required for org.apache.cassandra.Util.getSupportedMTimeGranularity
 --add-opens java.base/java.nio.file.attribute=ALL-UNNAMED
+
+--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED
 
 
 ### GC logging options -- uncomment to enable
