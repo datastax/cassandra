@@ -94,7 +94,10 @@ public class ReadCoordinationMetricsTest extends TestBaseImpl
     @Test
     public void testPreferredOtherReplicas() throws Throwable
     {
-        try (Cluster cluster = init(Cluster.create(2), 2))
+        try (Cluster cluster =  init(builder()
+                                     .withNodes(2)
+                                     .withConfig(config -> config.set("dynamic_snitch", false)
+                                     ).start(), 2))
         {
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int, ck int, v int, PRIMARY KEY (pk, ck))"));
             for (int i = 0; i < NUM_ROWS; i++)
