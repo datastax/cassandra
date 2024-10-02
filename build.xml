@@ -404,7 +404,10 @@
     </target>
 
     <target name="clean" description="Remove all locally created artifacts">
-        <delete dir="${build.test.dir}" />
+        <delete includeemptydirs="true">
+            <fileset dir="${build.test.dir}/cassandra" includes="**/*"/>
+            <fileset dir="${build.test.dir}" includes="**/*" excludes="cassandra"/>
+        </delete>
         <delete dir="${build.classes}" />
         <delete dir="${build.src.gen-java}" />
         <delete dir="${version.properties.dir}" />
@@ -417,7 +420,7 @@
         <delete>
           <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*"/>
         </delete>
-        <delete dir="${build.dir}" />
+        <delete includeemptydirs="false" dir="${build.dir}" failonerror="false"/>
         <delete dir="${doc.dir}/build" />
         <delete dir="${doc.dir}/source/tools/nodetool" />
     </target>
