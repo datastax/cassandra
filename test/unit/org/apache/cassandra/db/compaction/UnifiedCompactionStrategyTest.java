@@ -30,6 +30,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -49,6 +51,7 @@ import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
@@ -58,6 +61,7 @@ import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Pair;
 import org.mockito.Mockito;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
@@ -197,6 +201,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
         when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
         when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.SINGLE);
 
         when(controller.getScalingParameter(anyInt())).thenAnswer(answer -> {
             int index = answer.getArgument(0);
@@ -246,7 +251,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertEquals(i, level.getIndex());
 
                 Collection<CompactionAggregate.UnifiedAggregate> compactionAggregates =
-                    level.getCompactionAggregates(entry.getKey(), Collections.EMPTY_SET, controller, dataSetSizeBytes);
+                level.getCompactionAggregates(entry.getKey(), Collections.EMPTY_SET, controller, dataSetSizeBytes);
+
                 long selectedCount = compactionAggregates.stream()
                                                          .filter(a -> !a.isEmpty())
                                                          .count();
@@ -254,6 +260,136 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertEquals(expectedCount, selectedCount);
             }
         }
+    }
+
+    @Test
+    public void testOverlapSetsWithDuplicatedSSTablesProducesNonDuplicatedAggregatesNone()
+    {
+        testOverlapSetsWithDuplicatedSSTablesProducesNonDuplicatedAggregates(Overlaps.InclusionMethod.NONE);
+    }
+
+    @Test
+    public void testOverlapSetsWithDuplicatedSSTablesProducesNonDuplicatedAggregatesSingle()
+    {
+        testOverlapSetsWithDuplicatedSSTablesProducesNonDuplicatedAggregates(Overlaps.InclusionMethod.SINGLE);
+    }
+
+    @Test
+    public void testOverlapSetsWithDuplicatedSSTablesProducesNonDuplicatedAggregatesTransitive()
+    {
+        testOverlapSetsWithDuplicatedSSTablesProducesNonDuplicatedAggregates(Overlaps.InclusionMethod.TRANSITIVE);
+    }
+
+    private void testOverlapSetsWithDuplicatedSSTablesProducesNonDuplicatedAggregates(Overlaps.InclusionMethod inclusionMethod)
+    {
+        final int m = 2; // minimal sorted run size in MB m
+        final Map<Integer, Integer> sstables = new TreeMap<>();
+        // 50MB, 100 sstables
+        sstables.put(50, 100);
+
+        // populate multiple overlapSets including duplicated sstables
+        AtomicLong leftToken = new AtomicLong(0);
+        Supplier<Pair<DecoratedKey, DecoratedKey>> keysSupplier = () -> {
+            // make sure any sstable is overlapping only part of all sstables, thus creating multiple overlapSets that
+            // include duplicated sstable
+            Pair<DecoratedKey, DecoratedKey> p = Pair.create(key(leftToken.get()), key(leftToken.get() + 80));
+            leftToken.incrementAndGet();
+            return p;
+        };
+
+        testGetMultipleBucketsOneArenaNonOverlappingAggregates(sstables, new int[]{ 30, 2, -6 }, m, 1, keysSupplier, inclusionMethod);
+    }
+
+    private void testGetMultipleBucketsOneArenaNonOverlappingAggregates(Map<Integer, Integer> sstableMap, int[] Ws, int m, int expectedLevels,
+                                                                        Supplier<Pair<DecoratedKey, DecoratedKey>> keysSupplier,
+                                                                        Overlaps.InclusionMethod inclusionMethod)
+    {
+        long minimalSizeBytes = m << 20;
+
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
+        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
+        when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
+        when(controller.maxSSTablesToCompact()).thenReturn(1000);
+        when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
+        when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
+        when(controller.overlapInclusionMethod()).thenReturn(inclusionMethod);
+
+        when(controller.getScalingParameter(anyInt())).thenAnswer(answer -> {
+            int index = answer.getArgument(0);
+            return Ws[index < Ws.length ? index : Ws.length - 1];
+        });
+        when(controller.getFanout(anyInt())).thenCallRealMethod();
+        when(controller.getThreshold(anyInt())).thenCallRealMethod();
+        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
+
+        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
+        when(controller.random()).thenCallRealMethod();
+
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+        List<SSTableReader> sstables = new ArrayList<>();
+        long dataSetSizeBytes = 0;
+        for (Map.Entry<Integer, Integer> entry : sstableMap.entrySet())
+        {
+            for (int i = 0; i < entry.getValue(); i++)
+            {
+                // we want a number > 0 and < 1 so that the sstable has always some size and never crosses the boundary to the next bucket
+                // so we leave a 1% margin, picking a number from 0.01 to 0.99
+                double rand = 0.01 + 0.98 * random.nextDouble();
+                long sizeOnDiskBytes = (entry.getKey() << 20) + (long) (minimalSizeBytes * rand);
+                dataSetSizeBytes += sizeOnDiskBytes;
+                Pair<DecoratedKey, DecoratedKey> keys = keysSupplier.get();
+                sstables.add(mockSSTable(sizeOnDiskBytes, System.currentTimeMillis(), keys.left, keys.right));
+            }
+        }
+        dataTracker.addInitialSSTables(sstables);
+
+        Map<UnifiedCompactionStrategy.Arena, List<UnifiedCompactionStrategy.Level>> arenas = strategy.getLevels();
+        assertNotNull(arenas);
+        assertEquals(1, arenas.size());
+
+        for (Map.Entry<UnifiedCompactionStrategy.Arena, List<UnifiedCompactionStrategy.Level>> entry : arenas.entrySet())
+        {
+            List<UnifiedCompactionStrategy.Level> levels = entry.getValue();
+            assertEquals(expectedLevels, levels.size());
+
+            for (int i = 0; i < expectedLevels; i++)
+            {
+                UnifiedCompactionStrategy.Level level = levels.get(i);
+                assertEquals(i, level.getIndex());
+
+                Collection<CompactionAggregate.UnifiedAggregate> compactionAggregates =
+                    level.getCompactionAggregates(entry.getKey(), Collections.EMPTY_SET, controller, dataSetSizeBytes);
+
+                Set<CompactionSSTable> selectedSSTables = new HashSet<>();
+                for (CompactionAggregate.UnifiedAggregate aggregate : compactionAggregates)
+                {
+                    for (CompactionSSTable sstable : aggregate.getSelected().sstables())
+                    {
+                        if (selectedSSTables.contains(sstable))
+                            throw new RuntimeException("Found duplicated sstable " + sstable);
+                        selectedSSTables.add(sstable);
+                    }
+                }
+
+                // at least one aggregate is selected
+                long selectedCount = compactionAggregates.stream().filter(a -> !a.isEmpty()).count();
+                assertThat(selectedCount).isGreaterThanOrEqualTo(1);
+            }
+        }
+    }
+
+    private BufferDecoratedKey key(long token)
+    {
+        return new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), ByteBuffer.allocate(0));
+    }
+
+    private BufferDecoratedKey key(Token token)
+    {
+        return new BufferDecoratedKey(token, ByteBuffer.allocate(0));
     }
 
     @Test
@@ -437,6 +573,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
         when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
         when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.SINGLE);
 
         if (maxSSTablesToCompact >= numSSTables)
             when(controller.maxConcurrentCompactions()).thenReturn(levels * (W < 0 ? 1 : F)); // make sure the work is assigned to different levels
@@ -600,6 +737,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
         when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
         when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.SINGLE);
         // Calculate the minimum shard size such that the top bucket compactions won't be considered "oversized" and
         // all will be allowed to run. The calculation below assumes (1) that compactions are considered "oversized"
         // if they are more than 1/2 of the max shard size; (2) that mockSSTables uses 15% less than the max SSTable
@@ -1013,6 +1151,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
         when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
         when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.SINGLE);
         when(controller.random()).thenCallRealMethod();
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
@@ -1180,6 +1319,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
         when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
         when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.SINGLE);
         when(controller.random()).thenCallRealMethod();
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
@@ -1231,6 +1371,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.SINGLE);
         when(controller.maxSSTablesToCompact()).thenReturn(1000);
 
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
@@ -1316,6 +1457,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.maxSSTablesToCompact()).thenReturn(2);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.SINGLE);
         when(controller.prioritize(anyList())).thenAnswer(answ -> {
             List<CompactionAggregate.UnifiedAggregate> pending = answ.getArgument(0);
             pending.sort(Comparator.comparingLong(a -> ((CompactionAggregate.UnifiedAggregate) a).sstables.stream().mapToLong(CompactionSSTable::onDiskLength).sum()).reversed());
@@ -1386,6 +1528,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
         when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
         when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.SINGLE);
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
@@ -1454,7 +1597,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     public void testBucketSelectionFives()
     {
         testBucketSelection(arr(25, 15, 10), repeats(5, arr(10)), Overlaps.InclusionMethod.TRANSITIVE);
-        testBucketSelection(arr(25, 15, 10), concat(repeats(5, 6), repeats(5, 4)), Overlaps.InclusionMethod.SINGLE);
+        testBucketSelection(arr(25, 15, 10), new int [] {6, 4, 6, 6, 6, 6, 4, 4, 4, 4}, Overlaps.InclusionMethod.SINGLE);
         // When we take large sstables for one compaction, remaining overlaps don't have enough to trigger next
         testBucketSelection(arr(25, 15, 10), repeats(10, arr(3)), Overlaps.InclusionMethod.NONE, 20);
     }
@@ -1562,6 +1705,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         assertEquals(expecteds.length, picks.size());
         int buckIdx = 0;
+        for (CompactionPick pick : picks)
+            System.out.println("## " + pick.sstables().size());
         for (CompactionPick pick : picks)
         {
             int expectedCount = expecteds[buckIdx++];
