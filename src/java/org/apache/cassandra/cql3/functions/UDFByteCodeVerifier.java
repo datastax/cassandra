@@ -84,7 +84,7 @@ public final class UDFByteCodeVerifier
     {
         String clsNameSl = clsName.replace('.', '/');
         Set<String> errors = new TreeSet<>(); // it's a TreeSet for unit tests
-        ClassVisitor classVisitor = new ClassVisitor(Opcodes.ASM7)
+        ClassVisitor classVisitor = new ClassVisitor(Opcodes.ASM9)
         {
             public FieldVisitor visitField(int access, String name, String desc, String signature, Object value)
             {
@@ -160,7 +160,7 @@ public final class UDFByteCodeVerifier
 
         ExecuteImplVisitor(Set<String> errors)
         {
-            super(Opcodes.ASM7);
+            super(Opcodes.ASM9);
             this.errors = errors;
         }
 
@@ -210,7 +210,7 @@ public final class UDFByteCodeVerifier
 
         ConstructorVisitor(Set<String> errors)
         {
-            super(Opcodes.ASM7);
+            super(Opcodes.ASM9);
             this.errors = errors;
         }
 
