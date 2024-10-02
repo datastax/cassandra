@@ -92,7 +92,7 @@ public class TermsReader implements Closeable
         termDictionaryRoot = root;
         this.termDictionaryFileEncodingVersion = termsDataEncodingVersion;
 
-        try (final IndexInput indexInput = IndexFileUtils.instance().openInput(termDictionaryFile))
+        try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile))
         {
             // if the pointer is -1 then this is a previous version of the index
             // use the old way to validate the footer
@@ -107,7 +107,7 @@ public class TermsReader implements Closeable
             }
         }
 
-        try (final IndexInput indexInput = IndexFileUtils.instance().openInput(postingsFile))
+        try (final IndexInput indexInput = IndexFileUtils.instance.openInput(postingsFile))
         {
             validate(indexInput);
         }
@@ -168,8 +168,8 @@ public class TermsReader implements Closeable
         TermQuery(ByteComparable term, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
             this.listener = listener;
-            postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
+            postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
             this.term = term;
             lookupStartTime = System.nanoTime();
             this.context = context;
@@ -299,8 +299,8 @@ public class TermsReader implements Closeable
             ArrayList<PostingList> postingLists = new ArrayList<>();
 
             // index inputs will be closed with the onClose method of the returned merged posting list
-            IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            IndexInput postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
+            IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
 
             do
             {
@@ -329,8 +329,8 @@ public class TermsReader implements Closeable
             ArrayList<PostingList> postingLists = new ArrayList<>();
 
             // index inputs will be closed with the onClose method of the returned merged posting list
-            IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            IndexInput postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
+            IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
 
             do
             {
@@ -379,8 +379,8 @@ public class TermsReader implements Closeable
         private TermsScanner(Version version, AbstractType<?> type)
         {
             this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, termDictionaryFileEncodingVersion);
-            this.postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            this.postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
+            this.postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            this.postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
             // We decode based on the logic used to encode the min and max terms in the trie.
             if (version.onOrAfter(Version.DB) && TypeUtil.isComposite(type))
             {
@@ -451,8 +451,8 @@ public class TermsReader implements Closeable
         private ReverseTermsScanner()
         {
             this.iterator = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot);
-            this.postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            this.postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
+            this.postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            this.postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
         }
 
         @Override

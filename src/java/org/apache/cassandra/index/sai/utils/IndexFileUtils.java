@@ -35,12 +35,10 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.storage.StorageProvider;
-import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -60,23 +58,9 @@ public class IndexFileUtils
                                                                                               .finishOnClose(true)
                                                                                               .build();
 
-    private static final IndexFileUtils instance = new IndexFileUtils(defaultWriterOption);
-    private static IndexFileUtils overrideInstance = null;
+    public static volatile IndexFileUtils instance = new IndexFileUtils(defaultWriterOption);
 
     private final SequentialWriterOption writerOption;
-
-    public static synchronized void setOverrideInstance(IndexFileUtils overrideInstance)
-    {
-        IndexFileUtils.overrideInstance = overrideInstance;
-    }
-
-    public static IndexFileUtils instance()
-    {
-        if (overrideInstance == null)
-            return instance;
-        else
-            return overrideInstance;
-    }
 
     /**
      * Remembers checksums of files so we don't have to recompute them from the beginning of the file whenever appending
@@ -96,7 +80,7 @@ public class IndexFileUtils
     public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append) throws IOException
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
-        var checksumWriter = new IncrementalChecksumSequentialWriter(file, append);
+        var checksumWriter = new IncrementalChecksumSequentialWriter(file, writerOption, append);
         return new IndexOutputWriter(checksumWriter, order);
     }
 
@@ -136,7 +120,7 @@ public class IndexFileUtils
         /** Remembers the checksum after closing this writer */
         private long finalChecksum;
 
-        IncrementalChecksumSequentialWriter(File file, boolean append) throws IOException
+        IncrementalChecksumSequentialWriter(File file, SequentialWriterOption writerOption, boolean append) throws IOException
         {
             super(file, writerOption);
 

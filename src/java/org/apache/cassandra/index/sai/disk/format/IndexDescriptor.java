@@ -624,7 +624,7 @@ public class IndexDescriptor
             @Override
             public IndexInput openInput()
             {
-                return IndexFileUtils.instance().openBlockingInput(createFileHandle());
+                return IndexFileUtils.instance.openBlockingInput(createFileHandle());
             }
 
             @Override
@@ -662,7 +662,7 @@ public class IndexDescriptor
                                  component,
                                  file);
 
-                return IndexFileUtils.instance().openOutput(file, byteOrder(), append);
+                return IndexFileUtils.instance.openOutput(file, byteOrder(), append);
             }
 
             @Override

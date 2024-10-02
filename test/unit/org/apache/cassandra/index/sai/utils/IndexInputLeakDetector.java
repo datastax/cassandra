@@ -40,7 +40,7 @@ public class IndexInputLeakDetector extends TestRuleAdapter
     {
         TrackingIndexFileUtils trackingIndexFileUtils = new TrackingIndexFileUtils(sequentialWriterOption);
         trackedIndexFileUtils.add(trackingIndexFileUtils);
-        IndexFileUtils.setOverrideInstance(trackingIndexFileUtils);
+        IndexFileUtils.instance = trackingIndexFileUtils;
         return IndexDescriptor.empty(descriptor);
     }
 
@@ -58,6 +58,6 @@ public class IndexInputLeakDetector extends TestRuleAdapter
     protected void afterAlways(List<Throwable> errors)
     {
         trackedIndexFileUtils.clear();
-        IndexFileUtils.setOverrideInstance(null);
+        IndexFileUtils.instance = null;
     }
 }

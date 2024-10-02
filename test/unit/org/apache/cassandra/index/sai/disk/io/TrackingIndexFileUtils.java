@@ -37,7 +37,7 @@ import org.apache.lucene.index.CorruptIndexException;
 public class TrackingIndexFileUtils extends IndexFileUtils
 {
     private final Map<TrackingIndexInput, String> openInputs = Collections.synchronizedMap(new HashMap<>());
-    private final Set<TrackingIndexInput> closedInputs = new HashSet<>();
+    private final Set<TrackingIndexInput> closedInputs = Collections.synchronizedSet(new HashSet<>());
 
     public TrackingIndexFileUtils(SequentialWriterOption writerOption)
     {
