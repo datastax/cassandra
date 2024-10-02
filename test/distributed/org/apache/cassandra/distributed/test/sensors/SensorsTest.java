@@ -30,7 +30,6 @@ import org.junit.Test;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.PageSize;
-import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.SelectStatement;
@@ -59,28 +58,24 @@ public class SensorsTest extends TestBaseImpl
         CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(ActiveRequestSensorsFactory.class.getName());
     }
     @Test
-    public void testSensorsInResultMessage() throws Throwable
+    public void testSensorsInResultMessageEnabled() throws Throwable
     {
+        CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCAL.setBoolean(true);
         try (Cluster cluster = builder().withNodes(1).start())
         {
             // resister a noop sensor listener before init(cluster) which creates the test keyspace to ensure that the registry singleton instance is subscribed to schema notifications
             cluster.get(1).runsOnInstance(initSensorsRegistry()).run();
             init(cluster);
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)"));
-            String write = withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')");
+            cluster.get(1).executeInternal(withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')"));
+
             String query = withKeyspace("SELECT * FROM %s.tbl WHERE pk=1");
 
             // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
             cluster.get(1).runOnInstance(() -> {
-                ResultMessage writeResult = executeWithResult(write);
-                Map<String, ByteBuffer> customPayload = writeResult.getCustomPayload();
-
-                double writeBytesRequest = getWriteBytesRequest(customPayload, "tbl");
-                Assertions.assertThat(writeBytesRequest).isGreaterThan(0D);
-
                 ResultMessage.Rows readResult = executeWithPagingWithResultMessage(query);
-                customPayload = readResult.getCustomPayload();
-                assertReadBytesHeadersExist(customPayload);
+                Map<String, ByteBuffer> customPayload = readResult.getCustomPayload();
+                assertReadBytesHeadersExist(customPayload, true);
 
                 double readBytesRequest = getReadBytesRequest(customPayload);
                 Assertions.assertThat(readBytesRequest).isGreaterThan(0D);
@@ -88,22 +83,41 @@ public class SensorsTest extends TestBaseImpl
         }
     }
 
-    private static void assertReadBytesHeadersExist(Map<String, ByteBuffer> customPayload)
+    @Test
+    public void testSensorsInResultMessageDisabled() throws Throwable
     {
-        Assertions.assertThat(customPayload).containsKey(SensorsCustomParams.READ_BYTES_REQUEST);
+        CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCAL.setBoolean(false);
+        try (Cluster cluster = builder().withNodes(1).start())
+        {
+            // resister a noop sensor listener before init(cluster) which creates the test keyspace to ensure that the registry singleton instance is subscribed to schema notifications
+            cluster.get(1).runsOnInstance(initSensorsRegistry()).run();
+            init(cluster);
+            cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)"));
+            cluster.get(1).executeInternal(withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')"));
+
+            String query = withKeyspace("SELECT * FROM %s.tbl WHERE pk=1");
+
+            // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
+            cluster.get(1).runOnInstance(() -> {
+                ResultMessage.Rows readResult = executeWithPagingWithResultMessage(query);
+                Map<String, ByteBuffer> customPayload  = readResult.getCustomPayload();
+                assertReadBytesHeadersExist(customPayload, false);
+            });
+        }
+    }
+
+    private static void assertReadBytesHeadersExist(Map<String, ByteBuffer> customPayload, boolean exists)
+    {
+        if (exists)
+            Assertions.assertThat(customPayload).containsKey(SensorsCustomParams.READ_BYTES_REQUEST);
+        else if (customPayload != null)
+            Assertions.assertThat(customPayload).doesNotContainKey(SensorsCustomParams.READ_BYTES_REQUEST);
     }
 
     private static double getReadBytesRequest(Map<String, ByteBuffer> customPayload)
     {
         Assertions.assertThat(customPayload).containsKey(SensorsCustomParams.READ_BYTES_REQUEST);
         return ByteBufferUtil.toDouble(customPayload.get(SensorsCustomParams.READ_BYTES_REQUEST));
-    }
-
-    private static double getWriteBytesRequest(Map<String, ByteBuffer> customPayload, String table)
-    {
-        String headerName = String.format(SensorsCustomParams.WRITE_BYTES_REQUEST_TEMPLATE, table);
-        Assertions.assertThat(customPayload).containsKey(headerName);
-        return ByteBufferUtil.toDouble(customPayload.get(headerName));
     }
 
     /**
@@ -153,25 +167,5 @@ public class SensorsTest extends TestBaseImpl
                                                           selectStatement.keyspace());
 
         return selectStatement.execute(state, initialOptions, nanoTime);
-    }
-
-    /**
-     * TODO: update SimpleQueryResult in the dtest-api project to expose custom payload and use Coordinator##executeWithResult instead
-     */
-    private static ResultMessage executeWithResult(String query, Object... args)
-    {
-        long nanoTime = System.nanoTime();
-        QueryHandler.Prepared prepared = QueryProcessor.prepareInternal(query);
-        ConsistencyLevel consistencyLevel = ConsistencyLevel.valueOf(ConsistencyLevel.ALL.name());
-        org.apache.cassandra.db.ConsistencyLevel cl = org.apache.cassandra.db.ConsistencyLevel.fromCode(consistencyLevel.ordinal());
-        QueryOptions initialOptions = QueryOptions.create(cl,
-                                                          null,
-                                                          false,
-                                                          PageSize.inRows(512),
-                                                          null,
-                                                          null,
-                                                          ProtocolVersion.CURRENT,
-                                                          prepared.keyspace);
-        return prepared.statement.execute(QueryProcessor.internalQueryState(), initialOptions, nanoTime);
     }
 }

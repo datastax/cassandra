@@ -17,22 +17,14 @@
  */
 package org.apache.cassandra.service;
 
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import org.apache.cassandra.db.IMutation;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.db.WriteType;
-import org.apache.cassandra.net.SensorsCustomParams;
-import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
-import org.apache.cassandra.sensors.Type;
 
 /**
  * Handles blocking writes for ONE, ANY, TWO, THREE, QUORUM, and ALL consistency levels.
@@ -62,10 +54,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     public void onResponse(Message<T> m)
     {
         if (responsesUpdater.decrementAndGet(this) == 0)
-        {
-            estimateAndIncrementWriteSensor(m);
             signal();
-        }
         //Must be last after all subclass processing
         //The two current subclasses both assume logResponseToIdealCLDelegate is called
         //here.
@@ -75,35 +64,5 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     public int ackCount()
     {
         return blockFor() - responses;
-    }
-
-    private void estimateAndIncrementWriteSensor(Message<T> msg)
-    {
-        RequestSensors requestSensors = RequestTracker.instance.get();
-        if (requestSensors == null)
-            return;
-
-        if (msg == null)
-            return;
-
-        Map<String, byte[]> customParams = msg.header.customParams();
-        if (customParams == null)
-            return;
-
-        if (!(msg instanceof IMutation))
-            return;
-
-        IMutation mutation = (IMutation) msg;
-        for (PartitionUpdate pu: mutation.getPartitionUpdates())
-        {
-            String headerName = SensorsCustomParams.encodeTableInWriteBytesRequestParam(pu.metadata().name);
-            byte[] writeBytes = msg.header.customParams().get(headerName);
-            if (writeBytes == null)
-                continue;
-            double adjustedSensorValue = SensorsCustomParams.sensorValueFromBytes(writeBytes) * candidateReplicaCount();
-            Context context = Context.from(pu.metadata());
-            requestSensors.registerSensor(context, Type.WRITE_BYTES);
-            requestSensors.incrementSensor(context, Type.WRITE_BYTES, adjustedSensorValue);
-        }
     }
 }

@@ -497,7 +497,12 @@ public enum CassandraRelevantProperties
      * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class");
+    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+
+    /**
+     * If true, the coordinator will propagate request sensors via the native protocol custom payload flag.
+     */
+    PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCAL("cassandra.propagate_request_sensors_via_native_protocal", "false");;
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
