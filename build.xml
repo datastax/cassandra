@@ -433,9 +433,13 @@
 
     <target name="gen-cql3-grammar" depends="check-gen-cql3-grammar" unless="cql3current">
       <echo>Building Grammar ${build.src.antlr}/Cql.g  ...</echo>
+      <!-- Ran into an odd situation where, on jdk21, antlr crashed first time through then worked 2nd. Forking it fixes this. -->
       <java classname="org.antlr.Tool"
             classpathref="cql3-grammar.classpath"
-            failonerror="true">
+            failonerror="true"
+            fork="true"
+            outputproperty="antlr.output"
+            errorproperty="antlr.error">
          <arg value="-Xconversiontimeout" />
          <arg value="10000" />
          <arg value="${build.src.antlr}/Cql.g" />
