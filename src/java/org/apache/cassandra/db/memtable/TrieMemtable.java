@@ -86,7 +86,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     public static final Factory FACTORY = new TrieMemtable.Factory();
 
     /** Buffer type to use for memtable tries (on- vs off-heap) */
-    public static final BufferType BUFFER_TYPE;
+    public static BufferType BUFFER_TYPE;
 
     static
     {

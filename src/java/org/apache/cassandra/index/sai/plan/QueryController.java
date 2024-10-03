@@ -101,7 +101,7 @@ import static java.lang.Math.max;
 public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
-
+    
     /**
      * Controls whether we optimize query plans.
      * 0 disables the optimizer. As a side effect, hybrid ANN queries will default to FilterSortOrder.SCAN_THEN_FILTER.
