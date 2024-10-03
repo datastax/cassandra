@@ -152,7 +152,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                     @Override
                     public int allocate() throws TrieSpaceExhaustedException
                     {
-                        return allocateCell();
+                        return allocateNewCell();
                     }
                 }, opOrder);
                 objectAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(new MemoryAllocationStrategy.Allocator()
