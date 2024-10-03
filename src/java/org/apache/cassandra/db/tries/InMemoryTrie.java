@@ -131,12 +131,40 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         switch (lifetime)
         {
             case SHORT:
-                cellAllocator = new MemoryAllocationStrategy.NoReuseStrategy(this::allocateNewCell);
-                objectAllocator = new MemoryAllocationStrategy.NoReuseStrategy(this::allocateNewObject);
+                cellAllocator = new MemoryAllocationStrategy.NoReuseStrategy(new MemoryAllocationStrategy.Allocator()
+                {
+                    @Override
+                    public int allocate() throws TrieSpaceExhaustedException
+                    {
+                        return allocateNewCell();
+                    }
+                });
+                objectAllocator = new MemoryAllocationStrategy.NoReuseStrategy(new MemoryAllocationStrategy.Allocator()
+                {
+                    @Override
+                    public int allocate()
+                    {
+                        return allocateNewObject();
+                    }
+                });
                 break;
             case LONG:
-                cellAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(this::allocateNewCell, opOrder);
-                objectAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(this::allocateNewObject, opOrder);
+                cellAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(new MemoryAllocationStrategy.Allocator()
+                {
+                    @Override
+                    public int allocate() throws TrieSpaceExhaustedException
+                    {
+                        return allocateNewCell();
+                    }
+                }, opOrder);
+                objectAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(new MemoryAllocationStrategy.Allocator()
+                {
+                    @Override
+                    public int allocate()
+                    {
+                        return allocateNewObject();
+                    }
+                }, opOrder);
                 break;
             default:
                 throw new AssertionError();
