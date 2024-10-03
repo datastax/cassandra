@@ -140,7 +140,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 objectAllocator = new MemoryAllocationStrategy.NoReuseStrategy(new MemoryAllocationStrategy.Allocator()
                 {
                     @Override
-                    public int allocate() throws TrieSpaceExhaustedException
+                    public int allocate()
                     {
                         return allocateNewObject();
                     }
@@ -158,7 +158,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 objectAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(new MemoryAllocationStrategy.Allocator()
                 {
                     @Override
-                    public int allocate() throws TrieSpaceExhaustedException
+                    public int allocate()
                     {
                         return allocateNewObject();
                     }
