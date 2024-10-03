@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +43,6 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.lucene.store.ByteBuffersDataOutput;
 
 /**
  * Multiple {@link SegmentMetadata} are stored in {@link IndexComponentType#META} file, each corresponds to an on-disk
@@ -144,7 +142,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.minTerm = readBytes(input);
         this.maxTerm = readBytes(input);
         TermsDistribution td = null;
-        if (version.onOrAfter(Version.EA))
+        if (version.onOrAfter(Version.EB))
         {
             int len = input.readInt();
             long fp = input.getFilePointer();
@@ -196,7 +194,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                           metadata.maxKey.partitionKey().getKey(),
                           metadata.minTerm, metadata.maxTerm).forEach(bb -> writeBytes(bb, output));
 
-                if (writer.version().onOrAfter(Version.EA))
+                if (writer.version().onOrAfter(Version.EB))
                 {
                     if (metadata.termsDistribution != null)
                     {
