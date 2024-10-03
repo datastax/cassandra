@@ -201,8 +201,8 @@ public class VectorMemtableIndex implements MemtableIndex
     @Override
     public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        // TODO: this is a stub, we need to compute the correct fraction
-        return primaryKeys.size();
+        // For BOUNDED_ANN we use the old way of estimating cardinality - by running the search.
+        throw new UnsupportedOperationException("Cardinality estimation not supported by vector indexes");
     }
 
     @Override
