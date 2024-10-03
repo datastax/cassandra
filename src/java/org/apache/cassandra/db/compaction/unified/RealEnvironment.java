@@ -35,11 +35,11 @@ import org.apache.cassandra.utils.PageAware;
  * An implementation of {@link Environment} that returns
  * real values.
  */
-class RealEnvironment implements Environment
+public class RealEnvironment implements Environment
 {
     private final CompactionRealm realm;
 
-    RealEnvironment(CompactionRealm realm)
+    public RealEnvironment(CompactionRealm realm)
     {
         assert realm != null;
         this.realm = realm;
