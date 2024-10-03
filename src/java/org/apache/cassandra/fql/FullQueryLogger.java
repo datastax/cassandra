@@ -52,6 +52,7 @@ import org.apache.cassandra.utils.concurrent.WeightedQueue;
 import org.github.jamm.MemoryLayoutSpecification;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static org.github.jamm.MemoryMeterStrategy.MEMORY_LAYOUT;
 
 /**
  * A logger that logs entire query contents after the query finishes (or times out).
@@ -84,8 +85,8 @@ public class FullQueryLogger implements QueryEvents.Listener
     private static final int EMPTY_LIST_SIZE = Ints.checkedCast(ObjectSizes.measureDeep(new ArrayList<>(0)));
     private static final int EMPTY_BYTEBUF_SIZE;
 
-    private static final int OBJECT_HEADER_SIZE = MemoryLayoutSpecification.SPEC.getObjectHeaderSize();
-    private static final int OBJECT_REFERENCE_SIZE = MemoryLayoutSpecification.SPEC.getReferenceSize();
+    private static final int OBJECT_HEADER_SIZE = MEMORY_LAYOUT.getObjectHeaderSize();
+    private static final int OBJECT_REFERENCE_SIZE = MEMORY_LAYOUT.getReferenceSize();
 
     public static final FullQueryLogger instance = new FullQueryLogger();
 

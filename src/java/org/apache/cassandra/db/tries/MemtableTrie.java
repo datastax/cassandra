@@ -33,6 +33,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.github.jamm.MemoryLayoutSpecification;
 
+import static org.github.jamm.MemoryMeterStrategy.MEMORY_LAYOUT;
+
 /**
  * Memtable trie, i.e. an in-memory trie built for fast modification and reads executing concurrently with writes from
  * a single mutator thread.
@@ -982,7 +984,7 @@ public class MemtableTrie<T> extends MemtableReadTrie<T>
     /** Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content. */
     public long sizeOnHeap()
     {
-        return contentCount * MemoryLayoutSpecification.SPEC.getReferenceSize() +
+        return contentCount * (long) MEMORY_LAYOUT.getReferenceSize() +
                (bufferType == BufferType.ON_HEAP ? allocatedPos + EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP);
     }
 
