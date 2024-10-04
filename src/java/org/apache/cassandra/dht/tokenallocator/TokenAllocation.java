@@ -223,9 +223,9 @@ public class TokenAllocation
 
             for (Token t : tokens)
             {
-                while (tokenMetadata.getEndpoint(t) != null)
+                InetAddressAndPort other;
+                while ((other = tokenMetadata.getEndpoint(t)) != null)
                 {
-                    InetAddressAndPort other = tokenMetadata.getEndpoint(t);
                     if (inAllocationRing(other))
                         throw new ConfigurationException(String.format("Allocated token %s already assigned to node %s. Is another node also allocating tokens?", t, other));
                     t = t.nextValidToken();
