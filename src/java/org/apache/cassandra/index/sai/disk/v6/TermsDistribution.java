@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -41,6 +42,8 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
  * Approximates a statistical distribution of term values in a sstable index segment.
@@ -63,6 +66,7 @@ public class TermsDistribution
     private static final Bucket MIN_BUCKET = new Bucket(null, 0, 0);
 
     final AbstractType<?> termType;
+    final Comparator<ByteBuffer> termComparator;
     final ByteBuffer minTerm;
     final ByteBuffer maxTerm;
     final List<Bucket> histogram;
@@ -74,6 +78,7 @@ public class TermsDistribution
     private TermsDistribution(AbstractType<?> termType, List<Bucket> histogram, NavigableMap<ByteBuffer, Long> mostFrequentTerms)
     {
         this.termType = termType;
+        this.termComparator = ByteComparable::compare;
         this.histogram = histogram;
         this.mostFrequentTerms = mostFrequentTerms;
 
@@ -257,7 +262,7 @@ public class TermsDistribution
     private int indexOfBucketContaining(@Nonnull ByteBuffer b)
     {
         Bucket needle = new Bucket(b, 0, 0);
-        int index = Collections.binarySearch(histogram, needle, (b1, b2) -> termType.compare(b1.term, b2.term));
+        int index = Collections.binarySearch(histogram, needle, (b1, b2) -> termComparator.compare(b1.term, b2.term));
         return (index >= -1) ? index : -(index + 1);
     }
 
@@ -322,7 +327,7 @@ public class TermsDistribution
         if (mostFrequentTermsCount < 0)
             throw new IOException("Number of most frequent terms cannot be negative: " + mostFrequentTermsCount);
 
-        NavigableMap<ByteBuffer, Long> mostFrequentTerms = new TreeMap<>(termType);
+        NavigableMap<ByteBuffer, Long> mostFrequentTerms = new TreeMap<>(ByteComparable::compare);
         for (int i = 0; i < mostFrequentTermsCount; i++)
         {
             ByteBuffer term = input.readBytes();
@@ -337,6 +342,7 @@ public class TermsDistribution
     public static class Builder
     {
         final AbstractType<?> termType;
+        final Comparator<ByteBuffer> termComparator;
         final int histogramSize;
         final int mostFrequentTermsTableSize;
 
@@ -352,6 +358,7 @@ public class TermsDistribution
         public Builder(AbstractType<?> termType, int histogramSize, int mostFrequentTermsTableSize)
         {
             this.termType = termType;
+            this.termComparator = ByteComparable::compare;
             this.histogramSize = histogramSize;
             this.mostFrequentTermsTableSize = mostFrequentTermsTableSize;
 
@@ -363,7 +370,7 @@ public class TermsDistribution
         /**
          * Adds a point to the histogram.
          * Points must be added in ascending order of term values
-         * (the order of termValues is defined by {@link this#termType}).
+         * (termValues are bytecomparable).
          * If the order is not preserved, the behavior is undefined.
          */
         public void add(ByteBuffer term, long rowCount)
@@ -393,7 +400,7 @@ public class TermsDistribution
 
             shrink();
 
-            var mft = new TreeMap<ByteBuffer, Long>(termType);
+            var mft = new TreeMap<ByteBuffer, Long>(termComparator);
             for (Point point : mostFrequentTerms) {
                 mft.put(point.term, point.rowCount);
             }

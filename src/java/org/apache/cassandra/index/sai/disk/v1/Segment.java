@@ -240,14 +240,14 @@ public class Segment implements Closeable
             case EQ:
             case CONTAINS_KEY:
             case CONTAINS_VALUE:
-                return metadata.estimateNumRowsMatchingExact(predicate.lower.value.raw);
+                return metadata.estimateNumRowsMatchingExact(predicate.lower.value.encoded);
             case NOT_EQ:
             case NOT_CONTAINS_KEY:
             case NOT_CONTAINS_VALUE:
-                return metadata.numRows - metadata.estimateNumRowsMatchingExact(predicate.lower.value.raw);
+                return metadata.numRows - metadata.estimateNumRowsMatchingExact(predicate.lower.value.encoded);
             case RANGE:
-                ByteBuffer lower = predicate.lower != null ? predicate.lower.value.raw : null;
-                ByteBuffer upper = predicate.upper != null ? predicate.upper.value.raw : null;
+                ByteBuffer lower = predicate.lower != null ? predicate.lower.value.encoded : null;
+                ByteBuffer upper = predicate.upper != null ? predicate.upper.value.encoded : null;
                 return metadata.estimateNumRowsMatchingRange(lower, predicate.lowerInclusive, upper, predicate.upperInclusive);
             default:
                 throw new IllegalArgumentException("Unsupported expression: " + predicate);

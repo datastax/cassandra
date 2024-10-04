@@ -38,13 +38,13 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
 
 /**
@@ -61,7 +61,6 @@ public class SegmentMetadataBuilder
     private final long segmentRowIdOffset;
 
     private final AbstractType<?> validator;
-    private final OnDiskFormat format;
     private final List<Closeable> interceptors = new ArrayList<>();
 
     private boolean built = false;
@@ -85,7 +84,6 @@ public class SegmentMetadataBuilder
     {
         IndexContext context = Objects.requireNonNull(components.context());
         this.segmentRowIdOffset = segmentRowIdOffset;
-        this.format = components.version().onDiskFormat();
         this.validator = Objects.requireNonNull(components.context(), "Context must be set").getValidator();
 
         int histogramSize = context.getIntOption(HISTOGRAM_SIZE_OPTION, 128);
@@ -131,13 +129,13 @@ public class SegmentMetadataBuilder
      * @param term the term value
      * @param rowCount the number of rows with this term value in the segment
      */
-    void add(ByteComparable term, int rowCount)
+    void add(ByteBuffer term, int rowCount)
     {
         if (built)
             throw new IllegalStateException("Segment metadata already built, no more additions allowed");
 
         numRows += rowCount;
-        termsDistributionBuilder.add(format.decodeFromTrie(term, validator), rowCount);
+        termsDistributionBuilder.add(term, rowCount);
     }
 
     public @Nonnull SegmentMetadata build()
@@ -247,7 +245,8 @@ public class SegmentMetadataBuilder
             {
                 exception = e;
             }
-            builder.add(term, postings.size());
+            byte[] termBytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+            builder.add(ByteBuffer.wrap(termBytes), postings.size());
             return term;
         }
 
@@ -355,7 +354,7 @@ public class SegmentMetadataBuilder
                 if (!Arrays.equals(term, lastTerm))
                 {
                     if (lastTerm != null)
-                        builder.add(encodeIfNeeded(lastTerm), count);
+                        builder.add(ByteBuffer.wrap(lastTerm), count);
 
 
                     count = 0;
@@ -371,7 +370,7 @@ public class SegmentMetadataBuilder
         {
             if (lastTerm != null)
             {
-                builder.add(encodeIfNeeded(lastTerm), count);
+                builder.add(ByteBuffer.wrap(lastTerm), count);
             }
         }
 

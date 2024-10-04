@@ -425,6 +425,7 @@ public class TypeUtil
         return value;
     }
 
+
     /**
      * Encode a {@link BigInteger} into a fixed width 20 byte encoded value.
      *
@@ -475,6 +476,7 @@ public class TypeUtil
     {
         byte[] bytes = new byte[20];
         encoded.get(bytes);
+        encoded.rewind();
 
         // Undo the XOR operation on the first byte
         bytes[0] ^= 0x80;
@@ -628,7 +630,7 @@ public class TypeUtil
 
 
     /**
-     * Converts the term to a BigDecimal in a way that it keeps the sort order
+     * Converts the index encoded term to a BigDecimal in a way that it keeps the sort order
      * (so terms comparing larger yield larger numbers). If the term represents a number,
      * the conversion is linear and lossless, because we use the method provided by the concrete
      * termType. For non-number types, we reinterpret the bytecomparable representation as a number.
@@ -638,14 +640,20 @@ public class TypeUtil
         if (value == null)
             return null;
 
+        if (valueType instanceof IntegerType)
+            return ((IntegerType) valueType).toBigDecimal(decodeBigInteger(value));
+
+        if (valueType instanceof DecimalType)
+            return ((DecimalType) valueType).toBigDecimal(decodeDecimal(value));
+
         if (valueType instanceof NumberType)
         {
             var numberType = (NumberType<?>) valueType;
-            return numberType.toBigDecimal(value);
+            var bs = ByteSource.fixedLength(value);
+            return numberType.toBigDecimal(valueType.fromComparableBytes(ByteSource.peekable(bs), ByteComparable.Version.OSS41));
         }
 
-        byte[] origBytes = ByteSourceInverse.readBytes(valueType.asComparableBytes(value, ByteComparable.Version.OSS41));
-        byte[] fixedLengthBytes = Arrays.copyOf(origBytes, 20);
+        byte[] fixedLengthBytes = Arrays.copyOf(ByteBufferUtil.getArray(value), 20);
         return new BigDecimal(new BigInteger(fixedLengthBytes));
     }
 
