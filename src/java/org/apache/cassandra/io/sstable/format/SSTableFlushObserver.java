@@ -23,6 +23,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.metrics.TableMetrics;
 
 /**
  * Observer for events in the lifecycle of writing out an sstable.
@@ -110,4 +111,10 @@ public interface SSTableFlushObserver
      * Clean up resources on error. There should be no side effects if called multiple times.
      */
     default void abort(Throwable accumulator) {}
+
+    /**
+     * Update table metrics with the latest information.
+     * @param tableMetrics the metrics to update
+     */
+    default void updateTableMetrics(TableMetrics tableMetrics) {}
 }

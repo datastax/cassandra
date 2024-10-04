@@ -84,6 +84,9 @@ public class KeyspaceMetrics
     /** Time spent flushing memtables */
     public final Histogram flushTime;
 
+    /** Time spent writing SAI */
+    public final Histogram storageAttachedIndexWritingTime;
+
     /** Time spent writing  memtables during compaction */
     public final Histogram compactionTime;
 
@@ -224,6 +227,7 @@ public class KeyspaceMetrics
         sstablesPerReadHistogram = createKeyspaceHistogram("SSTablesPerReadHistogram", true);
         tombstoneScannedHistogram = createKeyspaceHistogram("TombstoneScannedHistogram", false);
         flushTime = createKeyspaceHistogram("FlushTime", false);
+        storageAttachedIndexWritingTime = createKeyspaceHistogram("StorageAttachedIndexWritingTime", false);
         compactionTime = createKeyspaceHistogram("CompactionTime", false);
         shadowedKeysScannedHistogram = createKeyspaceHistogram("ShadowedKeysScannedHistogram", false);
         shadowedKeysLoopsHistogram = createKeyspaceHistogram("ShadowedKeysLoopsHistogram", false);

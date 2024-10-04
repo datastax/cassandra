@@ -65,13 +65,6 @@ public interface SSTableWatcher
     }
 
     /**
-     * Called when an index built is completed. This is currenly used only for metrics.
-     */
-    default void onIndexBuildCompleted(SSTableReader sstable, Set<? extends Index> indexes, long indexBuildStartTimeNanos, Throwable errorOccurred)
-    {
-    }
-
-    /**
      * Called when an index is dropped on index components affected by that drop.
      * <p>
      * By default, this method simply deletes the components locally, but it can overriden if different/additional

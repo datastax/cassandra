@@ -43,7 +43,9 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.Throwables;
 
 /**
@@ -61,20 +63,23 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     private final Stopwatch stopwatch = Stopwatch.createUnstarted();
     private final RowMapping rowMapping;
     private final OperationType opType;
+    private final TableMetrics tableMetrics;
 
     private DecoratedKey currentKey;
     private boolean tokenOffsetWriterCompleted = false;
     private boolean aborted = false;
 
     private long sstableRowId = 0;
+    private long totalTimeSpent = 0;
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
                                       TableMetadata tableMetadata,
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker lifecycleNewTracker,
-                                      long keyCount) throws IOException
+                                      long keyCount,
+                                      TableMetrics tableMetrics) throws IOException
     {
-        this(indexDescriptor, tableMetadata, indices, lifecycleNewTracker, keyCount, false);
+        this(indexDescriptor, tableMetadata, indices, lifecycleNewTracker, keyCount, false, tableMetrics);
     }
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
@@ -82,7 +87,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker lifecycleNewTracker,
                                       long keyCount,
-                                      boolean perIndexComponentsOnly) throws IOException
+                                      boolean perIndexComponentsOnly,
+                                      TableMetrics tableMetrics) throws IOException
     {
         // We always write at the latest version (through what that version is can be configured for specific cases)
         var onDiskFormat = Version.latest().onDiskFormat();
@@ -106,6 +112,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         this.perSSTableWriter = perIndexComponentsOnly
                                 ? PerSSTableWriter.NONE
                                 : onDiskFormat.newPerSSTableWriter(indexDescriptor);
+        this.tableMetrics = tableMetrics;
     }
 
     @Override
@@ -187,6 +194,9 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     @Override
     public void complete(SSTable sstable)
     {
+
+        tableMetrics.updateStorageAttachedIndexWritingTime(totalTimeSpent);
+
         if (aborted) return;
 
         long start = stopwatch.elapsed(TimeUnit.MILLISECONDS);
@@ -315,6 +325,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
     private void addRow(Row row) throws IOException, TrieSpaceExhaustedException
     {
+        long now = ApproximateTime.nanoTime();
         PrimaryKey primaryKey = primaryKeyFactory.create(currentKey, row.clustering());
         perSSTableWriter.nextRow(primaryKey);
         rowMapping.add(primaryKey, sstableRowId);
@@ -324,5 +335,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             w.addRow(primaryKey, row, sstableRowId);
         }
         sstableRowId++;
+
+        totalTimeSpent += (ApproximateTime.nanoTime() - now);
     }
 }

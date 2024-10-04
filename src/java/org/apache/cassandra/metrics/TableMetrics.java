@@ -210,6 +210,7 @@ public class TableMetrics
     public final MovingAverage flushTimePerKb;
     /** Time spent in flushing memtables */
     public final TableHistogram flushTime;
+    public final TableHistogram storageAttachedIndexWritingTime;
     /** Total number of bytes inserted into memtables since server [re]start. */
     public final Counter bytesInserted;
     /** Total number of bytes written by compaction since server [re]start */
@@ -730,6 +731,7 @@ public class TableMetrics
         flushSegmentCount = ExpMovingAverage.decayBy1000();
         flushTimePerKb = ExpMovingAverage.decayBy100();
         flushTime = createTableHistogram("FlushTime", cfs.getKeyspaceMetrics().flushTime, false);
+        storageAttachedIndexWritingTime = createTableHistogram("StorageAttachedIndexWritingTime", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTime, false);
         bytesInserted = createTableCounter("BytesInserted");
 
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
@@ -1105,6 +1107,11 @@ public class TableMetrics
         // this assumes that at least 1 Kb was flushed, which should always be the case, then rounds down
         flushTimePerKb.update(elapsedNanos / (double) Math.max(1, inputSize / 1024L));
         flushTime.update(elapsedNanos);
+    }
+
+    public void updateStorageAttachedIndexWritingTime(long totalTimeSpentNanos)
+    {
+        storageAttachedIndexWritingTime.update(totalTimeSpentNanos);
     }
 
     public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)

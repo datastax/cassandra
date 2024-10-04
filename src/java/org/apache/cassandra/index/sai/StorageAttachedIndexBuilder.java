@@ -165,7 +165,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 prepareForRebuild(indexDescriptor.perIndexComponents(index.getIndexContext()), replacedComponents);
 
             long keyCount = SSTableReader.getApproximateKeyCount(Set.of(sstable));
-            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, metadata, indexes, txn, keyCount, perIndexComponentsOnly);
+            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, metadata, indexes, txn, keyCount, perIndexComponentsOnly, group.table().metric);
 
             long previousKeyPosition = 0;
             indexWriter.begin();
@@ -264,8 +264,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
         finally
         {
-            SSTableWatcher.instance.onIndexBuildCompleted(sstable, indexes, indexBuildStartTimeNanos, errorOccurred);
-
             ref.release();
             // release current lock in case of error
             if (perSSTableFileLock != null)
