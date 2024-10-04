@@ -91,7 +91,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
     private long bytesProcessed = 0;
     private final long totalSizeInBytes;
-    private final long startTimeNanos;
 
     StorageAttachedIndexBuilder(StorageAttachedIndexGroup group, SortedMap<SSTableReader, Set<StorageAttachedIndex>> sstables, boolean isFullRebuild, boolean isInitialBuild)
     {
@@ -102,7 +101,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         this.isFullRebuild = isFullRebuild;
         this.isInitialBuild = isInitialBuild;
         this.totalSizeInBytes = sstables.keySet().stream().mapToLong(SSTableReader::uncompressedLength).sum();
-        this.startTimeNanos = ApproximateTime.nanoTime();
     }
 
     @Override
@@ -138,6 +136,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     private boolean indexSSTable(SSTableReader sstable, Set<StorageAttachedIndex> indexes)
     {
         logger.debug(logMessage("Starting index build on {}"), sstable.descriptor);
+        long startTimeNanos = ApproximateTime.nanoTime();
 
         CountDownLatch perSSTableFileLock = null;
         StorageAttachedIndexWriter indexWriter = null;
