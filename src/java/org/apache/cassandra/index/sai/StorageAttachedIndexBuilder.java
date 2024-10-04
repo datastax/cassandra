@@ -29,6 +29,7 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Maps;
@@ -57,6 +58,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
@@ -89,6 +91,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
     private long bytesProcessed = 0;
     private final long totalSizeInBytes;
+    private final long startTimeNanos;
 
     StorageAttachedIndexBuilder(StorageAttachedIndexGroup group, SortedMap<SSTableReader, Set<StorageAttachedIndex>> sstables, boolean isFullRebuild, boolean isInitialBuild)
     {
@@ -99,6 +102,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         this.isFullRebuild = isFullRebuild;
         this.isInitialBuild = isInitialBuild;
         this.totalSizeInBytes = sstables.keySet().stream().mapToLong(SSTableReader::uncompressedLength).sum();
+        this.startTimeNanos = ApproximateTime.nanoTime();
     }
 
     @Override
@@ -162,7 +166,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 prepareForRebuild(indexDescriptor.perIndexComponents(index.getIndexContext()), replacedComponents);
 
             long keyCount = SSTableReader.getApproximateKeyCount(Set.of(sstable));
-            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, metadata, indexes, txn, keyCount, perIndexComponentsOnly);
+            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, metadata, indexes, txn, keyCount, perIndexComponentsOnly, group.table().metric);
 
             long previousKeyPosition = 0;
             indexWriter.begin();
@@ -220,7 +224,9 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
                 completeSSTable(txn, indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
             }
-            logger.debug("Completed indexing sstable {}", sstable.descriptor);
+            long timeTaken = ApproximateTime.nanoTime() - startTimeNanos;
+            group.table().metric.storageAttachedIndexRebuildTime.update(timeTaken);
+            logger.debug("Completed indexing sstable {} in {} seconds", sstable.descriptor, TimeUnit.NANOSECONDS.toSeconds(timeTaken));
 
             return false;
         }

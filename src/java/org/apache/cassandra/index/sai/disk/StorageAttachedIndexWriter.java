@@ -195,7 +195,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     public void complete(SSTable sstable)
     {
 
-        tableMetrics.updateStorageAttachedIndexWritingTime(totalTimeSpent);
+        tableMetrics.updateStorageAttachedIndexWritingTime(totalTimeSpent, opType);
 
         if (aborted) return;
 

@@ -55,6 +55,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -210,7 +211,11 @@ public class TableMetrics
     public final MovingAverage flushTimePerKb;
     /** Time spent in flushing memtables */
     public final TableHistogram flushTime;
-    public final TableHistogram storageAttachedIndexWritingTime;
+    public final TableHistogram storageAttachedIndexRebuildTime;
+    public final TableHistogram storageAttachedIndexWritingTimeForIndexBuild;
+    public final TableHistogram storageAttachedIndexWritingTimeForCompaction;
+    public final TableHistogram storageAttachedIndexWritingTimeForFlush;
+    public final TableHistogram storageAttachedIndexWritingTimeForOther;
     /** Total number of bytes inserted into memtables since server [re]start. */
     public final Counter bytesInserted;
     /** Total number of bytes written by compaction since server [re]start */
@@ -731,7 +736,11 @@ public class TableMetrics
         flushSegmentCount = ExpMovingAverage.decayBy1000();
         flushTimePerKb = ExpMovingAverage.decayBy100();
         flushTime = createTableHistogram("FlushTime", cfs.getKeyspaceMetrics().flushTime, false);
-        storageAttachedIndexWritingTime = createTableHistogram("StorageAttachedIndexWritingTime", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTime, false);
+        storageAttachedIndexRebuildTime = createTableHistogram("StorageAttachedIndexRebuildTime", cfs.getKeyspaceMetrics().storageAttachedIndexRebuildTime, false);
+        storageAttachedIndexWritingTimeForIndexBuild = createTableHistogram("StorageAttachedIndexWritingTime", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForIndexBuild, false);
+        storageAttachedIndexWritingTimeForCompaction = createTableHistogram("StorageAttachedIndexWritingTimeForCompaction", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForCompaction, false);
+        storageAttachedIndexWritingTimeForFlush = createTableHistogram("StorageAttachedIndexWritingTimeForFlush", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForFlush, false);
+        storageAttachedIndexWritingTimeForOther= createTableHistogram("StorageAttachedIndexWritingTimeForOther", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForOther, false);
         bytesInserted = createTableCounter("BytesInserted");
 
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
@@ -1109,9 +1118,22 @@ public class TableMetrics
         flushTime.update(elapsedNanos);
     }
 
-    public void updateStorageAttachedIndexWritingTime(long totalTimeSpentNanos)
+    public void updateStorageAttachedIndexWritingTime(long totalTimeSpentNanos, OperationType opType)
     {
-        storageAttachedIndexWritingTime.update(totalTimeSpentNanos);
+        switch (opType)
+        {
+            case INDEX_BUILD:
+                storageAttachedIndexWritingTimeForIndexBuild.update(totalTimeSpentNanos);
+                break;
+            case COMPACTION:
+                storageAttachedIndexWritingTimeForCompaction.update(totalTimeSpentNanos);
+                break;
+            case FLUSH:
+                storageAttachedIndexWritingTimeForFlush.update(totalTimeSpentNanos);
+                break;
+            default:
+                storageAttachedIndexWritingTimeForOther.update(totalTimeSpentNanos);
+        }
     }
 
     public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)

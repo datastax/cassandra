@@ -83,9 +83,13 @@ public class KeyspaceMetrics
     public final Histogram tombstoneScannedHistogram;
     /** Time spent flushing memtables */
     public final Histogram flushTime;
+    public final Histogram storageAttachedIndexRebuildTime;
 
     /** Time spent writing SAI */
-    public final Histogram storageAttachedIndexWritingTime;
+    public final Histogram storageAttachedIndexWritingTimeForIndexBuild;
+    public final Histogram storageAttachedIndexWritingTimeForCompaction;
+    public final Histogram storageAttachedIndexWritingTimeForFlush;
+    public final Histogram storageAttachedIndexWritingTimeForOther;
 
     /** Time spent writing  memtables during compaction */
     public final Histogram compactionTime;
@@ -227,7 +231,11 @@ public class KeyspaceMetrics
         sstablesPerReadHistogram = createKeyspaceHistogram("SSTablesPerReadHistogram", true);
         tombstoneScannedHistogram = createKeyspaceHistogram("TombstoneScannedHistogram", false);
         flushTime = createKeyspaceHistogram("FlushTime", false);
-        storageAttachedIndexWritingTime = createKeyspaceHistogram("StorageAttachedIndexWritingTime", false);
+        storageAttachedIndexRebuildTime = createKeyspaceHistogram("StorageAttachedIndexRebuildTime", false);
+        storageAttachedIndexWritingTimeForIndexBuild = createKeyspaceHistogram("StorageAttachedIndexWritingTimeIndexBuild", false);
+        storageAttachedIndexWritingTimeForCompaction = createKeyspaceHistogram("StorageAttachedIndexWritingTimeCompaction", false);
+        storageAttachedIndexWritingTimeForFlush = createKeyspaceHistogram("StorageAttachedIndexWritingTimeFlush", false);
+        storageAttachedIndexWritingTimeForOther = createKeyspaceHistogram("StorageAttachedIndexWritingTimeOther", false);
         compactionTime = createKeyspaceHistogram("CompactionTime", false);
         shadowedKeysScannedHistogram = createKeyspaceHistogram("ShadowedKeysScannedHistogram", false);
         shadowedKeysLoopsHistogram = createKeyspaceHistogram("ShadowedKeysLoopsHistogram", false);
