@@ -29,6 +29,8 @@ import java.util.Set;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import org.apache.commons.lang3.ArrayUtils;
+
 import com.googlecode.concurrenttrees.radix.ConcurrentRadixTree;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -232,6 +234,7 @@ public class TypeUtil
         return v -> type.asComparableBytes(ByteBufferAccessor.instance, value, v, terminator);
     }
 
+
     /**
      * Fills a byte array with the comparable bytes for a type.
      * <p>
@@ -274,6 +277,8 @@ public class TypeUtil
             return encodeDecimal(value);
         return value;
     }
+
+
 
     /**
      * Compare two terms based on their type. This is used in place of {@link AbstractType#compare(ByteBuffer, ByteBuffer)}
@@ -465,6 +470,40 @@ public class TypeUtil
         return ByteBuffer.wrap(bytes);
     }
 
+
+    public static ByteBuffer decodeBigInteger(ByteBuffer encoded)
+    {
+        byte[] bytes = new byte[20];
+        encoded.get(bytes);
+
+        // Undo the XOR operation on the first byte
+        bytes[0] ^= 0x80;
+
+        // Extract the size (the first 4 bytes)
+        int size = ((bytes[0] & 0xff) << 24) | ((bytes[1] & 0xff) << 16) | ((bytes[2] & 0xff) << 8) | (bytes[3] & 0xff);
+
+        boolean isNegative = size < 0;
+        if (isNegative)
+            size = -size;
+
+        ByteBuffer result;
+        if (size < 16)
+        {
+            int offset = 20 - size;
+            result = ByteBuffer.wrap(Arrays.copyOfRange(bytes, offset, 20));
+        }
+        else
+        {
+            // Size >= 16 means we extract 16 bytes starting from index 4
+            var resultBytes = new byte[size];
+            System.arraycopy(bytes, 4, resultBytes, 0, 16);
+            result = ByteBuffer.wrap(resultBytes);
+        }
+
+        return result;
+    }
+
+
     /* Type comparison to get rid of ReversedType */
 
     /**
@@ -581,6 +620,11 @@ public class TypeUtil
         return ByteBuffer.wrap(data);
     }
 
+    public static ByteBuffer decodeDecimal(ByteBuffer value)
+    {
+        var peekableValue = ByteSource.peekable(ByteSource.fixedLength(value));
+        return DecimalType.instance.fromComparableBytes(peekableValue, ByteComparable.Version.OSS41);
+    }
 
 
     /**
