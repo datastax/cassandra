@@ -43,7 +43,6 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
  * Approximates a statistical distribution of term values in a sstable index segment.
@@ -60,13 +59,14 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 @Immutable
 public class TermsDistribution
 {
+    // Unless stated otherwise, all ByteBuffer used in this class are in byte-comparable encoding.
+
     // Special virtual bucket placed before all the other buckets of the histogram.
     // Can be considered a bucket at index -1. The existence of this instance allows us to never return null
     // when looking up the bucket by an index and simplifies the code.
     private static final Bucket MIN_BUCKET = new Bucket(null, 0, 0);
 
     final AbstractType<?> termType;
-    final Comparator<ByteBuffer> termComparator;
     final ByteBuffer minTerm;
     final ByteBuffer maxTerm;
     final List<Bucket> histogram;
@@ -78,7 +78,6 @@ public class TermsDistribution
     private TermsDistribution(AbstractType<?> termType, List<Bucket> histogram, NavigableMap<ByteBuffer, Long> mostFrequentTerms)
     {
         this.termType = termType;
-        this.termComparator = ByteComparable::compare;
         this.histogram = histogram;
         this.mostFrequentTerms = mostFrequentTerms;
 
@@ -88,6 +87,11 @@ public class TermsDistribution
         this.maxTerm = histogram.isEmpty() ? null : histogram.get(histogram.size() - 1).term;
     }
 
+    /**
+     * Estimates the number of values equal to the given term.
+     *
+     * @param term term encoded as byte-comparable
+     */
     public long estimateNumRowsMatchingExact(ByteBuffer term)
     {
         Long count = mostFrequentTerms.get(term);
@@ -111,6 +115,9 @@ public class TermsDistribution
     /**
      * Estimates the number of rows with a value in given range.
      * Allows to specify inclusiveness/exclusiveness of bounds.
+     *
+     * @param min byte-comparable encoded min bound
+     * @param max byte-comparable encoded max bound
      */
     public long estimateNumRowsInRange(ByteBuffer min, boolean minInclusive, ByteBuffer max, boolean maxInclusive)
     {
@@ -127,8 +134,8 @@ public class TermsDistribution
     /**
      * Estimates the number of rows with a value in given range.
      *
-     * @param min exclusive minimum bound
-     * @param max inclusive maximum bound
+     * @param min byte-comparable encoded minimum bound (exclusive)
+     * @param max byte-comparable encoded maximum bound (inclusive)
      */
     public long estimateNumRowsInRange(ByteBuffer min, ByteBuffer max)
     {
@@ -262,7 +269,7 @@ public class TermsDistribution
     private int indexOfBucketContaining(@Nonnull ByteBuffer b)
     {
         Bucket needle = new Bucket(b, 0, 0);
-        int index = Collections.binarySearch(histogram, needle, (b1, b2) -> termComparator.compare(b1.term, b2.term));
+        int index = Collections.binarySearch(histogram, needle, (b1, b2) -> ByteComparable.compare(b1.term, b2.term));
         return (index >= -1) ? index : -(index + 1);
     }
 
@@ -369,9 +376,11 @@ public class TermsDistribution
 
         /**
          * Adds a point to the histogram.
-         * Points must be added in ascending order of term values
-         * (termValues are bytecomparable).
+         * Terms must be added in ascending order of term values matching the order of the index.
+         * Terms must be encoded as byte-comparable, because they are compared lexicographically by unsigned bytes.
          * If the order is not preserved, the behavior is undefined.
+         *
+         * @param term encoded term
          */
         public void add(ByteBuffer term, long rowCount)
         {
