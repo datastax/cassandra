@@ -67,7 +67,7 @@ public interface SSTableWatcher
     /**
      * Called when an index built is completed. This is currenly used only for metrics.
      */
-    default void onIndonIndexBuildCompleted(SSTableReader sstable, Set<? extends Index> indexes, long indexBuildStartTimeNanos, Throwable errorOccurred)
+    default void onIndexBuildCompleted(SSTableReader sstable, Set<? extends Index> indexes, long indexBuildStartTimeNanos, Throwable errorOccurred)
     {
     }
 

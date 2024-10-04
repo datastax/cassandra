@@ -264,7 +264,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
         finally
         {
-            SSTableWatcher.instance.onIndonIndexBuildCompleted(sstable, indexes, indexBuildStartTimeNanos, errorOccurred);
+            SSTableWatcher.instance.onIndexBuildCompleted(sstable, indexes, indexBuildStartTimeNanos, errorOccurred);
 
             ref.release();
             // release current lock in case of error
