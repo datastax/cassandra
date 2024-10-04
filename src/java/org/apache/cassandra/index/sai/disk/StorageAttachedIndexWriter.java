@@ -194,6 +194,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     @Override
     public void complete(SSTable sstable)
     {
+        long startComplete = ApproximateTime.nanoTime();
         try
         {
             if (aborted) return;
@@ -271,6 +272,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         }
         finally
         {
+            totalTimeSpent += (ApproximateTime.nanoTime() - startComplete);
             tableMetrics.updateStorageAttachedIndexWritingTime(totalTimeSpent, opType);
         }
     }
