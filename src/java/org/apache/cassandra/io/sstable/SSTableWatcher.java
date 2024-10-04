@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.Set;
 
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
@@ -60,6 +61,13 @@ public interface SSTableWatcher
      * Called before executing index build on existing sstable
      */
     default void onIndexBuild(SSTableReader sstable)
+    {
+    }
+
+    /**
+     * Called when an index built is completed. This is currenly used only for metrics.
+     */
+    default void onIndonIndexBuildCompleted(SSTableReader sstable, Set<? extends Index> indexes, long indexBuildStartTimeNanos, Throwable errorOccurred)
     {
     }
 

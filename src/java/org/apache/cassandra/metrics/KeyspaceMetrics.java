@@ -81,6 +81,11 @@ public class KeyspaceMetrics
     public final Histogram sstablesPerReadHistogram;
     /** Tombstones scanned in queries on this Keyspace */
     public final Histogram tombstoneScannedHistogram;
+    /** Time spent flushing memtables */
+    public final Histogram flushTime;
+
+    /** Time spent writing  memtables during compaction */
+    public final Histogram compactionTime;
 
     /** Shadowed keys scan metrics **/
     public final Histogram shadowedKeysScannedHistogram;
@@ -218,6 +223,8 @@ public class KeyspaceMetrics
         // create histograms for TableMetrics to replicate updates to
         sstablesPerReadHistogram = createKeyspaceHistogram("SSTablesPerReadHistogram", true);
         tombstoneScannedHistogram = createKeyspaceHistogram("TombstoneScannedHistogram", false);
+        flushTime = createKeyspaceHistogram("FlushTime", false);
+        compactionTime = createKeyspaceHistogram("CompactionTime", false);
         shadowedKeysScannedHistogram = createKeyspaceHistogram("ShadowedKeysScannedHistogram", false);
         shadowedKeysLoopsHistogram = createKeyspaceHistogram("ShadowedKeysLoopsHistogram", false);
         liveScannedHistogram = createKeyspaceHistogram("LiveScannedHistogram", false);

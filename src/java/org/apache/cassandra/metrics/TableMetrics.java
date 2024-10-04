@@ -208,6 +208,8 @@ public class TableMetrics
     public final MovingAverage flushSegmentCount;
     /** The average duration per 1Kb of data flushed, in nanoseconds. */
     public final MovingAverage flushTimePerKb;
+    /** Time spent in flushing memtables */
+    public final TableHistogram flushTime;
     /** Total number of bytes inserted into memtables since server [re]start. */
     public final Counter bytesInserted;
     /** Total number of bytes written by compaction since server [re]start */
@@ -216,6 +218,8 @@ public class TableMetrics
     public final Counter compactionBytesRead;
     /** The average duration per 1Kb of data compacted, in nanoseconds. */
     public final MovingAverage compactionTimePerKb;
+    /** Time spent in writing sstables during compaction  */
+    public final TableHistogram compactionTime;
     /** Estimate of number of pending compactions for this table */
     public final Gauge<Integer> pendingCompactions;
     /** Number of SSTables on disk for this CF */
@@ -725,11 +729,13 @@ public class TableMetrics
         flushSizeOnDisk = ExpMovingAverage.decayBy1000();
         flushSegmentCount = ExpMovingAverage.decayBy1000();
         flushTimePerKb = ExpMovingAverage.decayBy100();
+        flushTime = createTableHistogram("FlushTime", cfs.getKeyspaceMetrics().flushTime, false);
         bytesInserted = createTableCounter("BytesInserted");
 
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
         compactionBytesRead = createTableCounter("CompactionBytesRead");
         compactionTimePerKb = ExpMovingAverage.decayBy100();
+        compactionTime = createTableHistogram("CompactionTime", cfs.getKeyspaceMetrics().compactionTime, false);
         pendingCompactions = createTableGauge("PendingCompactions", () -> cfs.getCompactionStrategy().getEstimatedRemainingTasks());
         liveSSTableCount = createTableGauge("LiveSSTableCount", () -> cfs.getLiveSSTables().size());
         oldVersionSSTableCount = createTableGauge("OldVersionSSTableCount", new Gauge<Integer>()
@@ -1098,6 +1104,7 @@ public class TableMetrics
         flushSize.update(outputSize);
         // this assumes that at least 1 Kb was flushed, which should always be the case, then rounds down
         flushTimePerKb.update(elapsedNanos / (double) Math.max(1, inputSize / 1024L));
+        flushTime.update(elapsedNanos);
     }
 
     public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)
@@ -1106,7 +1113,10 @@ public class TableMetrics
         compactionBytesWritten.inc(outputDiskSize);
         // only update compactionTimePerKb when there are non-expired sstables (inputDiskSize > 0)
         if (inputDiskSize > 0)
+        {
             compactionTimePerKb.update(1024.0 * elapsedNanos / inputDiskSize);
+            compactionTime.update(elapsedNanos);
+        }
     }
 
     public void updateSSTableIterated(int count, int intersectingCount, long elapsedNanos)
