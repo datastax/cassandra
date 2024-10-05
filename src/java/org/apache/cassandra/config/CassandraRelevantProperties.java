@@ -806,6 +806,10 @@ public enum CassandraRelevantProperties
      * To provide custom implementation to prioritize compaction tasks in UCS
      */
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
+    /**
+     * whether to include non-data files size into compaction space estimaton in UCS
+     */
+    UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
     UCS_DATASET_SIZE("unified_compaction.dataset_size"),
     UCS_IS_REPLICA_AWARE("unified_compaction.is_replica_aware"),
     UCS_L0_SHARDS_ENABLED("unified_compaction.l0_shards_enabled", "true"),
