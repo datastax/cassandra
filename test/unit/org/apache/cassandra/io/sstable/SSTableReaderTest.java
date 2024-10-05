@@ -95,6 +95,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.MmappedRegions;
 import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.schema.CachingParams;
@@ -1369,6 +1370,21 @@ public class SSTableReaderTest
         for (Component component : nonDataPrimaryComponents)
             sstable.descriptor.fileFor(component).delete();
         checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, false, numKeys, false);
+    }
+
+    @Test
+    public void testOnDiskComponentsSize()
+    {
+        final int numKeys = 1000;
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
+
+        SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
+        assertEquals(sstable.onDiskLength(), FileUtils.size(sstable.descriptor.pathFor(Components.DATA)));
+
+        assertTrue(sstable.components().contains(Components.DATA));
+        assertTrue(sstable.components().size() > 1);
+        assertTrue(sstable.onDiskComponentsSize() > sstable.onDiskLength());
     }
 
     private void checkSSTableOpenedWithGivenFPChance(ColumnFamilyStore cfs, SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys, boolean expectRecreated) throws IOException
