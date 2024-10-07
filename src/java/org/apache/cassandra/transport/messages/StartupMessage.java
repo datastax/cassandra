@@ -22,6 +22,7 @@ import java.util.Map;
 
 import io.netty.buffer.ByteBuf;
 
+import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
@@ -122,8 +123,9 @@ public class StartupMessage extends Message.Request
             clientState.setDriverVersion(options.get(DRIVER_VERSION));
         }
 
-        if (DatabaseDescriptor.getAuthenticator().requireAuthentication())
-            return new AuthenticateMessage(DatabaseDescriptor.getAuthenticator().getClass().getName());
+        IAuthenticator authenticator = DatabaseDescriptor.getAuthenticator();
+        if (authenticator.requireAuthentication())
+            return authenticator.getAuthenticateMessage(clientState);
         else
             return new ReadyMessage();
     }
