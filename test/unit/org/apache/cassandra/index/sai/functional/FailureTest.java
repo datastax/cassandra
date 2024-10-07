@@ -116,7 +116,7 @@ public class FailureTest extends SAITester
         Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_creation", SSTableContext.class, "<init>", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
 
-        String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+        String v2IndexName = createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
         // Verify that the initial index build fails...
         verifyInitialIndexFailed(v2IndexName);
