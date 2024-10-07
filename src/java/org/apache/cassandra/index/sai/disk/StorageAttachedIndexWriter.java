@@ -330,7 +330,10 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
     private void addRow(Row row) throws IOException, TrieSpaceExhaustedException
     {
-        long now = ApproximateTime.nanoTime();
+        // we are using System.nanoTime() instead of ApproximateTime.nanoTime() here because
+        // it is verify likely that this method takes microsecronds instead of milliseconds
+        // and ApproximateTime.nanoTime() precision is 2 milliseconds
+        long now = System.nanoTime();
         PrimaryKey primaryKey = primaryKeyFactory.create(currentKey, row.clustering());
         perSSTableWriter.nextRow(primaryKey);
         rowMapping.add(primaryKey, sstableRowId);
@@ -341,6 +344,6 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         }
         sstableRowId++;
 
-        totalTimeSpent += (ApproximateTime.nanoTime() - now);
+        totalTimeSpent += (System.nanoTime() - now);
     }
 }

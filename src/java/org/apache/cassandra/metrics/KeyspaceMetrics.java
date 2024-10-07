@@ -232,10 +232,10 @@ public class KeyspaceMetrics
         tombstoneScannedHistogram = createKeyspaceHistogram("TombstoneScannedHistogram", false);
         flushTime = createKeyspaceHistogram("FlushTime", false);
         storageAttachedIndexRebuildTime = createKeyspaceHistogram("StorageAttachedIndexRebuildTime", false);
-        storageAttachedIndexWritingTimeForIndexBuild = createKeyspaceHistogram("StorageAttachedIndexWritingTimeIndexBuild", false);
-        storageAttachedIndexWritingTimeForCompaction = createKeyspaceHistogram("StorageAttachedIndexWritingTimeCompaction", false);
-        storageAttachedIndexWritingTimeForFlush = createKeyspaceHistogram("StorageAttachedIndexWritingTimeFlush", false);
-        storageAttachedIndexWritingTimeForOther = createKeyspaceHistogram("StorageAttachedIndexWritingTimeOther", false);
+        storageAttachedIndexWritingTimeForIndexBuild = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForIndexBuild", false);
+        storageAttachedIndexWritingTimeForCompaction = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForCompaction", false);
+        storageAttachedIndexWritingTimeForFlush = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForFlush", false);
+        storageAttachedIndexWritingTimeForOther = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForOther", false);
         compactionTime = createKeyspaceHistogram("CompactionTime", false);
         shadowedKeysScannedHistogram = createKeyspaceHistogram("ShadowedKeysScannedHistogram", false);
         shadowedKeysLoopsHistogram = createKeyspaceHistogram("ShadowedKeysLoopsHistogram", false);

@@ -737,7 +737,7 @@ public class TableMetrics
         flushTimePerKb = ExpMovingAverage.decayBy100();
         flushTime = createTableHistogram("FlushTime", cfs.getKeyspaceMetrics().flushTime, false);
         storageAttachedIndexRebuildTime = createTableHistogram("StorageAttachedIndexRebuildTime", cfs.getKeyspaceMetrics().storageAttachedIndexRebuildTime, false);
-        storageAttachedIndexWritingTimeForIndexBuild = createTableHistogram("StorageAttachedIndexWritingTime", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForIndexBuild, false);
+        storageAttachedIndexWritingTimeForIndexBuild = createTableHistogram("StorageAttachedIndexWritingTimeForIndexBuild", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForIndexBuild, false);
         storageAttachedIndexWritingTimeForCompaction = createTableHistogram("StorageAttachedIndexWritingTimeForCompaction", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForCompaction, false);
         storageAttachedIndexWritingTimeForFlush = createTableHistogram("StorageAttachedIndexWritingTimeForFlush", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForFlush, false);
         storageAttachedIndexWritingTimeForOther= createTableHistogram("StorageAttachedIndexWritingTimeForOther", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForOther, false);
