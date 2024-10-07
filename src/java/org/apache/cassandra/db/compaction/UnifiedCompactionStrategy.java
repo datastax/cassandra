@@ -1085,6 +1085,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 logger.trace("Creating compaction aggregate with sstable set {}", sstables);
 
 
+            // Note that adjacent overlap sets may include deduplicated sstable
             List<Set<CompactionSSTable>> overlaps = Overlaps.constructOverlapSets(sstables,
                                                                                   UnifiedCompactionStrategy::startsAfter,
                                                                                   CompactionSSTable.firstKeyComparator,
