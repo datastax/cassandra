@@ -31,6 +31,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.ReadFailureException;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.IndexBuildDecider;
@@ -51,6 +52,7 @@ import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class IndexBuildDeciderTest extends SAITester
@@ -61,9 +63,10 @@ public class IndexBuildDeciderTest extends SAITester
               .build();
 
     @BeforeClass
-    public static void init()
+    public static void setUpClass()
     {
-        CUSTOM_INDEX_BUILD_DECIDER.setString(IndexBuildDeciderWithoutInitialBuild.class.getName()); 
+        CUSTOM_INDEX_BUILD_DECIDER.setString(IndexBuildDeciderWithoutInitialBuild.class.getName());
+        CQLTester.setUpClass();
     }
 
     @AfterClass
@@ -86,7 +89,7 @@ public class IndexBuildDeciderTest extends SAITester
     }
 
     @Test
-    public void testNoInitialBuildWithSAI() throws Throwable
+    public void testNoInitialBuildWithSAI()
     {
         createTable(CREATE_TABLE_TEMPLATE);
 
@@ -105,13 +108,14 @@ public class IndexBuildDeciderTest extends SAITester
 
         // create index: it's not queryable because IndexBuildDeciderWithoutInitialBuild skipped the initial build and
         // didn't consider the index queryable because there was already one sstable
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         Awaitility.await("Index is not queryable")
                   .pollDelay(5, TimeUnit.SECONDS)
                   .until(() -> !isIndexQueryable());
         assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v1>=0")).isInstanceOf(ReadFailureException.class);
 
         StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore());
+        assertNotNull(group);
         SSTableContextManager sstableContext = group.sstableContextManager();
 
         // given there was no index build, the initial sstable has no index files
@@ -124,19 +128,21 @@ public class IndexBuildDeciderTest extends SAITester
         assertEquals(0, flushWithMemtableIndexWriterCount.get());
 
         // check the second sstable flushed at index creation is now indexed:
-        SSTableReader secondSSTable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable).findFirst().get();
+        SSTableReader secondSSTable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable).findFirst().orElse(null);
+        assertNotNull(secondSSTable);
         assertEquals(initialSSTableFileCount + numericIndexFileCount(), sstableFileCount(secondSSTable));
         assertTrue(sstableContext.contains(secondSSTable));
 
         // SAI#canFlushFromMemtableIndex should be true
-        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
+        StorageAttachedIndex sai = group.getIndexes().iterator().next();
         assertTrue(sai.canFlushFromMemtableIndex());
 
         // flush another memtable: it should be flushed with MemtableIndexWriter
         execute("INSERT INTO %s (id1, v1) VALUES (?, ?)", String.valueOf(0), 0);
         flush();
         assertEquals(1, flushWithMemtableIndexWriterCount.get());
-        SSTableReader thirdSStable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable && s != secondSSTable).findFirst().get();
+        SSTableReader thirdSStable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable && s != secondSSTable).findFirst().orElse(null);
+        assertNotNull(thirdSStable);
 
         assertEquals(initialSSTableFileCount + numericIndexFileCount(), sstableFileCount(thirdSStable));
         assertTrue(sstableContext.contains(thirdSStable));
