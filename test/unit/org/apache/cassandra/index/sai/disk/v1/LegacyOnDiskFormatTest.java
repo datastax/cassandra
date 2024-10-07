@@ -144,7 +144,7 @@ public class LegacyOnDiskFormatTest
     public void canCreateAndUsePrimaryKeyMapWithLegacyFormat() throws Throwable
     {
         var perSSTableComponents = indexDescriptor.perSSTableComponents();
-        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.version().onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
 
         PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
 
