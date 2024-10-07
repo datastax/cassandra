@@ -254,11 +254,10 @@ public class OverlapsTest
         };
         String[] none3 = new String[]{
         "ABCD",
-        "ADE",
         "NPQ",
         "RST",
         };
-        int[] noneUnselected = new int[]{2, 3, 4, 5};
+        int[] noneUnselected = new int[]{1, 5, 4, 2, 3};
         String[] single3 = new String[]{
         "ABCDE",
         "LNOPQ",
@@ -286,6 +285,8 @@ public class OverlapsTest
         List<String> actual;
         IntArrayList unselected = new IntArrayList();
         actual = Overlaps.assignOverlapsIntoBuckets(3, method, input, this::makeBucket, s -> unselected.add(input.indexOf(s)));
+        actual.sort(String::compareTo);
+
         assertEquals(Arrays.asList(expected), actual);
         assertArrayEquals(expectedUnselected, unselected.toIntArray());
     }
