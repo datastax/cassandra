@@ -1749,4 +1749,12 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         for (int idx : objectAllocator.indexesInPipeline())
             setContent(~idx, null);
     }
+
+    /**
+     * Returns the number of values in the trie
+     */
+    public int valuesCount()
+    {
+        return contentCount;
+    }
 }

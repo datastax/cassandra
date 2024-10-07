@@ -624,7 +624,7 @@ public class TypeUtil
 
     public static ByteBuffer decodeDecimal(ByteBuffer value)
     {
-        var peekableValue = ByteSource.peekable(ByteSource.fixedLength(value));
+        var peekableValue = ByteSource.peekable(ByteSource.preencoded(value));
         return DecimalType.instance.fromComparableBytes(peekableValue, ByteComparable.Version.OSS41);
     }
 
@@ -649,7 +649,7 @@ public class TypeUtil
         if (valueType instanceof NumberType)
         {
             var numberType = (NumberType<?>) valueType;
-            var bs = ByteSource.fixedLength(value);
+            var bs = ByteSource.preencoded(value);
             return numberType.toBigDecimal(valueType.fromComparableBytes(ByteSource.peekable(bs), ByteComparable.Version.OSS41));
         }
 

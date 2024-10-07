@@ -30,10 +30,6 @@ import java.util.Objects;
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.DecimalType;
-import org.apache.cassandra.db.marshal.InetAddressType;
-import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
@@ -43,7 +39,6 @@ import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
 
@@ -60,7 +55,6 @@ public class SegmentMetadataBuilder
 
     private final long segmentRowIdOffset;
 
-    private final AbstractType<?> validator;
     private final List<Closeable> interceptors = new ArrayList<>();
 
     private boolean built = false;
@@ -84,7 +78,6 @@ public class SegmentMetadataBuilder
     {
         IndexContext context = Objects.requireNonNull(components.context());
         this.segmentRowIdOffset = segmentRowIdOffset;
-        this.validator = Objects.requireNonNull(components.context(), "Context must be set").getValidator();
 
         int histogramSize = context.getIntOption(HISTOGRAM_SIZE_OPTION, 128);
         int mostFrequentTermsCount = context.getIntOption(MFT_COUNT_OPTION, 128);
@@ -372,20 +365,6 @@ public class SegmentMetadataBuilder
             {
                 builder.add(ByteBuffer.wrap(lastTerm), count);
             }
-        }
-
-        /**
-         * Converts the term values coming from the index into a proper byte comparable values.
-         * This is needed because values of some types are stored in the index using their
-         * raw serializations, without encoding; but some others use byte comparable serialization.
-         */
-        private ByteComparable encodeIfNeeded(byte[] term)
-        {
-            AbstractType<?> type = builder.validator;
-            if (type instanceof InetAddressType || type instanceof IntegerType || type instanceof DecimalType)
-                return (v) -> type.asComparableBytes(ByteBuffer.wrap(term), v);
-
-            return (v) -> ByteSource.fixedLength(term);
         }
 
     }
