@@ -19,6 +19,7 @@
 package org.apache.cassandra.utils;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -27,6 +28,7 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
+import java.util.stream.IntStream;
 
 public class Overlaps
 {
@@ -104,10 +106,15 @@ public class Overlaps
     }
 
     /**
-     * Assign overlap sections into buckets. Identify sections that have at least threshold-many overlapping
+     * Assign overlap sections into buckets Identify sections that have at least threshold-many overlapping
      * items and apply the overlap inclusion method to combine with any neighbouring sections that contain
      * selected sstables to make sure we make full use of any sstables selected for compaction (i.e. avoid
      * recompacting, see {@link org.apache.cassandra.db.compaction.unified.Controller#overlapInclusionMethod()}).
+     *
+     * For non-transitive inclusionMethod the order in which we select the buckets matters because an sstables that
+     * spans overlap sets could be chosen for only one of the candidate buckets
+     *      * containing it. To make the most efficient selection we thus perform it by descending size, starting with the
+     *      * sets with most overlap.
      *
      * @param threshold       Threshold for selecting a bucket. Sets below this size will be ignored, unless they need
      *                        to be grouped with a neighboring set due to overlap.
@@ -124,6 +131,104 @@ public class Overlaps
                                                            BucketMaker<E, B> bucketer,
                                                            Consumer<Set<E>> unselectedHandler)
     {
+        switch (inclusionMethod)
+        {
+            case TRANSITIVE:
+                return assignOverlapsTransitive(threshold, overlaps, bucketer, unselectedHandler);
+            case SINGLE:
+            case NONE:
+                return assignOverlapsSingleOrNone(threshold, inclusionMethod, overlaps, bucketer, unselectedHandler);
+            default:
+                throw new UnsupportedOperationException(inclusionMethod + " is not supported");
+        }
+    }
+
+    private static <E, B> List<B> assignOverlapsSingleOrNone(int threshold,
+                                                             InclusionMethod inclusionMethod,
+                                                             List<Set<E>> overlaps,
+                                                             BucketMaker<E, B> bucketer,
+                                                             Consumer<Set<E>> unselectedHandler)
+    {
+        List<B> buckets = new ArrayList<>();
+        int regionCount = overlaps.size();
+        SortingIterator<Integer> bySize = new SortingIterator<>((a, b) -> Integer.compare(overlaps.get(b).size(),
+                                                                                          overlaps.get(a).size()),
+                                                                overlaps.isEmpty() ? new Integer[1] : IntStream.range(0, overlaps.size()).boxed().toArray());
+
+        BitSet used = new BitSet(overlaps.size());
+        while (bySize.hasNext())
+        {
+            final int i = bySize.next();
+            if (used.get(i))
+                continue;
+
+            Set<E> bucket = overlaps.get(i);
+            if (bucket.size() < threshold)
+                break;  // no more buckets will be above threshold
+            used.set(i);
+
+            Set<E> allOverlapping = bucket;
+            int j = i - 1;
+            int k = i + 1;
+            int startIndex = i;
+            int endIndex = i + 1;
+            // expand to include neighbors that intersect with current bucket
+            if (inclusionMethod == InclusionMethod.SINGLE)
+            {
+                // expand the bucket to include all overlapping sets
+                allOverlapping = new HashSet<>(bucket);
+                Set<E> overlapTarget = bucket;
+                for (; j >= 0 && !used.get(j); --j)
+                {
+                    Set<E> next = overlaps.get(j);
+                    if (!setsIntersect(next, overlapTarget))
+                        break;
+                    allOverlapping.addAll(next);
+                    used.set(j);
+                }
+                startIndex = j + 1;
+                for (; k < regionCount && !used.get(k); ++k)
+                {
+                    Set<E> next = overlaps.get(k);
+                    if (!setsIntersect(next, overlapTarget))
+                        break;
+                    allOverlapping.addAll(next);
+                    used.set(k);
+                }
+                endIndex = k;
+            }
+            // Now mark all overlapping with the extended as used
+            Set<E> overlapTarget = allOverlapping;
+            for (; j >= 0 && !used.get(j); --j)
+            {
+                Set<E> next = overlaps.get(j);
+                if (!setsIntersect(next, overlapTarget))
+                    break;
+                used.set(j);
+                unselectedHandler.accept(next);
+            }
+            for (; k < regionCount && !used.get(k); ++k)
+            {
+                Set<E> next = overlaps.get(k);
+                if (!setsIntersect(next, overlapTarget))
+                    break;
+                used.set(k);
+                unselectedHandler.accept(next);
+            }
+            buckets.add(bucketer.makeBucket(overlaps, startIndex, endIndex));
+        }
+
+        for (int i = used.nextClearBit(0); i < regionCount; i = used.nextClearBit(i + 1))
+            unselectedHandler.accept(overlaps.get(i));
+
+        return buckets;
+    }
+
+    private static <E, B> List<B> assignOverlapsTransitive(int threshold,
+                                                           List<Set<E>> overlaps,
+                                                           BucketMaker<E, B> bucketer,
+                                                           Consumer<Set<E>> unselectedHandler)
+    {
         List<B> buckets = new ArrayList<>();
         int regionCount = overlaps.size();
         int lastEnd = 0;
@@ -133,34 +238,29 @@ public class Overlaps
             int maxOverlap = bucket.size();
             if (maxOverlap < threshold)
                 continue;
-            int startIndex = i;
-            int endIndex = i + 1;
 
-            if (inclusionMethod != InclusionMethod.NONE)
+            // expand to include neighbors that intersect with expanded buckets
+            Set<E> allOverlapping = new HashSet<>(bucket);
+            Set<E> overlapTarget = allOverlapping;
+            int j;
+            for (j = i - 1; j >= lastEnd; --j)
             {
-                Set<E> allOverlapping = new HashSet<>(bucket);
-                Set<E> overlapTarget = inclusionMethod == InclusionMethod.TRANSITIVE
-                                       ? allOverlapping
-                                       : bucket;
-                int j;
-                for (j = i - 1; j >= lastEnd; --j)
-                {
-                    Set<E> next = overlaps.get(j);
-                    if (!setsIntersect(next, overlapTarget))
-                        break;
-                    allOverlapping.addAll(next);
-                }
-                startIndex = j + 1;
-                for (j = i + 1; j < regionCount; ++j)
-                {
-                    Set<E> next = overlaps.get(j);
-                    if (!setsIntersect(next, overlapTarget))
-                        break;
-                    allOverlapping.addAll(next);
-                }
-                i = j - 1;
-                endIndex = j;
+                Set<E> next = overlaps.get(j);
+                if (!setsIntersect(next, overlapTarget))
+                    break;
+                allOverlapping.addAll(next);
             }
+            int startIndex = j + 1;
+            for (j = i + 1; j < regionCount; ++j)
+            {
+                Set<E> next = overlaps.get(j);
+                if (!setsIntersect(next, overlapTarget))
+                    break;
+                allOverlapping.addAll(next);
+            }
+            i = j - 1;
+            int endIndex = j;
+
             buckets.add(bucketer.makeBucket(overlaps, startIndex, endIndex));
             for (int k = lastEnd; k < startIndex; ++k)
                 unselectedHandler.accept(overlaps.get(k));
