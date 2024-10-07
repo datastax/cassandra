@@ -537,6 +537,19 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public Callable<?> getUnloadTask()
+    {
+        return () ->
+        {
+            // mark index as invalid, in-progress SSTableIndexWriters will abort
+            valid = false;
+
+            indexContext.invalidate(false);
+            return null;
+        };
+    }
+
+    @Override
     public Callable<?> getPreJoinTask(boolean hadBootstrap)
     {
         /*
