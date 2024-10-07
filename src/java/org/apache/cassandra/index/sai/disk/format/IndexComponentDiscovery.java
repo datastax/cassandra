@@ -46,13 +46,15 @@ import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
- * Helper methods/classes used by `IndexDescriptor` to discover, from disk, the index components that a sstable has.
+ * Handles "discovering" SAI index components files from disk for a given sstable.
  * <p>
- * Not meant to be exposed outside this package; the public facing API for components is {@link IndexDescriptor}.
+ * This is used by {@link IndexDescriptor} and should rarely, if ever, be used directly, but it is exposed publicly to
+ * make the logic "pluggable" (typically for tiered-storage that may not store files directly on disk and thus require
+ * some specific abstraction).
  */
-class ComponentDiscovery
+class IndexComponentDiscovery
 {
-    private static final Logger logger = LoggerFactory.getLogger(ComponentDiscovery.class);
+    private static final Logger logger = LoggerFactory.getLogger(IndexComponentDiscovery.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     static class DiscoveredGroups

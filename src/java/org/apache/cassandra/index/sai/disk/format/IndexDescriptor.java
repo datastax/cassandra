@@ -105,20 +105,20 @@ public class IndexDescriptor
 
     public static IndexDescriptor load(SSTableReader sstable, Set<IndexContext> indices)
     {
-        ComponentDiscovery.DiscoveredGroups discovered = ComponentDiscovery.discoverComponents(sstable.descriptor);
+        IndexComponentDiscovery.DiscoveredGroups discovered = IndexComponentDiscovery.discoverComponents(sstable.descriptor);
         IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor);
         descriptor.populate(discovered, indices);
         return descriptor;
     }
 
-    private void populate(ComponentDiscovery.DiscoveredGroups discovered, Collection<IndexContext> indices)
+    private void populate(IndexComponentDiscovery.DiscoveredGroups discovered, Collection<IndexContext> indices)
     {
         populateOne(discovered.groups.get(null), null);
         for (var context : indices)
             populateOne(discovered.groups.get(context.getIndexName()), context);
     }
 
-    private void populateOne(@Nullable ComponentDiscovery.DiscoveredComponents discovered, @Nullable IndexContext context)
+    private void populateOne(@Nullable IndexComponentDiscovery.DiscoveredComponents discovered, @Nullable IndexContext context)
     {
         IndexComponentsImpl components;
         if (discovered == null)
@@ -196,7 +196,7 @@ public class IndexDescriptor
      */
     public IndexDescriptor reload(Set<IndexContext> indices)
     {
-        ComponentDiscovery.DiscoveredGroups discovered = ComponentDiscovery.discoverComponents(descriptor);
+        IndexComponentDiscovery.DiscoveredGroups discovered = IndexComponentDiscovery.discoverComponents(descriptor);
 
         // We want to make sure the descriptor only has data for the provided `indices` on reload, so we remove any
         // index data that is not in the ones provided. This essentially make sure we don't hold up memory for
