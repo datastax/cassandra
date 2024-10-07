@@ -84,7 +84,7 @@ public class SnapshotTest extends SAITester
 
         // Truncate the table
         truncate(false);
-        waitForAssert(() -> verifyNoIndexFiles());
+        waitForAssert(this::verifyNoIndexFiles);
         assertNumRows(0, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(0, 0);
 
@@ -100,10 +100,13 @@ public class SnapshotTest extends SAITester
 
         // Rebuild the index to verify that the index files are overridden
         rebuildIndexes(numericIndexContext.getIndexName());
-        verifyIndexComponentFiles(numericIndexContext, null);
+        verifyIndexFiles(numericIndexContext, null, 2, 2, 0, 2, 0);
         assertNotEquals(snapshotLastModified, indexFilesLastModified());
         assertNumRows(2, "SELECT * FROM %%s WHERE v1 >= 0");
-        assertValidationCount(2, 2); // compaction should not validate
+        assertValidationCount(2, 2);
+
+        verifyIndexComponentFiles(numericIndexContext, null);
+        assertValidationCount(4, 4);
 
         // index components are included after rebuild
         verifyIndexComponentsIncludedInSSTable();
@@ -146,7 +149,7 @@ public class SnapshotTest extends SAITester
 
         // Truncate the table
         truncate(false);
-        waitForAssert(() -> verifyNoIndexFiles());
+        waitForAssert(this::verifyNoIndexFiles);
         assertNumRows(0, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(0, 0);
 
