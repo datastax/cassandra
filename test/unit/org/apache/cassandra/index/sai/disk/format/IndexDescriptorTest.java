@@ -82,10 +82,11 @@ public class IndexDescriptorTest
     private IndexDescriptor loadDescriptor(IndexContext... contexts)
     {
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
-        indexDescriptor.reload(new HashSet<>(Arrays.asList(contexts)));
+        // Note: passing `null` as metadata is a bit hacky, but it only exists to be passed to the underlying index
+        // discovery class, and the default one ignores it so ... keeping it simple.
+        indexDescriptor.reload(null, new HashSet<>(Arrays.asList(contexts)));
         return indexDescriptor;
     }
-
 
     @Test
     public void versionAAPerSSTableComponentIsParsedCorrectly() throws Throwable
@@ -231,7 +232,8 @@ public class IndexDescriptorTest
         createFileOnDisk("-SAI_test_index_Meta.db");
         createFileOnDisk("-SAI_test_index_KDTree.db");
         createFileOnDisk("-SAI_test_index_KDTreePostingLists.db");
-        indexDescriptor.reload(Set.of(indexContext));
+        // See comment on `loadDescriptor` regarding passing null
+        indexDescriptor.reload(null, Set.of(indexContext));
 
         // Both the perSSTableComponents and perIndexComponents should now be complete and the components should be present
 

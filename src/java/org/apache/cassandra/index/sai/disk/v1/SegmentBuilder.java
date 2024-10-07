@@ -205,7 +205,7 @@ public abstract class SegmentBuilder
 
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
-            var encodedTerm = components.version().onDiskFormat().encodeForTrie(term, termComparator);
+            var encodedTerm = components.onDiskFormat().encodeForTrie(term, termComparator);
             var bytes = ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(byteComparableVersion));
             var bytesRef = new BytesRef(bytes);
             return ramIndexer.add(bytesRef, segmentRowId);
