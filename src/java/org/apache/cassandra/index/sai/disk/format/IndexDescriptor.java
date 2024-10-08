@@ -77,6 +77,8 @@ public class IndexDescriptor
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
+    private static final ComponentsBuildId EMPTY_GROUP_MARKER = ComponentsBuildId.latest(-1);
+
     // TODO Because indexes can be added at any time to existing data, the Version of a column index
     // may not match the Version of the base sstable.  OnDiskFormat + IndexFeatureSet + IndexDescriptor
     // was not designed with this in mind, leading to some awkwardness, notably in IFS where some features
@@ -105,7 +107,7 @@ public class IndexDescriptor
 
     public static IndexDescriptor load(SSTableReader sstable, Set<IndexContext> indices)
     {
-        IndexComponentDiscovery.DiscoveredGroups discovered = IndexComponentDiscovery.discoverComponents(sstable.descriptor);
+        IndexComponentDiscovery.DiscoveredGroups discovered = IndexComponentDiscovery.instance.discoverComponents(sstable.descriptor);
         IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor);
         descriptor.populate(discovered, indices);
         return descriptor;
@@ -113,9 +115,9 @@ public class IndexDescriptor
 
     private void populate(IndexComponentDiscovery.DiscoveredGroups discovered, Collection<IndexContext> indices)
     {
-        populateOne(discovered.groups.get(null), null);
+        populateOne(discovered.perSSTableGroup(), null);
         for (var context : indices)
-            populateOne(discovered.groups.get(context.getIndexName()), context);
+            populateOne(discovered.perIndexGroup(context.getIndexName()), context);
     }
 
     private void populateOne(@Nullable IndexComponentDiscovery.DiscoveredComponents discovered, @Nullable IndexContext context)
@@ -128,8 +130,8 @@ public class IndexDescriptor
         }
         else
         {
-            components = new IndexComponentsImpl(context, discovered.version, discovered.generation);
-            discovered.types.forEach(components::addOrGet);
+            components = new IndexComponentsImpl(context, discovered.buildId());
+            discovered.types().forEach(components::addOrGet);
             components.isComplete = true;
         }
         groups.put(context, components);
@@ -137,7 +139,7 @@ public class IndexDescriptor
 
     private IndexComponentsImpl createEmptyGroup(@Nullable IndexContext context)
     {
-        return new IndexComponentsImpl(context, Version.latest(), -1);
+        return new IndexComponentsImpl(context, EMPTY_GROUP_MARKER);
     }
 
     /**
@@ -149,13 +151,13 @@ public class IndexDescriptor
      */
     public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices)
     {
-        Version version = Version.latest();
+        ComponentsBuildId buildId = ComponentsBuildId.forNewSSTable();
         Set<Component> components = new HashSet<>();
-        for (IndexComponentType component : version.onDiskFormat().perSSTableComponentTypes())
-            components.add(customComponentFor(version, component, null, 0));
+        for (IndexComponentType component : buildId.version().onDiskFormat().perSSTableComponentTypes())
+            components.add(customComponentFor(buildId, component, null));
 
         for (StorageAttachedIndex index : indices)
-            addPerIndexComponentsForNewlyFlushedSSTable(components, version, index.getIndexContext());
+            addPerIndexComponentsForNewlyFlushedSSTable(components, buildId, index.getIndexContext());
         return components;
     }
 
@@ -166,19 +168,19 @@ public class IndexDescriptor
      */
     public static Set<Component> perIndexComponentsForNewlyFlushedSSTable(IndexContext context)
     {
-        return addPerIndexComponentsForNewlyFlushedSSTable(new HashSet<>(), Version.latest(), context);
+        return addPerIndexComponentsForNewlyFlushedSSTable(new HashSet<>(), ComponentsBuildId.forNewSSTable(), context);
     }
 
-    private static Set<Component> addPerIndexComponentsForNewlyFlushedSSTable(Set<Component> addTo, Version version, IndexContext context)
+    private static Set<Component> addPerIndexComponentsForNewlyFlushedSSTable(Set<Component> addTo, ComponentsBuildId buildId, IndexContext context)
     {
-        for (IndexComponentType component : version.onDiskFormat().perIndexComponentTypes(context))
-            addTo.add(customComponentFor(version, component, context, 0));
+        for (IndexComponentType component : buildId.version().onDiskFormat().perIndexComponentTypes(context))
+            addTo.add(customComponentFor(buildId, component, context));
         return addTo;
     }
 
-    private static Component customComponentFor(Version version, IndexComponentType componentType, @Nullable IndexContext context, int generation)
+    private static Component customComponentFor(ComponentsBuildId buildId, IndexComponentType componentType, @Nullable IndexContext context)
     {
-        return new Component(Component.Type.CUSTOM, version.fileNameFormatter().format(componentType, context, generation));
+        return new Component(Component.Type.CUSTOM, buildId.formatAsComponent(componentType, context));
     }
 
     /**
@@ -196,7 +198,7 @@ public class IndexDescriptor
      */
     public IndexDescriptor reload(Set<IndexContext> indices)
     {
-        IndexComponentDiscovery.DiscoveredGroups discovered = IndexComponentDiscovery.discoverComponents(descriptor);
+        IndexComponentDiscovery.DiscoveredGroups discovered = IndexComponentDiscovery.instance.discoverComponents(descriptor);
 
         // We want to make sure the descriptor only has data for the provided `indices` on reload, so we remove any
         // index data that is not in the ones provided. This essentially make sure we don't hold up memory for
@@ -236,42 +238,21 @@ public class IndexDescriptor
     private IndexComponents.ForWrite newComponentsForWrite(@Nullable IndexContext context)
     {
         var currentComponents = groups.get(context);
-        // If we're "bumping" the version compared to the existing group, then we can use generation 0. Otherwise, we
-        // have to bump the generation, unless we're using immutable components, in which case we always use generation 0.
-        // Unless we don't use immutable components, in which case we always use generation 0.
-        Version newVersion = Version.latest();
-        if (currentComponents != null && newVersion.useImmutableComponentFiles())
-        {
-            int candidateGeneration = currentComponents.version().equals(newVersion)
-                                      ? currentComponents.generation() + 1
-                                      : 0;
-            // Usually, we'll just use `candidateGeneration`, but we want to avoid overriding existing file (it's
-            // theoretically possible that the next generation was created at some other point, but then corrupted,
-            // and so we falled back on the previous generation but some of those file for the next generation still
-            // exists). So we check repeatedly increment the generation until we find one for which no files exist.
-            return createFirstGenerationAvailableComponents(context, newVersion, candidateGeneration);
-        }
-        else
-        {
-            return new IndexComponentsImpl(context, newVersion, 0);
-        }
-    }
-
-    private IndexComponentsImpl createFirstGenerationAvailableComponents(@Nullable IndexContext context, Version version, int startGeneration)
-    {
-        int generationToTest = startGeneration;
-        while (true)
-        {
-            IndexComponentsImpl candidate = new IndexComponentsImpl(context, version, generationToTest);
-            if (candidate.expectedComponentsForVersion().stream().noneMatch(candidate::componentExistsOnDisk))
-                return candidate;
-
-            noSpamLogger.warn(logMessage("Wanted to use generation {} for new build of {} SAI components of {}, but found some existing components on disk for that generation (maybe leftover from an incomplete/corrupted build?); trying next generation"),
-                              generationToTest,
-                              context == null ? "per-SSTable" : "per-index",
-                              descriptor);
-            generationToTest++;
-        }
+        var currentBuildId = currentComponents == null ? null : currentComponents.buildId;
+        return new IndexComponentsImpl(context, ComponentsBuildId.forNewBuild(currentBuildId, candidateId -> {
+            // This check that there is no existing files on disk we would overwrite by using `candidateId` for our
+            // new build.
+            IndexComponentsImpl candidate = new IndexComponentsImpl(context, candidateId);
+            boolean isUsable = candidate.expectedComponentsForVersion().stream().noneMatch(candidate::componentExistsOnDisk);
+            if (!isUsable)
+            {
+                noSpamLogger.warn(logMessage("Wanted to use generation {} for new build of {} SAI components of {}, but found some existing components on disk for that generation (maybe leftover from an incomplete/corrupted build?); trying next generation"),
+                                  candidateId.generation(),
+                                  context == null ? "per-SSTable" : "per-index",
+                                  descriptor);
+            }
+            return isUsable;
+        }));
     }
 
     /**
@@ -340,19 +321,17 @@ public class IndexDescriptor
     private class IndexComponentsImpl implements IndexComponents.ForWrite
     {
         private final @Nullable IndexContext context;
-        private final Version version;
-        private final int generation;
+        private final ComponentsBuildId buildId;
 
         private final Map<IndexComponentType, IndexComponentImpl> components = new EnumMap<>(IndexComponentType.class);
 
         // Mark groups that are complete (and should not have new components added).
         private volatile boolean isComplete;
 
-        private IndexComponentsImpl(@Nullable IndexContext context, Version version, int generation)
+        private IndexComponentsImpl(@Nullable IndexContext context, ComponentsBuildId buildId)
         {
             this.context = context;
-            this.version = version;
-            this.generation = generation;
+            this.buildId = buildId;
         }
 
         private boolean componentExistsOnDisk(IndexComponentType component)
@@ -380,15 +359,9 @@ public class IndexDescriptor
         }
 
         @Override
-        public Version version()
+        public ComponentsBuildId buildId()
         {
-            return version;
-        }
-
-        @Override
-        public int generation()
-        {
-            return generation;
+            return buildId;
         }
 
         @Override
@@ -424,7 +397,7 @@ public class IndexDescriptor
                     logger.warn(logMessage("Missing index component {} from SSTable {}"), expected, descriptor);
                     isValid = false;
                 }
-                else if (!version().onDiskFormat().validateIndexComponent(component, validateChecksum))
+                else if (!onDiskFormat().validateIndexComponent(component, validateChecksum))
                 {
                     logger.warn(logMessage("Invalid/corrupted component {} for SSTable {}"), expected, descriptor);
                     if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
@@ -463,7 +436,7 @@ public class IndexDescriptor
                 deleteComponentFile(marker.file());
 
             // Keeping legacy behavior if immutable components is disabled.
-            if (!version.useImmutableComponentFiles() && CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+            if (!buildId.version().useImmutableComponentFiles() && CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
                 forceDeleteAllComponents();
 
             // We replace the group by an explicitly empty one.
@@ -482,7 +455,7 @@ public class IndexDescriptor
         public IndexComponent.ForRead get(IndexComponentType component)
         {
             IndexComponentImpl info = components.get(component);
-            Preconditions.checkNotNull(info, "SSTable %s has no %s component for version %s and generation %s (context: %s)", descriptor, component, version, generation, context);
+            Preconditions.checkNotNull(info, "SSTable %s has no %s component for build %s (context: %s)", descriptor, component, buildId, context);
             return info;
         }
 
@@ -497,7 +470,7 @@ public class IndexDescriptor
         {
             Preconditions.checkArgument(!isComplete, "Should not add components for SSTable %s at this point; the completion marker has already been written", descriptor);
             // When a sstable doesn't have any complete group, we use a marker empty one with a generation of -1:
-            Preconditions.checkArgument(generation >= 0, "Should not be adding component to empty components");
+            Preconditions.checkArgument(buildId != EMPTY_GROUP_MARKER, "Should not be adding component to empty components");
             return components.computeIfAbsent(component, IndexComponentImpl::new);
         }
 
@@ -522,7 +495,7 @@ public class IndexDescriptor
         @Override
         public int hashCode()
         {
-            return Objects.hash(descriptor, context, version, generation);
+            return Objects.hash(descriptor, context, buildId);
         }
 
         @Override
@@ -533,18 +506,16 @@ public class IndexDescriptor
             IndexComponentsImpl that = (IndexComponentsImpl) o;
             return Objects.equals(descriptor, that.descriptor())
                    && Objects.equals(context, that.context)
-                   && Objects.equals(version, that.version)
-                   && generation == that.generation;
+                   && Objects.equals(buildId, that.buildId);
         }
 
         @Override
         public String toString()
         {
-            return String.format("%s components for %s (v: %s, gen: %d): %s",
+            return String.format("%s components for %s (%s): %s",
                                  context == null ? "Per-SSTable" : "Per-Index",
                                  descriptor,
-                                 version,
-                                 generation,
+                                 buildId,
                                  components.values());
         }
 
@@ -575,7 +546,7 @@ public class IndexDescriptor
             @Override
             public ByteOrder byteOrder()
             {
-                return version.onDiskFormat().byteOrderFor(component, context);
+                return buildId.version().onDiskFormat().byteOrderFor(component, context);
             }
 
             @Override
@@ -583,7 +554,7 @@ public class IndexDescriptor
             {
                 // Not thread-safe, but not really the end of the world if called multiple time
                 if (filenamePart == null)
-                    filenamePart = version.fileNameFormatter().format(component, context, generation);
+                    filenamePart = buildId.formatAsComponent(component, context);
                 return filenamePart;
             }
 
@@ -646,7 +617,7 @@ public class IndexDescriptor
              */
             private ChecksumIndexInput checksumIndexInput(IndexInput indexInput)
             {
-                if (version == Version.AA)
+                if (buildId.version() == Version.AA)
                     return new EndiannessReverserChecksumIndexInput(indexInput);
                 else
                     return new BufferedChecksumIndexInput(indexInput);
