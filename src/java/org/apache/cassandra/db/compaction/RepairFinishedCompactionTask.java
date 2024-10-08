@@ -24,7 +24,6 @@ import java.util.UUID;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,7 +105,7 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
         }
     }
 
-    public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+    public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm, Directories directories, Set<SSTableReader> nonExpiredSSTables)
     {
         throw new UnsupportedOperationException();
     }

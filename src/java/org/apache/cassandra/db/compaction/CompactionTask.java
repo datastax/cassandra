@@ -45,7 +45,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.DefaultCompactionWriter;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.ScannerList;
@@ -78,7 +78,7 @@ public class CompactionTask extends AbstractCompactionTask
     private final CompactionStrategy strategy;
 
     public CompactionTask(CompactionRealm realm,
-                          LifecycleTransaction txn,
+                          ILifecycleTransaction txn,
                           int gcBefore,
                           boolean keepOriginals,
                           @Nullable CompactionStrategy strategy)
@@ -97,7 +97,7 @@ public class CompactionTask extends AbstractCompactionTask
     /**
      * Create a compaction task without a compaction strategy, currently only called by tests.
      */
-    static AbstractCompactionTask forTesting(CompactionRealm realm, LifecycleTransaction txn, int gcBefore)
+    static AbstractCompactionTask forTesting(CompactionRealm realm, ILifecycleTransaction txn, int gcBefore)
     {
         return new CompactionTask(realm, txn, gcBefore, false, null);
     }
@@ -105,7 +105,7 @@ public class CompactionTask extends AbstractCompactionTask
     /**
      * Create a compaction task for deleted data collection.
      */
-    public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm, LifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
+    public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm, ILifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
     {
         AbstractCompactionTask task = new CompactionTask(realm, txn, gcBefore, false, null)
         {
@@ -306,7 +306,7 @@ public class CompactionTask extends AbstractCompactionTask
                 // resources that need closing, must be created last in case of exceptions and released if there is an exception in the c.tor
                 this.sstableRefs = Refs.ref(actuallyCompact);
                 this.op = initializeSource();
-                this.writer = getCompactionAwareWriter(realm, dirs, transaction, actuallyCompact);
+                this.writer = getCompactionAwareWriter(realm, dirs, actuallyCompact);
                 this.obsCloseable = opObserver.onOperationStart(op);
 
                 getCompObservers().forEach(obs -> obs.onInProgress(this));
@@ -806,7 +806,6 @@ public class CompactionTask extends AbstractCompactionTask
     @Override
     public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                           Directories directories,
-                                                          LifecycleTransaction transaction,
                                                           Set<SSTableReader> nonExpiredSSTables)
     {
         return new DefaultCompactionWriter(realm, directories, transaction, nonExpiredSSTables, keepOriginals, getLevel());

@@ -24,7 +24,7 @@ import org.apache.cassandra.db.compaction.CompactionTask;
 import org.apache.cassandra.db.compaction.ShardManager;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
@@ -37,7 +37,7 @@ public class UnifiedCompactionTask extends CompactionTask
 
     public UnifiedCompactionTask(CompactionRealm cfs,
                                  UnifiedCompactionStrategy strategy,
-                                 LifecycleTransaction txn,
+                                 ILifecycleTransaction txn,
                                  int gcBefore,
                                  ShardManager shardManager)
     {
@@ -49,11 +49,10 @@ public class UnifiedCompactionTask extends CompactionTask
     @Override
     public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                           Directories directories,
-                                                          LifecycleTransaction txn,
                                                           Set<SSTableReader> nonExpiredSSTables)
     {
         double density = shardManager.calculateCombinedDensity(nonExpiredSSTables);
         int numShards = controller.getNumShards(density * shardManager.shardSetCoverage());
-        return new ShardedCompactionWriter(realm, directories, txn, nonExpiredSSTables, keepOriginals, shardManager.boundaries(numShards));
+        return new ShardedCompactionWriter(realm, directories, transaction, nonExpiredSSTables, keepOriginals, shardManager.boundaries(numShards));
     }
 }

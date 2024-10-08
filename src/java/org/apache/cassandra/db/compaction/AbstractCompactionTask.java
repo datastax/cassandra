@@ -29,11 +29,11 @@ import com.google.common.base.Preconditions;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WrappedRunnable;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 
 import static com.google.common.base.Throwables.propagate;
 
@@ -45,7 +45,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         CassandraRelevantProperties.COMPACTION_SKIP_REPAIR_STATE_CHECKING.getBoolean();
 
     protected final CompactionRealm realm;
-    protected LifecycleTransaction transaction;
+    protected ILifecycleTransaction transaction;
     protected boolean isUserDefined;
     protected OperationType compactionType;
     protected TableOperationObserver opObserver;
@@ -55,7 +55,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
      * @param realm
      * @param transaction the modifying managing the status of the sstables we're replacing
      */
-    protected AbstractCompactionTask(CompactionRealm realm, LifecycleTransaction transaction)
+    protected AbstractCompactionTask(CompactionRealm realm, ILifecycleTransaction transaction)
     {
         this.realm = realm;
         this.transaction = transaction;
@@ -67,7 +67,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         try
         {
             // enforce contract that caller should mark sstables compacting
-            Set<SSTableReader> compacting = transaction.getCompacting();
+            var compacting = realm.getCompactingSSTables();
             for (SSTableReader sstable : transaction.originals())
                 assert compacting.contains(sstable) : sstable.getFilename() + " is not correctly marked compacting";
 
@@ -160,7 +160,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         return Throwables.perform(err, () -> transaction.close());
     }
 
-    public abstract CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables);
+    public abstract CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm, Directories directories, Set<SSTableReader> nonExpiredSSTables);
 
     @VisibleForTesting
     public OperationType getCompactionType()
@@ -205,7 +205,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     }
 
     @VisibleForTesting
-    LifecycleTransaction getTransaction()
+    ILifecycleTransaction getTransaction()
     {
         return transaction;
     }

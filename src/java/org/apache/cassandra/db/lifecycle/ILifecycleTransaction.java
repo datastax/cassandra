@@ -20,9 +20,12 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.util.Collection;
 import java.util.Set;
+import java.util.UUID;
 
-import org.apache.cassandra.io.sstable.SSTable;
+import com.google.common.collect.Iterables;
+
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 public interface ILifecycleTransaction extends Transactional, LifecycleNewTracker
@@ -30,10 +33,40 @@ public interface ILifecycleTransaction extends Transactional, LifecycleNewTracke
     void checkpoint();
     void update(SSTableReader reader, boolean original);
     void update(Collection<SSTableReader> readers, boolean original);
-    public SSTableReader current(SSTableReader reader);
+    SSTableReader current(SSTableReader reader);
     void obsolete(SSTableReader reader);
     void obsoleteOriginals();
     Set<SSTableReader> originals();
     boolean isObsolete(SSTableReader reader);
     boolean isOffline();
+    UUID opId();
+
+    void cancel(SSTableReader removedSSTable);
+
+    /**
+     * convenience method to both prepareToCommit() and commit() in one operation;
+     */
+    default Object finish()
+    {
+        prepareToCommit();
+        commit();
+        return this;
+    }
+
+    default void abort()
+    {
+        Throwables.maybeFail(abort(null));
+    }
+
+    default void commit()
+    {
+        Throwables.maybeFail(commit(null));
+    }
+
+    default SSTableReader onlyOne()
+    {
+        final Set<SSTableReader> originals = originals();
+        assert originals.size() == 1;
+        return Iterables.getFirst(originals, null);
+    }
 }

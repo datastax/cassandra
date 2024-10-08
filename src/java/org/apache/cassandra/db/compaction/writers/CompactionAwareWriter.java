@@ -34,7 +34,7 @@ import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionTask;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Token;
@@ -64,7 +64,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
     protected final boolean isTransient;
 
     protected final SSTableRewriter sstableWriter;
-    protected final LifecycleTransaction txn;
+    protected final ILifecycleTransaction txn;
     private final List<Directories.DataDirectory> locations;
     private final List<Token> diskBoundaries;
     private int locationIndex;
@@ -72,7 +72,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
 
     public CompactionAwareWriter(CompactionRealm realm,
                                  Directories directories,
-                                 LifecycleTransaction txn,
+                                 ILifecycleTransaction txn,
                                  Set<SSTableReader> nonExpiredSSTables,
                                  boolean keepOriginals)
     {

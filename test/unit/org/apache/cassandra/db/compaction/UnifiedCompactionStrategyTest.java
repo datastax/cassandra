@@ -1327,7 +1327,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Collection<AbstractCompactionTask> tasks = strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());
 
         assertEquals(1, tasks.size());
-        Set<SSTableReader> compacting = tasks.iterator().next().transaction.getCompacting();
+        var compacting = realm.getCompactingSSTables();
         assertEquals(2, compacting.size());
         assertEquals(new HashSet<>(sstables1), compacting);
     }
