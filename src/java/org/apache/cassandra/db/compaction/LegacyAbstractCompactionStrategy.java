@@ -312,7 +312,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
             // there is no overlap, tombstones are safely droppable
             return true;
         }
-        else if (CompactionController.getFullyExpiredSSTables(realm, Collections.singleton(sstable), overlaps, gcBefore).size() > 0)
+        else if (CompactionController.getFullyExpiredSSTables(realm, Collections.singleton(sstable), c -> overlaps, gcBefore).size() > 0)
         {
             return true;
         }

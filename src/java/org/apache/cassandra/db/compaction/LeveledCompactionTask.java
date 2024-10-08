@@ -28,7 +28,7 @@ import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.MajorLeveledCompactionWriter;
 import org.apache.cassandra.db.compaction.writers.MaxSSTableSizeWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 
 public class LeveledCompactionTask extends CompactionTask
 {
@@ -36,7 +36,7 @@ public class LeveledCompactionTask extends CompactionTask
     private final long maxSSTableBytes;
     private final boolean majorCompaction;
 
-    public LeveledCompactionTask(LeveledCompactionStrategy strategy, LifecycleTransaction txn, int level, int gcBefore, long maxSSTableBytes, boolean majorCompaction)
+    public LeveledCompactionTask(LeveledCompactionStrategy strategy, ILifecycleTransaction txn, int level, int gcBefore, long maxSSTableBytes, boolean majorCompaction)
     {
         super(strategy.realm, txn, gcBefore, false, strategy);
         this.level = level;
@@ -44,7 +44,7 @@ public class LeveledCompactionTask extends CompactionTask
         this.majorCompaction = majorCompaction;
     }
 
-    public LeveledCompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int level, int gcBefore, long maxSSTableBytes, boolean majorCompaction, @Nullable CompactionStrategy strategy) {
+    public LeveledCompactionTask(ColumnFamilyStore cfs, ILifecycleTransaction txn, int level, int gcBefore, long maxSSTableBytes, boolean majorCompaction, @Nullable CompactionStrategy strategy) {
         super(cfs, txn, gcBefore, false, strategy);
         this.level = level;
         this.maxSSTableBytes = maxSSTableBytes;
@@ -54,12 +54,11 @@ public class LeveledCompactionTask extends CompactionTask
     @Override
     public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                           Directories directories,
-                                                          LifecycleTransaction txn,
                                                           Set<SSTableReader> nonExpiredSSTables)
     {
         if (majorCompaction)
-            return new MajorLeveledCompactionWriter(realm, directories, txn, nonExpiredSSTables, maxSSTableBytes, false);
-        return new MaxSSTableSizeWriter(realm, directories, txn, nonExpiredSSTables, maxSSTableBytes, getLevel(), false);
+            return new MajorLeveledCompactionWriter(realm, directories, transaction, nonExpiredSSTables, maxSSTableBytes, false);
+        return new MaxSSTableSizeWriter(realm, directories, transaction, nonExpiredSSTables, maxSSTableBytes, getLevel(), false);
     }
 
     @Override
