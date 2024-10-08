@@ -296,8 +296,9 @@ public class TrieMemoryIndex extends MemoryIndex
             return 0;
 
         AbstractType<?> termType = indexContext.getValidator();
-        ByteBuffer endTerm = expression.upper != null
-                             ? Collections.min(Arrays.asList(expression.upper.value.raw, maxTerm), termType)
+        // TODO is there a way to fail this with a test? I didn't find one, which makes me wonder if it was a problem.
+        ByteBuffer endTerm = expression.upper != null && TypeUtil.compare(expression.upper.value.encoded, maxTerm, termType, Version.latest()) < 0
+                             ? expression.upper.value.encoded
                              : maxTerm;
 
         long pointCount = 0;
