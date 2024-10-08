@@ -45,7 +45,7 @@ public class IndexGroupMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void verifyIndexGroupMetrics() throws Throwable
+    public void verifyIndexGroupMetrics()
     {
         // create first index
         createTable(CREATE_TABLE_TEMPLATE);
@@ -75,7 +75,6 @@ public class IndexGroupMetricsTest extends AbstractMetricsTest
         // create second index
         String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
         IndexContext v2IndexContext = createIndexContext(v2IndexName, UTF8Type.instance);
-        waitForIndexQueryable(v2IndexName);
 
         // same number of sstables, but more string index files.
         int stringIndexOpenFileCount = sstables * V1OnDiskFormat.instance.openFilesPerIndex(v2IndexContext);
