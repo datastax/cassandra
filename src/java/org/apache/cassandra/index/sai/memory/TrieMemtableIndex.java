@@ -369,4 +369,10 @@ public class TrieMemtableIndex implements MemtableIndex
             term = null;
         }
     }
+
+    @VisibleForTesting
+    public MemoryIndex[] getRangeIndexes()
+    {
+        return rangeIndexes;
+    }
 }
