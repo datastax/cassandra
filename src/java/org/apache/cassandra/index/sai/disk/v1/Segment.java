@@ -248,7 +248,9 @@ public class Segment implements Closeable
             case RANGE:
                 ByteBuffer lower = predicate.lower != null ? predicate.lower.value.encoded : null;
                 ByteBuffer upper = predicate.upper != null ? predicate.upper.value.encoded : null;
-                return metadata.estimateNumRowsMatchingRange(lower, predicate.lowerInclusive, upper, predicate.upperInclusive);
+                boolean lowerInclusive = predicate.lower != null && predicate.lower.inclusive;
+                boolean upperInclusive = predicate.upper != null && predicate.upper.inclusive;
+                return metadata.estimateNumRowsMatchingRange(lower, lowerInclusive, upper, upperInclusive);
             default:
                 throw new IllegalArgumentException("Unsupported expression: " + predicate);
         }
