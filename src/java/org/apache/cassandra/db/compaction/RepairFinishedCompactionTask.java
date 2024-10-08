@@ -89,7 +89,8 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
         {
             if (obsoleteSSTables)
             {
-                transaction.finish();
+                transaction.prepareToCommit();
+                transaction.commit();
             }
             else
             {

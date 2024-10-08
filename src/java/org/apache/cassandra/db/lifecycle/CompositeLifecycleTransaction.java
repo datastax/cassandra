@@ -59,7 +59,8 @@ public class CompositeLifecycleTransaction extends LifecycleTransaction
                 checkpoint();
                 if (obsoleteOriginalsRequested)
                     obsoleteOriginals();
-                finish();
+                prepareToCommit();
+                commit();
             }
         }
     }

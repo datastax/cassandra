@@ -43,16 +43,6 @@ public interface ILifecycleTransaction extends Transactional, LifecycleNewTracke
 
     void cancel(SSTableReader removedSSTable);
 
-    /**
-     * convenience method to both prepareToCommit() and commit() in one operation;
-     */
-    default Object finish()
-    {
-        prepareToCommit();
-        commit();
-        return this;
-    }
-
     default void abort()
     {
         Throwables.maybeFail(abort(null));
