@@ -31,6 +31,7 @@ import com.google.common.base.Predicate;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.compaction.unified.Environment;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -59,6 +60,11 @@ import org.apache.cassandra.utils.TimeUUID;
  */
 public interface CompactionRealm extends SSTableReader.Owner
 {
+    /**
+     * @return the UCS environment of this table.
+     */
+    Environment makeUCSEnvironment();
+
     /**
      * @return the schema metadata of this table.
      */
