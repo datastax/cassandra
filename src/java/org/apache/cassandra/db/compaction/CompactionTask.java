@@ -398,7 +398,16 @@ public class CompactionTask extends AbstractCompactionTask
             Throwable err = Throwables.close(errorsSoFar, obsCloseable, writer, sstableRefs);
 
             if (transaction.isOffline())
+            {
+                if (completed)
+                {
+                    // update basic metrics
+                    realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
+                                                      outputDiskSize(),
+                                                      System.nanoTime() - startNanos);
+                }
                 return;
+            }
 
             if (completed)
             {
