@@ -406,6 +406,7 @@ public class CompactionTask extends AbstractCompactionTask
                                                       outputDiskSize(),
                                                       System.nanoTime() - startNanos);
                 }
+                Throwables.maybeFail(err);
                 return;
             }
 
