@@ -243,7 +243,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
         try
         {
-            return new StorageAttachedIndexWriter(indexDescriptor, tableMetadata, indices, tracker, keyCount);
+            return new StorageAttachedIndexWriter(indexDescriptor, tableMetadata, indices, tracker, keyCount, baseCfs.metric);
         }
         catch (Throwable t)
         {
