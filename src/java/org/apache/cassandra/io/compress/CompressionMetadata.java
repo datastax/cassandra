@@ -99,7 +99,7 @@ public class CompressionMetadata implements AutoCloseable
     /**
      * Create metadata about given compressed file including uncompressed data length, chunk size
      * and list of the chunk offsets of the compressed data.
-     *
+     * <p>
      * This is an expensive operation! Don't create more than one for each
      * sstable.
      *
