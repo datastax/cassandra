@@ -24,7 +24,6 @@ import java.util.UUID;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,7 +89,8 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
         {
             if (obsoleteSSTables)
             {
-                transaction.finish();
+                transaction.prepareToCommit();
+                transaction.commit();
             }
             else
             {
@@ -104,16 +104,5 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
                 realm.repairSessionCompleted(sessionID);
             }
         }
-    }
-
-    public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    protected int executeInternal()
-    {
-        run();
-        return transaction.originals().size();
     }
 }

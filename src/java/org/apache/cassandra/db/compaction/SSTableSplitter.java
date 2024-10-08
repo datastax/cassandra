@@ -62,10 +62,9 @@ public class SSTableSplitter
         @Override
         public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                               Directories directories,
-                                                              LifecycleTransaction txn,
                                                               Set<SSTableReader> nonExpiredSSTables)
         {
-            return new MaxSSTableSizeWriter(realm, directories, txn, nonExpiredSSTables, sstableSizeInMB * 1024L * 1024L, 0, false);
+            return new MaxSSTableSizeWriter(realm, directories, transaction, nonExpiredSSTables, sstableSizeInMB * 1024L * 1024L, 0, false);
         }
 
         @Override

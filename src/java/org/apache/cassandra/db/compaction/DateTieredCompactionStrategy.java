@@ -96,7 +96,7 @@ public class DateTieredCompactionStrategy extends LegacyAbstractCompactionStrate
             // Find fully expired SSTables. Those will be included no matter what.
             expired = CompactionController.getFullyExpiredSSTables(realm,
                                                                    uncompacting,
-                                                                   realm.getOverlappingLiveSSTables(uncompacting),
+                                                                   realm::getOverlappingLiveSSTables,
                                                                    gcBefore);
             lastExpiredCheck = System.currentTimeMillis();
         }

@@ -1479,6 +1479,31 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return positions;
     }
 
+    public long onDiskSizeForRanges(Collection<Range<Token>> ranges)
+    {
+        long total = 0;
+        if (!compression)
+        {
+            for (var position : getPositionsForRanges(ranges))
+                total += position.upperPosition - position.lowerPosition;
+        }
+        else
+        {
+            final CompressionMetadata compressionMetadata = getCompressionMetadata();
+            long lastEnd = 0;
+            for (var position : getPositionsForRanges(ranges))
+            {
+                long upperChunkEnd = compressionMetadata.chunkFor(position.upperPosition).chunkEnd();
+                long lowerChunkStart = compressionMetadata.chunkFor(position.lowerPosition).offset;
+                if (lowerChunkStart < lastEnd)  // if regions include the same chunk, count it only once
+                    lowerChunkStart = lastEnd;
+                total += upperChunkEnd - lowerChunkStart;
+                lastEnd = upperChunkEnd;
+            }
+        }
+        return total;
+    }
+
     public KeyCacheKey getCacheKey(DecoratedKey key)
     {
         return new KeyCacheKey(metadata(), descriptor, key.getKey());

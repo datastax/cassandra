@@ -33,8 +33,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -43,10 +43,13 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.DefaultCompactionWriter;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -78,34 +81,36 @@ public class CompactionTask extends AbstractCompactionTask
     private final CompactionStrategy strategy;
 
     public CompactionTask(CompactionRealm realm,
-                          LifecycleTransaction txn,
+                          ILifecycleTransaction txn,
                           int gcBefore,
                           boolean keepOriginals,
                           @Nullable CompactionStrategy strategy)
+    {
+        this(realm, txn, gcBefore, keepOriginals, strategy, strategy);
+    }
+
+    public CompactionTask(CompactionRealm realm,
+                          ILifecycleTransaction txn,
+                          int gcBefore,
+                          boolean keepOriginals,
+                          @Nullable CompactionStrategy strategy,
+                          CompactionObserver observer)
     {
         super(realm, txn);
         this.gcBefore = gcBefore;
         this.keepOriginals = keepOriginals;
         this.strategy = strategy;
 
-        if (strategy != null)
-            addObserver(strategy);
+        if (observer != null)
+            addObserver(observer);
 
         logger.debug("Created compaction task with id {} and strategy {}", txn.opId(), strategy);
     }
 
     /**
-     * Create a compaction task without a compaction strategy, currently only called by tests.
-     */
-    static AbstractCompactionTask forTesting(CompactionRealm realm, LifecycleTransaction txn, int gcBefore)
-    {
-        return new CompactionTask(realm, txn, gcBefore, false, null);
-    }
-
-    /**
      * Create a compaction task for deleted data collection.
      */
-    public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm, LifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
+    public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm, ILifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
     {
         AbstractCompactionTask task = new CompactionTask(realm, txn, gcBefore, false, null)
         {
@@ -129,13 +134,6 @@ public class CompactionTask extends AbstractCompactionTask
     private static long addToTotalBytesCompacted(long bytesCompacted)
     {
         return totalBytesCompacted.addAndGet(bytesCompacted);
-    }
-
-    @Override
-    protected int executeInternal()
-    {
-        run();
-        return transaction.originals().size();
     }
 
     /*
@@ -171,6 +169,7 @@ public class CompactionTask extends AbstractCompactionTask
             // Note that we have removed files that are still marked as compacting.
             // This suboptimal but ok since the caller will unmark all the sstables at the end.
             transaction.cancel(removedSSTable);
+            nonExpiredSSTables.remove(removedSSTable);
             return true;
         }
         return false;
@@ -188,7 +187,7 @@ public class CompactionTask extends AbstractCompactionTask
         // it is not empty, it may compact down to nothing if all rows are deleted.
         assert transaction != null;
 
-        if (transaction.originals().isEmpty())
+        if (inputSSTables().isEmpty())
             return;
 
         if (DatabaseDescriptor.isSnapshotBeforeCompaction())
@@ -196,18 +195,57 @@ public class CompactionTask extends AbstractCompactionTask
 
         // The set of sstables given here may be later modified by buildCompactionCandidatesForAvailableDiskSpace() and
         // the compaction iterators in CompactionController and OverlapTracker will reflect the updated set of sstables.
-        try (CompactionController controller = getCompactionController(transaction.originals());
+        try (CompactionController controller = getCompactionController(inputSSTables());
              CompactionOperation operation = createCompactionOperation(controller, strategy))
         {
             operation.execute();
         }
     }
 
+    /**
+     * @return The token range that the operation should compact. This is usually null, but if we have a parallelizable
+     * multi-task operation (see {@link UnifiedCompactionStrategy#createAndAddTasks}), it will specify a subrange.
+     */
+    protected Range<Token> tokenRange()
+    {
+        return null;
+    }
+
+    /**
+     * If this is a partial compaction, its progress reports are shared between tasks. This method returns the shared
+     * progress object.
+     */
+    protected SharedCompactionProgress sharedProgress()
+    {
+        return null;
+    }
+
+    /**
+     * @return The set of input sstables for this compaction. This must be a subset of the transaction originals and
+     * must reflect any removal of sstables from the originals set for correct overlap tracking.
+     * See {@link UnifiedCompactionTask} for an example.
+     */
+    protected Set<SSTableReader> inputSSTables()
+    {
+        return transaction.originals();
+    }
+
+    /**
+     * @return True if the task should try to limit the operation size to the available space by removing sstables from
+     * the compacting set. This cannot be done if this is part of a multi-task operation with a shared transaction.
+     */
+    protected boolean shouldReduceScopeForSpace()
+    {
+        return true;
+    }
+
     private CompactionOperation createCompactionOperation(CompactionController controller, CompactionStrategy strategy)
     {
         Set<CompactionSSTable> fullyExpiredSSTables = controller.getFullyExpiredSSTables();
+        Set<SSTableReader> actuallyCompact = new HashSet<>(inputSSTables());
+        actuallyCompact.removeAll(fullyExpiredSSTables);
         // select SSTables to compact based on available disk space.
-        if (!buildCompactionCandidatesForAvailableDiskSpace(fullyExpiredSSTables))
+        if (shouldReduceScopeForSpace() && !buildCompactionCandidatesForAvailableDiskSpace(actuallyCompact, !fullyExpiredSSTables.isEmpty()))
         {
             // The set of sstables has changed (one or more were excluded due to limited available disk space).
             // We need to recompute the overlaps between sstables. The iterators used in the compaction controller 
@@ -216,17 +254,18 @@ public class CompactionTask extends AbstractCompactionTask
             controller.refreshOverlaps();
         }
 
+        // sanity check: sstables to compact is a subset of the transaction originals
+        assert transaction.originals().containsAll(actuallyCompact);
         // sanity check: all sstables must belong to the same table
         assert !Iterables.any(transaction.originals(), sstable -> !sstable.descriptor.cfname.equals(realm.getTableName()));
 
-        Set<SSTableReader> actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
 
         // Cursors currently don't support:
         boolean compactByIterators = !CURSORS_ENABLED.getBoolean()
                                      ||strategy != null && !strategy.supportsCursorCompaction()  // strategy does not support it
                                      || controller.shouldProvideTombstoneSources()  // garbagecollect
-                                     || realm.getIndexManager().hasIndexes()
-                                     || realm.metadata().enforceStrictLiveness();   // indexes
+                                     || realm.getIndexManager().hasIndexes()  // indexes
+                                     || realm.metadata().enforceStrictLiveness();   // strict liveness
 
         logger.debug("Compacting in {} by {}: {} {} {} {} {}",
                      realm.toString(),
@@ -260,6 +299,7 @@ public class CompactionTask extends AbstractCompactionTask
         private final long startTime;
         final Set<SSTableReader> actuallyCompact;
         private final int fullyExpiredSSTablesCount;
+        private final long inputDiskSize;
 
         // resources that are updated and may be read by another thread
         volatile Collection<SSTableReader> newSStables;
@@ -305,19 +345,41 @@ public class CompactionTask extends AbstractCompactionTask
             {
                 // resources that need closing, must be created last in case of exceptions and released if there is an exception in the c.tor
                 this.sstableRefs = Refs.ref(actuallyCompact);
-                this.op = initializeSource();
-                this.writer = getCompactionAwareWriter(realm, dirs, transaction, actuallyCompact);
+                this.inputDiskSize = getTotalOnDiskBytes(actuallyCompact, tokenRange());
+                this.op = initializeSource(tokenRange());
+                this.writer = getCompactionAwareWriter(realm, dirs, actuallyCompact);
                 this.obsCloseable = opObserver.onOperationStart(op);
+                CompactionProgress progress = this;
+                var sharedProgress = sharedProgress();
+                if (sharedProgress != null)
+                {
+                    sharedProgress.addSubtask(this);
+                    progress = sharedProgress;
+                }
 
-                getCompObservers().forEach(obs -> obs.onInProgress(this));
+                for (var obs : getCompObservers())
+                    obs.onInProgress(progress);
             }
             catch (Throwable t)
             {
                 close(t);
+                throw new AssertionError(t); // unreachable (close will throw when t is not null). Added for static analysis.
             }
         }
 
-        abstract TableOperation initializeSource() throws Throwable;
+        private long getTotalOnDiskBytes(Set<SSTableReader> actuallyCompact, Range<Token> tokenRange)
+        {
+            if (tokenRange == null)
+                return CompactionSSTable.getTotalBytes(actuallyCompact);
+
+            var rangeList = ImmutableList.of(tokenRange);
+            long total = 0;
+            for (SSTableReader rdr : actuallyCompact)
+                total += rdr.onDiskSizeForRanges(rangeList);
+            return total;
+        }
+
+        abstract TableOperation initializeSource(Range<Token> tokenRange) throws Throwable;
 
         private void execute()
         {
@@ -412,14 +474,22 @@ public class CompactionTask extends AbstractCompactionTask
 
             if (completed)
             {
-                if (COMPACTION_HISTORY_ENABLED.getBoolean())
+                boolean shouldSignalCompletion = true;
+                var sharedProgress = sharedProgress();
+                if (sharedProgress != null)
+                    shouldSignalCompletion = sharedProgress.completeSubtask(this);
+
+                if (shouldSignalCompletion)
                 {
-                    updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this);
+                    if (COMPACTION_HISTORY_ENABLED.getBoolean())
+                    {
+                        updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this);
+                    }
+                    CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTablesCount);
+                    if (!transaction.originals().isEmpty() && actuallyCompact.isEmpty())
+                        // this CompactionOperation only deleted fully expired SSTables without compacting anything
+                        CompactionManager.instance.incrementDeleteOnlyCompactions();
                 }
-                CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTablesCount);
-                if (transaction.originals().size() > 0 && actuallyCompact.size() == 0)
-                    // this CompactionOperation only deleted fully expired SSTables without compacting anything
-                    CompactionManager.instance.incrementDeleteOnlyCompactions();
 
                 if (logger.isDebugEnabled())
                     debugLogCompactionSummaryInfo(taskId, System.nanoTime() - startNanos, totalKeysWritten, newSStables, this);
@@ -428,6 +498,7 @@ public class CompactionTask extends AbstractCompactionTask
                 if (strategy != null)
                     strategy.getCompactionLogger().compaction(startTime,
                                                               transaction.originals(),
+                                                              tokenRange(),
                                                               System.currentTimeMillis(),
                                                               newSStables);
 
@@ -520,7 +591,7 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         public long inputDiskSize()
         {
-            return CompactionSSTable.getTotalBytes(actuallyCompact);
+            return inputDiskSize;
         }
 
         @Override
@@ -536,21 +607,9 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         @Override
-        public long durationInNanos()
+        public long startTimeNanos()
         {
-            return System.nanoTime() - startNanos;
-        }
-
-        @Override
-        public double sizeRatio()
-        {
-            long estInputSizeBytes = adjustedInputDiskSize();
-            if (estInputSizeBytes > 0)
-                return outputDiskSize() / (double) estInputSizeBytes;
-
-            // this is a valid case, when there are no sstables to actually compact
-            // the previous code would return a NaN that would be logged as zero
-            return 0;
+            return startNanos;
         }
     }
 
@@ -577,10 +636,11 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         @Override
-        TableOperation initializeSource()
+        TableOperation initializeSource(Range<Token> tokenRange)
         {
-            this.scanners = strategy != null ? strategy.getScanners(actuallyCompact)
-                                             : ScannerList.of(actuallyCompact, null);
+            var rangeList = tokenRange != null ? ImmutableList.of(tokenRange) : null;
+            this.scanners = strategy != null ? strategy.getScanners(actuallyCompact, rangeList)
+                                             : ScannerList.of(actuallyCompact, rangeList);
             this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
             return compactionIterator.getOperation();
         }
@@ -705,9 +765,9 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         @Override
-        TableOperation initializeSource()
+        TableOperation initializeSource(Range<Token> tokenRange)
         {
-            this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, controller, limiter, FBUtilities.nowInSeconds(), taskId);
+            this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, tokenRange, controller, limiter, FBUtilities.nowInSeconds(), taskId);
             return compactionCursor.createOperation();
         }
 
@@ -772,7 +832,7 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         public long adjustedInputDiskSize()
         {
-            return compactionCursor.getTotalCompressedSize();
+            return inputDiskSize();
         }
 
         @Override
@@ -813,31 +873,11 @@ public class CompactionTask extends AbstractCompactionTask
         }
     }
 
-    @Override
     public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                           Directories directories,
-                                                          LifecycleTransaction transaction,
                                                           Set<SSTableReader> nonExpiredSSTables)
     {
         return new DefaultCompactionWriter(realm, directories, transaction, nonExpiredSSTables, keepOriginals, getLevel());
-    }
-
-    public static String updateCompactionHistory(UUID taskId, String keyspaceName, String columnFamilyName, long[] mergedRowCounts, long startSize, long endSize)
-    {
-        StringBuilder mergeSummary = new StringBuilder(mergedRowCounts.length * 10);
-        Map<Integer, Long> mergedRows = new HashMap<>();
-        for (int i = 0; i < mergedRowCounts.length; i++)
-        {
-            long count = mergedRowCounts[i];
-            if (count == 0)
-                continue;
-
-            int rows = i + 1;
-            mergeSummary.append(String.format("%d:%d, ", rows, count));
-            mergedRows.put(rows, count);
-        }
-        SystemKeyspace.updateCompactionHistory(taskId, keyspaceName, columnFamilyName, System.currentTimeMillis(), startSize, endSize, mergedRows);
-        return mergeSummary.toString();
     }
 
     protected Directories getDirectories()
@@ -899,8 +939,9 @@ public class CompactionTask extends AbstractCompactionTask
      * other compactions.
      *
      * @return true if there is enough disk space to execute the complete compaction, false if some sstables are excluded.
+     *         If SSTables are excluded, they are removed from the transaction as well as the nonExpiredSSTables set.
      */
-    protected boolean buildCompactionCandidatesForAvailableDiskSpace(final Set<CompactionSSTable> fullyExpiredSSTables)
+    protected boolean buildCompactionCandidatesForAvailableDiskSpace(Set<SSTableReader> nonExpiredSSTables, boolean containsExpired)
     {
         if(!realm.isCompactionDiskSpaceCheckEnabled() && compactionType == OperationType.COMPACTION)
         {
@@ -908,7 +949,6 @@ public class CompactionTask extends AbstractCompactionTask
             return true;
         }
 
-        final Set<SSTableReader> nonExpiredSSTables = Sets.difference(transaction.originals(), fullyExpiredSSTables);
         int sstablesRemoved = 0;
 
         while(!nonExpiredSSTables.isEmpty())
@@ -928,10 +968,10 @@ public class CompactionTask extends AbstractCompactionTask
                 // usually means we've run out of disk space
 
                 // but we can still compact expired SSTables
-                if(partialCompactionsAcceptable() && fullyExpiredSSTables.size() > 0 )
+                if(partialCompactionsAcceptable() && containsExpired)
                 {
                     // if all remaining sstables are fully expired, we can still start compaction; otherwise throw
-                    if (transaction.originals().equals(fullyExpiredSSTables))
+                    if (nonExpiredSSTables.isEmpty())
                         break;
                 }
 
@@ -1007,13 +1047,14 @@ public class CompactionTask extends AbstractCompactionTask
 
         StringBuilder newSSTableNames = new StringBuilder(newSStables.size() * 100);
         for (SSTableReader reader : newSStables)
-            newSSTableNames.append(reader.descriptor.baseFileUri()).append(",");
-        logger.debug("Compacted ({}) {} sstables to [{}] to level={}. {} to {} (~{}% of original) in {}ms. " +
+            newSSTableNames.append(reader.descriptor.baseFileUri()).append(',');
+        logger.debug("Compacted ({}{}) {} sstables to [{}] to level={}. {} to {} (~{}% of original) in {}ms. " +
                      "Read Throughput = {}, Write Throughput = {}, Row Throughput = ~{}/s, Partition Throughput = ~{}/s." +
                      " {} total partitions merged to {}. Partition merge counts were {}.",
                      taskId,
+                     tokenRange() != null ? " range " + tokenRange() : "",
                      transaction.originals().size(),
-                     newSSTableNames.toString(),
+                     newSSTableNames,
                      getLevel(),
                      prettyPrintMemory(progress.adjustedInputDiskSize()),
                      prettyPrintMemory(progress.outputDiskSize()),
@@ -1025,14 +1066,17 @@ public class CompactionTask extends AbstractCompactionTask
                      (int) progress.partitionsRead() / (TimeUnit.NANOSECONDS.toSeconds(progress.durationInNanos()) + 1),
                      totalMergedPartitions,
                      totalKeysWritten,
-                     mergeSummary.toString());
+                     mergeSummary);
     }
 
     private void debugLogCompactingMessage(UUID taskId)
     {
         Set<SSTableReader> originals = transaction.originals();
         StringBuilder ssTableLoggerMsg = new StringBuilder(originals.size() * 100);
-        ssTableLoggerMsg.append("Compacting (").append(taskId).append(')').append(" [");
+        ssTableLoggerMsg.append("Compacting (").append(taskId);
+        if (tokenRange() != null)
+            ssTableLoggerMsg.append(" range ").append(tokenRange());
+        ssTableLoggerMsg.append(") [");
         for (SSTableReader sstr : originals)
         {
             ssTableLoggerMsg.append(sstr.getFilename())
@@ -1040,7 +1084,7 @@ public class CompactionTask extends AbstractCompactionTask
                             .append(sstr.getSSTableLevel())
                             .append(", ");
         }
-        ssTableLoggerMsg.append("]");
+        ssTableLoggerMsg.append(']');
 
         logger.debug(ssTableLoggerMsg.toString());
     }
