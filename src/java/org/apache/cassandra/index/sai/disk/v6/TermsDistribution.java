@@ -38,11 +38,14 @@ import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.NumberType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Approximates a statistical distribution of term values in a sstable index segment.
@@ -71,6 +74,7 @@ public class TermsDistribution
     final ByteBuffer maxTerm;
     final List<Bucket> histogram;
     final NavigableMap<ByteBuffer, Long> mostFrequentTerms;
+    final Comparator<ByteBuffer> termComparator;
 
     final long numPoints;
     final long numRows;
@@ -80,11 +84,27 @@ public class TermsDistribution
         this.termType = termType;
         this.histogram = histogram;
         this.mostFrequentTerms = mostFrequentTerms;
+        // TODO do we need to consider the version here? This is a hack that seems to have made numbers work (even
+        // the normal ones that were not truncated), but I'm not sure it works for text and other columns.
+        // The only way to know is to add tests. What is most odd is that this seems necessary for all numeric
+        // queries to work. On one hand, that makes sense because of how numeric queries encode their search terms
+        // and then compare within that index, but it's still a bit confusing.
+        // TODO add test coverage for strings.
+        this.termComparator = termType instanceof NumberType ? ByteComparable::compare : termType;
 
         this.numRows = histogram.isEmpty() ? 0 : histogram.get(histogram.size() - 1).cumulativeRowCount;
         this.numPoints = histogram.isEmpty() ? 0 : histogram.get(histogram.size() - 1).cumulativePointCount;
         this.minTerm = histogram.isEmpty() ? null : histogram.get(0).term;
         this.maxTerm = histogram.isEmpty() ? null : histogram.get(histogram.size() - 1).term;
+    }
+
+
+    private ByteBuffer getComparableBytes(ByteBuffer term)
+    {
+        if (term == null)
+            return null;
+        var bytes = TypeUtil.asComparableBytes(term, termType).asByteComparableArray(TypeUtil.BYTE_COMPARABLE_VERSION);
+        return ByteBuffer.wrap(bytes);
     }
 
     /**
@@ -93,6 +113,11 @@ public class TermsDistribution
      * @param term term encoded as byte-comparable
      */
     public long estimateNumRowsMatchingExact(ByteBuffer term)
+    {
+        return estimateNumRowsMatchingExactEncoded(getComparableBytes(term));
+    }
+
+    private long estimateNumRowsMatchingExactEncoded(ByteBuffer term)
     {
         Long count = mostFrequentTerms.get(term);
         if (count != null)
@@ -119,14 +144,16 @@ public class TermsDistribution
      * @param min byte-comparable encoded min bound
      * @param max byte-comparable encoded max bound
      */
-    public long estimateNumRowsInRange(ByteBuffer min, boolean minInclusive, ByteBuffer max, boolean maxInclusive)
+    public long estimateNumRowsInRange(ByteBuffer minPartial, boolean minInclusive, ByteBuffer maxPartial, boolean maxInclusive)
     {
+        var min = getComparableBytes(minPartial);
+        var max = getComparableBytes(maxPartial);
         long rowCount = estimateNumRowsInRange(min, max);
 
         if (minInclusive && min != null)
-            rowCount += estimateNumRowsMatchingExact(min);
+            rowCount += estimateNumRowsMatchingExactEncoded(min);
         if (!maxInclusive && max != null)
-            rowCount = Math.max(0, rowCount - estimateNumRowsMatchingExact(max));
+            rowCount = Math.max(0, rowCount - estimateNumRowsMatchingExactEncoded(max));
 
         return rowCount;
     }
@@ -269,7 +296,7 @@ public class TermsDistribution
     private int indexOfBucketContaining(@Nonnull ByteBuffer b)
     {
         Bucket needle = new Bucket(b, 0, 0);
-        int index = Collections.binarySearch(histogram, needle, (b1, b2) -> ByteComparable.compare(b1.term, b2.term));
+        int index = Collections.binarySearch(histogram, needle, (b1, b2) -> termComparator.compare(b1.term, b2.term));
         return (index >= -1) ? index : -(index + 1);
     }
 
@@ -365,7 +392,7 @@ public class TermsDistribution
         public Builder(AbstractType<?> termType, int histogramSize, int mostFrequentTermsTableSize)
         {
             this.termType = termType;
-            this.termComparator = ByteComparable::compare;
+            this.termComparator = (b1, b2) -> TypeUtil.compare(b1, b2, termType, Version.latest());
             this.histogramSize = histogramSize;
             this.mostFrequentTermsTableSize = mostFrequentTermsTableSize;
 
