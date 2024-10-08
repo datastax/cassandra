@@ -163,12 +163,6 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     public abstract CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables);
 
     @VisibleForTesting
-    public LifecycleTransaction getTransaction()
-    {
-        return transaction;
-    }
-
-    @VisibleForTesting
     public OperationType getCompactionType()
     {
         return compactionType;
@@ -205,13 +199,13 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     }
 
     @VisibleForTesting
-    public List<CompactionObserver> getCompObservers()
+    List<CompactionObserver> getCompObservers()
     {
         return compObservers;
     }
 
     @VisibleForTesting
-    public LifecycleTransaction transaction()
+    LifecycleTransaction getTransaction()
     {
         return transaction;
     }

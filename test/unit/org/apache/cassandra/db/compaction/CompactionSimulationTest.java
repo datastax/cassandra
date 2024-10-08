@@ -1353,7 +1353,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                         continue;
                     }
 
-                    LifecycleTransaction txn = task.transaction();
+                    LifecycleTransaction txn = task.getTransaction();
                     Set<SSTableReader> candidates = txn.originals();
                     for (SSTableReader candidate : candidates)
                         counters.numReadForCompaction.addAndGet(candidate.keyCardinalityEstimator().cardinality());

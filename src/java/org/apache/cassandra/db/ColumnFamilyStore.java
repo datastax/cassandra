@@ -1436,9 +1436,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 }
 
                 Throwable accumulate = null;
+
                 for (SSTableMultiWriter writer : flushResults)
                     accumulate = writer.commit(accumulate);
-
                 maybeFail(txn.commit(accumulate));
 
                 for (SSTableMultiWriter writer : flushResults)
