@@ -72,6 +72,7 @@ import org.apache.cassandra.db.compaction.unified.CostsCalculator;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
@@ -408,6 +409,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          0,
                                                          Reservations.Type.PER_LEVEL,
                                                          overlapInclusionMethod,
+                                                         true,
+                                                         true,
                                                          false,
                                                          updateTimeSec,
                                                          minW,
@@ -435,6 +438,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        0,
                                                        Reservations.Type.PER_LEVEL,
                                                        overlapInclusionMethod,
+                                                       true,
+                                                       true,
                                                        false,
                                                        "ks",
                                                        "tbl");
@@ -1357,7 +1362,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                         continue;
                     }
 
-                    LifecycleTransaction txn = task.transaction();
+                    ILifecycleTransaction txn = task.getTransaction();
                     Set<SSTableReader> candidates = txn.originals();
                     for (SSTableReader candidate : candidates)
                         counters.numReadForCompaction.addAndGet(candidate.keyCardinalityEstimator().cardinality());
@@ -1391,7 +1396,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 
                     maybeSubmitCompaction();
 
-                    txn.unsafeClose();
+                    ((LifecycleTransaction)txn).unsafeClose();
                 }
                 logger.debug("...completed monitoring compactions");
             }
