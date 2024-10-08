@@ -23,6 +23,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -607,6 +608,51 @@ public abstract class ControllerTest
         // sanity check
         assertEquals(3, controller.getNumShards(Math.scalb(600, 20)));
         assertEquals(6, controller.getNumShards(Math.scalb(2400, 20)));
+    }
+
+    @Test
+    public void testParallelizeOutputShards()
+    {
+        testBooleanOption(Controller.PARALLELIZE_OUTPUT_SHARDS_OPTION, Controller.DEFAULT_PARALLELIZE_OUTPUT_SHARDS, Controller::parallelizeOutputShards);
+    }
+
+    @Test
+    public void testReshardMajorCompactions()
+    {
+        testBooleanOption(Controller.RESHARD_MAJOR_COMPACTIONS_OPTION,
+                          Controller.DEFAULT_RESHARD_MAJOR_COMPACTIONS != null ? Controller.DEFAULT_RESHARD_MAJOR_COMPACTIONS
+                                                                               : Controller.DEFAULT_PARALLELIZE_OUTPUT_SHARDS,
+                          Controller::reshardMajorCompactions);
+        // Check reshard defaults to the value of parallelize output shards if not set
+        testBooleanOption(Controller.RESHARD_MAJOR_COMPACTIONS_OPTION,
+                          false,
+                          Controller::reshardMajorCompactions,
+                          Controller.PARALLELIZE_OUTPUT_SHARDS_OPTION, "false");
+        testBooleanOption(Controller.RESHARD_MAJOR_COMPACTIONS_OPTION,
+                          true,
+                          Controller::reshardMajorCompactions,
+                          Controller.PARALLELIZE_OUTPUT_SHARDS_OPTION, "true");
+    }
+
+    public void testBooleanOption(String name, boolean defaultValue, Predicate<Controller> getter, String... extraSettings)
+    {
+        Controller controller = Controller.fromOptions(cfs, newOptions(extraSettings));
+        assertEquals(defaultValue, getter.test(controller));
+        for (boolean b : new boolean[] { true, false })
+        {
+            Map<String, String> options = newOptions(extraSettings);
+            options.put(name, Boolean.toString(b));
+            controller = Controller.fromOptions(cfs, options);
+            assertEquals(b, getter.test(controller));
+        }
+    }
+
+    private HashMap<String, String> newOptions(String... settings)
+    {
+        HashMap<String, String> options = new HashMap<>();
+        for (int i = 0; i < settings.length; i += 2)
+            options.put(settings[i], settings[i + 1]);
+        return options;
     }
 
     void testValidateCompactionStrategyOptions(boolean testLogType)

@@ -27,7 +27,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.ShardTracker;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
@@ -46,20 +46,20 @@ public class ShardedCompactionWriter extends CompactionAwareWriter
 
     private final ShardTracker boundaries;
 
+    /// @param uniqueKeyRatio the expected ratio between the expected number of unique keys in the output sstable and
+    /// the number of keys in the individual inputs.
     public ShardedCompactionWriter(CompactionRealm realm,
                                    Directories directories,
-                                   LifecycleTransaction txn,
+                                   ILifecycleTransaction txn,
                                    Set<SSTableReader> nonExpiredSSTables,
+                                   double uniqueKeyRatio,
                                    boolean keepOriginals,
+                                   boolean earlyOpenAllowed,
                                    ShardTracker boundaries)
     {
-        super(realm, directories, txn, nonExpiredSSTables, keepOriginals);
-
+        super(realm, directories, txn, nonExpiredSSTables, keepOriginals, earlyOpenAllowed);
         this.boundaries = boundaries;
-        long totalKeyCount = nonExpiredSSTables.stream()
-                                               .mapToLong(SSTableReader::estimatedKeys)
-                                               .sum();
-        this.uniqueKeyRatio = 1.0 * SSTableReader.getApproximateKeyCount(nonExpiredSSTables) / totalKeyCount;
+        this.uniqueKeyRatio = uniqueKeyRatio;
     }
 
     @Override

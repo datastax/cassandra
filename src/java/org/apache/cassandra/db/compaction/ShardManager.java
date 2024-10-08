@@ -18,8 +18,12 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
@@ -28,6 +32,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.utils.SortingIterator;
 
 public interface ShardManager
 {
@@ -136,6 +141,11 @@ public interface ShardManager
             span = rangeSpanned(rdr.getFirst(), rdr.getLast());
 
         long partitionCount = rdr.estimatedKeys();
+        return adjustSmallSpans(span, partitionCount);
+    }
+
+    private double adjustSmallSpans(double span, long partitionCount)
+    {
         if (partitionCount >= PER_PARTITION_SPAN_THRESHOLD && span >= MINIMUM_TOKEN_COVERAGE)
             return span;
 
@@ -143,7 +153,7 @@ public interface ShardManager
         // or falling outside the local token ranges. In these cases we apply a per-partition minimum calculated from
         // the number of partitions in the table.
         double perPartitionMinimum = Math.min(partitionCount * minimumPerPartitionSpan(), 1.0);
-        return span > perPartitionMinimum ? span : perPartitionMinimum; // The latter will be chosen if span is NaN too.
+        return span > perPartitionMinimum ? span : perPartitionMinimum;
     }
 
     default double rangeSpanned(PartitionPosition first, PartitionPosition last)
@@ -171,7 +181,7 @@ public interface ShardManager
     /**
      * Estimate the density of the sstable that will be the result of compacting the given sources.
      */
-    default double calculateCombinedDensity(Set<? extends CompactionSSTable> sstables)
+    default double calculateCombinedDensity(Collection<? extends CompactionSSTable> sstables, long approximatePartitionCount)
     {
         if (sstables.isEmpty())
             return 0;
@@ -185,9 +195,42 @@ public interface ShardManager
             max = max == null || max.compareTo(sstable.getLast()) < 0 ? sstable.getLast() : max;
         }
         double span = rangeSpanned(min, max);
-        if (span >= MINIMUM_TOKEN_COVERAGE)
-            return onDiskLength / span;
-        else
-            return onDiskLength;
+        return onDiskLength / adjustSmallSpans(span, approximatePartitionCount);
+    }
+
+    /**
+     * Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+     * the given function on the combination of each shard range and the intersecting sstable set.
+     */
+    default <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
+                                                                           int numShards,
+                                                                           BiFunction<Set<R>, Range<Token>, T> maker)
+    {
+        var boundaries = boundaries(numShards);
+        List<T> tasks = new ArrayList<>();
+        SortingIterator<R> firsts = SortingIterator.create(CompactionSSTable.firstKeyComparator, sstables);
+        SortingIterator<R> lasts = SortingIterator.create(CompactionSSTable.lastKeyComparator, sstables);
+        Set<R> current = new HashSet<>(sstables.size());
+        while (lasts.hasNext())
+        {
+            if (current.isEmpty())
+            {
+                boundaries.advanceTo(firsts.peek().getFirst().getToken());
+                current.add(firsts.next());
+            }
+            Token shardEnd = boundaries.shardEnd();
+
+            while (firsts.hasNext() && (shardEnd == null || firsts.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
+                current.add(firsts.next());
+
+            tasks.add(maker.apply(current, boundaries.shardSpan()));
+
+            while (lasts.hasNext() && (shardEnd == null || lasts.peek().getLast().getToken().compareTo(shardEnd) <= 0))
+                current.remove(lasts.next());
+
+            if (!current.isEmpty()) // shardEnd must be non-null (otherwise the line above exhausts all)
+                boundaries.advanceTo(shardEnd.nextValidToken());
+        }
+        return tasks;
     }
 }
