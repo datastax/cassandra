@@ -224,7 +224,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 completeSSTable(txn, indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
             }
             long timeTaken = ApproximateTime.nanoTime() - startTimeNanos;
-            group.table().metric.storageAttachedIndexRebuildTime.update(timeTaken);
+            group.table().metric.storageAttachedIndexBuildTime.update(timeTaken);
             logger.debug("Completed indexing sstable {} in {} seconds", sstable.descriptor, TimeUnit.NANOSECONDS.toSeconds(timeTaken));
 
             return false;

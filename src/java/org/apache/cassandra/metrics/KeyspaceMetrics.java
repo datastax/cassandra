@@ -83,7 +83,7 @@ public class KeyspaceMetrics
     public final Histogram tombstoneScannedHistogram;
     /** Time spent flushing memtables */
     public final Histogram flushTime;
-    public final Histogram storageAttachedIndexRebuildTime;
+    public final Histogram storageAttachedIndexBuildTime;
 
     /** Time spent writing SAI */
     public final Histogram storageAttachedIndexWritingTimeForIndexBuild;
@@ -231,7 +231,7 @@ public class KeyspaceMetrics
         sstablesPerReadHistogram = createKeyspaceHistogram("SSTablesPerReadHistogram", true);
         tombstoneScannedHistogram = createKeyspaceHistogram("TombstoneScannedHistogram", false);
         flushTime = createKeyspaceHistogram("FlushTime", false);
-        storageAttachedIndexRebuildTime = createKeyspaceHistogram("StorageAttachedIndexRebuildTime", false);
+        storageAttachedIndexBuildTime = createKeyspaceHistogram("StorageAttachedIndexBuildTime", false);
         storageAttachedIndexWritingTimeForIndexBuild = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForIndexBuild", false);
         storageAttachedIndexWritingTimeForCompaction = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForCompaction", false);
         storageAttachedIndexWritingTimeForFlush = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForFlush", false);

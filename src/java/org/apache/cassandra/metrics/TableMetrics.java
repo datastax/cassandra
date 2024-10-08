@@ -211,7 +211,7 @@ public class TableMetrics
     public final MovingAverage flushTimePerKb;
     /** Time spent in flushing memtables */
     public final TableHistogram flushTime;
-    public final TableHistogram storageAttachedIndexRebuildTime;
+    public final TableHistogram storageAttachedIndexBuildTime;
     public final TableHistogram storageAttachedIndexWritingTimeForIndexBuild;
     public final TableHistogram storageAttachedIndexWritingTimeForCompaction;
     public final TableHistogram storageAttachedIndexWritingTimeForFlush;
@@ -736,7 +736,7 @@ public class TableMetrics
         flushSegmentCount = ExpMovingAverage.decayBy1000();
         flushTimePerKb = ExpMovingAverage.decayBy100();
         flushTime = createTableHistogram("FlushTime", cfs.getKeyspaceMetrics().flushTime, false);
-        storageAttachedIndexRebuildTime = createTableHistogram("StorageAttachedIndexRebuildTime", cfs.getKeyspaceMetrics().storageAttachedIndexRebuildTime, false);
+        storageAttachedIndexBuildTime = createTableHistogram("StorageAttachedIndexBuildTime", cfs.getKeyspaceMetrics().storageAttachedIndexBuildTime, false);
         storageAttachedIndexWritingTimeForIndexBuild = createTableHistogram("StorageAttachedIndexWritingTimeForIndexBuild", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForIndexBuild, false);
         storageAttachedIndexWritingTimeForCompaction = createTableHistogram("StorageAttachedIndexWritingTimeForCompaction", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForCompaction, false);
         storageAttachedIndexWritingTimeForFlush = createTableHistogram("StorageAttachedIndexWritingTimeForFlush", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForFlush, false);
