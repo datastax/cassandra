@@ -28,10 +28,12 @@ import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.junit.Assert.assertEquals;
 
@@ -85,10 +87,10 @@ public class ImmutableOneDimPointValuesTest
             @Override
             public void visit(int docID, byte[] packedValue)
             {
-                final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
+                final ByteComparable actualTerm = ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, packedValue);
                 final ByteComparable expectedTerm = ByteComparable.of(term);
 
-                assertEquals(0, ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+                assertEquals(0, ByteComparable.compare(actualTerm, expectedTerm, TypeUtil.BYTE_COMPARABLE_VERSION));
                 assertEquals(postingCounter, docID);
 
                 if (postingCounter >= 2)
@@ -123,7 +125,7 @@ public class ImmutableOneDimPointValuesTest
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
                 IntArrayList postings = new IntArrayList();
                 postings.add(0, 1, 2);
-                return Pair.create(ByteComparable.fixedLength(term), postings);
+                return Pair.create(v -> ByteSource.preencoded(term), postings);
             }
         };
 

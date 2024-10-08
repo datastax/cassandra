@@ -327,7 +327,7 @@ public abstract class CassandraIndex implements Index
                 break;
             case REGULAR:
                 if (update.columns().regulars.contains(indexedColumn))
-                    validateRows(update);
+                    validateRows(update.rows());
                 break;
             case STATIC:
                 if (update.columns().statics.contains(indexedColumn))
@@ -592,7 +592,7 @@ public abstract class CassandraIndex implements Index
     private void validateClusterings(PartitionUpdate update) throws InvalidRequestException
     {
         assert indexedColumn.isClusteringColumn();
-        for (Row row : update)
+        for (Row row : update.rows())
             validateIndexedValue(getIndexedValue(null, row.clustering(), null));
     }
 

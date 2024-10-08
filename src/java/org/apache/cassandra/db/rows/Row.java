@@ -22,6 +22,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -352,7 +353,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
      * <p>
      * Currently, the only use of shadowable row deletions is Materialized Views, see CASSANDRA-10261.
      */
-    public static class Deletion
+    public static class Deletion implements IMeasurableMemory
     {
         public static final Deletion LIVE = new Deletion(DeletionTime.LIVE, false);
         private static final long EMPTY_SIZE = ObjectSizes.measure(new DeletionTime(0, 0));

@@ -206,10 +206,14 @@ public class SensorsIndexWriteTest
         handleMutation(secondaryIndexMutation);
 
         Sensor secondaryIndexSensor = SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
-        // Writing the same amount of data to an indexed column should generate at least the same number of bytes (the SecondaryIndex write bytes >= the vanilla write bytes)
-        assertThat(secondaryIndexSensor.getValue()).isGreaterThanOrEqualTo(standardSensor.getValue());
+        // We are not guaranteed that the amount of data we write to the secondary index is more than what we write to the main file,
+        // and we are not tracking it very precisely. It should, though, at least include the cell data and deletions which is about
+        // half the standard write size.
+        assertThat(secondaryIndexSensor.getValue()).isGreaterThanOrEqualTo(standardSensor.getValue() / 2);
         Sensor secondaryIndexRegistrySensor = SensorsTestUtil.getRegistrySensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
         assertThat(secondaryIndexRegistrySensor).isEqualTo(secondaryIndexSensor);
+        // Check that we also get the correct vanilla write bytes for this operation.
+        assertThat(SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.WRITE_BYTES).getValue()).isEqualTo(standardSensor.getValue());
 
         // check global registry is synchronized for Secondary Index table
         assertThat(secondaryIndexRegistrySensor.getValue()).isEqualTo(secondaryIndexSensor.getValue());

@@ -170,13 +170,13 @@ final class MapSelector extends Selector
         }
     }
 
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(ResultSetBuilder rs) throws InvalidRequestException
     {
         for (int i = 0, m = elements.size(); i < m; i++)
         {
             Pair<Selector, Selector> pair = elements.get(i);
-            pair.left.addInput(protocolVersion, rs);
-            pair.right.addInput(protocolVersion, rs);
+            pair.left.addInput(rs);
+            pair.right.addInput(rs);
         }
     }
 

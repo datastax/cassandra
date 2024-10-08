@@ -30,6 +30,8 @@ import com.google.common.base.Predicate;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -56,6 +58,11 @@ import org.apache.cassandra.schema.TableMetadataRef;
  */
 public interface CompactionRealm
 {
+    /**
+     * @return the UCS environment of this table.
+     */
+    Environment makeUCSEnvironment();
+
     /**
      * @return the schema metadata of this table.
      */
@@ -96,7 +103,7 @@ public interface CompactionRealm
     Directories getDirectories();
 
     /**
-     * @return the {@DiskBoundaries} that are currently applied to the directories backing table.
+     * @return the {@link DiskBoundaries} that are currently applied to the directories backing table.
      */
     DiskBoundaries getDiskBoundaries();
 
@@ -105,6 +112,21 @@ public interface CompactionRealm
      * but should be set when the strategy is asked to select or run compactions.
      */
     TableMetrics metrics();
+
+    /**
+     * Return the estimated partition count, used when the number of partitions in an sstable is not sufficient to give
+     * a sensible range estimation.
+     */
+    default long estimatedPartitionCount()
+    {
+        final long INITIAL_ESTIMATED_PARTITION_COUNT = 1 << 16; // If we don't yet have a count, use a sensible default.
+        if (metrics() == null)
+            return INITIAL_ESTIMATED_PARTITION_COUNT;
+        final Long estimation = metrics().estimatedPartitionCount.getValue();
+        if (estimation == null || estimation == 0)
+            return INITIAL_ESTIMATED_PARTITION_COUNT;
+        return estimation;
+    }
 
     /**
      * @return the secondary index manager, which is responsible for all secondary indexes.

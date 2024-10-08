@@ -16,9 +16,9 @@
  limitations under the License.
 -->
 
-# MemtableTrie Design
+# InMemoryTrie Design
 
-The `MemtableTrie` is one of the main components of the trie infrastructure, a mutable in-memory trie built for fast
+The `InMemoryTrie` is one of the main components of the trie infrastructure, a mutable in-memory trie built for fast
 modification and reads executing concurrently with writes from a single mutator thread.
 
 The main features of its implementation are:
@@ -26,6 +26,8 @@ The main features of its implementation are:
 - using nodes of several different types for efficiency
 - support for content on any node, including intermediate (prefix)
 - support for writes from a single mutator thread concurrent with multiple readers
+- various consistency and atomicity guarantees for readers
+- memory management, off-heap or on-heap
 - maximum trie size of 2GB
 
 
@@ -34,10 +36,9 @@ The main features of its implementation are:
 One of the main design drivers of the memtable trie is the desire to avoid on-heap storage and Java object management.
 The trie thus implements its own memory management for the structure of the trie (content is, at this time, still given
 as Java objects in a content array). The structure resides in one `UnsafeBuffer` (which can be on or off heap as
-desired) and is broken up in 32-byte "cells" (also called "blocks" in the code), which are the unit of allocation,
-update and reuse.
+desired) and is broken up in 32-byte "cells", which are the unit of allocation, update and reuse.
 
-Like all tries, `MemtableTrie` is built from nodes and has a root pointer. The nodes reside in cells, but there is no
+Like all tries, `InMemoryTrie` is built from nodes and has a root pointer. The nodes reside in cells, but there is no
 1:1 correspondence between nodes and cells - some node types pack multiple in one cell, while other types require
 multiple cells.
 
@@ -74,7 +75,7 @@ The sections below specify the layout of each supported node type.
 #### Leaf nodes
 
 Leaf nodes do not have a corresponding cell in the buffer. Instead, they reference a value (i.e. a POJO in the
-`MemtableTrie`'s content type) in the content array. The index of the value is specified by `~pointer` (unlike `-x`,
+`InMemoryTrie`'s content type) in the content array. The index of the value is specified by `~pointer` (unlike `-x`,
 `~x` allows one to also encode 0 in a negative number).
 
 Leaf nodes have no children, and return the specified value for `content()`.
@@ -85,7 +86,7 @@ Example: -1 is a leaf cell with content `contentArray[0]`.
 
 Chain nodes are one-child nodes. Multiple chain nodes, forming a chain of transitions to one target, can reside in a
 single cell. Chain nodes are identified by the lowest 5 bits of a pointer being between `0x00` and `0x1B`. In addition
-to the the type of node, in this case the bits also define the length of the chain &mdash; the difference between
+to the type of node, in this case the bits also define the length of the chain &mdash; the difference between
 `0x1C` and the pointer offset specifies the number of characters in the chain.
 
 The simplest chain node has one transition leading to one child and is laid out like this:
@@ -133,7 +134,7 @@ nodes (an example will be given below). In any case, the byte pointed directly b
 transition byte. The child pointer is either `pointer + 1` (if the lowest 5 pointer bits are less than `0x1B`), or the
 integer stored at `pointer + 1` (if the pointer's last 5 bits are `0x1B`).
 
-![graph](MemtableTrie.md.g1.svg)
+![graph](InMemoryTrie.md.g1.svg)
 
 Note: offset `0x00` also specifies a chain node, but the pointer 0 is a special case and care must be taken to ensure no
 28-byte chain node is placed in the cell at bytes `0x00`-`0x1F`.
@@ -172,7 +173,7 @@ To explain this better, we will give an example of the evolution of a sparse nod
 the previous section, and some update needs to attach a second child to that, e.g. with the character `A` and child
 `0x238`.
 
-![graph](MemtableTrie.md.g2.svg)
+![graph](InMemoryTrie.md.g2.svg)
 
 To do this, the mutating thread will have to convert the chain node into a sparse by allocating a new cell
 (e.g. `0x240`-`0x25F`) and filling in the sparse node `00000238 0000013A 00000000 00000000 00000000 00000000 41430000
@@ -282,14 +283,14 @@ offset|content|
 18 - 1B|pointer to child for ending 110|
 1C - 1F|pointer to child for ending 111|
 
-In any of the cell or pointer positions we can have `NONE`, meaning that such a child (or block of children) does not
+In any of the cell or pointer positions we can have `NONE`, meaning that such a child (or cell of children) does not
 exist. At minimum, a split node occupies 3 cells (one leading, one mid and one end), and at maximum &mdash;
 `1 + 4 + 4*8 = 37` cells i.e. `1184` bytes. If we could allocate contiguous arrays, a full split node would use `1024`
 bytes, thus this splitting can add ~15% overhead. However, real data often has additional structure that this can make
-use of to avoid creating some of the blocks, e.g. if the trie encodes US-ASCII or UTF-encoded strings where some
+use of to avoid creating some of the cells, e.g. if the trie encodes US-ASCII or UTF-encoded strings where some
 character ranges are not allowed at all, and others are prevalent. Another benefit is that to change a transition while
-preserving the previous state of the node for concurrent readers we have to only copy three blocks and not the entire
-range of children (applications of this will be given later).
+preserving the previous state of the node for concurrent readers we have to only copy three cells and not the entire
+range of children (applications of this will be given in the [Mutation](#mutation) section).
 
 As an example, suppose we need to add a `0x51` `Q` transition to `0x455` to the 6-children sparse node from the previous
 section. This will generate the following structure:
@@ -374,7 +375,7 @@ To find a child in this structure, we follow the transitions along the bits of t
 the `010` index to retrieve the node pointer `0x35C`. Note that the intermediate cells (dashed in the diagram) are not
 reachable with pointers, they only make sense as substructure of the split node.
 
-![graph](MemtableTrie.md.g3.svg)
+![graph](InMemoryTrie.md.g3.svg)
 
 #### Content `Prefix`
 
@@ -428,25 +429,25 @@ offset|content|example
 Both `0x51C` and `0x51F` are valid pointers in this cell. The former refers to the plain split node, the latter to its
 content-augmented version. The only difference between the two is the result of a call to `content()`.
 
-![graph](MemtableTrie.md.g4.svg)
+![graph](InMemoryTrie.md.g4.svg)
 
 
 ## Reading a trie
 
-`MemtableTrie` is mainly meant to be used as an implementation of `Trie`. As such, the main method of retrieval of
+`InMemoryTrie` is mainly meant to be used as an implementation of `Trie`. As such, the main method of retrieval of
 information is via some selection (i.e. intersection) of a subtrie followed by a walk over the content in this
 subtrie. Straightforward methods for direct retrieval of data by key are also provided, but they are mainly for testing.
 
 The methods for iterating over and transforming tries are provided by the `Trie` interface and are built on the cursor
-interface implemented by `MemtableTrie` (see `Trie.md` for a description of cursors).
+interface implemented by `InMemoryTrie` (see `Trie.md` for a description of cursors).
 
-![graph](MemtableTrie.md.wc1.svg)
+![graph](InMemoryTrie.md.wc1.svg)
 
 (Edges in black show the trie's structure, and the ones in <span style="color:lightblue">light blue</span> the path the cursor walk takes.)
 
-### Cursors over `MemtableTrie`
+### Cursors over `InMemoryTrie`
 
-`MemtableTrie` implements cursors using arrays of integers to store the backtracking state (as the simplest
+`InMemoryTrie` implements cursors using arrays of integers to store the backtracking state (as the simplest
 possible structure that can be easily walked and garbage collected). No backtracking state is added for `Chain` or 
 `Leaf` nodes and any prefix. For `Sparse` we store the node address, depth and the remainder of the sparse order word.
 That is, we read the sparse order word on entry, peel off the next index to descend and store the remainder. When we 
@@ -465,19 +466,19 @@ This substructure is a little more efficient than storing only one entry for the
 mid-to-tail links do not need to be followed for every new child) and also allows us to easily get the precise next 
 child and remove the backtracking entry when a cell has no further children.
 
-`MemtableTrie` cursors also implement `advanceMultiple`, which jumps over intermediate nodes in `Chain` blocks:
+`InMemoryTrie` cursors also implement `advanceMultiple`, which jumps over intermediate nodes in `Chain` cells:
 
-![graph](MemtableTrie.md.wc2.svg)
+![graph](InMemoryTrie.md.wc2.svg)
 
 ## Mutation
 
-Mutation of `MemtableTrie` must be done by one thread only (for performance reasons we don't enforce it, the user must
+Mutation of `InMemoryTrie` must be done by one thread only (for performance reasons we don't enforce it, the user must
 make sure that's the case), but writes may be concurrent with multiple reads over the data that is being mutated. The
 trie is built to support this by making sure that any modification of a node is safe for any reader that is operating
 concurrently.
 
-The main method for mutating a `MemtableTrie` is `apply`, which merges the structure of another `Trie` in. 
-`MemtableTrie` also provides simpler recursive method of modification, `putRecursive`, which creates a single 
+The main method for mutating a `InMemoryTrie` is `apply`, which merges the structure of another `Trie` in. 
+`InMemoryTrie` also provides simpler recursive method of modification, `putRecursive`, which creates a single 
 `key -> value` mapping in the trie. We will describe the mutation process starting with a `putRecursive` example.
 
 ### Adding a new key -> value mapping using `putRecursive`
@@ -487,7 +488,7 @@ insertion process walks the trie to find corresponding existing nodes for the on
 When it has to leave the existing trie, because it has no entries for the path, the process continues using `NONE` as
 the trie node.
 
-![graph](MemtableTrie.md.m1.svg)
+![graph](InMemoryTrie.md.m1.svg)
 
 When it reaches the end of the path, it needs to attach the value. Unless this is a prefix of an existing entry, the 
 matching trie node will either be `NONE` or a leaf node. Here it's `NONE`, so we create a item in the
@@ -501,7 +502,7 @@ writing the new character at the address just before the child pointer, and retu
 child chain node is newly created, so we can't be overwriting any existing data there). We can do this several more
 times.
 
-![graph](MemtableTrie.md.m2.svg)
+![graph](InMemoryTrie.md.m2.svg)
 
 (<span style="color:lightblue">Light blue</span> specifies the descent path, <span style="color:pink">pink</span>
 the values returned, <span style="color:blue">blue</span> stands for newly-created nodes and links, and
@@ -524,7 +525,7 @@ them).
 It can then return its address `0x07E` unchanged up, and no changes need to be done in any of the remaining steps. The
 process finishes in a new value for `root`, which in this case remains unchanged.
 
-![graph](MemtableTrie.md.m3.svg)
+![graph](InMemoryTrie.md.m3.svg)
 
 The process created a few new nodes (in blue), and made one obsolete (in grey). What concurrent readers can see depends
 on where they are at the time the attachment point write is done. Forward traversals, if they are in the path below
@@ -540,7 +541,8 @@ Note that if we perform multiple mutations in sequence, and a reader happens to 
 order), such reader may see only the mutation that is ahead of it _in iteration order_, which is not necessarily the
 mutation that happened first. For the example above, if we also inserted `trespass`, a reader thread that was paused
 at `0x018` in a forward traversal and wakes up after both insertions have completed will see `trespass`, but _will not_
-see `traverse` even though it was inserted earlier.
+see `traverse` even though it was inserted earlier. This inconsistency is often undesirable; we will describe a
+method of avoiding it in one of the next paragraphs.
 
 ### In-place modifications
 
@@ -701,12 +703,16 @@ iteration processes a child, we apply the update to the node, which may happen i
 the original `existingNode`, it was pointing to an unreachable copied node which will remain unreachable as we will only
 attach the newer version.
 
+For reasons to be described below, copying of existing reachable nodes may be enforced. The test `updatedNode
+ == existingNode` can be used to tell if the node is indeed reachable; if we have copied it already there is no need to
+ copy it again to update for a new child (note: we may still need to copy reachable mid or end cells in `Split` nodes).
+
 After all modifications coming as the result of application of child branches have been applied, we have an
 `updatedNode` that reflects all. As we ascend we apply that new value to the parent's `updatedNode`.
 
 For example (adding a trie containing "traverse, truck" to the "tractor, tree, trie" one):
 
-![graph](MemtableTrie.md.a1.svg)
+![graph](InMemoryTrie.md.a1.svg)
 
 In this diagram `existingNode`s are the ones reached through the <span style="color:lightblue">light blue</span> arrows during the descent phase (e.g.
 `0x018` for the `ApplyState` at `tra`, or `NONE` for `tru`), and `updatedNode`s are the ones ascent (<span style="color:pink">pink</span> arrows)
@@ -722,6 +728,52 @@ manages to attach `truck`;
 - a reading thread that iterated to `tree` (while `traverse` was not yet attached) and paused, will see `truck` if the
 mutating thread applies the update during the pause.
 
+### Atomicity
+
+Atomicity of writes is usually a desirable property. Atomicity means that readers can see either none of the contents
+of a mutation, or all of them, i.e. that they can never see some part of an update and miss another.
+
+We can achieve this by making sure that the application of a mutation has only one attachment point. This is always the
+case for single-path updates (`putRecursive` or `apply` where no mutation node has more than one child). We can achieve
+the same for branching updates if we "force-copy" all memtable trie nodes at or below the topmost branching node of
+the mutation trie.
+
+This ensures that any partially applied changes are only done in unreachable copy nodes, while concurrent readers
+continue working on the originals. Once the branch is fully prepared, we attach it using one in-place write which makes
+the whole of it visible.
+
+The example above with atomic writes will be done as
+
+![graph](InMemoryTrie.md.a2.svg)
+
+### Consistency
+
+The same idea can also be used to enforce sequential consistency, defined here as the property that all readers that see
+an update must also be able to see all updates that happened before it (alternatively, if a reader does not see an
+update, it will not see any update that was applied after it in the order of execution of the mutating thread).
+
+Inconsistencies happen because, while a reader is traversing through it, a branch can change at random places, some of
+which may be before or after the reader's position in iteration order. We can avoid this problem if we ensure that the
+snapshot the reader is operating on does not change.
+
+To do this, we must force-copy any node we update, until the modification proceeds to the root pointer, which we then
+update to the new value (i.e. we force the attachment point for the mutation to be the root pointer). Any reader who has
+already read the root pointer will not see any updates that apply after that point in time. Any reader who reads the new
+pointer will see everything that the mutation thread did until it wrote that pointer, i.e. the last mutation and all
+mutations that precede it.
+
+![graph](InMemoryTrie.md.a3.svg)
+
+At the end of the processing of this example, the root pointer is written volatile to the new value `0x13A`. Although we
+maintain a full snapshot of the trie, we did not need to copy all nodes, only the ones that were touched by the update
+(i.e. the extra space is proportional to the update size, not to the size of the recipient trie).
+
+Consistency can also be applied below a point selected by the user (e.g. below user-identifiable metadata). In this case
+the snapshot is preserved only for nodes at or below the identified point, i.e. force-copying applies at that level
+and below, and the attachment point of any update is above the identified point &mdash; readers who see the new link
+must also see anything that the mutation thread did below that point, including any mutation that preceded the last and
+all modified content in the protected branch.
+
 ### Handling prefix nodes
 
 The descriptions above were given without prefix nodes. Handling prefixes is just a little complication over the update
@@ -732,7 +784,7 @@ To do this we expand the state tracked to:
   nodes like a prefix with no child) and is the base for all child updates (i.e. it takes the role of
   `existingNode` in the descriptions above),
 - `updatedPostContentNode` which is the node as changed/copied after children modifications are applied,
-- `contentIndex` which is the index in the content array for the result of merging existing and newly introduced 
+- `contentIndex` which is the index in the content array for the result of merging existing and newly introduced
   content, (Note: The mutation content is only readable when the cursor enters the node, and we can only attach it when
   we ascend from it.)
 - `transition` remains as before.
@@ -745,9 +797,99 @@ constructed after `updatedPostContentNode` but links above it in the trie.)
 
 As an example, consider the process of adding `trees` to our sample trie:
 
-![graph](MemtableTrie.md.p1.svg)
+![graph](InMemoryTrie.md.p1.svg)
 
 When descending at `tree` we set `existingPreContentNode = ~1`, `existingPostContentNode = NONE` and `contentIndex = 1`.
 Ascending back to add the child `~3`, we add a child to `NONE` and get `updatedPostContentNode = 0x0BB`. To then apply
 the existing content, we create the embedded prefix node `updatedPreContentNode = 0x0BF` with `contentIndex = 1` and
 pass that on to the recursion.
+
+### Memory management and cell reuse
+
+As mentioned in the beginning, in order to avoid long garbage collection pauses due to large long-lasting content in
+memtable tries such as the ones used to store database memtables, `InMemoryTrie` uses its own memory management, and
+can be used with on- or off-heap memory.
+
+The most important uses for the trie are long-lived ones, but there are also cases where we want to compose small
+short-lived tries, for example to store the result of a query, or to prepare a partition update before it is merged
+with the memtable. The two usecases are served most efficiently by using different allocation and reuse methods, which
+is why `InMemoryTrie`s offer two factory methods to create two different kinds of tries:
+
+- `InMemoryTrie.shortLived()` creates a trie that is expected to remain relatively small, to be used only for a short
+  period (e.g. the duration of a write or read request), and typically to be accessed by one thread only. These tries
+  reside on heap, because allocation and release of smaller buffers is done more efficiently using garbage collection, and
+  do not make any attempt to reclaim cells that become unused due to copying or type change. In tries that are accessed
+  by one thread only, mutations can safely be made without any atomicity or consistency concerns thus without any forced
+  copying, which means that the overhead of not reclaiming cells should be inconsequential.
+  `PartitionUpdate`s are an example of short-lived tries, where mutations are prepared before being sent to the commit log
+  and merged into a memtable.
+
+- `InMemoryTrie.longLived(OpOrder)` creates a trie which is expected to grow large, to remain in place for a long time,
+  and to be read by a multitude of threads concurrently with a single mutator. This kind of trie will usually be off-heap,
+  and will reclaim any cells that become unreferenced due to copying or type change. Because recycling cells requires the
+  trie/mutator to know if a reader can still be looking at cells that have become unreachable, long lived tries rely on an
+  `OpOrder` which readers must take a group from before reading the trie, and release when done.
+  `MemtableShard` (and in general database memtables) use long-lived tries, with the table's `readOrdering` (which all
+  reads already use) as the `OpOrder` signal when unreachable cells can be reused.
+
+The on/off-heap distinction is handled by the `BufferType` used in constructing the trie, while the recycling strategy
+is handled by the one of the two `MemtableAllocationStrategies`. `NoReuseStrategy`, used by the short-lived option is
+trivial, simply bump-allocating cells and objects from linear byte buffer and object array. `OpOrderReuseStrategy`
+handles the long-lived case and will be detailed below.
+
+The descriptions in this section talk about cells, but we apply exactly the same mechanisms for handling slots in the
+java object content array (with separate queues).
+
+#### Cell recycling in long-lived tries
+
+During the application of a mutation, the `InMemoryTrie` code knows which cells are being copied to another location and
+tells the allocation strategy that the cells are going to be freed (using a `recycleCell` or implied in `copyCell`).
+This does not mean that the old cell is already free, because:
+- (1) it is probably still reachable (if the process has not backtracked enough to attach the new cell to some
+  parent) by concurrent readers;
+- (2) the procedure may fail before the attachment point and the old cell may remain reachable even for this thread;
+- (3) it may still be needed by the mutator (e.g. a chain cell is freed when we recognize that the last node in the
+  chain needs to be moved, but the other nodes in the cell are still in the parent path for the mutation process); or
+- (4) concurrent readers may hold a pointer to the old cell, or a parent or child chain that leads to it.
+
+Thus, we can only recycle a cell when all four conditions are no longer possible. Once an attachment has been made, (1)
+and (2) are no longer possible (since attachment writes are volatile, all threads that visit that point at any time
+after the write _must_ see the new paths). (3) becomes impossible when the mutation completes. To make things simple,
+we use the completion of a mutation (signalled to the allocation strategy via a `completeMutation` call) as the point
+in time when all attachments are in place. To make sure (4) is no longer happening, the allocation strategy relies on
+the given `OpOrder` &mdash; when a barrier, issued at any point _after_ the `completeMutation` call, expires, no cells
+identified by the mutation as recyclable can be referenced in any current readers, because they must have followed the
+newly set paths and thus cannot have reached those cells.
+
+The allocation strategy implements this by maintaining several lists:
+- just-released cells, added in response to `recycleCell` calls and awaiting `completeMutation`
+- cells awaiting barrier, moved from the top list after `completeMutation`, for which a barrier has been issued,
+  awaiting the barrier to expire
+- reusable cells, moved from the list above after their barrier has expired
+
+For efficiency the allocation strategy does not work with individual cells, but rather in blocks of ~250. Newly
+allocated cells are taken from a `free` block. When a mutation releases cells, they are put in a `justReleased` block,
+and if the block is filled, another one is created and linked to form a queue. At mutation completion we do nothing if
+no block is yet completed; if one is, we issue a barrier and give it to the block (and any other completed blocks in
+the `justReleased` queue), with which we move it/them to the tail of an `awaitingBarrier` queue. The head of this queue
+is the oldest block of recycled cells and has the highest probability of having passed its barrier &mdash; if any block
+in the queue has an expired barrier, all previous ones also will (because of the logic of expiring barriers in
+`OpOrder`). Hence, when we need to allocate a new cell and the free block is empty, we check if that head block's barrier
+has expired, and if it has, we make that the new `free` block. If the barrier hasn't expired, there is no block of cells
+that is ready for recycling, thus we must refill the `free` block with new cells.
+
+Technically, the "reusable cells" list and "cells awaiting barrier" are in the same linked queue, which is effectively
+split in two parts by the property of having an expired barrier. Also, to simplify handling, the `free` block stands at
+the head of that queue &mdash; it plays the part of a sentinel block for the `awaitingBarrier` queue as we
+always have a block at `free`, thus `awaitingBarrierTail` can move to it when the queue becomes empty.
+
+![diagram](InMemoryTrie.md.recycling.svg)
+
+If an exception is thrown during a mutation, the `InMemoryTrie` code catches that exception and signals `abortMutation`
+to the strategy, which tells it that the cells the current call marked as recyclable will probably remain reachable
+and should be discarded; because the strategy works with blocks, it will actually discard everything in the
+`justReleased` block and queue. This may result in some cell waste &mdash; unreachable cells that cannot be recycled
+&mdash; if cells were allocated and/or an attachment was made before the exception is thrown. We don't expect this to
+happen often, but any users of tries that expect them to live indefinitely (unlike memtables which are flushed
+regularly; an example would be the chunk cache map when/if we switch it to `InMemoryTrie`) must ensure that exceptions
+cannot happen during mutation, otherwise waste can slowly accumulate to bring the node down.

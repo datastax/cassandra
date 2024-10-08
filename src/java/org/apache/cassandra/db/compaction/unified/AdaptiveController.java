@@ -112,11 +112,13 @@ public class AdaptiveController extends Controller
                               long expiredSSTableCheckFrequency,
                               boolean ignoreOverlapsInExpirationCheck,
                               int baseShardCount,
+                              boolean isReplicaAware,
                               long targetSStableSize,
                               double sstableGrowthModifier,
                               int reservedThreadsPerLevel,
                               Reservations.Type reservationsType,
                               Overlaps.InclusionMethod overlapInclusionMethod,
+                              boolean hasVectorType,
                               int intervalSec,
                               int minScalingParameter,
                               int maxScalingParameter,
@@ -138,11 +140,13 @@ public class AdaptiveController extends Controller
               expiredSSTableCheckFrequency,
               ignoreOverlapsInExpirationCheck,
               baseShardCount,
+              isReplicaAware,
               targetSStableSize,
               sstableGrowthModifier,
               reservedThreadsPerLevel,
               reservationsType,
-              overlapInclusionMethod);
+              overlapInclusionMethod,
+              hasVectorType);
 
         this.scalingParameters = scalingParameters;
         this.previousScalingParameters = previousScalingParameters;
@@ -166,11 +170,13 @@ public class AdaptiveController extends Controller
                                   long expiredSSTableCheckFrequency,
                                   boolean ignoreOverlapsInExpirationCheck,
                                   int baseShardCount,
+                                  boolean isReplicaAware,
                                   long targetSSTableSize,
                                   double sstableGrowthModifier,
                                   int reservedThreadsPerLevel,
                                   Reservations.Type reservationsType,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
+                                  boolean hasVectorType,
                                   String keyspaceName,
                                   String tableName,
                                   Map<String, String> options)
@@ -263,11 +269,13 @@ public class AdaptiveController extends Controller
                                       expiredSSTableCheckFrequency,
                                       ignoreOverlapsInExpirationCheck,
                                       baseShardCount,
+                                      isReplicaAware,
                                       targetSSTableSize,
                                       sstableGrowthModifier,
                                       reservedThreadsPerLevel,
                                       reservationsType,
                                       overlapInclusionMethod,
+                                      hasVectorType,
                                       intervalSec,
                                       minScalingParameter,
                                       maxScalingParameter,
@@ -315,6 +323,9 @@ public class AdaptiveController extends Controller
             parseScalingParameters(staticScalingFactors);
         else if (staticScalingParameters != null)
             parseScalingParameters(staticScalingParameters);
+        String vectorScalingParameters = options.remove(VECTOR_SCALING_PARAMETERS_OPTION);
+        if (vectorScalingParameters != null)
+            throw new ConfigurationException(String.format("%s option is not supported with Adaptive UCS", VECTOR_SCALING_PARAMETERS_OPTION));
         s = options.remove(MIN_SCALING_PARAMETER);
         if (s != null)
             minScalingParameter = Integer.parseInt(s);

@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -38,10 +38,13 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1,jvmArgsAppend = { "-Xmx4G", "-Xms4G", "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"})
 @Threads(1) // no concurrent writes
 @State(Scope.Benchmark)
-public class MemtableTrieUnionBench
+public class InMemoryTrieUnionBench
 {
     @Param({"ON_HEAP", "OFF_HEAP"})
     BufferType bufferType = BufferType.OFF_HEAP;
+
+    @Param({"OSS50"})
+    ByteComparable.Version byteComparableVersion = ByteComparable.Version.OSS50;
 
     @Param({"1000", "100000", "10000000"})
     int count = 1000;
@@ -52,26 +55,26 @@ public class MemtableTrieUnionBench
     @Param({"false", "true"})
     boolean sequential = true;
 
-    final static MemtableTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
+    final static InMemoryTrie.UpsertTransformer<Byte, Byte> resolver = (x, y) -> y;
 
     Trie<Byte> trie;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        List<MemtableTrie<Byte>> tries = new ArrayList<>(sources);
+        List<InMemoryTrie<Byte>> tries = new ArrayList<>(sources);
         System.out.format("Putting %,d among %d tries\n", count, sources);
         Random rand = new Random(1);
         if (sequential)
         {
             long sz = 65536 / sources;
             for (int i = 0; i < sources; ++i)
-                tries.add(new MemtableTrie<>(bufferType));
+                tries.add(InMemoryTrie.longLived(byteComparableVersion, bufferType, null));
 
             for (long current = 0; current < count; ++current)
             {
                 long l = rand.nextLong();
-                MemtableTrie<Byte> tt = tries.get(Math.min((int) (((l >> 48) + 32768) / sz), sources - 1));
+                InMemoryTrie<Byte> tt = tries.get(Math.min((int) (((l >> 48) + 32768) / sz), sources - 1));
                 tt.putRecursive(ByteComparable.of(l), (byte) (l >> 56), resolver);
             }
 
@@ -81,7 +84,7 @@ public class MemtableTrieUnionBench
             long current = 0;
             for (int i = 0; i < sources; ++i)
             {
-                MemtableTrie<Byte> trie = new MemtableTrie(bufferType);
+                InMemoryTrie<Byte> trie = InMemoryTrie.longLived(byteComparableVersion, bufferType, null);
                 int currMax = this.count * (i + 1) / sources;
 
                 for (; current < currMax; ++current)
@@ -93,10 +96,10 @@ public class MemtableTrieUnionBench
             }
         }
 
-        for (MemtableTrie<Byte> trie : tries)
+        for (InMemoryTrie<Byte> trie : tries)
         {
             System.out.format("Trie size on heap %,d off heap %,d\n",
-                              trie.sizeOnHeap(), trie.sizeOffHeap());
+                              trie.usedSizeOnHeap(), trie.usedSizeOffHeap());
         }
         trie = Trie.mergeDistinct(tries);
 
@@ -134,9 +137,7 @@ public class MemtableTrieUnionBench
     public int iterateValuesLimited()
     {
         Iterable<Byte> values = trie.subtrie(ByteComparable.of(0L),
-                                             true,
-                                             ByteComparable.of(Long.MAX_VALUE / 2),         // 1/4 of all
-                                             false)
+                                             ByteComparable.of(Long.MAX_VALUE / 2))         // 1/4 of all
                                     .values();
         int sum = 0;
         for (byte b : values)

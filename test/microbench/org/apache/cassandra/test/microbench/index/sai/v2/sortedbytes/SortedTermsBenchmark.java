@@ -25,9 +25,9 @@ import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsMeta;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsReader;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.test.microbench.index.sai.v1.AbstractOnDiskBenchmark;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -126,10 +127,10 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
             for (int x = 0; x < NUM_ROWS; x++)
             {
                 ByteBuffer buffer = Int32Type.instance.decompose(x);
-                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, TypeUtil.BYTE_COMPARABLE_VERSION);
                 byte[] bytes = ByteSourceInverse.readBytes(byteSource);
                 bcIntBytes[x] = bytes;
-                writer.add(ByteComparable.fixedLength(bytes));
+                writer.add(ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, bytes));
             }
         }
 
@@ -256,7 +257,8 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {
-                bh.consume(cursor.ceiling(ByteComparable.fixedLength(this.bcIntBytes[i * skippingDistance])));
+                int iFinal = i;
+                bh.consume(cursor.ceiling(v -> ByteSource.preencoded(this.bcIntBytes[iFinal * skippingDistance])));
             }
         }
     }

@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.cql;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.index.Index;
@@ -53,6 +54,14 @@ public class RebuildWithImmutableComponentsTest extends AbstractRebuildAndImmuta
             // Make sure the TOC has all the active components; this is somewhat indirectly tested by the few next
             // assertions, but good sanity check (and somewhat test the `activeComponents` method too).
             assertTrue(SSTable.readTOC(sstable.descriptor).containsAll(indexGroup.activeComponents(sstable)));
+
+            // verify TOC only includes latest SAI generation
+            Set<Component> saiComponents = SSTable.readTOC(sstable.descriptor).stream().filter(c -> c.name.contains("SAI")).collect(Collectors.toSet());
+            assertEquals(saiComponents, indexGroup.activeComponents(sstable));
+
+            // verify SSTable#components only includes latest SAI generation
+            saiComponents = sstable.components().stream().filter(c -> c.name.contains("SAI")).collect(Collectors.toSet());
+            assertEquals(saiComponents, indexGroup.activeComponents(sstable));
 
             IndexDescriptor descriptor = IndexDescriptor.load(sstable, Set.of(context));
             assertEquals(1, descriptor.perSSTableComponents().generation());

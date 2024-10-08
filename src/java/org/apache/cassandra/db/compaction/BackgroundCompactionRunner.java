@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.io.IOError;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -54,6 +55,8 @@ import org.apache.cassandra.utils.Throwables;
 public class BackgroundCompactionRunner implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(BackgroundCompactionRunner.class);
+
+    public static final String NO_SPACE_LEFT_MESSAGE = "No space left on device";
 
     public enum RequestResult
     {
@@ -443,9 +446,15 @@ public class BackgroundCompactionRunner implements Runnable
     {
         t = Throwables.unwrapped(t);
 
+        // in case of no-space-left exception, check with disk error handler in JVMStabilityInspector
+        if (Throwables.isCausedBy(t, IOException.class) && t.toString().contains(NO_SPACE_LEFT_MESSAGE))
+        {
+            logger.error("Encounter no space left error on {}", cfs, t);
+            JVMStabilityInspector.inspectThrowable(t);
+        }
         // FSDiskFullWriteErrors caught during compaction are expected to be recoverable, so we don't explicitly
         // trigger the disk failure policy because of them (see CASSANDRA-12385).
-        if (t instanceof IOError && !(t instanceof FSDiskFullWriteError))
+        else if (t instanceof IOError && !(t instanceof FSDiskFullWriteError))
         {
             logger.error("Potentially unrecoverable error during background compaction of table {}", cfs, t);
             // Strictly speaking it's also possible to hit a read-related IOError during compaction, although the

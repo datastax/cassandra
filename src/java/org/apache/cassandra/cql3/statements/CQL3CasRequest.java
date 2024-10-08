@@ -232,7 +232,7 @@ public class CQL3CasRequest implements CASRequest
     @Override
     public PartitionUpdate makeUpdates(FilteredPartition current, QueryState state) throws InvalidRequestException
     {
-        PartitionUpdate.Builder updateBuilder = new PartitionUpdate.Builder(metadata, key, updatedColumns(), conditions.size());
+        PartitionUpdate.Builder updateBuilder = PartitionUpdate.builder(metadata, key, updatedColumns(), conditions.size());
         for (RowUpdate upd : updates)
             upd.applyUpdates(current, updateBuilder, state);
         for (RangeDeletion upd : rangeDeletions)

@@ -81,6 +81,18 @@ public class KeyspaceMetrics
     public final Histogram sstablesPerReadHistogram;
     /** Tombstones scanned in queries on this Keyspace */
     public final Histogram tombstoneScannedHistogram;
+    /** Time spent flushing memtables */
+    public final Histogram flushTime;
+    public final Histogram storageAttachedIndexBuildTime;
+
+    /** Time spent writing SAI */
+    public final Histogram storageAttachedIndexWritingTimeForIndexBuild;
+    public final Histogram storageAttachedIndexWritingTimeForCompaction;
+    public final Histogram storageAttachedIndexWritingTimeForFlush;
+    public final Histogram storageAttachedIndexWritingTimeForOther;
+
+    /** Time spent writing  memtables during compaction */
+    public final Histogram compactionTime;
 
     /** Shadowed keys scan metrics **/
     public final Histogram shadowedKeysScannedHistogram;
@@ -218,6 +230,13 @@ public class KeyspaceMetrics
         // create histograms for TableMetrics to replicate updates to
         sstablesPerReadHistogram = createKeyspaceHistogram("SSTablesPerReadHistogram", true);
         tombstoneScannedHistogram = createKeyspaceHistogram("TombstoneScannedHistogram", false);
+        flushTime = createKeyspaceHistogram("FlushTime", false);
+        storageAttachedIndexBuildTime = createKeyspaceHistogram("StorageAttachedIndexBuildTime", false);
+        storageAttachedIndexWritingTimeForIndexBuild = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForIndexBuild", false);
+        storageAttachedIndexWritingTimeForCompaction = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForCompaction", false);
+        storageAttachedIndexWritingTimeForFlush = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForFlush", false);
+        storageAttachedIndexWritingTimeForOther = createKeyspaceHistogram("StorageAttachedIndexWritingTimeForOther", false);
+        compactionTime = createKeyspaceHistogram("CompactionTime", false);
         shadowedKeysScannedHistogram = createKeyspaceHistogram("ShadowedKeysScannedHistogram", false);
         shadowedKeysLoopsHistogram = createKeyspaceHistogram("ShadowedKeysLoopsHistogram", false);
         liveScannedHistogram = createKeyspaceHistogram("LiveScannedHistogram", false);

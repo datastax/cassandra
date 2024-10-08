@@ -314,7 +314,7 @@ public class QueryPagerTest
         assertEquals(key, string(partition.partitionKey().getKey()));
         assertFalse(partition.isEmpty());
         int i = 0;
-        for (Row row : Util.once(partition.iterator()))
+        for (Row row : Util.once(partition.rowIterator()))
         {
             ByteBuffer expected = names[i++];
             assertEquals("column " + i + " doesn't match " + string(expected) + " vs " + string(row.clustering().bufferAt(0)), expected, row.clustering().bufferAt(0));

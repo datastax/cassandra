@@ -208,6 +208,11 @@ public enum CassandraRelevantProperties
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
 
     /**
+     * whether to include non-data files size into compaction space estimaton in UCS
+     */
+    UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
+
+    /**
      * The handler of the storage of sstables, and possibly other files such as txn logs.
      */
     REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
@@ -252,6 +257,8 @@ public enum CassandraRelevantProperties
 
     /** what class to use for mbean registeration */
     MBEAN_REGISTRATION_CLASS("org.apache.cassandra.mbean_registration_class"),
+
+    MEMTABLE_TRIE_SIZE_LIMIT("cassandra.trie_size_limit_mb"),
 
     /** This property indicates if the code is running under the in-jvm dtest framework */
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),

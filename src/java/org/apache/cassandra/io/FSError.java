@@ -38,6 +38,12 @@ public abstract class FSError extends IOError
         this.file = new File(path);
     }
 
+    @Override
+    public String getMessage()
+    {
+        return super.getMessage() + " on file " + String.valueOf(file);
+    }
+
     /**
      * Unwraps the Throwable cause chain looking for an FSError instance
      * @param top the top-level Throwable to unwrap

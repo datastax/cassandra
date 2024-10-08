@@ -1585,7 +1585,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                              Ref<SSTableReader> ref = tryRef();
                              if (ref == null)
                              {
-                                 logger.error("Unable to reference sstable, will use pass-through bloom filter");
+                                 logger.error("Unable to reference sstable {}, will use pass-through bloom filter", descriptor.baseFileUri());
                                  bf = FilterFactory.AlwaysPresent;
                              }
                              else
@@ -1715,6 +1715,17 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public long onDiskLength()
     {
         return dfile.onDiskLength;
+    }
+
+    public long onDiskComponentsSize()
+    {
+        long total = 0;
+        for (Component component : components())
+        {
+            total += FileUtils.size(descriptor.pathFor(component));
+        }
+
+        return total;
     }
 
     @VisibleForTesting
