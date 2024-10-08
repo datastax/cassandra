@@ -1140,11 +1140,11 @@ public class TableMetrics
     {
         compactionBytesRead.inc(inputDiskSize);
         compactionBytesWritten.inc(outputDiskSize);
+        compactionTime.update(elapsedNanos);
         // only update compactionTimePerKb when there are non-expired sstables (inputDiskSize > 0)
         if (inputDiskSize > 0)
         {
             compactionTimePerKb.update(1024.0 * elapsedNanos / inputDiskSize);
-            compactionTime.update(elapsedNanos);
         }
     }
 
