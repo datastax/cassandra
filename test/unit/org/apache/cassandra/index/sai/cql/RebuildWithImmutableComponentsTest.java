@@ -64,8 +64,8 @@ public class RebuildWithImmutableComponentsTest extends AbstractRebuildAndImmuta
             assertEquals(saiComponents, indexGroup.activeComponents(sstable));
 
             IndexDescriptor descriptor = IndexDescriptor.load(sstable, Set.of(context));
-            assertEquals(1, descriptor.perSSTableComponents().generation());
-            assertEquals(1, descriptor.perIndexComponents(context).generation());
+            assertEquals(1, descriptor.perSSTableComponents().buildId().generation());
+            assertEquals(1, descriptor.perIndexComponents(context).buildId().generation());
 
             Set<String> files = allSSTableFilenames(sstable);
             for (var components : List.of(descriptor.perSSTableComponents(), descriptor.perIndexComponents(context)))

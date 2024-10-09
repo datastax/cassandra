@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.format;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.NoSuchFileException;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -32,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 
 import org.slf4j.Logger;
@@ -43,56 +45,156 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY;
+
 /**
- * Helper methods/classes used by `IndexDescriptor` to discover, from disk, the index components that a sstable has.
+ * Handles "discovering" SAI index components files from disk for a given sstable.
  * <p>
- * Not meant to be exposed outside this package; the public facing API for components is {@link IndexDescriptor}.
+ * This is used by {@link IndexDescriptor} and should rarely, if ever, be used directly, but it is exposed publicly to
+ * make the logic "pluggable" (typically for tiered-storage that may not store files directly on disk and thus require
+ * some specific abstraction).
  */
-class ComponentDiscovery
+public abstract class IndexComponentDiscovery
 {
-    private static final Logger logger = LoggerFactory.getLogger(ComponentDiscovery.class);
+    private static final Logger logger = LoggerFactory.getLogger(IndexComponentDiscovery.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    static class DiscoveredGroups
+    static IndexComponentDiscovery instance = !CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY.isPresent()
+                              ? new DefaultIndexComponentDiscovery() {}
+                              : FBUtilities.construct(CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY.getString(), "SAI index components discovery");
+
+    public abstract DiscoveredGroups discoverComponents(Descriptor descriptor);
+
+    /**
+     * Represents all the groups of discovered components, that is normall a per-sstable one, and a number of per-index
+     * ones.
+     */
+    public static class DiscoveredGroups
     {
-        Map<String, DiscoveredComponents> groups = new HashMap<>();
+        private final Map<String, DiscoveredComponents> groups;
+
+        private DiscoveredGroups(Map<String, DiscoveredComponents> groups)
+        {
+            this.groups = groups;
+        }
+
+        public static DiscoveredGroups of(Map<String, DiscoveredComponents.Builder> groupBuilders)
+        {
+            Map<String, DiscoveredComponents> groups = new HashMap<>();
+            for (Map.Entry<String, DiscoveredComponents.Builder> entry : groupBuilders.entrySet())
+            {
+                var builder = entry.getValue();
+                if (builder.buildId != null && !builder.types.isEmpty())
+                    groups.put(entry.getKey(), builder.build());
+            }
+            return new DiscoveredGroups(groups);
+        }
+
+        public DiscoveredComponents perSSTableGroup()
+        {
+            return groups.get(null);
+        }
+
+        public DiscoveredComponents perIndexGroup(String indexName)
+        {
+            return groups.get(indexName);
+        }
 
         @Override
         public String toString()
         {
-            return groups.entrySet().stream().map(e -> e.getKey() + ": " + e.getValue()).collect(Collectors.joining(", ", "{", "}"));
+            return groups.entrySet()
+                         .stream()
+                         .map(e -> (e.getKey() == null ? "<shared>" : e.getKey()) + ": " + e.getValue())
+                         .collect(Collectors.joining(", ", "{", "}"));
         }
     }
 
-    static class DiscoveredComponents
+    public static class DiscoveredComponents
     {
-        Version version;
-        int generation;
-        final Set<IndexComponentType> types = EnumSet.noneOf(IndexComponentType.class);
+        private final ComponentsBuildId buildId;
+        private final Set<IndexComponentType> types;
+
+        private DiscoveredComponents(ComponentsBuildId buildId, Set<IndexComponentType> types)
+        {
+            this.buildId = buildId;
+            this.types = types;
+        }
+
+        public ComponentsBuildId buildId()
+        {
+            return buildId;
+        }
+
+        public Set<IndexComponentType> types()
+        {
+            return types;
+        }
 
         @Override
         public String toString()
         {
-            return String.format("version=%s, generation=%d, types=%s", version, generation, types);
+            return String.format("%s: %s", buildId, types);
+        }
+
+        public static class Builder
+        {
+            private ComponentsBuildId buildId;
+            private final Set<IndexComponentType> types = EnumSet.noneOf(IndexComponentType.class);
+
+            public void setBuildId(ComponentsBuildId buildId)
+            {
+                Preconditions.checkState(this.buildId == null, "Build ID already set");
+                this.buildId = buildId;
+            }
+
+            public void add(IndexComponentType type)
+            {
+                this.types.add(type);
+            }
+
+            public void addAll(Collection<IndexComponentType> types)
+            {
+                this.types.addAll(types);
+            }
+
+            public DiscoveredComponents build()
+            {
+                Preconditions.checkState(buildId != null, "Build ID should have bee set");
+                return new DiscoveredComponents(buildId, Collections.unmodifiableSet(types));
+            }
         }
     }
 
-    static DiscoveredGroups discoverComponents(Descriptor descriptor)
+    private static class DefaultIndexComponentDiscovery extends IndexComponentDiscovery
     {
-        DiscoveredGroups groups = tryDiscoverComponentsFromTOC(descriptor);
-        return groups == null
-               ? discoverComponentsFromDiskFallback(descriptor)
-               : groups;
+        @Override
+        public DiscoveredGroups discoverComponents(Descriptor descriptor)
+        {
+            DiscoveredGroups groups = tryDiscoverComponentsFromTOC(descriptor);
+            return groups == null
+                   ? discoverComponentsFromDiskFallback(descriptor)
+                   : groups;
+        }
+
+
     }
 
-    private static IndexComponentType completionMarker(@Nullable String name)
+    protected static IndexComponentType completionMarker(@Nullable String name)
     {
         return name == null ? IndexComponentType.GROUP_COMPLETION_MARKER : IndexComponentType.COLUMN_COMPLETION_MARKER;
     }
 
-    private static @Nullable DiscoveredGroups tryDiscoverComponentsFromTOC(Descriptor descriptor)
+    /**
+     * Tries reading the TOC file of the provided SSTable to discover its current SAI components.
+     *
+     * @param descriptor the SSTable to read the TOC file of.
+     * @return the discovered components, or `null` if the TOC file is missing or if it is corrupted in some way.
+     */
+    protected @Nullable DiscoveredGroups tryDiscoverComponentsFromTOC(Descriptor descriptor)
     {
         Set<Component> componentsFromToc = readSAIComponentFromSSTableTOC(descriptor);
         if (componentsFromToc == null)
@@ -100,7 +202,7 @@ class ComponentDiscovery
 
         // We collect all the version/generation for which we have files on disk for the per-sstable parts and every
         // per-index found.
-        DiscoveredGroups discovered = new DiscoveredGroups();
+        Map<String, DiscoveredComponents.Builder> discovered = new HashMap<>();
         Set<String> invalid = new HashSet<>();
         for (Component component : componentsFromToc)
         {
@@ -115,19 +217,18 @@ class ComponentDiscovery
             if (invalid.contains(indexName))
                 continue;
 
-            DiscoveredComponents forGroup = discovered.groups.computeIfAbsent(indexName, __ -> new DiscoveredComponents());
+            DiscoveredComponents.Builder forGroup  = discovered.computeIfAbsent(indexName, __ -> new DiscoveredComponents.Builder());
             // Make sure it is the same version and generation that any we've seen so far.
-            if (forGroup.version == null)
+            if (forGroup.buildId == null)
             {
-                forGroup.version = parsed.version;
-                forGroup.generation = parsed.generation;
+                forGroup.setBuildId(parsed.buildId);
             }
-            else if (!forGroup.version.equals(parsed.version) || forGroup.generation != parsed.generation)
+            else if (!forGroup.buildId.equals(parsed.buildId))
             {
                 logger.error("Found multiple versions/generations of SAI components in TOC for SSTable {}: cannot load {}",
                              descriptor, indexName == null ? "per-SSTable components" : "per-index components of " + indexName);
 
-                discovered.groups.remove(indexName);
+                discovered.remove(indexName);
                 invalid.add(indexName);
                 continue;
             }
@@ -136,10 +237,10 @@ class ComponentDiscovery
 
         // We then do an additional pass to remove any group that is not complete.
         invalid.clear();
-        for (Map.Entry<String, DiscoveredComponents> entry : discovered.groups.entrySet())
+        for (Map.Entry<String, DiscoveredComponents.Builder> entry : discovered.entrySet())
         {
             String name = entry.getKey();
-            DiscoveredComponents components = entry.getValue();
+            DiscoveredComponents.Builder components = entry.getValue();
 
             // If it's in the TOC, it should have a completion marker: if we don't, it's either a bug in the code that
             // rewrote the TOC incorrectly, or the marker was lost. In any case, worth logging an error.
@@ -151,13 +252,11 @@ class ComponentDiscovery
             }
         }
 
-        invalid.forEach(discovered.groups::remove);
-        return discovered;
+        invalid.forEach(discovered::remove);
+        return DiscoveredGroups.of(discovered);
     }
 
-    // Returns `null` if something fishy happened while reading the components from the TOC and we should fall back
-    // to `discoverComponentsFromDiskFallback` for safety.
-    private static @Nullable Set<Component> readSAIComponentFromSSTableTOC(Descriptor descriptor)
+    private @Nullable Set<Component> readSAIComponentFromSSTableTOC(Descriptor descriptor)
     {
         try
         {
@@ -214,12 +313,19 @@ class ComponentDiscovery
         }
     }
 
-    // San disk to find all the SAI components for the provided descriptor that exists on disk. Then pick
-    // the approriate set of those components (the highest version/generation for which there is a completion marker).
-    // This is only use a fallback when there is no TOC file for the sstable because this will scan the whole
-    // table directory every time and this can be a bit inefficient, especially when some tiered storage is used
-    // underneath where scanning a directory may be particularly expensive.
-    private static DiscoveredGroups discoverComponentsFromDiskFallback(Descriptor descriptor)
+    /**
+     * Scan disk to find all the SAI components for the provided descriptor that exists on disk. Then pick
+     * the approriate set of those components (the highest version/generation for which there is a completion marker).
+     * This should usually only be used ask a fallback because this will scan the whole table directory every time and
+     * can be a bit inefficient, especially when some tiered storage is used underneath where scanning a directory may
+     * be particularly expensive. And picking the most recent version/generation is usually the right thing to do, but
+     * may lack flexibility in some cases.
+     *
+     * @param descriptor the SSTable for which to discover components for.
+     * @return the discovered components. This is never {@code null}, but could well be empty if no SAI components are
+     * found.
+     */
+    protected DiscoveredGroups discoverComponentsFromDiskFallback(Descriptor descriptor)
     {
         // We first collect all the version/generation for which we have files on disk.
         Map<String, Map<Version, IntObjectMap<Set<IndexComponentType>>>> candidates = Maps.newHashMap();
@@ -234,12 +340,12 @@ class ComponentDiscovery
             // add it to the candidates.
             Version.tryParseFileName(filename)
                    .ifPresent(parsed -> candidates.computeIfAbsent(parsed.indexName, __ -> new HashMap<>())
-                                                  .computeIfAbsent(parsed.version, __ -> new IntObjectHashMap<>())
-                                                  .computeIfAbsent(parsed.generation, __ -> EnumSet.noneOf(IndexComponentType.class))
+                                                  .computeIfAbsent(parsed.buildId.version(), __ -> new IntObjectHashMap<>())
+                                                  .computeIfAbsent(parsed.buildId.generation(), __ -> EnumSet.noneOf(IndexComponentType.class))
                                                   .add(parsed.component));
         });
 
-        DiscoveredGroups discovered = new DiscoveredGroups();
+        Map<String, DiscoveredComponents.Builder> discovered = new HashMap<>();
         for (var entry : candidates.entrySet())
         {
             String name = entry.getKey();
@@ -263,15 +369,14 @@ class ComponentDiscovery
 
                 if (maxGeneration.isPresent())
                 {
-                    var components = new DiscoveredComponents();
-                    components.version = version;
-                    components.generation = maxGeneration.getAsInt();
-                    components.types.addAll(versionCandidates.get(maxGeneration.getAsInt()));
-                    discovered.groups.put(name, components);
+                    var components = new DiscoveredComponents.Builder();
+                    components.setBuildId(ComponentsBuildId.of(version, maxGeneration.getAsInt()));
+                    components.addAll(versionCandidates.get(maxGeneration.getAsInt()));
+                    discovered.put(name, components);
                     break;
                 }
             }
         }
-        return discovered;
+        return DiscoveredGroups.of(discovered);
     }
 }
