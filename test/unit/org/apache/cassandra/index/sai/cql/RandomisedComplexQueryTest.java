@@ -71,9 +71,7 @@ public class RandomisedComplexQueryTest extends SAITester
 
         createTable(schema.toTableDefinition());
 
-        List<String> indexes = schema.generateIndexStrings().stream().map(this::createIndex).collect(Collectors.toList());
-
-        indexes.forEach(this::waitForIndexQueryable);
+        schema.generateIndexStrings().forEach(this::createIndex);
 
         List<RandomRow> data = schema.generateDataset();
 
