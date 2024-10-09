@@ -323,8 +323,9 @@ public class SortedTermsReader
         @Override
         public void close() throws IOException
         {
-            this.termsData.close();
-            this.reader.close();
+            blockOffsets.close();
+            termsData.close();
+            reader.close();
         }
     }
 }
