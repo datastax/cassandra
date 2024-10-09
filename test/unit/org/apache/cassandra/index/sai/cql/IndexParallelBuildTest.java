@@ -88,7 +88,6 @@ public class IndexParallelBuildTest extends SAITester
 
         // create indexes
         String index = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForIndexQueryable(index);
         assertTrue(getCurrentColumnFamilyStore().getLiveSSTables().isEmpty());
 
         Injections.Counter parallelBuildCounter = Injections.newCounter("IndexParallelBuildCounter")
