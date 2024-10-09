@@ -151,6 +151,11 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         }
     }
 
+    public Throwable rejected(Throwable t)
+    {
+        return cleanup(t);
+    }
+
     public Throwable cleanup(Throwable err)
     {
         final boolean isSuccess = err == null;

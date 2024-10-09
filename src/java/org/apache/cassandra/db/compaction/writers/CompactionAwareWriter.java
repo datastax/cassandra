@@ -76,6 +76,16 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
                                  Set<SSTableReader> nonExpiredSSTables,
                                  boolean keepOriginals)
     {
+        this(realm, directories, txn, nonExpiredSSTables, keepOriginals, true);
+    }
+
+    public CompactionAwareWriter(CompactionRealm realm,
+                                 Directories directories,
+                                 ILifecycleTransaction txn,
+                                 Set<SSTableReader> nonExpiredSSTables,
+                                 boolean keepOriginals,
+                                 boolean earlyOpenAllowed)
+    {
         this.realm = realm;
         this.directories = directories;
         this.nonExpiredSSTables = nonExpiredSSTables;
@@ -83,7 +93,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
 
         estimatedTotalKeys = SSTableReader.getApproximateKeyCount(nonExpiredSSTables);
         maxAge = CompactionTask.getMaxDataAge(nonExpiredSSTables);
-        sstableWriter = SSTableRewriter.construct(realm, txn, keepOriginals, maxAge);
+        sstableWriter = SSTableRewriter.construct(realm, txn, keepOriginals, maxAge, earlyOpenAllowed);
         minRepairedAt = CompactionTask.getMinRepairedAt(nonExpiredSSTables);
         pendingRepair = CompactionTask.getPendingRepair(nonExpiredSSTables);
         isTransient = CompactionTask.getIsTransient(nonExpiredSSTables);

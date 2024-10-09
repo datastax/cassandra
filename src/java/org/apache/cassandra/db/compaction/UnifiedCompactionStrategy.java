@@ -34,12 +34,14 @@ import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
@@ -47,12 +49,17 @@ import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.ShardedMultiWriter;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
+import org.apache.cassandra.db.lifecycle.CompositeLifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -205,12 +212,16 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         List<AbstractCompactionTask> tasks = new ArrayList<>();
         for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
         {
-            List<Set<CompactionSSTable>> nonOverlapping = splitInNonOverlappingSets(arena.sstables);
-            for (Set<CompactionSSTable> set : nonOverlapping)
+            var compactingSets = Controller.MAJOR_COMPACTIONS_RESHARD
+                                 ? ImmutableList.of(arena.sstables)
+                                 : splitInNonOverlappingSets(arena.sstables);
+
+            for (Collection<CompactionSSTable> set : compactingSets)
             {
                 LifecycleTransaction txn = realm.tryModify(set, OperationType.COMPACTION);
                 if (txn != null)
-                    tasks.add(createCompactionTask(gcBefore, txn, true, splitOutput));
+                    createAndAddTasks(gcBefore, txn, tasks);
+                // we ignore splitOutput (always split according to the strategy's sharding) and do not need isMaximal
             }
         }
         return CompactionTasks.create(tasks);
@@ -318,7 +329,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (transaction != null)
             {
                 backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-                tasks.add(createCompactionTask(transaction, gcBefore));
+                createAndAddTasks(gcBefore, transaction, tasks);
             }
             else
             {
@@ -328,6 +339,29 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
 
         return tasks;
+    }
+
+    private void createAndAddTasks(int gcBefore, LifecycleTransaction transaction, Collection<AbstractCompactionTask> tasks)
+    {
+        if (Controller.PARALLELIZE_OUTPUT_SHARDS)
+        {
+            // done: Orchestrate scheduling of potentially large number of subtasks.
+            // done: Make sure no signals are lost when scheduling individual subtasks (e.g. rejected execution).
+            // done: Disable early open for these.
+            // done: Apply the operation range.
+            // done: Adjust progress reports for cursors.
+            // post-first-version:
+            // TODO: Tests for SSTableReader.onDiskSizeForRanges, ShardManager.shardsCovering
+            // TODO: Is it okay to not rate control individual subtasks?
+            // TODO: Find a way to only run up to the limit subtasks for each level?
+            // TODO: Take subtasks into account in getSelected?
+            // TODO: Maybe specify a task count parameter to createParallelCompactionTasks?
+            // TODO: Progress reports are incorrect for iterators
+            // TODO: Maybe optimize scanners to not use index.
+            tasks.addAll(createParallelCompactionTasks(transaction, gcBefore));
+        }
+        else
+            tasks.add(createCompactionTask(transaction, gcBefore));
     }
 
     /**
@@ -385,6 +419,38 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     {
         return createCompactionTask(txn, gcBefore);
     }
+
+    private Collection<UnifiedCompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction, int gcBefore)
+    {
+        // Separating the expired sstables is too hard, just use all (C* 5's version of UCS splits these out and will solve this).
+        Collection<SSTableReader> sstables = transaction.originals();
+        PartitionPosition min = null;
+        PartitionPosition max = null;
+        for (CompactionSSTable sstable : sstables)
+        {
+            min = min == null || min.compareTo(sstable.getFirst()) > 0 ? sstable.getFirst() : min;
+            max = max == null || max.compareTo(sstable.getLast()) < 0 ? sstable.getLast() : max;
+        }
+        double density = shardManager.calculateCombinedDensity(sstables);
+        int numShards = controller.getNumShards(density * shardManager.shardSetCoverage());
+        List<Range<Token>> ranges = shardManager.boundaries(numShards).shardsCovering(min.getToken(), max.getToken());
+        if (ranges.size() > 1)
+        {
+            List<UnifiedCompactionTask> tasks = new ArrayList<>(ranges.size());
+            CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction, ranges.size());
+            for (Range<Token> range : ranges)
+                tasks.add(new UnifiedCompactionTask(realm,
+                                                    this,
+                                                    new PartialLifecycleTransaction(compositeTransaction),
+                                                    gcBefore,
+                                                    shardManager,
+                                                    range));
+            return tasks;
+        }
+        else
+            return Collections.singletonList(createCompactionTask(transaction, gcBefore));
+    }
+
 
     private void maybeUpdateSelector()
     {

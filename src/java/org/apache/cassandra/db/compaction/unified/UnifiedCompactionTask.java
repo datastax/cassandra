@@ -25,6 +25,8 @@ import org.apache.cassandra.db.compaction.ShardManager;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
@@ -34,6 +36,7 @@ public class UnifiedCompactionTask extends CompactionTask
 {
     private final ShardManager shardManager;
     private final Controller controller;
+    private final Range<Token> operationRange;
 
     public UnifiedCompactionTask(CompactionRealm cfs,
                                  UnifiedCompactionStrategy strategy,
@@ -41,9 +44,21 @@ public class UnifiedCompactionTask extends CompactionTask
                                  int gcBefore,
                                  ShardManager shardManager)
     {
+        this(cfs, strategy, txn, gcBefore, shardManager, null);
+    }
+
+
+    public UnifiedCompactionTask(CompactionRealm cfs,
+                                 UnifiedCompactionStrategy strategy,
+                                 ILifecycleTransaction txn,
+                                 int gcBefore,
+                                 ShardManager shardManager,
+                                 Range<Token> operationRange)
+    {
         super(cfs, txn, gcBefore, strategy.getController().getIgnoreOverlapsInExpirationCheck(), strategy);
         this.controller = strategy.getController();
         this.shardManager = shardManager;
+        this.operationRange = operationRange;
     }
 
     @Override
@@ -53,6 +68,19 @@ public class UnifiedCompactionTask extends CompactionTask
     {
         double density = shardManager.calculateCombinedDensity(nonExpiredSSTables);
         int numShards = controller.getNumShards(density * shardManager.shardSetCoverage());
-        return new ShardedCompactionWriter(realm, directories, transaction, nonExpiredSSTables, keepOriginals, shardManager.boundaries(numShards));
+        // In multi-task operations we need to expire many ranges in a source sstable for early open. Not doable yet.
+        final boolean earlyOpenAllowed = operationRange == null;
+        return new ShardedCompactionWriter(realm,
+                                           directories,
+                                           transaction,
+                                           nonExpiredSSTables,
+                                           keepOriginals,
+                                           earlyOpenAllowed,
+                                           shardManager.boundaries(numShards));
+    }
+
+    protected Range<Token> tokenRange()
+    {
+        return operationRange;
     }
 }

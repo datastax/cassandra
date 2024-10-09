@@ -278,6 +278,21 @@ public abstract class Controller
                                                           Overlaps.InclusionMethod.TRANSITIVE.toString()).toUpperCase());
 
     /**
+     * Whether to create subtask for the output shards of individual compactions and execute them in parallel.
+     */
+    public static final boolean PARALLELIZE_OUTPUT_SHARDS = Boolean.parseBoolean(getSystemProperty("parallelize_output_shards",
+                                                                                                   "true"));
+
+    /**
+     * Whether major compactions should not try to split the inputs into non-overlapping sets. Splitting the input is
+     * helpful to increase parallelism when {@link #PARALLELIZE_OUTPUT_SHARDS} is not enabled. The downside is that it
+     * does not re-shard data that has already been split into shards, which is something we may want to do in some
+     * scenarios.
+     */
+    public static final boolean MAJOR_COMPACTIONS_RESHARD = Boolean.parseBoolean(getSystemProperty("major_compactions_reshard",
+                                                                                                   Boolean.toString(PARALLELIZE_OUTPUT_SHARDS)));
+
+    /**
      * The scaling parameters W, one per bucket index and separated by a comma.
      * Higher indexes will use the value of the last index with a W specified.
      */

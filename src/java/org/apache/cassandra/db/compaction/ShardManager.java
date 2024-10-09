@@ -18,9 +18,8 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.Collection;
 import java.util.List;
-import java.util.Set;
-import java.util.function.Consumer;
 
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
@@ -151,7 +150,7 @@ public interface ShardManager
     /**
      * Estimate the density of the sstable that will be the result of compacting the given sources.
      */
-    default double calculateCombinedDensity(Set<? extends CompactionSSTable> sstables)
+    default double calculateCombinedDensity(Collection<? extends CompactionSSTable> sstables)
     {
         if (sstables.isEmpty())
             return 0;
@@ -168,6 +167,6 @@ public interface ShardManager
         if (span >= MINIMUM_TOKEN_COVERAGE)
             return onDiskLength / span;
         else
-            return onDiskLength;
+            return onDiskLength; // TODO: Update this to use number of partitions
     }
 }

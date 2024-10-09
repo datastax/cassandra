@@ -18,23 +18,21 @@
 
 package org.apache.cassandra.db.lifecycle;
 
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-
-public class CompositeLifecycleTransaction extends LifecycleTransaction
+public class CompositeLifecycleTransaction
 {
+    final LifecycleTransaction mainTransaction;
     private final AtomicInteger partsToCommitOrAbort;
     private volatile boolean obsoleteOriginalsRequested;
     private volatile boolean wasAborted;
 
-    public CompositeLifecycleTransaction(Tracker tracker, OperationType operationType, Iterable<? extends SSTableReader> readers, UUID uuid, int partCount)
+    public CompositeLifecycleTransaction(LifecycleTransaction mainTransaction, int partCount)
     {
-        super(tracker, operationType, readers, uuid);
-        partsToCommitOrAbort = new AtomicInteger(partCount);
-        wasAborted = false;
+        this.mainTransaction = mainTransaction;
+        this.partsToCommitOrAbort = new AtomicInteger(partCount);
+        this.wasAborted = false;
+        this.obsoleteOriginalsRequested = false;
     }
 
 
@@ -53,14 +51,14 @@ public class CompositeLifecycleTransaction extends LifecycleTransaction
         if (partsToCommitOrAbort.decrementAndGet() == 0)
         {
             if (wasAborted)
-                abort();
+                mainTransaction.abort();
             else
             {
-                checkpoint();
+                mainTransaction.checkpoint();
                 if (obsoleteOriginalsRequested)
-                    obsoleteOriginals();
-                prepareToCommit();
-                commit();
+                    mainTransaction.obsoleteOriginals();
+                mainTransaction.prepareToCommit();
+                mainTransaction.commit();
             }
         }
     }

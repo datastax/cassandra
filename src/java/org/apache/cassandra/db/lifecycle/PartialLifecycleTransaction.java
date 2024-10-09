@@ -33,12 +33,14 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 public class PartialLifecycleTransaction implements ILifecycleTransaction
 {
 
-    final CompositeLifecycleTransaction delegate;
+    final CompositeLifecycleTransaction composite;
+    final ILifecycleTransaction mainTransaction;
     final AtomicBoolean committedOrAborted = new AtomicBoolean(false);
 
-    public PartialLifecycleTransaction(CompositeLifecycleTransaction delegate)
+    public PartialLifecycleTransaction(CompositeLifecycleTransaction composite)
     {
-        this.delegate = delegate;
+        this.composite = composite;
+        this.mainTransaction = composite.mainTransaction;
     }
 
     public void checkpoint()
@@ -58,12 +60,12 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
 
     public void update(Collection<SSTableReader> readers, boolean original)
     {
-        delegate.update(readers, original);
+        mainTransaction.update(readers, original);
     }
 
     public SSTableReader current(SSTableReader reader)
     {
-        return delegate.current(reader);
+        return mainTransaction.current(reader);
     }
 
     public void obsolete(SSTableReader reader)
@@ -73,12 +75,12 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
 
     public void obsoleteOriginals()
     {
-        delegate.requestObsoleteOriginals();
+        composite.requestObsoleteOriginals();
     }
 
     public Set<SSTableReader> originals()
     {
-        return delegate.originals();
+        return mainTransaction.originals();
     }
 
     public boolean isObsolete(SSTableReader reader)
@@ -94,21 +96,21 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     public Throwable commit(Throwable accumulate)
     {
         if (markCommittedOrAborted())
-            delegate.commitPart();
+            composite.commitPart();
         return accumulate;
     }
 
     public Throwable abort(Throwable accumulate)
     {
         if (markCommittedOrAborted())
-            delegate.abortPart();
+            composite.abortPart();
         return accumulate;
     }
 
     private void throwIfAborted()
     {
         // maybe throw if the composite transaction is already aborted?
-        if (delegate.wasAborted())
+        if (composite.wasAborted())
             throw new IllegalStateException("Transaction aborted");
     }
 
@@ -121,39 +123,39 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     public void close()
     {
         if (markCommittedOrAborted())   // close should abort if not committed
-            delegate.abortPart();
+            composite.abortPart();
     }
 
     public void trackNew(SSTable table)
     {
         throwIfAborted();
-        delegate.trackNew(table);
+        mainTransaction.trackNew(table);
     }
 
     public void untrackNew(SSTable table)
     {
-        delegate.untrackNew(table);
+        mainTransaction.untrackNew(table);
     }
 
     public OperationType opType()
     {
-        return delegate.opType();
+        return mainTransaction.opType();
     }
 
     public boolean isOffline()
     {
-        return delegate.isOffline();
+        return mainTransaction.isOffline();
     }
 
     @Override
     public UUID opId()
     {
-        return delegate.opId();
+        return mainTransaction.opId();
     }
 
     @Override
     public void cancel(SSTableReader removedSSTable)
     {
-        delegate.cancel(removedSSTable);
+        mainTransaction.cancel(removedSSTable);
     }
 }

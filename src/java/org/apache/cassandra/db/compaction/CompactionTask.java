@@ -29,10 +29,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
@@ -47,6 +49,9 @@ import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.DefaultCompactionWriter;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -203,11 +208,29 @@ public class CompactionTask extends AbstractCompactionTask
         }
     }
 
+    /**
+     * @return The token range that the operation should compact. This is usually null, but if we have a parallelizable
+     * multi-task operation (see {@link UnifiedCompactionStrategy#createCompactionTasks}), it will specify a subrange.
+     */
+    protected Range<Token> tokenRange()
+    {
+        return null;
+    }
+
+    /**
+     * @return True if the task should try to limit the operation size to the available space by removing sstables from
+     * the compacting set. This cannot be done if this is part of a multi-task operation with a shared transaction.
+     */
+    protected boolean shouldReduceScopeForSpace()
+    {
+        return tokenRange() == null;
+    }
+
     private CompactionOperation createCompactionOperation(CompactionController controller, CompactionStrategy strategy)
     {
         Set<CompactionSSTable> fullyExpiredSSTables = controller.getFullyExpiredSSTables();
         // select SSTables to compact based on available disk space.
-        if (!buildCompactionCandidatesForAvailableDiskSpace(fullyExpiredSSTables))
+        if (shouldReduceScopeForSpace() && !buildCompactionCandidatesForAvailableDiskSpace(fullyExpiredSSTables))
         {
             // The set of sstables has changed (one or more were excluded due to limited available disk space).
             // We need to recompute the overlaps between sstables. The iterators used in the compaction controller 
@@ -240,9 +263,9 @@ public class CompactionTask extends AbstractCompactionTask
                      realm.metadata().enforceStrictLiveness() ? "strict liveness" : "");
 
         if (compactByIterators)
-            return new CompactionOperationIterator(controller, actuallyCompact, fullyExpiredSSTables.size());
+            return new CompactionOperationIterator(controller, actuallyCompact, tokenRange(), fullyExpiredSSTables.size());
         else
-            return new CompactionOperationCursor(controller, actuallyCompact, fullyExpiredSSTables.size());
+            return new CompactionOperationCursor(controller, actuallyCompact, tokenRange(), fullyExpiredSSTables.size());
     }
 
     /**
@@ -260,6 +283,7 @@ public class CompactionTask extends AbstractCompactionTask
         private final long startTime;
         final Set<SSTableReader> actuallyCompact;
         private final int fullyExpiredSSTablesCount;
+        private final long inputDiskSize;
 
         // resources that are updated and may be read by another thread
         volatile Collection<SSTableReader> newSStables;
@@ -284,7 +308,7 @@ public class CompactionTask extends AbstractCompactionTask
          * @param actuallyCompact the set of sstables to compact (excludes any fully expired ones)
          * @param fullyExpiredSSTablesCount the number of fully expired sstables (used in metrics)
          */
-        private CompactionOperation(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount)
+        private CompactionOperation(CompactionController controller, Set<SSTableReader> actuallyCompact, Range<Token> tokenRange, int fullyExpiredSSTablesCount)
         {
             this.controller = controller;
             this.actuallyCompact = actuallyCompact;
@@ -300,12 +324,19 @@ public class CompactionTask extends AbstractCompactionTask
             this.completed = false;
 
             Directories dirs = getDirectories();
+            // Filter out sstables that don't intersect the target range.
+            if (tokenRange != null)
+                actuallyCompact = actuallyCompact.stream()
+                                                 .filter(rdr -> tokenRange.intersects(new Bounds(rdr.getFirst().getToken(),
+                                                                                                 rdr.getLast().getToken())))
+                                                 .collect(Collectors.toSet());
 
             try
             {
                 // resources that need closing, must be created last in case of exceptions and released if there is an exception in the c.tor
                 this.sstableRefs = Refs.ref(actuallyCompact);
-                this.op = initializeSource();
+                this.inputDiskSize = getTotalOnDiskBytes(actuallyCompact, tokenRange);
+                this.op = initializeSource(tokenRange);
                 this.writer = getCompactionAwareWriter(realm, dirs, actuallyCompact);
                 this.obsCloseable = opObserver.onOperationStart(op);
 
@@ -314,10 +345,23 @@ public class CompactionTask extends AbstractCompactionTask
             catch (Throwable t)
             {
                 close(t);
+                throw new AssertionError(t); // unreachable (close will throw when t is not null). Added for static analysis.
             }
         }
 
-        abstract TableOperation initializeSource() throws Throwable;
+        private long getTotalOnDiskBytes(Set<SSTableReader> actuallyCompact, Range<Token> tokenRange)
+        {
+            if (tokenRange == null)
+                return CompactionSSTable.getTotalBytes(actuallyCompact);
+
+            var rangeList = ImmutableList.of(tokenRange);
+            long total = 0;
+            for (SSTableReader rdr : actuallyCompact)
+                total += rdr.onDiskSizeForRanges(rangeList);
+            return total;
+        }
+
+        abstract TableOperation initializeSource(Range<Token> tokenRange) throws Throwable;
 
         private void execute()
         {
@@ -510,7 +554,7 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         public long inputDiskSize()
         {
-            return CompactionSSTable.getTotalBytes(actuallyCompact);
+            return inputDiskSize;
         }
 
         @Override
@@ -561,16 +605,17 @@ public class CompactionTask extends AbstractCompactionTask
          * <p/>
          * @param controller the compaction controller is needed by the scanners and compaction iterator to manage options
          */
-        CompactionOperationIterator(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount)
+        CompactionOperationIterator(CompactionController controller, Set<SSTableReader> actuallyCompact, Range<Token> tokenRange, int fullyExpiredSSTablesCount)
         {
-            super(controller, actuallyCompact, fullyExpiredSSTablesCount);
+            super(controller, actuallyCompact, tokenRange, fullyExpiredSSTablesCount);
         }
 
         @Override
-        TableOperation initializeSource()
+        TableOperation initializeSource(Range<Token> tokenRange)
         {
-            this.scanners = strategy != null ? strategy.getScanners(actuallyCompact)
-                                             : ScannerList.of(actuallyCompact, null);
+            var rangeList = tokenRange != null ? ImmutableList.of(tokenRange) : null;
+            this.scanners = strategy != null ? strategy.getScanners(actuallyCompact, rangeList)
+                                             : ScannerList.of(actuallyCompact, rangeList);
             this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
             return compactionIterator.getOperation();
         }
@@ -689,15 +734,15 @@ public class CompactionTask extends AbstractCompactionTask
          * <p/>
          * @param controller the compaction controller is needed by the scanners and compaction iterator to manage options
          */
-        CompactionOperationCursor(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount)
+        CompactionOperationCursor(CompactionController controller, Set<SSTableReader> actuallyCompact, Range<Token> tokenRange, int fullyExpiredSSTablesCount)
         {
-            super(controller, actuallyCompact, fullyExpiredSSTablesCount);
+            super(controller, actuallyCompact, tokenRange, fullyExpiredSSTablesCount);
         }
 
         @Override
-        TableOperation initializeSource()
+        TableOperation initializeSource(Range<Token> tokenRange)
         {
-            this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, controller, limiter, FBUtilities.nowInSeconds(), taskId);
+            this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, tokenRange, controller, limiter, FBUtilities.nowInSeconds(), taskId);
             return compactionCursor.createOperation();
         }
 

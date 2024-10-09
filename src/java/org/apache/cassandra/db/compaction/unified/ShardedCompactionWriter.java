@@ -51,9 +51,10 @@ public class ShardedCompactionWriter extends CompactionAwareWriter
                                    ILifecycleTransaction txn,
                                    Set<SSTableReader> nonExpiredSSTables,
                                    boolean keepOriginals,
+                                   boolean earlyOpenAllowed,
                                    ShardTracker boundaries)
     {
-        super(realm, directories, txn, nonExpiredSSTables, keepOriginals);
+        super(realm, directories, txn, nonExpiredSSTables, keepOriginals, earlyOpenAllowed);
 
         this.boundaries = boundaries;
         long totalKeyCount = nonExpiredSSTables.stream()

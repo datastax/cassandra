@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import javax.annotation.Nullable;
 
@@ -69,5 +71,26 @@ public interface ShardTracker
     {
         if (writer.first != null)
             writer.setTokenSpaceCoverage(rangeSpanned(writer.first, writer.last));
+    }
+
+    default List<Range<Token>> shardsCovering(Token min, Token max)
+    {
+        List<Range<Token>> ranges = new ArrayList<>();
+        Token next = min;
+        Token start = min;
+        while (true)
+        {
+            advanceTo(next);
+            next = shardEnd();
+            if (next == null || next.compareTo(max) > 0)
+            {
+                next = max; // minValue for no right bound
+                ranges.add(new Range<>(start, next));
+                break;
+            }
+            ranges.add(new Range<>(start, next));
+            start = next;
+        }
+        return ranges;
     }
 }
