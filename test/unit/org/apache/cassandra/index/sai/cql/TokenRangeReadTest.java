@@ -38,8 +38,7 @@ public class TokenRangeReadTest extends SAITester
     public void testTokenRangeRead() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, v1 text, PRIMARY KEY (k1))");
-        String index = createIndex(format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable(index);
+        createIndex(format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
 
         execute("INSERT INTO %S(k1, v1) values(1, '1')");
 
