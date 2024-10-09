@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -29,9 +30,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
@@ -63,16 +61,16 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
-    private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
-
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
+    private final TableQueryMetrics tableQueryMetrics;
     private final ColumnFamilyStore cfs;
 
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
@@ -85,7 +83,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         this.command = command;
         this.cfs = cfs;
         this.queryContext = new QueryContext(executionQuotaMs);
-        this.controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext, tableQueryMetrics);
+        this.controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext);
+        this.tableQueryMetrics = tableQueryMetrics;
     }
 
     @Override
@@ -137,8 +136,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
                 assert !(keysIterator instanceof RangeIterator);
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-                var result = new ScoreOrderedResultRetriever(queryView.view, scoredKeysIterator, filterTree, controller,
-                                                             executionController, queryContext);
+                var result = new ScoreOrderedResultRetriever(queryView.view, scoredKeysIterator, filterTree, executionController);
                 return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
             }
         }
@@ -146,13 +144,13 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
             assert keysIterator instanceof RangeIterator;
-            return new ResultRetriever((RangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
+            return new ResultRetriever((RangeIterator) keysIterator, filterTree, executionController);
         }
     }
 
     /**
      * Converts expressions into filter tree (which is currently just a single AND).
-     *
+     * </p>
      * Filter tree allows us to do a couple of important optimizations
      * namely, group flattening for AND operations (query rewrite), expression bounds checks,
      * "satisfies by" checks for resulting rows with an early exit.
@@ -164,7 +162,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         return controller.buildFilter();
     }
 
-    private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+    private class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final PrimaryKey firstPrimaryKey;
         private final Iterator<DataRange> keyRanges;
@@ -172,27 +170,21 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         private final RangeIterator operation;
         private final FilterTree filterTree;
-        private final QueryController controller;
         private final ReadExecutionController executionController;
-        private final QueryContext queryContext;
         private final PrimaryKey.Factory keyFactory;
 
         private PrimaryKey lastKey;
 
         private ResultRetriever(RangeIterator operation,
                                 FilterTree filterTree,
-                                QueryController controller,
-                                ReadExecutionController executionController,
-                                QueryContext queryContext)
+                                ReadExecutionController executionController)
         {
             this.keyRanges = controller.dataRanges().iterator();
             this.currentKeyRange = keyRanges.next().keyRange();
 
             this.operation = operation;
             this.filterTree = filterTree;
-            this.controller = controller;
             this.executionController = executionController;
-            this.queryContext = queryContext;
             this.keyFactory = controller.primaryKeyFactory();
 
             this.firstPrimaryKey = controller.firstPrimaryKey();
@@ -373,7 +365,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          * Initially, it retrieves the rows from the given iterator until it runs out of data.
          * Then it iterates the primary keys obtained from the index until the end of the partition
          * and lazily constructs new row itertors for each of the key. At a given time, only one row iterator is open.
-         *
+         * </p>
          * The rows are retrieved in the order of primary keys provided by the underlying index.
          * The iterator is complete when the next key to be fetched belongs to different partition
          * (but the iterator does not consume that key).
@@ -427,12 +419,20 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             Preconditions.checkNotNull(key.partitionKey(), "Partition key must not be null");
             if (lastKey != null && key.partitionKey().equals(lastKey.partitionKey()) && key.clustering().equals(lastKey.clustering()))
                 return null;
+
             lastKey = key;
+            long startTimeNanos = Clock.Global.nanoTime();
 
             UnfilteredRowIterator partition = controller.getPartition(key, executionController);
             queryContext.addPartitionsRead(1);
             queryContext.checkpoint();
-            return applyIndexFilter(partition, filterTree, queryContext);
+            UnfilteredRowIterator filtered = applyIndexFilter(partition, filterTree, queryContext);
+
+            // Note that we record the duration of the read after post-filtering, which actually
+            // materializes the rows from disk.
+            tableQueryMetrics.postFilteringReadLatency.update(Clock.Global.nanoTime() - startTimeNanos, TimeUnit.NANOSECONDS);
+
+            return filtered;
         }
 
         @Override
@@ -445,30 +445,27 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public void close()
         {
             FileUtils.closeQuietly(operation);
-            controller.finish();
+            if (tableQueryMetrics != null)
+                tableQueryMetrics.record(queryContext);
         }
     }
 
-    public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+    public class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final ColumnFamilyStore.RefViewFragment view;
         private final List<AbstractBounds<PartitionPosition>> keyRanges;
         private final boolean coversFullRing;
         private final CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator;
         private final FilterTree filterTree;
-        private final QueryController controller;
         private final ReadExecutionController executionController;
-        private final QueryContext queryContext;
 
-        private HashSet<PrimaryKey> keysSeen;
-        private HashSet<PrimaryKey> updatedKeys;
+        private final HashSet<PrimaryKey> keysSeen;
+        private final HashSet<PrimaryKey> updatedKeys;
 
         private ScoreOrderedResultRetriever(ColumnFamilyStore.RefViewFragment view,
                                             CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
-                                            QueryController controller,
-                                            ReadExecutionController executionController,
-                                            QueryContext queryContext)
+                                            ReadExecutionController executionController)
         {
             this.view = view;
             this.keyRanges = controller.dataRanges().stream().map(DataRange::keyRange).collect(Collectors.toList());
@@ -476,9 +473,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             this.scoredPrimaryKeyIterator = scoredPrimaryKeyIterator;
             this.filterTree = filterTree;
-            this.controller = controller;
             this.executionController = executionController;
-            this.queryContext = queryContext;
 
             this.keysSeen = new HashSet<>();
             this.updatedKeys = new HashSet<>();
@@ -517,7 +512,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         /**
          * Determine if the key is in one of the queried key ranges. We do not iterate through results in
          * {@link PrimaryKey} order, so we have to check each range.
-         * @param key
+         *
+         * @param key a partition key
          * @return true if the key is in one of the queried key ranges
          */
         private boolean isInRange(DecoratedKey key)
@@ -587,7 +583,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return true;
         }
 
-        public static class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
+        public class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
         {
             private boolean consumed = false;
             private final Unfiltered row;
@@ -623,10 +619,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return controller.metadata();
         }
 
+        @Override
         public void close()
         {
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
-            controller.finish();
+            if (tableQueryMetrics != null)
+                tableQueryMetrics.record(queryContext);
         }
     }
 
@@ -707,7 +705,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      * Used by {@link StorageAttachedIndexSearcher#filterReplicaFilteringProtection} to filter rows for columns that
      * have transformations so won't get handled correctly by the row filter.
      */
-    @SuppressWarnings("resource")
     private static PartitionIterator applyIndexFilter(PartitionIterator response, FilterTree tree, QueryContext queryContext)
     {
         return new PartitionIterator()
