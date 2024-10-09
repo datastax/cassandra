@@ -283,14 +283,10 @@ final class HintsStore
     {
         long total = 0;
         for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
-            // FIXME CNDB-11013: Review port of STAR-1525: Possible conflict with CASSANDRA-19477
-            //   was: total += descriptor.hintsFileSize(hintsDirectory);
             total += descriptor.getDataSize();
 
         HintsWriter currentWriter = getWriter();
         if (null != currentWriter)
-            // FIXME  CNDB-11013: Review port of STAR-1525: Possible conflict with CASSANDRA-19477
-            //   was: total += currentWriter.descriptor().hintsFileSize(hintsDirectory);
             total += currentWriter.descriptor().getDataSize();
 
         return total;
