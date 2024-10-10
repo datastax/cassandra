@@ -1357,7 +1357,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 reclaim(memtable);
                 return Collections.emptyList();
             }
-
+            long start = System.nanoTime();
             List<Future<SSTableMultiWriter>> futures = new ArrayList<>();
             long totalBytesOnDisk = 0;
             long maxBytesOnDisk = 0;
@@ -1467,6 +1467,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         }
                     }
                 }
+                metric.memTableFlushCompleted(System.nanoTime() - start);
 
                 cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }

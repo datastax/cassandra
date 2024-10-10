@@ -210,12 +210,12 @@ public class TableMetrics
     /** The average duration per 1Kb of data flushed, in nanoseconds. */
     public final MovingAverage flushTimePerKb;
     /** Time spent in flushing memtables */
-    public final TableHistogram flushTime;
-    public final TableHistogram storageAttachedIndexBuildTime;
-    public final TableHistogram storageAttachedIndexWritingTimeForIndexBuild;
-    public final TableHistogram storageAttachedIndexWritingTimeForCompaction;
-    public final TableHistogram storageAttachedIndexWritingTimeForFlush;
-    public final TableHistogram storageAttachedIndexWritingTimeForOther;
+    public final Counter flushTime;
+    public final Counter storageAttachedIndexBuildTime;
+    public final Counter storageAttachedIndexWritingTimeForIndexBuild;
+    public final Counter storageAttachedIndexWritingTimeForCompaction;
+    public final Counter storageAttachedIndexWritingTimeForFlush;
+    public final Counter storageAttachedIndexWritingTimeForOther;
     /** Total number of bytes inserted into memtables since server [re]start. */
     public final Counter bytesInserted;
     /** Total number of bytes written by compaction since server [re]start */
@@ -225,7 +225,7 @@ public class TableMetrics
     /** The average duration per 1Kb of data compacted, in nanoseconds. */
     public final MovingAverage compactionTimePerKb;
     /** Time spent in writing sstables during compaction  */
-    public final TableHistogram compactionTime;
+    public final Counter compactionTime;
     /** Estimate of number of pending compactions for this table */
     public final Gauge<Integer> pendingCompactions;
     /** Number of SSTables on disk for this CF */
@@ -735,18 +735,18 @@ public class TableMetrics
         flushSizeOnDisk = ExpMovingAverage.decayBy1000();
         flushSegmentCount = ExpMovingAverage.decayBy1000();
         flushTimePerKb = ExpMovingAverage.decayBy100();
-        flushTime = createTableHistogram("FlushTime", cfs.getKeyspaceMetrics().flushTime, false);
-        storageAttachedIndexBuildTime = createTableHistogram("StorageAttachedIndexBuildTime", cfs.getKeyspaceMetrics().storageAttachedIndexBuildTime, false);
-        storageAttachedIndexWritingTimeForIndexBuild = createTableHistogram("StorageAttachedIndexWritingTimeForIndexBuild", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForIndexBuild, false);
-        storageAttachedIndexWritingTimeForCompaction = createTableHistogram("StorageAttachedIndexWritingTimeForCompaction", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForCompaction, false);
-        storageAttachedIndexWritingTimeForFlush = createTableHistogram("StorageAttachedIndexWritingTimeForFlush", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForFlush, false);
-        storageAttachedIndexWritingTimeForOther= createTableHistogram("StorageAttachedIndexWritingTimeForOther", cfs.getKeyspaceMetrics().storageAttachedIndexWritingTimeForOther, false);
+        flushTime = createTableCounter("FlushTime");
+        storageAttachedIndexBuildTime = createTableCounter("StorageAttachedIndexBuildTime");
+        storageAttachedIndexWritingTimeForIndexBuild = createTableCounter("StorageAttachedIndexWritingTimeForIndexBuild");
+        storageAttachedIndexWritingTimeForCompaction = createTableCounter("StorageAttachedIndexWritingTimeForCompaction");
+        storageAttachedIndexWritingTimeForFlush = createTableCounter("StorageAttachedIndexWritingTimeForFlush");
+        storageAttachedIndexWritingTimeForOther= createTableCounter("StorageAttachedIndexWritingTimeForOther");
         bytesInserted = createTableCounter("BytesInserted");
 
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
         compactionBytesRead = createTableCounter("CompactionBytesRead");
         compactionTimePerKb = ExpMovingAverage.decayBy100();
-        compactionTime = createTableHistogram("CompactionTime", cfs.getKeyspaceMetrics().compactionTime, false);
+        compactionTime = createTableCounter("CompactionTime");
         pendingCompactions = createTableGauge("PendingCompactions", () -> cfs.getCompactionStrategy().getEstimatedRemainingTasks());
         liveSSTableCount = createTableGauge("LiveSSTableCount", () -> cfs.getLiveSSTables().size());
         oldVersionSSTableCount = createTableGauge("OldVersionSSTableCount", new Gauge<Integer>()
@@ -1115,32 +1115,41 @@ public class TableMetrics
         flushSize.update(outputSize);
         // this assumes that at least 1 Kb was flushed, which should always be the case, then rounds down
         flushTimePerKb.update(elapsedNanos / (double) Math.max(1, inputSize / 1024L));
-        flushTime.update(elapsedNanos);
+    }
+
+    public void updateStorageAttachedIndexBuildTime(long totalTimeSpentNanos)
+    {
+        storageAttachedIndexBuildTime.inc(TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos));
     }
 
     public void updateStorageAttachedIndexWritingTime(long totalTimeSpentNanos, OperationType opType)
     {
+        long totalTimeSpentMicros = TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos);
         switch (opType)
         {
             case INDEX_BUILD:
-                storageAttachedIndexWritingTimeForIndexBuild.update(totalTimeSpentNanos);
+                storageAttachedIndexWritingTimeForIndexBuild.inc(totalTimeSpentMicros);
                 break;
             case COMPACTION:
-                storageAttachedIndexWritingTimeForCompaction.update(totalTimeSpentNanos);
+                storageAttachedIndexWritingTimeForCompaction.inc(totalTimeSpentMicros);
                 break;
             case FLUSH:
-                storageAttachedIndexWritingTimeForFlush.update(totalTimeSpentNanos);
+                storageAttachedIndexWritingTimeForFlush.inc(totalTimeSpentMicros);
                 break;
             default:
-                storageAttachedIndexWritingTimeForOther.update(totalTimeSpentNanos);
+                storageAttachedIndexWritingTimeForOther.inc(totalTimeSpentMicros);
         }
+    }
+
+    public void memTableFlushCompleted(long totalTimeSpentNanos) {
+        flushTime.inc(TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos));
     }
 
     public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)
     {
         compactionBytesRead.inc(inputDiskSize);
         compactionBytesWritten.inc(outputDiskSize);
-        compactionTime.update(elapsedNanos);
+        compactionTime.inc(TimeUnit.NANOSECONDS.toMicros(elapsedNanos));
         // only update compactionTimePerKb when there are non-expired sstables (inputDiskSize > 0)
         if (inputDiskSize > 0)
             compactionTimePerKb.update(1024.0 * elapsedNanos / inputDiskSize);
