@@ -82,7 +82,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
-        this.boundaries = indexContext.owner().localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(TrieMemtable.SHARD_COUNT);
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.indexContext = indexContext;
         this.validator = indexContext.getValidator();
@@ -249,6 +249,14 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        int startShard = boundaries.getShardForToken(keyRange.left.getToken());
+        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+        return rangeIndexes[startShard].estimateMatchingRowsCount(expression, keyRange) * (endShard - startShard + 1);
+    }
+
+    @Override
     public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
     {
         if (keys.isEmpty())
@@ -360,5 +368,11 @@ public class TrieMemtableIndex implements MemtableIndex
             Arrays.fill(rangeIndexEntriesToMerge, null);
             term = null;
         }
+    }
+
+    @VisibleForTesting
+    public MemoryIndex[] getRangeIndexes()
+    {
+        return rangeIndexes;
     }
 }

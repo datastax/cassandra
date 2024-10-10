@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
@@ -27,6 +28,8 @@ import java.util.Iterator;
 import java.util.Set;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+
+import org.apache.commons.lang3.ArrayUtils;
 
 import com.googlecode.concurrenttrees.radix.ConcurrentRadixTree;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -39,6 +42,7 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -230,6 +234,7 @@ public class TypeUtil
         return v -> type.asComparableBytes(ByteBufferAccessor.instance, value, v, terminator);
     }
 
+
     /**
      * Fills a byte array with the comparable bytes for a type.
      * <p>
@@ -272,6 +277,8 @@ public class TypeUtil
             return encodeDecimal(value);
         return value;
     }
+
+
 
     /**
      * Compare two terms based on their type. This is used in place of {@link AbstractType#compare(ByteBuffer, ByteBuffer)}
@@ -418,6 +425,7 @@ public class TypeUtil
         return value;
     }
 
+
     /**
      * Encode a {@link BigInteger} into a fixed width 20 byte encoded value.
      *
@@ -462,6 +470,41 @@ public class TypeUtil
         bytes[0] ^= 0x80;
         return ByteBuffer.wrap(bytes);
     }
+
+
+    public static ByteBuffer decodeBigInteger(ByteBuffer encoded)
+    {
+        byte[] bytes = new byte[20];
+        encoded.get(bytes);
+        encoded.rewind();
+
+        // Undo the XOR operation on the first byte
+        bytes[0] ^= 0x80;
+
+        // Extract the size (the first 4 bytes)
+        int size = ((bytes[0] & 0xff) << 24) | ((bytes[1] & 0xff) << 16) | ((bytes[2] & 0xff) << 8) | (bytes[3] & 0xff);
+
+        boolean isNegative = size < 0;
+        if (isNegative)
+            size = -size;
+
+        ByteBuffer result;
+        if (size < 16)
+        {
+            int offset = 20 - size;
+            result = ByteBuffer.wrap(Arrays.copyOfRange(bytes, offset, 20));
+        }
+        else
+        {
+            // Size >= 16 means we extract 16 bytes starting from index 4
+            var resultBytes = new byte[size];
+            System.arraycopy(bytes, 4, resultBytes, 0, 16);
+            result = ByteBuffer.wrap(resultBytes);
+        }
+
+        return result;
+    }
+
 
     /* Type comparison to get rid of ReversedType */
 
@@ -578,4 +621,40 @@ public class TypeUtil
         bs.nextBytes(data); // reads up to the number of bytes in the array, leaving 0s in the remaining bytes
         return ByteBuffer.wrap(data);
     }
+
+    public static ByteBuffer decodeDecimal(ByteBuffer value)
+    {
+        var peekableValue = ByteSource.peekable(ByteSource.preencoded(value));
+        return DecimalType.instance.fromComparableBytes(peekableValue, ByteComparable.Version.OSS41);
+    }
+
+
+    /**
+     * Converts the index encoded term to a BigDecimal in a way that it keeps the sort order
+     * (so terms comparing larger yield larger numbers). If the term represents a number,
+     * the conversion is linear and lossless, because we use the method provided by the concrete
+     * termType. For non-number types, we reinterpret the bytecomparable representation as a number.
+     */
+    public static BigDecimal toBigDecimal(ByteBuffer value, AbstractType<?> valueType)
+    {
+        if (value == null)
+            return null;
+
+        if (valueType instanceof IntegerType)
+            return ((IntegerType) valueType).toBigDecimal(decodeBigInteger(value));
+
+        if (valueType instanceof DecimalType)
+            return ((DecimalType) valueType).toBigDecimal(decodeDecimal(value));
+
+        if (valueType instanceof NumberType)
+        {
+            var numberType = (NumberType<?>) valueType;
+            var bs = ByteSource.preencoded(value);
+            return numberType.toBigDecimal(valueType.fromComparableBytes(ByteSource.peekable(bs), ByteComparable.Version.OSS41));
+        }
+
+        byte[] fixedLengthBytes = Arrays.copyOf(ByteBufferUtil.getArray(value), 20);
+        return new BigDecimal(new BigInteger(fixedLengthBytes));
+    }
+
 }

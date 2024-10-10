@@ -202,4 +202,10 @@ public interface OnDiskFormat
      * @return The encoded {@link ByteComparable} object
      */
     public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type);
+
+    /**
+     * Inverse of {@link #encodeForTrie(ByteBuffer, AbstractType)}
+     */
+    public ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type);
+
 }

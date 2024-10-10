@@ -135,6 +135,11 @@ public class SSTableIndex
         return searchableIndex.getRowCount();
     }
 
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return searchableIndex.estimateMatchingRowsCount(predicate, keyRange);
+    }
+
     /**
      * @return total size of per-column SAI components, in bytes
      */

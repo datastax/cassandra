@@ -18,7 +18,6 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.net.InetAddress;
-
 import org.junit.Before;
 import org.junit.Test;
 

@@ -141,6 +141,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     private final Multimap<Expression, RangeIterator> keyIterators = ArrayListMultimap.create();
 
+    private final Map<IndexContext, QueryView> queryViews = new HashMap<>();
+
     static
     {
         logger.info(String.format("Query plan optimization is %s (level = %d)",
@@ -397,6 +399,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return keysIterationPlan;
     }
 
+
     public Iterator<? extends PrimaryKey> buildIterator(Plan plan)
     {
         try
@@ -413,6 +416,29 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             closeUnusedIterators();
         }
     }
+
+    /**
+     * Creates an iterator over keys of rows that match given WHERE predicate.
+     * Does not cache the iterator!
+     */
+    private RangeIterator buildIterator(Expression predicate)
+    {
+        QueryView view = getQueryView(predicate.context);
+        return TermIterator.build(predicate, view.referencedIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Creates a consistent view of indexes.
+     * Invocations are memorized - multiple calls for the same context return the same view.
+     * The views are kept for the lifetime of this {@code QueryController}.
+     */
+    QueryView getQueryView(IndexContext context)
+    {
+        return queryViews.computeIfAbsent(context,
+                                          c -> new QueryView.Builder(c, mergeRange, queryContext).build());
+
+    }
+
 
     private float avgCellsPerRow()
     {
@@ -466,35 +492,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return;
         }
 
-        boolean defer = builder.type == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
-
-        Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, expressions).entrySet();
-        try
+        for (Expression expression : expressions)
         {
-            var viewIterator = view.iterator();
-            while (viewIterator.hasNext())
+            if (expression.context.isIndexed())
             {
-                var e = viewIterator.next();
-                Expression predicate = e.getKey();
-                RangeIterator iterator = TermIterator.build(predicate, e.getValue(), mergeRange, queryContext, defer, Integer.MAX_VALUE);
-
-                // The returned iterator owns the set of indexes now and will release them on close,
-                // so let's remove it from the view to avoid double-release.
-                viewIterator.remove();
-
-                // Cache the iterator for when the plan node needs it for the execution
-                keyIterators.put(predicate, iterator);
-
-                long keysCount = Math.min(iterator.getMaxKeys(), planFactory.tableMetrics.rows);
-                Plan.KeysIteration plan = planFactory.indexScan(predicate, keysCount);
-                builder.add(plan);
+                long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
+                builder.add(planFactory.indexScan(expression, expectedMatchingRowCount));
             }
-        }
-        catch (Throwable t)
-        {
-            // Release the references to the indexes that we didn't get the iterator for
-            view.forEach(e -> e.getValue().forEach(SSTableIndex::release));
-            throw t;
         }
     }
 
@@ -502,12 +506,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     public Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate)
     {
         Collection<RangeIterator> rangeIterators = keyIterators.get(predicate);
-        // This should be never empty, because we put iterators in this map when we create the IndexScan nodes of the Plan
-        assert !rangeIterators.isEmpty() : "No iterator found for predicate: " + predicate;
+        // This will be non-empty only if we created the iterator as part of the query planning process.
+        if (!rangeIterators.isEmpty())
+        {
+            RangeIterator iterator = rangeIterators.iterator().next();
+            keyIterators.remove(predicate, iterator);  // remove so we never accidentally reuse the same iterator
+            return iterator;
+        }
 
-        RangeIterator iterator = rangeIterators.iterator().next();
-        keyIterators.remove(predicate, iterator);  // remove so we never accidentally reuse the same iterator
-        return iterator;
+        return buildIterator(predicate);
     }
 
     /**
@@ -519,12 +526,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
         try
         {
-            for (MemtableIndex index : queryContext.view.memtableIndexes)
+            QueryView view = getQueryView(orderer.context);
+            for (MemtableIndex index : view.memtableIndexes)
                 memtableResults.addAll(index.orderBy(queryContext, orderer, predicate, mergeRange, softLimit));
 
-            var totalRows = queryContext.view.getTotalSStableRows();
+            var totalRows = view.getTotalSStableRows();
             SSTableSearcher searcher = index -> index.orderBy(orderer, predicate, mergeRange, queryContext, softLimit, totalRows);
-            var sstableResults = searchSSTables(queryContext.view, searcher);
+            var sstableResults = searchSSTables(view, searcher);
             sstableResults.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableResults, orderer.getComparator());
         }
@@ -566,7 +574,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
-        var memtableResults = queryContext.view.memtableIndexes.stream()
+        QueryView view = getQueryView(orderer.context);
+        var memtableResults = view.memtableIndexes.stream()
                                                                .map(index -> index.orderResultsBy(queryContext,
                                                                                                   sourceKeys,
                                                                                                   orderer,
@@ -574,13 +583,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                                .collect(Collectors.toList());
         try
         {
-            var totalRows = queryContext.view.getTotalSStableRows();
+            var totalRows = view.getTotalSStableRows();
             SSTableSearcher ssTableSearcher = index -> index.orderResultsBy(queryContext,
                                                                             sourceKeys,
                                                                             orderer,
                                                                             softLimit,
                                                                             totalRows);
-            var sstableScoredPrimaryKeyIterators = searchSSTables(queryContext.view, ssTableSearcher);
+            var sstableScoredPrimaryKeyIterators = searchSSTables(view, ssTableSearcher);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableScoredPrimaryKeyIterators, orderer.getComparator());
         }
@@ -600,11 +609,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
-     * Create the list of iterators over {@link PrimaryKeyWithSortKey} from the given {@link QueryViewBuilder.QueryView}.
+     * Create the list of iterators over {@link PrimaryKeyWithSortKey} from the given {@link QueryView}.
      * @param queryView The view to use to create the iterators.
      * @return The list of iterators over {@link PrimaryKeyWithSortKey}.
      */
-    private List<CloseableIterator<PrimaryKeyWithSortKey>> searchSSTables(QueryViewBuilder.QueryView queryView, SSTableSearcher searcher)
+    private List<CloseableIterator<PrimaryKeyWithSortKey>> searchSSTables(QueryView queryView, SSTableSearcher searcher)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> results = new ArrayList<>();
         for (var index : queryView.referencedIndexes)
@@ -678,24 +687,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                   clusteringIndexFilter.isReversed());
     }
 
-    private static void releaseQuietly(SSTableIndex index)
-    {
-        try
-        {
-            index.release();
-        }
-        catch (Throwable e)
-        {
-            logger.error(index.getIndexContext().logMessage("Failed to release index on SSTable {}"), index.getSSTable().descriptor, e);
-        }
-    }
-
     /**
      * Used to release all resources and record metrics when query finishes.
      */
     public void finish()
     {
         closeUnusedIterators();
+        closeQueryViews();
         if (tableQueryMetrics != null) tableQueryMetrics.record(queryContext);
     }
 
@@ -709,135 +707,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         }
     }
 
-    /**
-     * Try to reference all SSTableIndexes before querying on disk indexes.
-     *
-     * If we attempt to proceed into {@link TermIterator#build(Expression, Set, AbstractBounds, QueryContext, boolean, int)}
-     * without first referencing all indexes, a concurrent compaction may decrement one or more of their backing
-     * SSTable {@link Ref} instances. This will allow the {@link SSTableIndex} itself to be released and will fail the query.
-     */
-    private Map<Expression, NavigableSet<SSTableIndex>> referenceAndGetView(Operation.OperationType op, Collection<Expression> expressions)
+    private void closeQueryViews()
     {
-        SortedSet<String> indexNames = new TreeSet<>();
-        try
+        Iterator<Map.Entry<IndexContext, QueryView>> entries = queryViews.entrySet().iterator();
+        while (entries.hasNext())
         {
-            while (true)
-            {
-                List<SSTableIndex> referencedIndexes = new ArrayList<>();
-                boolean failed = false;
-
-                Map<Expression, NavigableSet<SSTableIndex>> view = getView(op, expressions);
-
-                for (SSTableIndex index : view.values().stream().flatMap(Collection::stream).collect(Collectors.toList()))
-                {
-                    indexNames.add(index.getIndexContext().getIndexName());
-
-                    if (index.reference())
-                    {
-                        referencedIndexes.add(index);
-                    }
-                    else
-                    {
-                        failed = true;
-                        break;
-                    }
-                }
-
-                if (failed)
-                {
-                    // TODO: This might be a good candidate for a table/index group metric in the future...
-                    referencedIndexes.forEach(QueryController::releaseQuietly);
-                }
-                else
-                {
-                    return view;
-                }
-            }
+            entries.next().getValue().close();
+            entries.remove();
         }
-        finally
-        {
-            Tracing.trace("Querying storage-attached indexes {}", indexNames);
-        }
-    }
-
-    private Map<Expression, NavigableSet<SSTableIndex>> getView(Operation.OperationType op, Collection<Expression> expressions)
-    {
-        // first let's determine the primary expression if op is AND
-        Pair<Expression, NavigableSet<SSTableIndex>> primary = (op == Operation.OperationType.AND) ? calculatePrimary(expressions) : null;
-
-        Map<Expression, NavigableSet<SSTableIndex>> indexes = new HashMap<>();
-        for (Expression e : expressions)
-        {
-            // NO_EQ and non-index column query should only act as FILTER BY for satisfiedBy(Row) method
-            // because otherwise it likely to go through the whole index.
-            if (!e.context.isIndexed())
-            {
-                continue;
-            }
-
-            // primary expression, we'll have to add as is
-            if (primary != null && e.equals(primary.left))
-            {
-                indexes.put(primary.left, primary.right);
-
-                continue;
-            }
-
-            View view = e.context.getView();
-
-            NavigableSet<SSTableIndex> readers = new TreeSet<>(SSTableIndex.COMPARATOR);
-            if (primary != null && primary.right.size() > 0)
-            {
-                for (SSTableIndex index : primary.right)
-                    readers.addAll(view.match(index.minKey(), index.maxKey()));
-            }
-            else
-            {
-                readers.addAll(applyScope(view.match(e)));
-            }
-
-            indexes.put(e, readers);
-        }
-
-        return indexes;
-    }
-
-    private Pair<Expression, NavigableSet<SSTableIndex>> calculatePrimary(Collection<Expression> expressions)
-    {
-        Expression expression = null;
-        NavigableSet<SSTableIndex> primaryIndexes = null;
-
-        for (Expression e : expressions)
-        {
-            if (!e.context.isIndexed())
-                continue;
-
-            View view = e.context.getView();
-
-            NavigableSet<SSTableIndex> indexes = new TreeSet<>(SSTableIndex.COMPARATOR);
-            indexes.addAll(applyScope(view.match(e)));
-
-            if (expression == null || primaryIndexes.size() > indexes.size())
-            {
-                primaryIndexes = indexes;
-                expression = e;
-            }
-        }
-
-        return expression == null ? null : Pair.create(expression, primaryIndexes);
-    }
-
-    private Set<SSTableIndex> applyScope(Set<SSTableIndex> indexes)
-    {
-        return Sets.filter(indexes, index -> {
-            SSTableReader sstable = index.getSSTable();
-            if (mergeRange instanceof Bounds && mergeRange.left.equals(mergeRange.right) && (!mergeRange.left.isMinimum()) && mergeRange.left instanceof DecoratedKey)
-            {
-                if (!sstable.getBloomFilter().isPresent((DecoratedKey)mergeRange.left))
-                    return false;
-            }
-            return mergeRange.left.compareTo(sstable.last) <= 0 && (mergeRange.right.isMinimum() || sstable.first.compareTo(mergeRange.right) <= 0);
-        });
     }
 
     /**
@@ -879,7 +756,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         long rows = 0;
 
         for (Memtable memtable : cfs.getAllMemtables())
-            rows += estimateMemtableRowCount(memtable);
+            rows += Memtable.estimateRowCount(memtable);
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
             for (DataRange range : ranges)
@@ -889,11 +766,68 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return rows;
     }
 
-    private static long estimateMemtableRowCount(Memtable memtable)
+    /**
+     * Estimates how many rows match the predicate.
+     * There are no guarantees. The returned value may come with a significant estimation error.
+     * You must not rely on this except for query optimization purposes.
+     */
+    private long estimateMatchingRowCount(Expression predicate)
     {
-        long rowSize = memtable.getEstimatedAverageRowSize();
-        return rowSize > 0 ? memtable.getLiveDataSize() / rowSize : 0;
+        switch (predicate.getOp())
+        {
+            case EQ:
+            case CONTAINS_KEY:
+            case CONTAINS_VALUE:
+            case NOT_EQ:
+            case NOT_CONTAINS_KEY:
+            case NOT_CONTAINS_VALUE:
+            case RANGE:
+                return (indexFeatureSet.hasTermsHistogram())
+                       ? estimateMatchingRowCountUsingHistograms(predicate)
+                       : estimateMatchingRowCountUsingIndex(predicate);
+            default:
+                return estimateMatchingRowCountUsingIndex(predicate);
+        }
     }
+
+    /**
+     * Estimates the number of matching rows by consulting the terms histograms on the indexes.
+     * This is faster but the histograms are not available on indexes before V6.
+     */
+    private long estimateMatchingRowCountUsingHistograms(Expression predicate)
+    {
+        assert indexFeatureSet.hasTermsHistogram();
+        var context = predicate.context;
+
+        Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
+        long rowCount = 0;
+        for (MemtableIndex index : memtables)
+            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+
+        var queryView = context.getView();
+        for (SSTableIndex index : queryView.getIndexes())
+            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+
+        return rowCount;
+    }
+
+    /**
+     * Legacy way of estimating predicate selectivity.
+     * Runs the search on the index and returns the size of the iterator.
+     * Caches the iterator for future use, to avoid doing search twice.
+     */
+    private long estimateMatchingRowCountUsingIndex(Expression predicate)
+    {
+        // For older indexes we don't have histograms, so we need to construct the iterator
+        // and ask for the posting list size.
+        RangeIterator iterator = buildIterator(predicate);
+
+        // We're not going to consume the iterator here, so memorize it for future uses.
+        // It can be used when executing the plan.
+        keyIterators.put(predicate, iterator);
+        return iterator.getMaxKeys();
+    }
+
 
     @Override
     public double estimateAnnSearchCost(Orderer ordering, int limit, long candidates)
