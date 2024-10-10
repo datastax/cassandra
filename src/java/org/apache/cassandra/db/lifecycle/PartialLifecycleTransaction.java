@@ -55,7 +55,10 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
 
     public void update(SSTableReader reader, boolean original)
     {
-        earlyOpenUnsupported();
+        if (original)
+            throw earlyOpenUnsupported();
+
+        mainTransaction.update(reader, original);
     }
 
     public void update(Collection<SSTableReader> readers, boolean original)

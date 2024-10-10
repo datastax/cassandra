@@ -1042,10 +1042,11 @@ public class CompactionTask extends AbstractCompactionTask
         StringBuilder newSSTableNames = new StringBuilder(newSStables.size() * 100);
         for (SSTableReader reader : newSStables)
             newSSTableNames.append(reader.descriptor.baseFileUri()).append(",");
-        logger.debug("Compacted ({}) {} sstables to [{}] to level={}. {} to {} (~{}% of original) in {}ms. " +
+        logger.debug("Compacted ({}{}) {} sstables to [{}] to level={}. {} to {} (~{}% of original) in {}ms. " +
                      "Read Throughput = {}, Write Throughput = {}, Row Throughput = ~{}/s, Partition Throughput = ~{}/s." +
                      " {} total partitions merged to {}. Partition merge counts were {}.",
                      taskId,
+                     tokenRange() != null ? " range " + tokenRange() : "",
                      transaction.originals().size(),
                      newSSTableNames.toString(),
                      getLevel(),
@@ -1066,7 +1067,10 @@ public class CompactionTask extends AbstractCompactionTask
     {
         Set<SSTableReader> originals = transaction.originals();
         StringBuilder ssTableLoggerMsg = new StringBuilder(originals.size() * 100);
-        ssTableLoggerMsg.append("Compacting (").append(taskId).append(')').append(" [");
+        ssTableLoggerMsg.append("Compacting (").append(taskId);
+        if (tokenRange() != null)
+            ssTableLoggerMsg.append(" range ").append(tokenRange());
+        ssTableLoggerMsg.append(") [");
         for (SSTableReader sstr : originals)
         {
             ssTableLoggerMsg.append(sstr.getFilename())
