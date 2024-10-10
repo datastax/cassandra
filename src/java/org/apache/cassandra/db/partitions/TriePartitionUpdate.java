@@ -252,10 +252,10 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
     static Trie<Object> trieFor(PartitionUpdate update)
     {
-        Trie<Object> trie = Trie.singleton(ByteComparable.EMPTY, update.deletionInfo());
+        Trie<Object> trie = Trie.singleton(ByteComparable.EMPTY, BYTE_COMPARABLE_VERSION, update.deletionInfo());
         Row staticRow = update.staticRow();
         if (!staticRow.isEmpty())
-            trie = trie.mergeWith(Trie.singleton(Clustering.STATIC_CLUSTERING_PATH, rowToData(staticRow)), Trie.throwingResolver());
+            trie = trie.mergeWith(Trie.singleton(STATIC_CLUSTERING_PATH, BYTE_COMPARABLE_VERSION, rowToData(staticRow)), Trie.throwingResolver());
 
         return trie.mergeWith(new TrieFromRows(update), Trie.throwingResolver());
     }

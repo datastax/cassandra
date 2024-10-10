@@ -27,6 +27,8 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.function.Function;
 
+import static org.apache.cassandra.db.partitions.TrieBackedPartition.BYTE_COMPARABLE_VERSION;
+
 public abstract class TrieFromOrderedData<I, O> extends Trie<O>
 {
 
@@ -36,7 +38,7 @@ public abstract class TrieFromOrderedData<I, O> extends Trie<O>
     {
         Iterator<I> iterator = getIterator(direction);
         if (!iterator.hasNext())
-            return Trie.<O>empty().cursor(direction);
+            return Trie.<O>empty(BYTE_COMPARABLE_VERSION).cursor(direction);
         return new Cursor(direction, iterator);
     }
 
@@ -87,6 +89,12 @@ public abstract class TrieFromOrderedData<I, O> extends Trie<O>
         public Direction direction()
         {
             return direction;
+        }
+
+        @Override
+        public ByteComparable.Version byteComparableVersion()
+        {
+            return BYTE_COMPARABLE_VERSION;
         }
 
         private void setByte(int depth, int value)
@@ -148,7 +156,7 @@ public abstract class TrieFromOrderedData<I, O> extends Trie<O>
         private int getNextEntryAndItsFirstByte()
         {
             currentEntry = iterator.next();
-            currentKey = keyFor(currentEntry).asComparableBytes(Trie.BYTE_COMPARABLE_VERSION);
+            currentKey = keyFor(currentEntry).asComparableBytes(BYTE_COMPARABLE_VERSION);
             return currentKey.next();
         }
 
