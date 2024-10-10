@@ -95,6 +95,14 @@ public final class SensorsCustomParams
         return buffer.array();
     }
 
+    public static ByteBuffer sensorValueAsByteBuffer(double value)
+    {
+        ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
+        buffer.putDouble(value);
+        buffer.flip();
+        return buffer;
+    }
+
     public static double sensorValueFromBytes(byte[] bytes)
     {
         ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);

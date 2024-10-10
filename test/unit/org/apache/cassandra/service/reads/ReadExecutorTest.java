@@ -18,10 +18,16 @@
 
 package org.apache.cassandra.service.reads;
 
+import java.nio.ByteBuffer;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang3.exception.ExceptionUtils;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadResponse;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.ReplicaPlan;
@@ -42,9 +48,16 @@ import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.sensors.ActiveRequestSensors;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
+import org.mockito.Mockito;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.locator.ReplicaUtils.full;
@@ -236,6 +249,39 @@ public class ReadExecutorTest
         }
     }
 
+    @Test
+    public void testReadSensorsEstimatedAndIncremented()
+    {
+        MockSinglePartitionReadCommand command = new MockSinglePartitionReadCommand(TimeUnit.DAYS.toMillis(365));
+        ReplicaPlan.ForTokenRead plan = plan(ConsistencyLevel.QUORUM, targets, targets.subList(0, 1));
+        // register read sensor before initilizaing the read executor
+        RequestSensors requestSensors = new ActiveRequestSensors();
+        Context context = Context.from(command);
+        requestSensors.registerSensor(context, Type.READ_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
+        ExecutorLocals.set(locals);
+        AbstractReadExecutor executor = new AbstractReadExecutor(cfs, command, plan, 1, System.nanoTime(), noopReadTracker())
+        {
+            @Override
+            public void maybeTryAdditionalReplicas()
+            {
+            }
+        };
+
+        double readSesnorValue = 19.0;
+        for (int target = 0; target < targets.size(); target++)
+        {
+            Message<ReadResponse> response = createMessageWithReadSensor(targets.get(target).endpoint(), readSesnorValue);
+            executor.handler.onResponse(response); // will triger signalAll after the second response
+        }
+
+        executor.awaitResponses();
+
+        Optional<Sensor> readSensor = requestSensors.getSensor(context, Type.READ_BYTES);
+        assertTrue(readSensor.isPresent());
+        assertEquals(readSesnorValue * targets.size(), readSensor.get().getValue(), 0.01);
+    }
+
     public static class MockSinglePartitionReadCommand extends SinglePartitionReadCommand
     {
         private final long timeout;
@@ -277,5 +323,54 @@ public class ReadExecutorTest
     private QueryInfoTracker.ReadTracker noopReadTracker()
     {
         return QueryInfoTracker.ReadTracker.NOOP;
+    }
+
+    private Message<ReadResponse> createMessageWithReadSensor(InetAddressAndPort from, double readSensorValue)
+    {
+        ReadResponse response = new ReadResponse()
+        {
+            @Override
+            public UnfilteredPartitionIterator makeIterator(ReadCommand command)
+            {
+                UnfilteredPartitionIterator iterator = Mockito.mock(UnfilteredPartitionIterator.class);
+                Mockito.when(iterator.metadata()).thenReturn(command.metadata());
+                return iterator;
+            }
+
+            @Override
+            public ByteBuffer digest(ReadCommand command)
+            {
+                return null;
+            }
+
+            @Override
+            public ByteBuffer repairedDataDigest()
+            {
+                return null;
+            }
+
+            @Override
+            public boolean isRepairedDigestConclusive()
+            {
+                return false;
+            }
+
+            @Override
+            public boolean mayIncludeRepairedDigest()
+            {
+                return false;
+            }
+
+            @Override
+            public boolean isDigestResponse()
+            {
+                return false;
+            }
+        };
+
+        return Message.builder(Verb.READ_RSP, response)
+                      .from(from)
+                      .withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, SensorsCustomParams.sensorValueAsBytes(readSensorValue))
+                      .build();
     }
 }

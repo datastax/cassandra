@@ -35,6 +35,7 @@ import org.apache.cassandra.sensors.ActiveRequestSensorsFactory;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.junit.Assert.assertEquals;
@@ -155,6 +156,16 @@ public class SensorsCustomParamsTest
         testAddSensorsToResponse(Type.READ_BYTES,
                                 ignored -> SensorsCustomParams.READ_BYTES_REQUEST,
                                 ignored -> SensorsCustomParams.READ_BYTES_TABLE);
+    }
+
+    @Test
+    public void testSensorValueAsByteBuffer()
+    {
+        double d = Double.MAX_VALUE;
+        ByteBuffer bb = SensorsCustomParams.sensorValueAsByteBuffer(d);
+        // bb should already be flipped
+        assertEquals(bb.position(), 0);
+        assertEquals(d, ByteBufferUtil.toDouble(bb), 0.0);
     }
 
     private void testAddSensorsToResponse(Type sensorType, Function<Context, String> requestParamSupplier, Function<Context, String> tableParamSupplier)
