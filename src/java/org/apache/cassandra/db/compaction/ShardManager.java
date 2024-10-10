@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -90,6 +91,29 @@ public interface ShardManager
      * arise, see {@link CompactionSimulationTest} for a possible implementation.
      */
     ShardTracker boundaries(int shardCount);
+
+    default List<Range<Token>> shardsCovering(int shardCount, Token min, Token max)
+    {
+        if (shardCount <= 1)
+            return null;
+
+        ShardTracker boundaries = boundaries(shardCount);
+        if (!min.isMinimum())
+            boundaries.advanceTo(min);
+
+        List<Range<Token>> ranges = new ArrayList<>();
+        Token end = boundaries.shardEnd();
+        while (end != null && end.compareTo(max) <= 0)
+        {
+            ranges.add(boundaries.shardSpan());
+            boolean advanced = boundaries.advanceTo(end.nextValidToken());
+            assert advanced;
+            end = boundaries.shardEnd();
+        }
+        ranges.add(boundaries.shardSpan());
+        return ranges;
+    }
+
 
     static Range<Token> coveringRange(CompactionSSTable sstable)
     {

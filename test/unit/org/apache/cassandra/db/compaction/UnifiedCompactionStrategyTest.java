@@ -43,11 +43,13 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
+import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
@@ -987,9 +989,19 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertEquals(currentArenaSpecs.expectedBuckets[i], levels.get(i).sstables.size());
         }
     }
+
     @Test
-    public void testGetNextBackgroundTasks()
+    public void testGetNextBackgroundTasksParallelizeOutputShards() throws Exception
     {
+        Util.modifyStaticFinalField(Controller.class, "PARALLELIZE_OUTPUT_SHARDS", true);
+        assertCompactionTask(1, 3, UnifiedCompactionTask.class);
+        assertCompactionTask(3, 9, UnifiedCompactionTask.class);
+    }
+
+    @Test
+    public void testGetNextBackgroundTasksNoParallelization() throws Exception
+    {
+        Util.modifyStaticFinalField(Controller.class, "PARALLELIZE_OUTPUT_SHARDS", false);
         assertCompactionTask(1, 3, UnifiedCompactionTask.class);
         assertCompactionTask(3, 3, UnifiedCompactionTask.class);
     }
@@ -1148,19 +1160,22 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     }
 
     @Test
-    public void testDropExpiredSSTables1Shard()
+    public void testDropExpiredSSTables1Shard() throws Exception
     {
+        Util.modifyStaticFinalField(Controller.class, "PARALLELIZE_OUTPUT_SHARDS", true);
         testDropExpiredFromBucket(1);
         testDropExpiredAndCompactNonExpired();
     }
 
     @Test
-    public void testDropExpiredSSTables3Shards()
+    public void testDropExpiredSSTables3Shards() throws Exception
     {
+        // We don't want separate tasks for each output shard here
+        Util.modifyStaticFinalField(Controller.class, "PARALLELIZE_OUTPUT_SHARDS", false);
         testDropExpiredFromBucket(3);
     }
 
-    private void testDropExpiredFromBucket(int numShards)
+    private void testDropExpiredFromBucket(int numShards) throws Exception
     {
         Controller controller = Mockito.mock(Controller.class);
         long minimalSizeBytes = 2 << 20;
@@ -1402,7 +1417,24 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     }
 
     @Test
-    public void testMaximalSelection()
+    public void testMaximalSelectionNoReshard() throws Exception
+    {
+        Util.modifyStaticFinalField(Controller.class, "RESHARD_MAJOR_COMPACTIONS", false);
+        Util.modifyStaticFinalField(Controller.class, "PARALLELIZE_OUTPUT_SHARDS", false);
+        testMaximalSelection(3, 5, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
+    }
+
+    @Test
+    public void testMaximalSelectionReshard() throws Exception
+    {
+        Util.modifyStaticFinalField(Controller.class, "RESHARD_MAJOR_COMPACTIONS", true);
+        Util.modifyStaticFinalField(Controller.class, "PARALLELIZE_OUTPUT_SHARDS", true);
+        // shared transaction, all tasks refer to the same input sstables
+        testMaximalSelection(1, 1, 10 + 15 + 25, ((10 * 100L + 15 * 200 + 25 * 400) << 20));
+        testMaximalSelection(3, 3, 10 + 15 + 25, ((10 * 100L + 15 * 200 + 25 * 400) << 20));
+    }
+
+    private void testMaximalSelection(int numShards, int expectedTaskCount, int originalsCount, long onDiskLength)
     {
         Set<SSTableReader> allSSTables = new HashSet<>();
         allSSTables.addAll(mockNonOverlappingSSTables(10, 0, 100 << 20));
@@ -1411,26 +1443,30 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         dataTracker.addInitialSSTables(allSSTables);
 
         Controller controller = Mockito.mock(Controller.class);
+        when(controller.getNumShards(anyDouble())).thenReturn(numShards);
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         CompactionTasks tasks = strategy.getMaximalTasks(0, false);
-        assertEquals(5, tasks.size());  // 5 (gcd of 10,15,25) common boundaries
+        assertEquals(expectedTaskCount, tasks.size());  // 5 (gcd of 10,15,25) common boundaries without resharding
         for (AbstractCompactionTask task : tasks)
         {
             Set<SSTableReader> compacting = task.getTransaction().originals();
-            assertEquals(2 + 3 + 5, compacting.size()); // count / gcd sstables of each level
-            assertEquals((2 * 100L + 3 * 200 + 5 * 400) << 20, compacting.stream().mapToLong(CompactionSSTable::onDiskLength).sum());
+            assertEquals(originalsCount, compacting.size()); // count / gcd sstables of each level
+            assertEquals(onDiskLength, compacting.stream().mapToLong(CompactionSSTable::onDiskLength).sum());
 
-            // None of the selected sstables may intersect any in any other set.
-            for (AbstractCompactionTask task2 : tasks)
+            if (!(task.getTransaction() instanceof PartialLifecycleTransaction))
             {
-                if (task == task2)
-                    continue;
+                // None of the selected sstables may intersect any in any other set.
+                for (AbstractCompactionTask task2 : tasks)
+                {
+                    if (task == task2)
+                        continue;
 
-                Set<SSTableReader> compacting2 = task2.getTransaction().originals();
-                for (SSTableReader r1 : compacting)
-                    for (SSTableReader r2 : compacting2)
-                        assertTrue(r1 + " intersects " + r2, r1.getFirst().compareTo(r2.getLast()) > 0 || r1.getLast().compareTo(r2.getFirst()) < 0);
+                    Set<SSTableReader> compacting2 = task2.getTransaction().originals();
+                    for (SSTableReader r1 : compacting)
+                        for (SSTableReader r2 : compacting2)
+                            assertTrue(r1 + " intersects " + r2, r1.getFirst().compareTo(r2.getLast()) > 0 || r1.getLast().compareTo(r2.getFirst()) < 0);
+                }
             }
         }
     }

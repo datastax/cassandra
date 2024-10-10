@@ -80,7 +80,7 @@ public class ShardManagerTrivial implements ShardManager
         @Override
         public Token shardEnd()
         {
-            return partitioner.getMinimumToken();
+            return null;
         }
 
         @Override

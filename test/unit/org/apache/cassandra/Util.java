@@ -24,6 +24,7 @@ import java.io.EOFException;
 import java.io.IOError;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.math.BigInteger;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -1313,5 +1314,21 @@ public class Util
             fieldTypes.add(entry.getValue());
         }
         return new UserType(ks, UTF8Type.instance.decompose(name), fieldNames, fieldTypes, multicell);
+    }
+
+    public static void modifyStaticFinalField(Class<?> clazz, String fieldName, Object newValue) throws Exception
+    {
+        Field field = clazz.getDeclaredField(fieldName);
+
+        // Make the field accessible to bypass private visibility
+        field.setAccessible(true);
+
+        // Remove the 'final' modifier using reflection
+        Field modifiersField = Field.class.getDeclaredField("modifiers");
+        modifiersField.setAccessible(true);
+        modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+
+        // Set the new value for the static field
+        field.set(null, newValue); // Use null for static fields
     }
 }

@@ -66,10 +66,13 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
 
         try
         {
-            // enforce contract that caller should mark sstables compacting
-            var compacting = realm.getCompactingSSTables();
-            for (SSTableReader sstable : transaction.originals())
-                assert compacting.contains(sstable) : sstable.getFilename() + " is not correctly marked compacting";
+            if (!transaction.isOffline())
+            {
+                // enforce contract that caller should mark sstables compacting
+                var compacting = realm.getCompactingSSTables();
+                for (SSTableReader sstable : transaction.originals())
+                    assert compacting.contains(sstable) : sstable.getFilename() + " is not correctly marked compacting";
+            }
 
             validateSSTables(transaction.originals());
         }

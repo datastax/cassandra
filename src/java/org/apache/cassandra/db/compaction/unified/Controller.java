@@ -289,7 +289,7 @@ public abstract class Controller
      * does not re-shard data that has already been split into shards, which is something we may want to do in some
      * scenarios.
      */
-    public static final boolean MAJOR_COMPACTIONS_RESHARD = Boolean.parseBoolean(getSystemProperty("major_compactions_reshard",
+    public static final boolean RESHARD_MAJOR_COMPACTIONS = Boolean.parseBoolean(getSystemProperty("reshard_major_compactions",
                                                                                                    Boolean.toString(PARALLELIZE_OUTPUT_SHARDS)));
 
     /**
