@@ -50,6 +50,20 @@ public interface SchemaUpdateHandler
     boolean waitUntilReady(Duration timeout);
 
     /**
+     * Checks if the schema for the given keyspace is ready to be used: should be invoked during request processing
+     * to make sure the schema is readily accessible before further processing the request.
+     *
+     * @param keyspaceName The name of the keyspace to check, as different implementations could manage the schema
+     *                     of different keyspaces separately.
+     *
+     * @return True if the schema is ready, false otherwise.
+     */
+    default boolean isReady(String keyspaceName)
+    {
+        return true;
+    }
+
+    /**
      * Applies schema transformation in the underlying storage and synchronizes with other nodes.
      *
      * @param transformation schema transformation to be performed

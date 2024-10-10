@@ -51,7 +51,10 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.ExceptionCode;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.NotReadyException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -327,6 +330,10 @@ public class Schema implements SchemaProvider
     public KeyspaceMetadata getKeyspaceMetadata(String keyspaceName)
     {
         assert keyspaceName != null;
+
+        if (!updateHandler.isReady(keyspaceName))
+            throw new NotReadyException(ExceptionCode.UNAVAILABLE, String.format("Keyspace %s not ready", keyspaceName));
+
         KeyspaceMetadata keyspace = distributedAndLocalKeyspaces().getNullable(keyspaceName);
         return null != keyspace ? keyspace : VirtualKeyspaceRegistry.instance.getKeyspaceMetadataNullable(keyspaceName);
     }

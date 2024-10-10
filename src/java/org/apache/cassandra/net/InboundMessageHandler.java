@@ -31,6 +31,7 @@ import io.netty.channel.ChannelHandlerContext;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.IncompatibleSchemaException;
+import org.apache.cassandra.exceptions.NotReadyException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message.Header;
@@ -178,6 +179,11 @@ public class InboundMessageHandler extends AbstractMessageHandler
         {
             callbacks.onFailedDeserialize(size, header, e);
             noSpamLogger.info("{} incompatible schema encountered while deserializing a message", this, e);
+        }
+        catch (NotReadyException e)
+        {
+            callbacks.onFailedDeserialize(size, header, e);
+            noSpamLogger.info("{}: {}", NotReadyException.class.getSimpleName(), e.getMessage());
         }
         catch (Throwable t)
         {
@@ -375,6 +381,11 @@ public class InboundMessageHandler extends AbstractMessageHandler
             {
                 callbacks.onFailedDeserialize(size, header, e);
                 noSpamLogger.info("{} incompatible schema encountered while deserializing a message", InboundMessageHandler.this, e);
+            }
+            catch (NotReadyException e)
+            {
+                callbacks.onFailedDeserialize(size, header, e);
+                noSpamLogger.info("{}: {}", NotReadyException.class.getSimpleName(), e.getMessage());
             }
             catch (Throwable t)
             {
