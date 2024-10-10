@@ -122,6 +122,16 @@ public class Nodes
     private final Peers peers;
     private final Local local;
 
+    public Peers getPeers()
+    {
+        return peers;
+    }
+
+    public Local getLocal()
+    {
+        return local;
+    }
+
     /**
      * Convenience method to retrieve the production code singleton.
      */
@@ -267,7 +277,8 @@ public class Nodes
         return map(peer, mapper, () -> null);
     }
 
-    private Nodes(Path storageDirectory)
+    @VisibleForTesting
+    public Nodes(Path storageDirectory)
     {
         this.updateExecutor = Executors.newSingleThreadExecutor(new NamedThreadFactory("nodes-info-persistence"));
         this.baseDirectory = storageDirectory;
@@ -417,7 +428,8 @@ public class Nodes
         }
     }
 
-    private List<Path> listSnapshots()
+    @VisibleForTesting
+    public List<Path> listSnapshots()
     {
         if (!Files.isDirectory(snapshotsDirectory))
             return Collections.emptyList();
@@ -451,9 +463,11 @@ public class Nodes
         private final Path localPath;
         private final Path localBackupPath;
         private final Path localTempPath;
+        private long lastLocalSave;
 
         private volatile LocalInfo localInfo;
         private volatile boolean closed;
+        private final boolean localInfoPresent;
 
         public Local(ObjectMapper objectMapper, Path storageDirectory)
         {
@@ -463,6 +477,8 @@ public class Nodes
 
             localReader = objectMapper.readerFor(LocalInfo.class);
             localWriter = objectMapper.writerFor(LocalInfo.class);
+
+            localInfoPresent = Files.exists(localPath);
 
             try
             {
@@ -492,8 +508,15 @@ public class Nodes
 
         private void write(OutputStream output) throws IOException
         {
+            lastLocalSave = System.nanoTime();
+
             localInfo.resetDirty();
             localWriter.writeValue(output, localInfo);
+        }
+
+        public long getLastSaveTimeNanos()
+        {
+            return lastLocalSave;
         }
 
         private void close()
@@ -511,6 +534,11 @@ public class Nodes
         {
             localInfo = new LocalInfo();
             saveToDisk();
+        }
+
+        public boolean localInfoWasPresent()
+        {
+            return localInfoPresent;
         }
 
         /**
@@ -533,7 +561,7 @@ public class Nodes
 
             if (local.isDirty())
             {
-                Future future = updateExecutor.submit(() -> saveToDisk());
+                Future future = updateExecutor.submit(this::saveToDisk);
                 if (blocking)
                     FBUtilities.waitOnFuture(future);
             }
@@ -562,7 +590,7 @@ public class Nodes
 
             if (local.isDirty())
             {
-                Future future = updateExecutor.submit(() -> saveToDisk());
+                Future future = updateExecutor.submit(this::saveToDisk);
                 if (blocking)
                     FBUtilities.waitOnFuture(future);
             }
@@ -623,7 +651,7 @@ public class Nodes
 
         public Collection<Token> getSavedTokens()
         {
-            return localInfo.getTokens() == null ? Collections.EMPTY_LIST : localInfo.getTokens();
+            return localInfo.getTokens() == null ? Collections.emptyList() : localInfo.getTokens();
         }
 
         public int incrementAndGetGeneration()
@@ -668,6 +696,7 @@ public class Nodes
         private final Path peersPath;
         private final Path peersBackupPath;
         private final Path peersTempPath;
+        private long lastPeersSave;
 
         private ConcurrentMap<InetAddressAndPort, PeerInfo> peers;
         private volatile boolean closed;
@@ -709,8 +738,14 @@ public class Nodes
 
         private void write(OutputStream output) throws IOException
         {
+            lastPeersSave = System.nanoTime();
             peers.values().forEach(NodeInfo::resetDirty);
             peerWriter.writeValue(output, peers.values());
+        }
+
+        public long getLastSaveTimeNanos()
+        {
+            return lastPeersSave;
         }
 
         private void close()
@@ -753,7 +788,7 @@ public class Nodes
             PeerInfo peerInfo = peers.computeIfAbsent(peer, PeerInfo::new);
             updater.accept(peerInfo);
             if (peerInfo.isDirty())
-                updateExecutor.submit(() -> saveToDisk());
+                updateExecutor.submit(this::saveToDisk);
         }
 
         /**
@@ -772,7 +807,7 @@ public class Nodes
             PeerInfo peerInfo = peers.computeIfAbsent(peer, PeerInfo::new);
             updater.accept(peerInfo, value);
             if (peerInfo.isDirty())
-                updateExecutor.submit(() -> saveToDisk());
+                updateExecutor.submit(this::saveToDisk);
         }
 
         /**
@@ -789,7 +824,7 @@ public class Nodes
                 throw new IllegalStateException("Nodes instance already closed");
 
             if (peers.remove(peer) != null)
-                updateExecutor.submit(() -> saveToDisk());
+                updateExecutor.submit(this::saveToDisk);
         }
 
         /**
