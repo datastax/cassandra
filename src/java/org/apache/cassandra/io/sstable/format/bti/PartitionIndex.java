@@ -28,14 +28,16 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.tries.SerializationNode;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.tries.TrieSerializer;
 import org.apache.cassandra.io.tries.ValueIterator;
 import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PageAware;
@@ -202,9 +204,9 @@ public class PartitionIndex implements SharedCloseable
         }
     }
 
-    public static Pair<DecoratedKey, DecoratedKey> readFirstAndLastKey(File file, IPartitioner partitioner, ByteComparable.Version version) throws IOException
+    public static Pair<DecoratedKey, DecoratedKey> readFirstAndLastKey(Descriptor descriptor, Component component, IPartitioner partitioner, ByteComparable.Version version) throws IOException
     {
-        try (PartitionIndex index = load(new FileHandle.Builder(file), partitioner, false, version))
+        try (PartitionIndex index = load(StorageProvider.instance.fileHandleBuilderFor(descriptor, component), partitioner, false, version))
         {
             return Pair.create(index.firstKey(), index.lastKey());
         }

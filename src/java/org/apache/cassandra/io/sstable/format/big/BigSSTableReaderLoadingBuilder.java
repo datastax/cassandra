@@ -319,7 +319,7 @@ public class BigSSTableReaderLoadingBuilder extends SortedTableReaderLoadingBuil
                                                            : OptionalInt.empty();
 
         if (indexFileBuilder == null)
-            indexFileBuilder = IndexComponent.fileBuilder(descriptor.fileFor(Components.PRIMARY_INDEX), ioOptions, chunkCache)
+            indexFileBuilder = IndexComponent.fileBuilder(descriptor, Components.PRIMARY_INDEX, ioOptions, chunkCache)
                                              .bufferSize(indexBufferSize.orElse(DiskOptimizationStrategy.MAX_BUFFER_SIZE));
 
         indexBufferSize.ifPresent(indexFileBuilder::bufferSize);
