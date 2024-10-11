@@ -264,7 +264,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
         {
-            return PartitionIndex.readFirstAndLastKey(descriptor.fileFor(Components.PARTITION_INDEX), partitioner, descriptor.version.getByteComparableVersion());
+            return PartitionIndex.readFirstAndLastKey(descriptor, Components.PARTITION_INDEX, partitioner, descriptor.version.getByteComparableVersion());
         }
 
         @Override
