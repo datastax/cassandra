@@ -176,7 +176,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                                                                    enforceStrictLiveness);
 
             // In case of top-k query, do not trim reconciled rows here because QueryPlan#postProcessor() needs to compare all rows
-            if (command.isTopK())
+            if (command.isTopK() || !enforceLimits)
                 this.mergedResultCounter.onlyCount();
         }
 
@@ -281,7 +281,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         PartitionIterator firstPhasePartitions = resolveInternal(firstPhaseContext,
                                                                  rfp.mergeController(),
                                                                  i -> shortReadProtectedResponse(i, firstPhaseContext, null),
-                                                                 UnaryOperator.identity(),
+                                                                 null,
                                                                  QueryInfoTracker.ReadTracker.NOOP);
 
         ResolveContext secondPhaseContext = new ResolveContext(replicas, true);
@@ -316,7 +316,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     private PartitionIterator resolveInternal(ResolveContext context,
                                               UnfilteredPartitionIterators.MergeListener mergeListener,
                                               ResponseProvider responseProvider,
-                                              UnaryOperator<PartitionIterator> preCountFilter,
+                                              @Nullable UnaryOperator<PartitionIterator> preCountFilter,
                                               QueryInfoTracker.ReadTracker resolveReadTracker)
     {
         int count = context.replicas.size();
