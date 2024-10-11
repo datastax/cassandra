@@ -25,6 +25,7 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IFilter;
@@ -58,7 +59,7 @@ extends SSTableReaderLoadingBuilder<R, B>
         int bufferSize = ioOptions.diskOptimizationStrategy.bufferSize(recordSize);
 
         if (dataFileBuilder == null)
-            dataFileBuilder = new FileHandle.Builder(descriptor.fileFor(BtiFormat.Components.DATA));
+            dataFileBuilder = StorageProvider.instance.fileHandleBuilderFor(descriptor, BtiFormat.Components.DATA);
 
         dataFileBuilder.bufferSize(bufferSize);
         dataFileBuilder.withChunkCache(chunkCache);
