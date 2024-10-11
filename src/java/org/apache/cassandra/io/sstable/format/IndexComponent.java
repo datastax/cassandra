@@ -21,26 +21,26 @@ package org.apache.cassandra.io.sstable.format;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IOOptions;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileHandle;
 
 public class IndexComponent
 {
-    public static FileHandle.Builder fileBuilder(File file, IOOptions ioOptions, ChunkCache chunkCache)
+    public static FileHandle.Builder fileBuilder(Descriptor descriptor, Component component, IOOptions ioOptions, ChunkCache chunkCache)
     {
-        return new FileHandle.Builder(file).withChunkCache(chunkCache)
-                                           .mmapped(ioOptions.indexDiskAccessMode);
+        return StorageProvider.instance.primaryIndexWriteTimeFileHandleBuilderFor(descriptor, component, ioOptions.indexDiskAccessMode, chunkCache, OperationType.UNKNOWN);
     }
 
     public static FileHandle.Builder fileBuilder(Component component, SSTable ssTable)
     {
-        return fileBuilder(ssTable.descriptor.fileFor(component), ssTable.ioOptions, ssTable.chunkCache);
+        return fileBuilder(ssTable.descriptor, component, ssTable.ioOptions, ssTable.chunkCache);
     }
 
     public static FileHandle.Builder fileBuilder(Component component, SSTable.Builder<?, ?> builder, OperationType operationType)
     {
-        return fileBuilder(builder.descriptor.fileFor(component), builder.getIOOptions(), builder.getChunkCache());
+        return StorageProvider.instance.primaryIndexWriteTimeFileHandleBuilderFor(builder.descriptor, component, builder.getIOOptions().indexDiskAccessMode, builder.getChunkCache(), operationType);
     }
 }
