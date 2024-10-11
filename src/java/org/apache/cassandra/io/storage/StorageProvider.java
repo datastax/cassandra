@@ -29,17 +29,12 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
-import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
-import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PathUtils;
@@ -165,21 +160,7 @@ public interface StorageProvider
      * @return a new {@link FileHandle.Builder} for the provided primary index component with access mode and chunk cache
      * configured as appropriate.
      */
-    FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType);
-
-    /**
-     * Creates a new {@link FileHandle.Builder} for the given sstable component.
-     * <p>
-     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
-     * will have been set if appropriate.
-     *
-     * @param descriptor descriptor for the sstable whose handler is built.
-     * @param component sstable component for which to build the handler.
-     * @param zeroCopyMetadata zero copy metadata for the sstable
-     * @return a new {@link FileHandle.Builder} for the provided sstable component with access mode and chunk cache
-     *   configured as appropriate.
-     */
-    FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component, ZeroCopyMetadata zeroCopyMetadata);
+    FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, Config.DiskAccessMode diskAccessMode, ChunkCache chunkCache, OperationType operationType);
 
     /**
      * Creates a new {@link FileHandle.Builder} for the given SAI component.
@@ -267,41 +248,21 @@ public interface StorageProvider
                 StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(c));
         }
 
-        protected Config.DiskAccessMode accessMode(Component component)
-        {
-            if (component.type == BigFormat.Components.Types.PRIMARY_INDEX
-                || component.type == BtiFormat.Components.Types.PARTITION_INDEX
-                || component.type == BtiFormat.Components.Types.ROW_INDEX)
-                return DatabaseDescriptor.getIndexAccessMode();
-            else
-                return DatabaseDescriptor.getDiskAccessMode();
-        }
-
         @Override
         @SuppressWarnings("resource")
         public FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component)
         {
-            return new FileHandle.Builder(descriptor.fileFor(component))
-                   .mmapped(accessMode(component) == Config.DiskAccessMode.mmap)
-                   .withChunkCache(ChunkCache.instance);
+            return new FileHandle.Builder(descriptor.fileFor(component));
         }
 
         @Override
-        public FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType)
+        public  FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, Config.DiskAccessMode diskAccessMode, ChunkCache chunkCache, OperationType operationType)
         {
             // By default, no difference between accesses during sstable writing and "at query time", but subclasses may need
             // to differenciate both.
-            return fileHandleBuilderFor(descriptor, component);
-        }
-
-        @Override
-        @SuppressWarnings("resource")
-        public FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component, ZeroCopyMetadata zeroCopyMetadata)
-        {
-            return new FileHandle.Builder(descriptor.fileFor(SSTableFormat.Components.DATA))
-                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
-                   .withChunkCache(ChunkCache.instance)
-                   .slice(zeroCopyMetadata);
+            return fileHandleBuilderFor(descriptor, component)
+                   .mmapped(diskAccessMode)
+                   .withChunkCache(chunkCache);
         }
 
         @Override

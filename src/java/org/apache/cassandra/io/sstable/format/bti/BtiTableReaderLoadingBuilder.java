@@ -39,6 +39,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.utils.FilterFactory;
@@ -202,7 +203,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         assert rowIndexFileBuilder == null || rowIndexFileBuilder.file.equals(descriptor.fileFor(Components.ROW_INDEX));
 
         if (rowIndexFileBuilder == null)
-            rowIndexFileBuilder = new FileHandle.Builder(descriptor.fileFor(Components.ROW_INDEX));
+            rowIndexFileBuilder = StorageProvider.instance.fileHandleBuilderFor(descriptor, Components.ROW_INDEX);
 
         rowIndexFileBuilder.withChunkCache(chunkCache);
         rowIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
@@ -215,7 +216,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         assert partitionIndexFileBuilder == null || partitionIndexFileBuilder.file.equals(descriptor.fileFor(Components.PARTITION_INDEX));
 
         if (partitionIndexFileBuilder == null)
-            partitionIndexFileBuilder = new FileHandle.Builder(descriptor.fileFor(Components.PARTITION_INDEX));
+            partitionIndexFileBuilder = StorageProvider.instance.fileHandleBuilderFor(descriptor, Components.PARTITION_INDEX);
 
         partitionIndexFileBuilder.withChunkCache(chunkCache);
         partitionIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
