@@ -58,6 +58,7 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -87,7 +88,7 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
     protected final SequentialWriter dataWriter;
     protected final I indexWriter;
     protected final P partitionWriter;
-    private final FileHandle.Builder dataFileBuilder = new FileHandle.Builder(descriptor.fileFor(Components.DATA));
+    private final FileHandle.Builder dataFileBuilder = StorageProvider.instance.fileHandleBuilderFor(descriptor, Components.DATA);
     private DecoratedKey lastWrittenKey;
     private DataPosition dataMark;
     private long lastEarlyOpenLength;
