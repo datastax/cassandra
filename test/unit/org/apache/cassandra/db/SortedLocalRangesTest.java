@@ -113,14 +113,16 @@ public class SortedLocalRangesTest
         assertEquals(sortedRanges, sortedRanges);
         assertEquals(sortedRanges.hashCode(), sortedRanges.hashCode());
 
+        assertEquals(sortedRanges.getRanges(), ranges);
+
         assertFalse(sortedRanges.isOutOfDate());
-        assertEquals(1, sortedRanges.getRanges().size());
+        assertEquals(0, sortedRanges.getRanges().size());
         assertEquals(ringVersion, sortedRanges.getRingVersion());
 
-        // split(x) returns 1 range for all x <= 1
+        // split(x) returns 1 range for all x when empty
         assertEquals(1, sortedRanges.split(0).size());
-        for (int i = 1; i <= 10; i++)
-            assertEquals(i, sortedRanges.split(i).size());
+        for (int i = 0; i <= 10; i++)
+            assertEquals(1, sortedRanges.split(i).size());
     }
 
     @Test
