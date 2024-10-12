@@ -58,13 +58,17 @@ public class SortedLocalRanges
         this.realm = realm;
         this.ringVersion = ringVersion;
 
-        if (ranges == null || ranges.isEmpty())
+        if (ranges == null)
         {
             IPartitioner partitioner = realm.getPartitioner();
             var range = new Splitter.WeightedRange(1.0,
                                                    new Range<>(partitioner.getMinimumToken(),
                                                                partitioner.getMinimumToken()));
             this.ranges = List.of(range);
+        }
+        else if (ranges.isEmpty())
+        {
+            this.ranges = ranges;
         }
         else
         {
