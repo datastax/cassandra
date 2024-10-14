@@ -48,7 +48,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     public ExpectedException exception = ExpectedException.none();
 
     @Test
-    public void testSameIndexNameAcrossKeyspaces() throws Throwable
+    public void testSameIndexNameAcrossKeyspaces()
     {
         String table = "test_same_index_name_across_keyspaces";
         String index = "test_same_index_name_across_keyspaces_index";
@@ -84,7 +84,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testMetricRelease() throws Throwable
+    public void testMetricRelease()
     {
         String table = "test_metric_release";
         String index = "test_metric_release_index";
@@ -93,7 +93,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
-        waitForIndexQueryable(keyspace, table);
 
         execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
 
@@ -112,7 +111,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testIndexQueryWithPartitionKey() throws Throwable
+    public void testIndexQueryWithPartitionKey()
     {
         String table = "test_range_key_type_with_index";
         String index = "test_range_key_type_with_index_index";
@@ -136,7 +135,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
             flush(keyspace, table);
         }
 
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows2 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '36' and v1 < 51");
         assertEquals(1, rows2.all().size());
@@ -160,7 +159,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testKDTreeQueryMetricsWithSingleIndex() throws Throwable
+    public void testKDTreeQueryMetricsWithSingleIndex()
     {
         String table = "test_metrics_through_write_lifecycle";
         String index = "test_metrics_through_write_lifecycle_index";
@@ -184,7 +183,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
         compact(keyspace, table);
         waitForIndexCompaction(keyspace, table, index);
 
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 >= 0");
 
@@ -224,7 +223,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testKDTreePostingsQueryMetricsWithSingleIndex() throws Throwable
+    public void testKDTreePostingsQueryMetricsWithSingleIndex()
     {
         String table = "test_kdtree_postings_metrics_through_write_lifecycle";
         String v1Index = "test_kdtree_postings_metrics_through_write_lifecycle_v1_index";
@@ -239,7 +238,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         int rowsWritten = 50;
 
-
         for (int i = 0; i < rowsWritten; i++)
         {
             execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES (?, ?, ?)", Integer.toString(i), i, Integer.toString(i));
@@ -249,7 +247,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
         compact(keyspace, table);
         waitForIndexCompaction(keyspace, table, v1Index);
 
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 >= 0");
 
@@ -267,7 +265,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testInvertedIndexQueryMetricsWithSingleIndex() throws Throwable
+    public void testInvertedIndexQueryMetricsWithSingleIndex()
     {
         String table = "test_invertedindex_metrics_through_write_lifecycle";
         String index = "test_invertedindex_metrics_through_write_lifecycle_index";
@@ -290,10 +288,9 @@ public class QueryMetricsTest extends AbstractMetricsTest
         compact(keyspace, table);
         waitForIndexCompaction(keyspace, table, index);
 
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v2 = '0'");
-
 
         int actualRows = rows.all().size();
         assertEquals(1, actualRows);
@@ -330,7 +327,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testKDTreePartitionsReadAndRowsFiltered() throws Throwable
+    public void testKDTreePartitionsReadAndRowsFiltered()
     {
         String table = "test_rows_filtered_large_partition";
         String index = "test_rows_filtered_large_partition_index";
@@ -341,7 +338,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
                                   "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }", keyspace,  table));
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
-        waitForIndexQueryable(keyspace, table);
 
         execute("INSERT INTO " + keyspace + "." + table + "(pk, ck, v1) VALUES (0, 0, 0)");
         execute("INSERT INTO " + keyspace + "." + table + "(pk, ck, v1) VALUES (1, 1, 1)");
@@ -362,7 +358,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testKDTreeQueryEarlyExit() throws Throwable
+    public void testKDTreeQueryEarlyExit()
     {
         String table = "test_queries_exited_early";
         String index = "test_queries_exited_early_index";
@@ -373,7 +369,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
                                   "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }", keyspace, table));
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
-        waitForIndexQueryable(keyspace, table);
 
         execute("INSERT INTO " + keyspace + "." + table + "(pk, ck, v1) VALUES (0, 0, 0)");
         execute("INSERT INTO " + keyspace + "." + table + "(pk, ck, v1) VALUES (1, 1, 1)");
@@ -398,12 +393,12 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEquals(objectName("KDTreeIntersectionEarlyExits", keyspace, table, index, GLOBAL_METRIC_TYPE), 2L);
     }
 
-    private long getPerQueryMetrics(String keyspace, String table, String metricsName) throws Exception
+    private long getPerQueryMetrics(String keyspace, String table, String metricsName)
     {
         return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, PER_QUERY_METRIC_TYPE));
     }
 
-    private long getTableQueryMetrics(String keyspace, String table, String metricsName) throws Exception
+    private long getTableQueryMetrics(String keyspace, String table, String metricsName)
     {
         return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, TableQueryMetrics.TABLE_QUERY_METRIC_TYPE));
     }
