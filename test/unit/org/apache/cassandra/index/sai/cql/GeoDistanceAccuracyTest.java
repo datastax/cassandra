@@ -49,7 +49,6 @@ public class GeoDistanceAccuracyTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
         int numVectors = 20000;
         var vectors = IntStream.range(0, numVectors).mapToObj(s -> Pair.create(s, createRandomNYCVector())).collect(Collectors.toList());
 

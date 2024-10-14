@@ -123,7 +123,6 @@ public class VectorCompressionTest extends VectorTester
 
         // create index after compaction so we don't have to wait for it to (potentially) build twice
         createIndex("CREATE CUSTOM INDEX ON %s(v) " + String.format("USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model': '%s'}", model));
-        waitForIndexQueryable();
 
         // get a View of the sstables that contain indexed data
         var sim = getCurrentColumnFamilyStore().indexManager;

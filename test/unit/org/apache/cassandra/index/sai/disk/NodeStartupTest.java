@@ -33,7 +33,6 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
@@ -266,7 +265,7 @@ public class NodeStartupTest extends SAITester
     {
         populator.populate(this);
 
-        assertTrue(isIndexQueryable());
+        assertTrue(areAllTableIndexesQueryable());
         assertTrue(isGroupIndexComplete());
         assertTrue(isColumnIndexComplete());
         Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 >= 0").size());
@@ -277,7 +276,7 @@ public class NodeStartupTest extends SAITester
 
         simulateNodeRestart();
 
-        assertTrue(isIndexQueryable());
+        assertTrue(areAllTableIndexesQueryable());
         assertTrue(isGroupIndexComplete());
         assertTrue(isColumnIndexComplete());
         Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 >= 0").size());

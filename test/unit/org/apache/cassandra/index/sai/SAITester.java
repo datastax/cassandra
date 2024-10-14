@@ -46,7 +46,6 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
-import com.google.common.collect.Table;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -296,7 +295,7 @@ public class SAITester extends CQLTester
         cfs.indexManager.executePreJoinTasksBlocking(true);
         if (wait)
         {
-            waitForIndexQueryable();
+            waitForTableIndexesQueryable();
         }
     }
 
@@ -326,44 +325,6 @@ public class SAITester extends CQLTester
             File file = loadDescriptor(sstable, cfs).perIndexComponents(indexContext).get(indexComponentType).file();
             corruptionType.corrupt(file);
         }
-    }
-
-    protected void waitForAssert(Runnable runnableAssert, long timeout, TimeUnit unit)
-    {
-        Awaitility.await().dontCatchUncaughtExceptions().atMost(timeout, unit).untilAsserted(runnableAssert::run);
-    }
-
-    protected void waitForAssert(Runnable assertion)
-    {
-        waitForAssert(() -> assertion.run(), ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-    }
-
-    protected boolean indexNeedsFullRebuild(String index)
-    {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        return cfs.indexManager.needsFullRebuild(index);
-    }
-
-    protected boolean isIndexQueryable()
-    {
-        return isIndexQueryable(KEYSPACE, currentTable());
-    }
-
-    protected boolean isIndexQueryable(String keyspace, String table)
-    {
-        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
-        for (Index index : cfs.indexManager.listIndexes())
-        {
-            if (!cfs.indexManager.isIndexQueryable(index))
-                return false;
-        }
-        return true;
-    }
-
-    protected void verifyInitialIndexFailed(String indexName)
-    {
-        // Verify that the initial index build fails...
-        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
     }
 
     protected boolean verifyChecksum(IndexContext context)
@@ -444,25 +405,6 @@ public class SAITester extends CQLTester
             throw new RuntimeException(e);
         }
         return metricValue;
-    }
-
-    public void waitForIndexQueryable()
-    {
-        waitForIndexQueryable(KEYSPACE, currentTable());
-    }
-
-    public void waitForIndexQueryable(int seconds)
-    {
-        waitForIndexQueryable(KEYSPACE, currentTable(), seconds);
-    }
-
-    public void waitForIndexQueryable(String keyspace, String table) {
-        waitForIndexQueryable(keyspace, table, 60);
-    }
-
-    public void waitForIndexQueryable(String keyspace, String table, int seconds)
-    {
-        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), seconds, TimeUnit.SECONDS);
     }
 
     protected void startCompaction() throws Throwable

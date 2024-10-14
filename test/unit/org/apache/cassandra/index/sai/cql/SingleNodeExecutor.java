@@ -63,7 +63,7 @@ public class SingleNodeExecutor implements DataModel.Executor
     @Override
     public void waitForIndexQueryable(String keyspace, String table)
     {
-        tester.waitForIndexQueryable(keyspace, table);
+        tester.waitForTableIndexesQueryable(keyspace, table);
     }
 
     @Override

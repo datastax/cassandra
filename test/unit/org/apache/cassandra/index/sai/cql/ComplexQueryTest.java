@@ -31,12 +31,11 @@ import static org.junit.Assert.assertEquals;
 public class ComplexQueryTest extends SAITester
 {
     @Test
-    public void partialUpdateTest() throws Throwable
+    public void partialUpdateTest()
     {
         createTable("CREATE TABLE %s (pk int, c1 text, c2 text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, c1, c2) VALUES (?, ?, ?)", 1, "a", "a");
         flush();
@@ -50,12 +49,11 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void splitRowsWithBooleanLogic() throws Throwable
+    public void splitRowsWithBooleanLogic()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with 2 partial rows
@@ -74,11 +72,10 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void basicOrTest() throws Throwable
+    public void basicOrTest()
     {
         createTable("CREATE TABLE %s (pk int, a int, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 1, 1);
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 2, 2);
@@ -90,11 +87,10 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void basicInTest() throws Throwable
+    public void basicInTest()
     {
         createTable("CREATE TABLE %s (pk int, a int, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 1, 1);
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 2, 2);
@@ -115,7 +111,6 @@ public class ComplexQueryTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(d) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 1, 1, 1, 1, 1);
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 2, 2, 1, 1, 1);
@@ -125,8 +120,6 @@ public class ComplexQueryTest extends SAITester
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 6, 6, 3, 2, 2);
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 7, 7, 4, 3, 2);
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 8, 8, 4, 3, 3);
-
-
 
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT pk FROM %s WHERE (a = 1 AND c = 1) OR (b IN (3, 4) AND d = 2)"), row(1), row(7), row(6));
@@ -139,7 +132,7 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void disjunctionWithClusteringKey() throws Throwable
+    public void disjunctionWithClusteringKey()
     {
         createTable("CREATE TABLE %s (pk int, ck int, a int, PRIMARY KEY(pk, ck))");
 
@@ -156,12 +149,11 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void disjunctionWithIndexOnClusteringKey() throws Throwable
+    public void disjunctionWithIndexOnClusteringKey()
     {
         createTable("CREATE TABLE %s (pk int, ck int, a int, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(ck) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, ck, a) VALUES (?, ?, ?)", 1, 1, 1);
         execute("INSERT INTO %s (pk, ck, a) VALUES (?, ?, ?)", 2, 2, 2);
@@ -172,7 +164,7 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void complexQueryWithMultipleClusterings() throws Throwable
+    public void complexQueryWithMultipleClusterings()
     {
         createTable("CREATE TABLE %s (pk int, ck0 int, ck1 int, a int, b int, c int, d int, e int, PRIMARY KEY(pk, ck0, ck1))");
         createIndex("CREATE CUSTOM INDEX ON %s(ck0) USING 'StorageAttachedIndex'");
@@ -182,7 +174,6 @@ public class ComplexQueryTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(d) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(e) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, ck0, ck1, a, b, c, d, e) VALUES (?, ?, ?, ?, ?, ? ,?, ?)", 1, 1, 1, 1, 1, 1, 1, 1);
         execute("INSERT INTO %s (pk, ck0, ck1, a, b, c, d, e) VALUES (?, ?, ?, ?, ?, ? ,?, ?)", 2, 2, 2, 2, 2, 2, 2, 2);
@@ -204,7 +195,7 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void complexQueryWithPartitionKeyRestriction() throws Throwable
+    public void complexQueryWithPartitionKeyRestriction()
     {
         createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY(pk, ck))");
 
@@ -234,12 +225,11 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void complexQueryWithPartitionKeyRestrictionAndIndexes() throws Throwable
+    public void complexQueryWithPartitionKeyRestrictionAndIndexes()
     {
         createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 1, 1, 5);
         execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 2, 2, 6);
@@ -256,11 +246,10 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void indexNotSupportingDisjunctionTest() throws Throwable
+    public void indexNotSupportingDisjunctionTest()
     {
         createTable("CREATE TABLE %s (pk int, a int, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 1, 1);
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 2, 2);
@@ -273,12 +262,11 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
-    public void complexQueryWithMultipleNEQ() throws Throwable
+    public void complexQueryWithMultipleNEQ()
     {
         createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 1, 1, 5);
         execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 2, 2, 6);

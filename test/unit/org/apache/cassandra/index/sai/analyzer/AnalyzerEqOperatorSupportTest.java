@@ -72,7 +72,6 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         populateTable();
 
         createIndex("CREATE INDEX ON %s(v)");
-        waitForIndexQueryable();
 
         // equals (=)
         assertRowsWithoutWarning("SELECT k FROM %s WHERE v = 'Quick fox'", row(1));
@@ -354,7 +353,6 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
     private void assertIndexQueries(String indexOptions, Runnable queries)
     {
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = " + indexOptions);
-        waitForIndexQueryable();
         populateTable();
 
         queries.run();
