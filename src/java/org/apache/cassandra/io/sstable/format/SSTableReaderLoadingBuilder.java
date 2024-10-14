@@ -33,6 +33,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IOOptions;
 import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -71,15 +72,17 @@ public abstract class SSTableReaderLoadingBuilder<R extends SSTableReader, B ext
 
     public R build(SSTable.Owner owner, boolean validate, boolean online)
     {
-        checkArgument(components.contains(Components.DATA), "Data component is missing for sstable %s", descriptor);
+        Set<Component> discoveredComponents = SSTableWatcher.instance.discoverComponents(descriptor, components);
+
+        checkArgument(discoveredComponents.contains(Components.DATA), "Data component is missing for sstable %s", descriptor);
         if (validate)
-            checkArgument(this.components.containsAll(descriptor.getFormat().primaryComponents()), "Some required components (%s) are missing for sstable %s", Sets.difference(descriptor.getFormat().primaryComponents(), this.components), descriptor);
+            checkArgument(discoveredComponents.containsAll(descriptor.getFormat().primaryComponents()), "Some required components (%s) are missing for sstable %s", Sets.difference(descriptor.getFormat().primaryComponents(), this.components), descriptor);
 
         B builder = (B) descriptor.getFormat().getReaderFactory().builder(descriptor);
         builder.setOpenReason(NORMAL);
         builder.setMaxDataAge(Clock.Global.currentTimeMillis());
         builder.setTableMetadataRef(tableMetadataRef);
-        builder.setComponents(components);
+        builder.setComponents(discoveredComponents);
 
         R reader = null;
 
