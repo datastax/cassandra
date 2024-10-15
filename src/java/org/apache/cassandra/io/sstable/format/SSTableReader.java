@@ -448,7 +448,6 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                                      boolean validate,
                                      boolean isOffline)
     {
-        components = SSTableWatcher.instance.discoverComponents(descriptor, components);
         SSTableReaderLoadingBuilder<?, ?> builder = descriptor.getFormat().getReaderFactory().loadingBuilder(descriptor, metadata, components);
 
         return builder.build(owner, validate, !isOffline);
