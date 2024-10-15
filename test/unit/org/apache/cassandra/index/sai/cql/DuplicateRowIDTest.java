@@ -36,7 +36,7 @@ public class DuplicateRowIDTest extends SAITester
     }
 
     @Test
-    public void shouldTolerateDuplicatedRowIDsAfterMemtableUpdates() throws Throwable
+    public void shouldTolerateDuplicatedRowIDsAfterMemtableUpdates()
     {
         createTable("CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT)");
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
