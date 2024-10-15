@@ -265,7 +265,7 @@ public class NodeStartupTest extends SAITester
     {
         populator.populate(this);
 
-        assertTrue(isIndexQueryable());
+        assertTrue(areAllTableIndexesQueryable());
         assertTrue(isGroupIndexComplete());
         assertTrue(isColumnIndexComplete());
         Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 >= 0").size());
@@ -276,7 +276,7 @@ public class NodeStartupTest extends SAITester
 
         simulateNodeRestart();
 
-        assertTrue(isIndexQueryable());
+        assertTrue(areAllTableIndexesQueryable());
         assertTrue(isGroupIndexComplete());
         assertTrue(isColumnIndexComplete());
         Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 >= 0").size());
