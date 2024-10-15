@@ -87,21 +87,21 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testCreateAndDropIndex() throws Throwable
+    public void testCreateAndDropIndex()
     {
         testCreateAndDropIndex("test", false);
         testCreateAndDropIndex("test2", true);
     }
 
     @Test
-    public void testCreateAndDropIndexWithQuotedIdentifier() throws Throwable
+    public void testCreateAndDropIndexWithQuotedIdentifier()
     {
         testCreateAndDropIndex("\"quoted_ident\"", false);
         testCreateAndDropIndex("\"quoted_ident2\"", true);
     }
 
     @Test
-    public void testCreateAndDropIndexWithCamelCaseIdentifier() throws Throwable
+    public void testCreateAndDropIndexWithCamelCaseIdentifier()
     {
         testCreateAndDropIndex("CamelCase", false);
         testCreateAndDropIndex("CamelCase2", true);
@@ -112,9 +112,8 @@ public class SecondaryIndexTest extends CQLTester
      *
      * @param indexName         the index name
      * @param addKeyspaceOnDrop add the keyspace name in the drop statement
-     * @throws Throwable if an error occurs
      */
-    private void testCreateAndDropIndex(String indexName, boolean addKeyspaceOnDrop) throws Throwable
+    private void testCreateAndDropIndex(String indexName, boolean addKeyspaceOnDrop)
     {
         assertInvalidMessage(format("Index '%s.%s' doesn't exist",
                                     KEYSPACE,
@@ -291,7 +290,7 @@ public class SecondaryIndexTest extends CQLTester
      * migrated from cql_tests.py:TestCQL.compression_option_validation_test()
      */
     @Test
-    public void testUnknownCompressionOptions() throws Throwable
+    public void testUnknownCompressionOptions()
     {
         String tableName = createTableName();
         assertInvalidThrow(SyntaxException.class, format("CREATE TABLE %s (key varchar PRIMARY KEY, password varchar, gender varchar) WITH compression_parameters:sstable_compressor = 'DeflateCompressor'", tableName));
@@ -350,7 +349,7 @@ public class SecondaryIndexTest extends CQLTester
      * migrated from cql_tests.py:TestCQL.refuse_in_with_indexes_test()
      */
     @Test
-    public void testInvalidIndexSelect() throws Throwable
+    public void testInvalidIndexSelect()
     {
         createTable("create table %s (pk varchar primary key, col1 varchar, col2 varchar)");
         createIndex("create index on %s (col1)");
@@ -438,7 +437,7 @@ public class SecondaryIndexTest extends CQLTester
      * Migrated from cql_tests.py:TestCQL.secondary_index_counters()
      */
     @Test
-    public void testIndexOnCountersInvalid() throws Throwable
+    public void testIndexOnCountersInvalid()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, c counter)");
         assertInvalid("CREATE INDEX ON test(c)");
@@ -483,7 +482,7 @@ public class SecondaryIndexTest extends CQLTester
         });
     }
 
-    private static void assertBackingTableKeyValidator(SecondaryIndexManager indexManager, String indexName, AbstractType expectedType)
+    private static void assertBackingTableKeyValidator(SecondaryIndexManager indexManager, String indexName, AbstractType<?> expectedType)
     {
         assertEquals(expectedType, indexManager.getIndexByName(indexName)
                                                .getBackingTable()
@@ -496,7 +495,7 @@ public class SecondaryIndexTest extends CQLTester
      * Test for DB-1121
      */
     @Test
-    public void testIndexOnCollectionsBackingTableKeyValidator() throws Throwable
+    public void testIndexOnCollectionsBackingTableKeyValidator()
     {
         createTable("CREATE TABLE %s (" +
                     "k int PRIMARY KEY, " +
@@ -697,7 +696,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testSyntaxVariationsForIndexOnCollectionsValue() throws Throwable
+    public void testSyntaxVariationsForIndexOnCollectionsValue()
     {
         createTable("CREATE TABLE %s (k int, m map<int, int>, l list<int>, s set<int>, PRIMARY KEY (k))");
         createAndDropCollectionValuesIndex("m");
@@ -705,7 +704,7 @@ public class SecondaryIndexTest extends CQLTester
         createAndDropCollectionValuesIndex("s");
     }
 
-    private void createAndDropCollectionValuesIndex(String columnName) throws Throwable
+    private void createAndDropCollectionValuesIndex(String columnName)
     {
         String indexName = columnName + "_idx";
         SecondaryIndexManager indexManager = getCurrentColumnFamilyStore().indexManager;
@@ -720,7 +719,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testCreateIndexWithQuotedColumnNames() throws Throwable
+    public void testCreateIndexWithQuotedColumnNames()
     {
         createTable("CREATE TABLE %s (" +
                     " k int," +
@@ -742,7 +741,7 @@ public class SecondaryIndexTest extends CQLTester
         createAndDropIndexWithQuotedColumnIdentifier("\"column_name_with\"\"escaped quote\"");
     }
 
-    private void createAndDropIndexWithQuotedColumnIdentifier(String target) throws Throwable
+    private void createAndDropIndexWithQuotedColumnIdentifier(String target)
     {
         String indexName = "test_mixed_case_idx";
         createIndex(format("CREATE INDEX %s ON %%s(%s)", indexName, target));
@@ -764,7 +763,7 @@ public class SecondaryIndexTest extends CQLTester
      * and restarting the node, here we just cleanup the cache.
      */
     @Test
-    public void testCanQuerySecondaryIndex() throws Throwable
+    public void testCanQuerySecondaryIndex()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int,)");
 
@@ -784,7 +783,7 @@ public class SecondaryIndexTest extends CQLTester
     // make sure we check conditional and unconditional statements,
     // both singly and in batches (CASSANDRA-10536)
     @Test
-    public void testIndexOnCompositeValueOver64k() throws Throwable
+    public void testIndexOnCompositeValueOver64k()
     {
         createTable("CREATE TABLE %s(a int, b int, c blob, PRIMARY KEY (a))");
         createIndex("CREATE INDEX ON %s(c)");
@@ -801,7 +800,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnPartitionKeyInsertValueOver64k() throws Throwable
+    public void testIndexOnPartitionKeyInsertValueOver64k()
     {
         createTable("CREATE TABLE %s(a int, b int, c blob, PRIMARY KEY ((a, b)))");
         createIndex("CREATE INDEX ON %s(a)");
@@ -831,7 +830,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnPartitionKeyWithStaticColumnAndNoRows() throws Throwable
+    public void testIndexOnPartitionKeyWithStaticColumnAndNoRows()
     {
         createTable("CREATE TABLE %s (pk1 int, pk2 int, c int, s int static, v int, PRIMARY KEY((pk1, pk2), c))");
         createIndex("CREATE INDEX ON %s (pk2)");
@@ -854,7 +853,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnClusteringColumnInsertValueOver64k() throws Throwable
+    public void testIndexOnClusteringColumnInsertValueOver64k()
     {
         createTable("CREATE TABLE %s(a int, b int, c blob, PRIMARY KEY (a, b))");
         createIndex("CREATE INDEX ON %s(b)");
@@ -884,7 +883,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnFullCollectionEntryInsertCollectionValueOver64k() throws Throwable
+    public void testIndexOnFullCollectionEntryInsertCollectionValueOver64k()
     {
         createTable("CREATE TABLE %s(a int, b frozen<map<int, blob>>, PRIMARY KEY (a))");
         createIndex("CREATE INDEX ON %s(full(b))");
@@ -901,7 +900,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void prepareStatementsWithLIKEClauses() throws Throwable
+    public void prepareStatementsWithLIKEClauses()
     {
         createTable("CREATE TABLE %s (a int, c1 text, c2 text, v1 text, v2 text, v3 int, PRIMARY KEY (a, c1, c2))");
         createIndex(format("CREATE CUSTOM INDEX c1_idx on %%s(c1) USING '%s' WITH OPTIONS = {'mode' : 'PREFIX'}",
@@ -959,7 +958,7 @@ public class SecondaryIndexTest extends CQLTester
                              "abc");
     }
 
-    public void failInsert(String insertCQL, Object...args) throws Throwable
+    public void failInsert(String insertCQL, Object...args)
     {
         try
         {
@@ -972,7 +971,7 @@ public class SecondaryIndexTest extends CQLTester
         }
     }
 
-    public void succeedInsert(String insertCQL, Object...args) throws Throwable
+    public void succeedInsert(String insertCQL, Object...args)
     {
         execute(insertCQL, args);
         flush();
@@ -982,7 +981,7 @@ public class SecondaryIndexTest extends CQLTester
      * Migrated from cql_tests.py:TestCQL.clustering_indexing_test()
      */
     @Test
-    public void testIndexesOnClustering() throws Throwable
+    public void testIndexesOnClustering()
     {
         createTable("CREATE TABLE %s ( id1 int, id2 int, author text, time bigint, v1 text, v2 text, PRIMARY KEY ((id1, id2), author, time))");
 
@@ -1015,7 +1014,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testMultipleIndexesOnOneColumn() throws Throwable
+    public void testMultipleIndexesOnOneColumn()
     {
         String indexClassName = StubIndex.class.getName();
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY ((a), b))");
@@ -1056,7 +1055,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testDeletions() throws Throwable
+    public void testDeletions()
     {
         // Test for bugs like CASSANDRA-10694.  These may not be readily visible with the built-in secondary index
         // implementation because of the stale entry handling.
@@ -1109,7 +1108,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testUpdatesToMemtableData() throws Throwable
+    public void testUpdatesToMemtableData()
     {
         // verify the contract specified by Index.Indexer::updateRow(oldRowData, newRowData),
         // when a row in the memtable is updated, the indexer should be informed of:
@@ -1179,7 +1178,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexQueriesWithIndexNotReady() throws Throwable
+    public void testIndexQueriesWithIndexNotReady()
     {
         createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
 
@@ -1204,7 +1203,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test // A Bad init could leave an index only accepting reads
-    public void testReadOnlyIndex() throws Throwable
+    public void testReadOnlyIndex()
     {
         // On successful initialization both reads and writes go through
         createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
@@ -1242,7 +1241,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test  // A Bad init could leave an index only accepting writes
-    public void testWriteOnlyIndex() throws Throwable
+    public void testWriteOnlyIndex()
     {
         // On successful initialization both reads and writes go through
         createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
@@ -1280,7 +1279,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void droppingIndexInvalidatesPreparedStatements() throws Throwable
+    public void droppingIndexInvalidatesPreparedStatements()
     {
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY ((a), b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
@@ -1295,7 +1294,7 @@ public class SecondaryIndexTest extends CQLTester
 
     // See CASSANDRA-11021
     @Test
-    public void testIndexesOnNonStaticColumnsWhereSchemaIncludesStaticColumns() throws Throwable
+    public void testIndexesOnNonStaticColumnsWhereSchemaIncludesStaticColumns()
     {
         createTable("CREATE TABLE %s (a int, b int, c int static, d int, PRIMARY KEY (a, b))");
         createIndex("CREATE INDEX b_idx on %s(b)");
@@ -1521,7 +1520,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnStaticColumnWithPartitionWithoutRows() throws Throwable
+    public void testIndexOnStaticColumnWithPartitionWithoutRows()
     {
         createTable("CREATE TABLE %s (pk int, c int, s int static, v int, PRIMARY KEY(pk, c))");
         createIndex("CREATE INDEX ON %s (s)");
@@ -1547,7 +1546,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnRegularColumnWithPartitionWithoutRows() throws Throwable
+    public void testIndexOnRegularColumnWithPartitionWithoutRows()
     {
         createTable("CREATE TABLE %s (pk int, c int, s int static, v int, PRIMARY KEY(pk, c))");
         createIndex("CREATE INDEX ON %s (v)");
@@ -1565,7 +1564,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnDurationColumn() throws Throwable
+    public void testIndexOnDurationColumn()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, d duration)");
         assertInvalidMessage("Secondary indexes are not supported on duration columns",
@@ -1591,7 +1590,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnFrozenUDT() throws Throwable
+    public void testIndexOnFrozenUDT()
     {
         String type = createType("CREATE TYPE %s (a int)");
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<" + type + ">)");
@@ -1619,7 +1618,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnFrozenCollectionOfUDT() throws Throwable
+    public void testIndexOnFrozenCollectionOfUDT()
     {
         String type = createType("CREATE TYPE %s (a int)");
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<set<frozen<" + type + ">>>)");
@@ -1651,7 +1650,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnNonFrozenCollectionOfFrozenUDT() throws Throwable
+    public void testIndexOnNonFrozenCollectionOfFrozenUDT()
     {
         String type = createType("CREATE TYPE %s (a int)");
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<frozen<" + type + ">>)");
@@ -1684,7 +1683,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnNonFrozenUDT() throws Throwable
+    public void testIndexOnNonFrozenUDT()
     {
         String type = createType("CREATE TYPE %s (a int)");
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + type + ")");
@@ -1737,7 +1736,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnPartitionKeyOverridingDeletedRow() throws Throwable
+    public void testIndexOnPartitionKeyOverridingDeletedRow()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, c int, v int, PRIMARY KEY ((k1, k2), c))");
         createIndex("CREATE INDEX ON %s(k1)");
@@ -1793,7 +1792,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnClusteringKeyOverridingDeletedRow() throws Throwable
+    public void testIndexOnClusteringKeyOverridingDeletedRow()
     {
         createTable("CREATE TABLE %s (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
         createIndex("CREATE INDEX ON %s(ck)");
@@ -1866,7 +1865,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnRegularColumnOverridingDeletedRow() throws Throwable
+    public void testIndexOnRegularColumnOverridingDeletedRow()
     {
         createTable("CREATE TABLE %s (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
         createIndex("CREATE INDEX ON %s(v)");

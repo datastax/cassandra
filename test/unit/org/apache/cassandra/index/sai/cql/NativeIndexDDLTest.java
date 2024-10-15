@@ -265,7 +265,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldNotFailCreateWithTupleType() throws Throwable
+    public void shouldNotFailCreateWithTupleType()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val tuple<text, int, double>)");
 
@@ -548,6 +548,87 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
+    public void shouldCreateNumericIndexWithBkdPostingsSkipAndMinLeaves()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'bkd_postings_skip' : 3, 'bkd_postings_min_leaves' : 32}");
+
+        assertEquals(1, NDI_CREATION_COUNTER.get());
+    }
+
+    @Test
+    public void shouldCreateNumericIndexWithBkdPostingsSkipOnly()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'bkd_postings_skip' : 3}");
+
+        assertEquals(1, NDI_CREATION_COUNTER.get());
+    }
+
+    @Test
+    public void shouldCreateNumericIndexWithBkdPostingsMinLeavesOnly()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'bkd_postings_min_leaves': 32}");
+
+        assertEquals(1, NDI_CREATION_COUNTER.get());
+    }
+
+    @Test
+    public void shouldFailToCreateNumericIndexWithTooLowBkdPostingsSkip()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
+
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                                            "WITH OPTIONS = {'bkd_postings_skip' : 0, 'bkd_postings_min_leaves' : 32}")).isInstanceOf(InvalidQueryException.class);
+    }
+
+    @Test
+    public void shouldFailToCreateNumericIndexWithTooLowBkdPostingsMinLeaves()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
+
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                                            "WITH OPTIONS = {'bkd_postings_skip' : 3, 'bkd_postings_min_leaves' : 0}")).isInstanceOf(InvalidQueryException.class);
+    }
+
+    @Test
+    public void shouldFailToCreateStringIndexWithBkdPostingsSkip()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                                            "WITH OPTIONS = {'bkd_postings_skip' : 3}")).isInstanceOf(InvalidQueryException.class);
+    }
+
+    @Test
+    public void shouldFailToCreateStringIndexWithBkdPostingsMinLeaves()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                                            "WITH OPTIONS = {'bkd_postings_min_leaves' : 9}")).isInstanceOf(InvalidQueryException.class);
+    }
+
+    @Test
+    public void shouldFailToCreateInvalidBooleanOption()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                                            "WITH OPTIONS = {'case_sensitive': 'NOTVALID'}")).isInstanceOf(InvalidQueryException.class);
+    }
+
+    @Test
+    public void shouldFailToCreateEmptyBooleanOption()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                                            "WITH OPTIONS = {'case_sensitive': ''}")).isInstanceOf(InvalidQueryException.class);
+    }
+
+    @Test
     public void shouldFailCreationOnMultipleColumns()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val1 text, val2 text)");
@@ -564,7 +645,7 @@ public class NativeIndexDDLTest extends SAITester
         execute("INSERT INTO %s (id, v1) VALUES(1, '1')");
         flush();
 
-        executeNet("CREATE INDEX index_1 ON %s(v1) USING 'sai'");
+        executeNet("CREATE CUSTOM INDEX index_1 ON %s(v1) USING 'StorageAttachedIndex'");
         waitForTableIndexesQueryable();
 
         // same name
@@ -615,7 +696,7 @@ public class NativeIndexDDLTest extends SAITester
 
         // Create the index, but do not allow the initial index build to begin:
         Injections.inject(delayInitializationTask);
-        createIndexAsync("CREATE INDEX ON %s(val) USING 'sai'");
+        String indexName = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Flush the Memtable's contents, which will feed data to the index as the SSTable is written:
         flush();
@@ -672,7 +753,6 @@ public class NativeIndexDDLTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(m) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(full(frozen_m)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         String largeTerm = UTF8Type.instance.compose(ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 1));
         assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, v) VALUES (0, ?)", largeTerm))
@@ -1434,7 +1514,7 @@ public class NativeIndexDDLTest extends SAITester
 
         // initial index builder should have stopped abruptly resulting in the index not being queryable
         verifyInitialIndexFailed(numericIndexContext.getIndexName());
-        assertFalse(isIndexQueryable());
+        assertFalse(areAllTableIndexesQueryable());
 
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         for (Index i : cfs.indexManager.listIndexes())

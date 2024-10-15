@@ -40,6 +40,8 @@ import static java.lang.String.format;
 @Command(name = "compactionstats", description = "Print statistics on compactions")
 public class CompactionStats extends NodeToolCmd
 {
+    private static final String TOTAL_COMPRESSED = "totalCompressed";
+
     @Option(title = "human_readable",
             name = {"-H", "--human-readable"},
             description = "Display bytes in human readable form, i.e. KiB, MiB, GiB, TiB")
@@ -163,18 +165,8 @@ public class CompactionStats extends NodeToolCmd
 
         for (Map<String, String> c : compactions)
         {
-<<<<<<< HEAD
-            long total = Long.parseLong(c.get(CompactionInfo.TOTAL));
-            String totalCompressedValue = c.get(CompactionInfo.TOTAL_COMPRESSED);
-            long completed = Long.parseLong(c.get(CompactionInfo.COMPLETED));
-            String taskType = c.get(CompactionInfo.TASK_TYPE);
-            String keyspace = c.get(CompactionInfo.KEYSPACE);
-            String columnFamily = c.get(CompactionInfo.COLUMNFAMILY);
-            String unit = c.get(CompactionInfo.UNIT);
-            boolean toFileSize = humanReadable && Unit.isFileSize(unit);
-            String[] tables = c.get(CompactionInfo.SSTABLES).split(",");
-=======
             long total = Long.parseLong(c.get(TableOperation.Progress.TOTAL));
+            String totalCompressedValue = c.get(TOTAL_COMPRESSED);
             long completed = Long.parseLong(c.get(TableOperation.Progress.COMPLETED));
             String taskType = c.get(TableOperation.Progress.OPERATION_TYPE);
             String keyspace = c.get(TableOperation.Progress.KEYSPACE);
@@ -182,7 +174,6 @@ public class CompactionStats extends NodeToolCmd
             String unit = c.get(TableOperation.Progress.UNIT);
             boolean toFileSize = humanReadable && TableOperation.Unit.isFileSize(unit);
             String[] tables = c.get(TableOperation.Progress.SSTABLES).split(",");
->>>>>>> 13dae50489 (STAR-410: Define compaction metrics and make them easily accessible on Fallout (#101))
             String progressStr = toFileSize ? FileUtils.stringifyFileSize(completed) : Long.toString(completed);
             String totalStr = toFileSize ? FileUtils.stringifyFileSize(total) : Long.toString(total);
             String totalCompressedStr;
@@ -199,13 +190,8 @@ public class CompactionStats extends NodeToolCmd
             String id = c.get(TableOperation.Progress.OPERATION_ID);
             if (vtableOutput)
             {
-<<<<<<< HEAD
-                String targetDirectory = c.get(CompactionInfo.TARGET_DIRECTORY);
-                table.add(keyspace, columnFamily, id, percentComplete, taskType, progressStr, String.valueOf(tables.length), totalStr, totalCompressedStr, unit, targetDirectory);
-=======
                 String targetDirectory = c.get(TableOperation.Progress.TARGET_DIRECTORY);
-                table.add(keyspace, columnFamily, id, percentComplete, taskType, progressStr, String.valueOf(tables.length), totalStr, unit, targetDirectory);
->>>>>>> 13dae50489 (STAR-410: Define compaction metrics and make them easily accessible on Fallout (#101))
+                table.add(keyspace, columnFamily, id, percentComplete, taskType, progressStr, String.valueOf(tables.length), totalStr, totalCompressedStr, unit, targetDirectory);
             }
             else
                 table.add(id, taskType, keyspace, columnFamily, progressStr, totalStr, unit, percentComplete);
@@ -224,9 +210,6 @@ public class CompactionStats extends NodeToolCmd
         table.printTo(out);
     }
 
-<<<<<<< HEAD
-}
-=======
     private static void reportAggregateCompactions(NodeProbe probe)
     {
         List<CompactionStrategyStatistics> statistics = (List<CompactionStrategyStatistics>) probe.getCompactionMetric("AggregateCompactions");
@@ -238,4 +221,3 @@ public class CompactionStats extends NodeToolCmd
             System.out.println(stat.toString());
     }
 }
->>>>>>> 13dae50489 (STAR-410: Define compaction metrics and make them easily accessible on Fallout (#101))

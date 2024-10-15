@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -71,7 +72,7 @@ public class SSTablesSystemViewTest extends SAITester
     }
 
     @Test
-    public void testVirtualTableThroughIndexLifeCycle() throws Throwable
+    public void testVirtualTableThroughIndexLifeCycle() throws Exception
     {
         createTable("CREATE TABLE %s (k int, c int, v1 int, v2 int, PRIMARY KEY (k, c))");
         String v1IndexName = createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
@@ -144,9 +145,13 @@ public class SSTablesSystemViewTest extends SAITester
                          long minSSTableRowId,
                          long maxSSTableRowId) throws Exception
     {
-        for (int generation = generationMin; generation <= generationMax; ++generation)
+        SSTableId[] ids = getCurrentColumnFamilyStore().getLiveSSTables().stream()
+                                                       .map(sst -> sst.descriptor.id)
+                                                       .sorted(SSTableIdFactory.COMPARATOR)
+                                                       .toArray(SSTableId[]::new);
+        for (SSTableId id : ids)
         {
-            Object[] row = row(indexName, generation, columnName, cellCount, minSSTableRowId, maxSSTableRowId);
+            Object[] row = row(indexName, id, columnName, cellCount, minSSTableRowId, maxSSTableRowId);
             if (row != null)
                 return row;
         }
