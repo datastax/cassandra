@@ -240,7 +240,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         int rowsWritten = 50;
 
-
         for (int i = 0; i < rowsWritten; i++)
         {
             execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES (?, ?, ?)", Integer.toString(i), i, Integer.toString(i));
@@ -294,7 +293,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v2 = '0'");
-
 
         int actualRows = rows.all().size();
         assertEquals(1, actualRows);
