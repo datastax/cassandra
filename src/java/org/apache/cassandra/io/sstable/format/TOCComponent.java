@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
@@ -144,7 +145,21 @@ public class TOCComponent
     {
         try
         {
-            return TOCComponent.loadTOC(descriptor);
+            try
+            {
+                SSTableWatcher.instance.discoverComponents(descriptor);
+                return TOCComponent.loadTOC(descriptor);
+            }
+            catch (FileNotFoundException | NoSuchFileException e)
+            {
+                Set<Component> components = descriptor.discoverComponents();
+                if (components.isEmpty())
+                    return components; // sstable doesn't exist yet
+
+                components.add(Components.TOC);
+                TOCComponent.appendTOC(descriptor, components);
+                return components;
+            }
         }
         catch (FileNotFoundException | NoSuchFileException e)
         {
