@@ -18,11 +18,14 @@
 
 package org.apache.cassandra.nodes.virtual;
 
+import java.util.HashSet;
 import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.mina.util.ConcurrentHashSet;
 
 /**
  * This class is primarily in place to allow access to the table and view names without
@@ -38,8 +41,8 @@ public class NodeConstants
     public static final String PEERS_V2_VIEW_NAME = "peer_v2_nodes";
     public static final String LEGACY_PEERS_VIEW_NAME = "peer_nodes";
 
-    public static final Set<String> ALL_TABLES = Sets.newHashSet(LOCAL, PEERS_V2, LEGACY_PEERS);
-    public static final Set<String> ALL_VIEWS = Sets.newHashSet(LOCAL_VIEW_NAME, PEERS_V2_VIEW_NAME, LEGACY_PEERS_VIEW_NAME);
+    public static final Set<String> ALL_TABLES = ImmutableSet.of(LOCAL, PEERS_V2, LEGACY_PEERS);
+    public static final Set<String> ALL_VIEWS = ImmutableSet.of(LOCAL_VIEW_NAME, PEERS_V2_VIEW_NAME, LEGACY_PEERS_VIEW_NAME);
 
     public static boolean canBeMapped(String keyspace, String table)
     {

@@ -489,7 +489,7 @@ public class SerializationHeader
                         // deserialization. The column will be ignored later on anyway.
                         column = metadata.getDroppedColumn(name, isStatic);
                         if (column == null)
-                            throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
+                            throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization of " + metadata.keyspace + '.' + metadata.name);
                     }
                     builder.add(column);
                 }
