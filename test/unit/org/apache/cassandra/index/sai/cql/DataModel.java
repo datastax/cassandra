@@ -239,7 +239,7 @@ public interface DataModel
                     executeLocalIndexed(tester, String.format(template, column.left, indexedTable, column.left));
                 }
             }
-            tester.waitForIndexQueryable(KEYSPACE, indexedTable);
+            tester.waitForTableIndexesQueryable(KEYSPACE, indexedTable);
         }
 
         public void flush(Executor tester) throws Throwable
@@ -456,7 +456,7 @@ public interface DataModel
                 if (!skipColumns.contains(column.left))
                 {
                     executeLocalIndexed(tester, String.format(template, column.left, indexedTable, column.left));
-                    tester.waitForIndexQueryable(KEYSPACE, indexedTable);
+                    tester.waitForTableIndexesQueryable(KEYSPACE, indexedTable);
                 }
             }
         }
@@ -610,7 +610,7 @@ public interface DataModel
 
         void disableCompaction(String keyspace, String table);
 
-        void waitForIndexQueryable(String keyspace, String table);
+        void waitForTableIndexesQueryable(String keyspace, String table);
 
         void executeLocal(String query, Object...values) throws Throwable;
 

@@ -62,20 +62,20 @@ public class MultiNodeExecutor implements DataModel.Executor
     }
 
     @Override
-    public void waitForIndexQueryable(String keyspace, String table)
+    public void waitForTableIndexesQueryable(String keyspace, String table)
     {
         SAIUtil.waitForIndexQueryable(cluster, keyspace);
     }
 
     @Override
-    public void executeLocal(String query, Object... values) throws Throwable
+    public void executeLocal(String query, Object... values)
     {
         Object[] buffers = ColumnTypeUtil.transformValues(values);
         cluster.coordinator(1).execute(query, ConsistencyLevel.QUORUM, buffers);
     }
 
     @Override
-    public List<Object> executeRemote(String query, int fetchSize, Object... values) throws Throwable
+    public List<Object> executeRemote(String query, int fetchSize, Object... values)
     {
         Object[] buffers = ColumnTypeUtil.transformValues(values);
         Iterator<Object> iterator = cluster.coordinator(1).executeWithPagingWithResult(query, ConsistencyLevel.QUORUM, fetchSize, buffers).map(row -> row.get(0));
