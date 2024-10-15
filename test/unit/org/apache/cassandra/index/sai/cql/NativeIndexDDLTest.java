@@ -154,7 +154,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailUnsupportedType() throws Throwable
+    public void shouldFailUnsupportedType()
     {
         for (CQL3Type.Native cql3Type : CQL3Type.Native.values())
         {
@@ -250,7 +250,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldNotFailCreateWithTupleType() throws Throwable
+    public void shouldNotFailCreateWithTupleType()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val tuple<text, int, double>)");
 
@@ -277,7 +277,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateIndexIfExists() throws Throwable
+    public void shouldCreateIndexIfExists()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -289,7 +289,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldBeCaseSensitiveByDefault() throws Throwable
+    public void shouldBeCaseSensitiveByDefault()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -303,7 +303,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldEnableCaseSensitiveSearch() throws Throwable
+    public void shouldEnableCaseSensitiveSearch()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -319,7 +319,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldEnableCaseInsensitiveSearch() throws Throwable
+    public void shouldEnableCaseInsensitiveSearch()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -332,7 +332,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldBeNonNormalizedByDefault() throws Throwable
+    public void shouldBeNonNormalizedByDefault()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -347,7 +347,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldEnableNonNormalizedSearch() throws Throwable
+    public void shouldEnableNonNormalizedSearch()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -364,7 +364,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldEnableNormalizedSearch() throws Throwable
+    public void shouldEnableNormalizedSearch()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -376,7 +376,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldEnableNormalizedCaseInsensitiveSearch() throws Throwable
+    public void shouldEnableNormalizedCaseInsensitiveSearch()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -388,7 +388,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldEnableAsciiSearch() throws Throwable
+    public void shouldEnableAsciiSearch()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -400,7 +400,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateIndexOnReversedType() throws Throwable
+    public void shouldCreateIndexOnReversedType()
     {
         createTable("CREATE TABLE %s (id text, ck1 text, ck2 int, val text, PRIMARY KEY (id,ck1,ck2)) WITH CLUSTERING ORDER BY (ck1 desc, ck2 desc)");
 
@@ -431,7 +431,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateIndexWithAlias() throws Throwable
+    public void shouldCreateIndexWithAlias()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -445,7 +445,7 @@ public class NativeIndexDDLTest extends SAITester
      * Not putting in {@link MixedIndexImplementationsTest} because it uses CQLTester which doesn't load NDI dependency.
      */
     @Test
-    public void shouldCreateSASI() throws Throwable
+    public void shouldCreateSASI()
     {
         createTable(CREATE_TABLE_TEMPLATE);
 
@@ -468,7 +468,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateNumericIndexWithBkdPostingsSkipAndMinLeaves() throws Throwable
+    public void shouldCreateNumericIndexWithBkdPostingsSkipAndMinLeaves()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'bkd_postings_skip' : 3, 'bkd_postings_min_leaves' : 32}");
@@ -477,7 +477,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateNumericIndexWithBkdPostingsSkipOnly() throws Throwable
+    public void shouldCreateNumericIndexWithBkdPostingsSkipOnly()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'bkd_postings_skip' : 3}");
@@ -486,7 +486,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateNumericIndexWithBkdPostingsMinLeavesOnly() throws Throwable
+    public void shouldCreateNumericIndexWithBkdPostingsMinLeavesOnly()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'bkd_postings_min_leaves': 32}");
@@ -495,7 +495,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailToCreateNumericIndexWithTooLowBkdPostingsSkip() throws Throwable
+    public void shouldFailToCreateNumericIndexWithTooLowBkdPostingsSkip()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
 
@@ -504,7 +504,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailToCreateNumericIndexWithTooLowBkdPostingsMinLeaves() throws Throwable
+    public void shouldFailToCreateNumericIndexWithTooLowBkdPostingsMinLeaves()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
 
@@ -513,7 +513,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailToCreateStringIndexWithBkdPostingsSkip() throws Throwable
+    public void shouldFailToCreateStringIndexWithBkdPostingsSkip()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -522,7 +522,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailToCreateStringIndexWithBkdPostingsMinLeaves() throws Throwable
+    public void shouldFailToCreateStringIndexWithBkdPostingsMinLeaves()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -531,7 +531,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailToCreateInvalidBooleanOption() throws Throwable
+    public void shouldFailToCreateInvalidBooleanOption()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -540,7 +540,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailToCreateEmptyBooleanOption() throws Throwable
+    public void shouldFailToCreateEmptyBooleanOption()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
@@ -549,7 +549,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailCreationOnMultipleColumns() throws Throwable
+    public void shouldFailCreationOnMultipleColumns()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val1 text, val2 text)");
 
@@ -559,14 +559,14 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailCreationMultipleIndexesOnSimpleColumn() throws Throwable
+    public void shouldFailCreationMultipleIndexesOnSimpleColumn()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, v1 TEXT)");
         execute("INSERT INTO %s (id, v1) VALUES(1, '1')");
         flush();
 
         executeNet("CREATE CUSTOM INDEX index_1 ON %s(v1) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable(KEYSPACE, "index_1");
+        waitForTableIndexesQueryable();
 
         // same name
         assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX index_1 ON %s(v1) USING 'StorageAttachedIndex'"))
@@ -588,7 +588,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldIndexBuildingWithInMemoryData() throws Throwable
+    public void shouldIndexBuildingWithInMemoryData()
     {
         createTable(CREATE_TABLE_TEMPLATE);
 
@@ -615,7 +615,7 @@ public class NativeIndexDDLTest extends SAITester
 
         // Create the index, but do not allow the initial index build to begin:
         Injections.inject(delayInitializationTask);
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        String indexName = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Flush the Memtable's contents, which will feed data to the index as the SSTable is written:
         flush();
@@ -671,7 +671,6 @@ public class NativeIndexDDLTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(m) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(full(frozen_m)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         String largeTerm = UTF8Type.instance.compose(ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 1));
         assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, v) VALUES (0, ?)", largeTerm))
@@ -868,8 +867,8 @@ public class NativeIndexDDLTest extends SAITester
 
         if (concurrentTruncate)
         {
-            String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-            String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+            createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2"));
             truncate(true);
         }
         else
@@ -1430,7 +1429,7 @@ public class NativeIndexDDLTest extends SAITester
 
         // initial index builder should have stopped abruptly resulting in the index not being queryable
         verifyInitialIndexFailed(numericIndexContext.getIndexName());
-        assertFalse(isIndexQueryable());
+        assertFalse(areAllTableIndexesQueryable());
 
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         for (Index i : cfs.indexManager.listIndexes())
@@ -1459,7 +1458,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldRejectQueriesWithCustomExpressions() throws Throwable
+    public void shouldRejectQueriesWithCustomExpressions()
     {
         createTable(CREATE_TABLE_TEMPLATE);
 

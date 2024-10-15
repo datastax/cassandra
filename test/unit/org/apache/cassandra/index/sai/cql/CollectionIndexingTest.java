@@ -40,7 +40,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMap() throws Throwable
+    public void indexMap()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
@@ -66,7 +66,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int primary key, value map<int, text>)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         // Test memtable index:
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, new HashMap<Integer, String>() {{
@@ -100,17 +99,16 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexQueryEmpty() throws Throwable
+    public void indexQueryEmpty()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
         assertEquals(0, execute("SELECT * FROM %s WHERE value CONTAINS ''").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE value CONTAINS '' AND value CONTAINS 'v1'").size());
     }
 
     @Test
-    public void indexMapKeys() throws Throwable
+    public void indexMapKeys()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
@@ -120,7 +118,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapValues() throws Throwable
+    public void indexMapValues()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
@@ -130,7 +128,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapEntries() throws Throwable
+    public void indexMapEntries()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
@@ -142,7 +140,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexFrozenList() throws Throwable
+    public void indexFrozenList()
     {
         createPopulatedFrozenList();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
@@ -150,7 +148,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexFrozenMap() throws Throwable
+    public void indexFrozenMap()
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
@@ -162,7 +160,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexFrozenMapQueryKeys() throws Throwable
+    public void indexFrozenMapQueryKeys()
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
@@ -172,7 +170,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexFrozenMapQueryValues() throws Throwable
+    public void indexFrozenMapQueryValues()
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
@@ -183,7 +181,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexFrozenMapQueryEntries() throws Throwable
+    public void indexFrozenMapQueryEntries()
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
@@ -192,7 +190,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapEntriesQueryEq() throws Throwable
+    public void indexMapEntriesQueryEq()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
@@ -201,7 +199,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapEntriesQueryKeys() throws Throwable
+    public void indexMapEntriesQueryKeys()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
@@ -212,7 +210,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapEntriesQueryValues() throws Throwable
+    public void indexMapEntriesQueryValues()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
@@ -223,7 +221,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapKeysQueryEq() throws Throwable
+    public void indexMapKeysQueryEq()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
@@ -232,7 +230,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapKeysQueryValues() throws Throwable
+    public void indexMapKeysQueryValues()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
@@ -241,7 +239,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapKeysQueryEntries() throws Throwable
+    public void indexMapKeysQueryEntries()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
@@ -250,7 +248,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapValuesQueryEq() throws Throwable
+    public void indexMapValuesQueryEq()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
@@ -259,7 +257,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapValuesQueryKeys() throws Throwable
+    public void indexMapValuesQueryKeys()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
@@ -270,7 +268,7 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapValuesQueryEntries() throws Throwable
+    public void indexMapValuesQueryEntries()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
@@ -285,7 +283,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createTable("CREATE TABLE %s(id int PRIMARY KEY, text_map map<text, text>)");
         createIndex("CREATE CUSTOM INDEX ON %s(values(text_map)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
         execute("INSERT INTO %s(id, text_map) values (1, {'k1':'v1'})");
         flush();
         // This update overwrites 'v1', so now the map does not contain 'v1' and the row should be returned
@@ -298,7 +295,7 @@ public class CollectionIndexingTest extends SAITester
         });
     }
 
-    private void createPopulatedMap() throws Throwable
+    private void createPopulatedMap()
     {
         createTable("CREATE TABLE %s (pk int primary key, value map<int, text>)");
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, new HashMap<Integer, String>() {{
@@ -311,7 +308,7 @@ public class CollectionIndexingTest extends SAITester
         }});
     }
 
-    private void createPopulatedFrozenMap() throws Throwable
+    private void createPopulatedFrozenMap()
     {
         createTable("CREATE TABLE %s (pk int primary key, value frozen<map<int, text>>)");
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, new HashMap<Integer, String>() {{
@@ -324,7 +321,7 @@ public class CollectionIndexingTest extends SAITester
         }});
     }
 
-    private void createPopulatedFrozenList() throws Throwable
+    private void createPopulatedFrozenList()
     {
         createTable("CREATE TABLE %s (pk int primary key, value frozen<list<int>>)");
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, Arrays.asList(1, 2, 3));
@@ -333,7 +330,7 @@ public class CollectionIndexingTest extends SAITester
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 4, Arrays.asList(1, 2, 7));
     }
 
-    private void assertUnsupportedIndexOperator(String query, Object... values) throws Throwable
+    private void assertUnsupportedIndexOperator(String query, Object... values)
     {
 //        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "value"),
 //                query, values);

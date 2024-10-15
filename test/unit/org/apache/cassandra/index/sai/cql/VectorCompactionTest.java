@@ -137,7 +137,6 @@ public class VectorCompactionTest extends VectorTester.Versioned
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
     }
 
     private void validateQueries()
