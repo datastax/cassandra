@@ -65,7 +65,6 @@ public abstract class FilteredQueryTester extends SAITester
         indexNames = indexes.stream().map(i -> i.name).collect(Collectors.toSet());
         createTable();
         indexes.forEach(i -> i.create(this));
-        waitForTableIndexesQueryable();
         populateTable();
     }
 

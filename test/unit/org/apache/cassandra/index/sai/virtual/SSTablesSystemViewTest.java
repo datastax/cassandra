@@ -74,7 +74,7 @@ public class SSTablesSystemViewTest extends SAITester
     }
 
     @Test
-    public void testVirtualTableThroughIndexLifeCycle() throws Throwable
+    public void testVirtualTableThroughIndexLifeCycle()
     {
         createTable("CREATE TABLE %s (k int, c int, v1 int, v2 int, PRIMARY KEY (k, c))");
         String v1IndexName = createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
@@ -158,7 +158,7 @@ public class SSTablesSystemViewTest extends SAITester
                              String columnName,
                              long cellCount,
                              long minSSTableRowId,
-                             long maxSSTableRowId) throws Exception
+                             long maxSSTableRowId)
     {
         for (SSTableId generation : generations)
         {
@@ -174,7 +174,7 @@ public class SSTablesSystemViewTest extends SAITester
                              String columnName,
                              long cellCount,
                              long minSSTableRowId,
-                             long maxSSTableRowId) throws Exception
+                             long maxSSTableRowId)
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         StorageAttachedIndex sai = (StorageAttachedIndex) cfs.indexManager.getIndexByName(indexName);

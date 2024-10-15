@@ -238,7 +238,7 @@ public abstract class CQLTester
     public static final String DATA_CENTER = ServerTestUtils.DATA_CENTER;
     public static final String DATA_CENTER_REMOTE = ServerTestUtils.DATA_CENTER_REMOTE;
     public static final String RACK1 = ServerTestUtils.RACK1;
-    protected static final int ASSERTION_TIMEOUT_SECONDS = 15;
+    private static final int ASSERTION_TIMEOUT_SECONDS = 15;
 
     private static org.apache.cassandra.transport.Server server;
     private static JMXConnectorServer jmxServer;
@@ -1401,7 +1401,7 @@ public abstract class CQLTester
 
     public void waitForTableIndexesQueryable()
     {
-        waitForTableIndexesQueryable(currentTable(), 60);
+        waitForTableIndexesQueryable(60);
     }
 
     public void waitForTableIndexesQueryable(int seconds)
@@ -1517,6 +1517,34 @@ public abstract class CQLTester
 
         Index index = manager.getIndexByName(indexName);
         return manager.isIndexQueryable(index);
+    }
+
+    protected boolean areAllTableIndexesQueryable()
+    {
+        return areAllTableIndexesQueryable(KEYSPACE, currentTable());
+    }
+
+    protected boolean areAllTableIndexesQueryable(String keyspace, String table)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
+        for (Index index : cfs.indexManager.listIndexes())
+        {
+            if (!cfs.indexManager.isIndexQueryable(index))
+                return false;
+        }
+        return true;
+    }
+
+    protected boolean indexNeedsFullRebuild(String index)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        return cfs.indexManager.needsFullRebuild(index);
+    }
+
+    protected void verifyInitialIndexFailed(String indexName)
+    {
+        // Verify that the initial index build fails...
+        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
     }
 
     @Nullable
@@ -2284,7 +2312,7 @@ public abstract class CQLTester
         return rows;
     }
 
-    protected void assertEmpty(UntypedResultSet result) throws Throwable
+    protected void assertEmpty(UntypedResultSet result)
     {
         if (result != null && !result.isEmpty())
             throw new AssertionError(String.format("Expected empty result but got %d rows: %s \n", result.size(), makeRowStrings(result)));
