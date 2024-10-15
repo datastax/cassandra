@@ -61,6 +61,7 @@ public abstract class SSTableReaderLoadingBuilder<R extends SSTableReader, B ext
     {
         this.descriptor = builder.descriptor;
         this.components = builder.getComponents() != null ? ImmutableSet.copyOf(builder.getComponents()) : TOCComponent.loadOrCreate(this.descriptor);
+
         this.tableMetadataRef = builder.getTableMetadataRef() != null ? builder.getTableMetadataRef() : resolveTableMetadataRef();
         this.ioOptions = builder.getIOOptions() != null ? builder.getIOOptions() : IOOptions.fromDatabaseDescriptor();
         this.chunkCache = builder.getChunkCache() != null ? builder.getChunkCache() : ChunkCache.instance;
