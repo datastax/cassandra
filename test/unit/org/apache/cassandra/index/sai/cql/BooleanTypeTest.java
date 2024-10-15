@@ -27,7 +27,7 @@ import static org.junit.Assert.assertEquals;
 public class BooleanTypeTest extends SAITester
 {
     @Test
-    public void test() throws Throwable
+    public void test()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val boolean)");
 
