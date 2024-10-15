@@ -118,6 +118,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -126,7 +127,7 @@ import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.NoOpRequestSensors;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
+import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
@@ -144,6 +145,7 @@ import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
+import static com.google.common.collect.Iterables.transform;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.NoPayload.noPayload;
@@ -1069,6 +1071,12 @@ public class StorageProxy implements StorageProxyMBean
 
         QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(state, false, mutations, consistencyLevel);
 
+        // Request sensors are utilized to track usages from replicas serving a write request
+        RequestSensors requestSensors = CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCAL.getBoolean() ?
+                                        new ActiveRequestSensors() : NoOpRequestSensors.instance;
+        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
+        ExecutorLocals.set(locals);
+
         long startTime = System.nanoTime();
 
         List<AbstractWriteResponseHandler<IMutation>> responseHandlers = new ArrayList<>(mutations.size());
@@ -1094,6 +1102,24 @@ public class StorageProxy implements StorageProxyMBean
             // wait for writes.  throws TimeoutException if necessary
             for (AbstractWriteResponseHandler<IMutation> responseHandler : responseHandlers)
                 responseHandler.get();
+
+            for (int i = 0; i < mutations.size(); ++i)
+            {
+                for (PartitionUpdate pu : mutations.get(i).getPartitionUpdates())
+                {
+                    Context context = Context.from(pu.metadata());
+                    if (pu.metadata().isIndex()) continue;
+
+                    requestSensors.registerSensor(context, Type.WRITE_BYTES);
+                    Optional<Sensor> sensor = requestSensors.getSensor(context, Type.WRITE_BYTES);
+                    if (sensor.isEmpty()) continue;
+
+                    String customParam = SensorsCustomParams.requestParamForSensor(sensor.get(), true);
+                    transform(responseHandlers.get(i).getResponseMessages().snapshot(),
+                              msg -> SensorsCustomParams.sensorValueFromCustomParam(msg, customParam))
+                    .forEach(value -> requestSensors.incrementSensor(context, Type.WRITE_BYTES, value));
+                }
+            }
 
             writeTracker.onDone();
         }

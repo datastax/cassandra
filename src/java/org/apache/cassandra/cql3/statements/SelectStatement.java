@@ -573,8 +573,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset);
         }
 
-        // Propagate read sensor data
-        addReadSensorData(msg, options);
+        RequestSensors sensors = RequestTracker.instance.get();
+        Context context = Context.from(this.table);
+        Type sensorType = Type.READ_BYTES;
+        SensorsCustomParams.addSensorToMessageResponse(msg, options.getProtocolVersion(), sensors, context, sensorType);
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.

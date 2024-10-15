@@ -58,6 +58,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.collect.Iterables.all;
+import static com.google.common.collect.Iterables.transform;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 /**
@@ -410,7 +411,7 @@ public abstract class AbstractReadExecutor
         {
             handler.awaitResults();
             assert digestResolver.isDataPresent() : "awaitResults returned with no data present.";
-            estimateAndIncrementReadSensor();
+            incrementReadSensor();
         }
         catch (ReadTimeoutException e)
         {
@@ -474,12 +475,10 @@ public abstract class AbstractReadExecutor
     }
 
     /**
-     * Estiamtes the read byte returned from all replicas and increments the {@link RequestSensors} with the estiamted
-     * value. The estimation is performed by multiplying the actual read bytes as retunred by one replica by the number
-     * of candiadte replicas. This avoids the cost of waiting for all replicas to response, and at the same time
-     * provides a consistent estimation of the same query between different requests.
+     * Increments the sensor for the read bytes request by summing up the sensor value returned by atleast
+     * a quorum of replicas.
      */
-    private void estimateAndIncrementReadSensor()
+    private void incrementReadSensor()
     {
         if (this.requestSensors == null)
             return;
@@ -487,18 +486,9 @@ public abstract class AbstractReadExecutor
         if (!handler.resolver.isDataPresent())
             return;
 
-        Message<ReadResponse> msg = handler.resolver.getMessages().get(0);
-        Map<String, byte[]> customParams = msg.header.customParams();
-        if (customParams == null)
-            return;
-
-        byte[] readBytes = msg.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST);
-        if (readBytes == null)
-            return;
-
-        int numCandidates = replicaPlan().candidates().size();
-        double adjustedSensorValue = SensorsCustomParams.sensorValueFromBytes(readBytes) * numCandidates;
         Context context = Context.from(this.command);
-        this.requestSensors.incrementSensor(context, Type.READ_BYTES, adjustedSensorValue);
+        transform(handler.resolver.getMessages().snapshot(),
+                  msg -> SensorsCustomParams.sensorValueFromCustomParam(msg, SensorsCustomParams.READ_BYTES_REQUEST))
+        .forEach(value -> requestSensors.incrementSensor(context, Type.READ_BYTES, value));
     }
 }

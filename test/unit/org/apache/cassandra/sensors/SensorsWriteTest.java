@@ -146,7 +146,7 @@ public class SensorsWriteTest
 
             // check global registry is synchronized
             assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
-            assertResponseSensors(localSensor.getValue(), writeSensorSum, CF_STANDARD);
+            assertResponseSensors(localSensor.getValue(), writeSensorSum, localSensor);
         }
     }
 
@@ -172,7 +172,7 @@ public class SensorsWriteTest
 
             // check global registry is synchronized
             assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
-            assertResponseSensors(localSensor.getValue(), writeSensorSum, CF_STANDARD_CLUSTERING);
+            assertResponseSensors(localSensor.getValue(), writeSensorSum, localSensor);
         }
     }
 
@@ -222,7 +222,7 @@ public class SensorsWriteTest
         Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
         assertThat(registrySensor.getValue()).isEqualTo(localSensor.getValue() + singleRowWriteBytes);
-        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), CF_STANDARD_CLUSTERING);
+        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), localSensor);
     }
 
     @Test
@@ -264,8 +264,8 @@ public class SensorsWriteTest
         assertThat(registrySensor2).isEqualTo(localSensor2);
         assertThat(registrySensor2.getValue()).isEqualTo(localSensor2.getValue());
 
-        assertResponseSensors(localSensor1.getValue(), registrySensor1.getValue(), CF_STANDARD);
-        assertResponseSensors(localSensor2.getValue(), registrySensor2.getValue(), CF_STANDARD2);
+        assertResponseSensors(localSensor1.getValue(), registrySensor1.getValue(), localSensor1);
+        assertResponseSensors(localSensor2.getValue(), registrySensor2.getValue(), localSensor2);
     }
 
     @Test
@@ -288,7 +288,7 @@ public class SensorsWriteTest
         assertThat(localSensor.getValue()).isGreaterThan(0);
         Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
-        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), CF_COUTNER);
+        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), localSensor);
     }
 
     @Test
@@ -305,7 +305,7 @@ public class SensorsWriteTest
         assertThat(writeSensor.getValue()).isGreaterThan(0);
         Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registryWriteSensor).isEqualTo(writeSensor);
-        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
+        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), writeSensor);
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
 
@@ -332,7 +332,7 @@ public class SensorsWriteTest
         assertThat(writeSensor.getValue()).isGreaterThan(0);
         Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registryWriteSensor).isEqualTo(writeSensor);
-        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
+        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), writeSensor);
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
 
@@ -359,7 +359,7 @@ public class SensorsWriteTest
         assertThat(writeSensor.getValue()).isGreaterThan(0);
         Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registryWriteSensor).isEqualTo(writeSensor);
-        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
+        assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), writeSensor);
 
         // No read is done in the commit phase
         assertThat(RequestTracker.instance.get().getSensor(context, Type.READ_BYTES)).isEmpty();
@@ -403,10 +403,10 @@ public class SensorsWriteTest
         assertResponseSensors(deserializedMessage, requestValue, registryValue, () -> SensorsCustomParams.READ_BYTES_REQUEST, () -> SensorsCustomParams.READ_BYTES_TABLE);
     }
 
-    private void assertResponseSensors(double requestValue, double registryValue, String table)
+    private void assertResponseSensors(double requestValue, double registryValue, Sensor sensor)
     {
-        Supplier<String> requestParamSupplier = () -> SensorsCustomParams.encodeTableInWriteBytesRequestParam(table);
-        Supplier<String> tableParamSupplier = () -> SensorsCustomParams.encodeTableInWriteBytesTableParam(table);
+        Supplier<String> requestParamSupplier = () -> SensorsCustomParams.requestParamForSensor(sensor, true);
+        Supplier<String> tableParamSupplier = () -> SensorsCustomParams.tableParamForSensor(sensor, true);
         // verify against the last message to enable testing of multiple mutations in a for loop
         Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
         assertResponseSensors(message, requestValue, registryValue, requestParamSupplier, tableParamSupplier);

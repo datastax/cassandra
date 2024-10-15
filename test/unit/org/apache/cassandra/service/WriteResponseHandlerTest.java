@@ -21,6 +21,7 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Collection;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -55,6 +56,7 @@ import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class WriteResponseHandlerTest
@@ -165,6 +167,26 @@ public class WriteResponseHandlerTest
         assertEquals(0,  ks.metric.writeFailedIdealCL.getCount());
         assertTrue( TimeUnit.DAYS.toMicros(1) < ks.metric.idealCLWriteLatency.totalLatency.getCount());
         assertEquals(startingCount + 1, ks.metric.idealCLWriteLatency.latency.getCount());
+    }
+
+    @Test
+    public void responseMessagesAddedOnRepsonse()
+    {
+        AbstractWriteResponseHandler awr = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM, System.nanoTime() - TimeUnit.DAYS.toNanos(1));
+
+        assertNotNull(awr.getResponseMessages());
+        assertEquals(0, awr.getResponseMessages().size());
+
+        Message m1 = createDummyMessage(0);
+        Message m2 = createDummyMessage(1);
+        awr.onResponse(m1);
+        awr.onResponse(m2);
+        awr.onResponse(null);
+
+        Collection<Message> responses = awr.getResponseMessages().snapshot();
+        assertEquals(2, responses.size());
+        assertTrue(responses.contains(m1));
+        assertTrue(responses.contains(m2));
     }
 
     /**

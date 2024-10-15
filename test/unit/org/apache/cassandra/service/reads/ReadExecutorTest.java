@@ -61,6 +61,7 @@ import org.mockito.Mockito;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.locator.ReplicaUtils.full;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -250,10 +251,10 @@ public class ReadExecutorTest
     }
 
     @Test
-    public void testReadSensorsEstimatedAndIncremented()
+    public void testReadSensorsIncremented()
     {
         MockSinglePartitionReadCommand command = new MockSinglePartitionReadCommand(TimeUnit.DAYS.toMillis(365));
-        ReplicaPlan.ForTokenRead plan = plan(ConsistencyLevel.QUORUM, targets, targets.subList(0, 1));
+        ReplicaPlan.ForTokenRead plan = plan(ConsistencyLevel.QUORUM, targets, targets);
         // register read sensor before initilizaing the read executor
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(command);
@@ -279,7 +280,8 @@ public class ReadExecutorTest
 
         Optional<Sensor> readSensor = requestSensors.getSensor(context, Type.READ_BYTES);
         assertTrue(readSensor.isPresent());
-        assertEquals(readSesnorValue * targets.size(), readSensor.get().getValue(), 0.01);
+        int quorum = targets.size() / 2 + 1;
+        assertThat(readSensor.get().getValue()).isBetween(quorum * readSesnorValue, targets.size() * readSesnorValue); // isBetween is inclusive on both ends
     }
 
     public static class MockSinglePartitionReadCommand extends SinglePartitionReadCommand
