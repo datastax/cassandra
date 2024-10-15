@@ -34,7 +34,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': -2})");
         flush();
@@ -57,7 +56,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         // We intentionally use apple, banana, and orange to deal with multiple keys in the trie.
         // We then search against banana to show that we only get results for banana
@@ -127,7 +125,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         // We intentionally use apple, banana, and orange to deal with multiple keys in the trie.
         // We then search against banana to show that we only get results for banana
@@ -153,7 +150,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, coordinates map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(coordinates)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         // No rows in table yet, so definitely no results
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] > 10"));
@@ -172,7 +168,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, coordinates map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(coordinates)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, coordinates) VALUES (1, {'x': -1000000, 'y': 1000000})");
         execute("INSERT INTO %s (partition, coordinates) VALUES (4, {'x': -100, 'y': 2})");
@@ -213,7 +208,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, dates map<text, date>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(dates)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, dates) VALUES (1, {'a': '2000-02-03'})");
         execute("INSERT INTO %s (partition, dates) VALUES (4, {'a': '2001-02-03'})");
@@ -245,7 +239,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, timestamps map<text, timestamp>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(timestamps)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         // 2011-02-03 04:05+0000 is 1296705900000
         execute("INSERT INTO %s (partition, timestamps) VALUES (1, {'a': '2011-02-03 04:05+0000'})");
@@ -286,7 +279,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': 2})");
         execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 2, 'orange': 1})");
@@ -303,7 +295,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': 2})");
 
@@ -347,7 +338,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 101, 'orange': 2})");
         execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 302, 'orange': 2})");
@@ -369,7 +359,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, text>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': '', 'orange': '2'})");
         execute("INSERT INTO %s (partition, item_cost) VALUES (4, {'apple': 'a', 'orange': '2'})");
@@ -388,7 +377,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': -2})");
         execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 2, 'orange': 1})");
@@ -426,7 +414,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': -2})");
         execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 2, 'orange': 1})");
@@ -456,7 +443,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': -2})");
         execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 2, 'orange': 1})");
@@ -482,7 +468,6 @@ public class MapEntriesIndexTest extends SAITester
         createTable("CREATE TABLE %s (partition int primary key, store_name text, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(store_name) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         // We intentionally use apple, banana, and orange to deal with multiple keys in the trie.
         // We then search against banana to show that we only get results for banana
@@ -503,7 +488,6 @@ public class MapEntriesIndexTest extends SAITester
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         // We intentionally use apple, banana, and orange to deal with multiple keys in the trie.
         // We then search against banana to show that we only get results for banana

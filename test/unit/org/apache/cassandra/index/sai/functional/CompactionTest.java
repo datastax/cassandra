@@ -124,7 +124,7 @@ public class CompactionTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testConcurrentQueryWithCompaction() throws Throwable
+    public void testConcurrentQueryWithCompaction()
     {
         createTable(CREATE_TABLE_TEMPLATE);
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
@@ -150,7 +150,7 @@ public class CompactionTest extends AbstractMetricsTest
                     throw new RuntimeException(e);
                 }
             }
-        }, () -> upgradeSSTables());
+        }, this::upgradeSSTables);
 
         compactionTest.start();
 
@@ -198,7 +198,6 @@ public class CompactionTest extends AbstractMetricsTest
         createTable(CREATE_TABLE_TEMPLATE);
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForTableIndexesQueryable();
 
         int sstables = 2;
         int num = 10;
