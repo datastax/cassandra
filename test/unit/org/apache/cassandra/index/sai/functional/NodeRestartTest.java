@@ -66,7 +66,7 @@ public class NodeRestartTest extends SAITester
         // We should have completed no actual SSTable validations:
         assertValidationCount(0, 0);
 
-        assertFalse(isIndexQueryable());
+        assertFalse(areAllTableIndexesQueryable());
     }
 
     // We don't allow the node to actually join the ring before a valid index is ready to accept queries.

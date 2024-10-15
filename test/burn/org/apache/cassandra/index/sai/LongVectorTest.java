@@ -60,7 +60,6 @@ public class LongVectorTest extends SAITester
     {
         createTable(String.format("CREATE TABLE %%s (key int primary key, value vector<float, %s>)", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function': 'dot_product' }");
-        waitForTableIndexesQueryable();
 
         AtomicInteger counter = new AtomicInteger();
         long start = System.currentTimeMillis();
