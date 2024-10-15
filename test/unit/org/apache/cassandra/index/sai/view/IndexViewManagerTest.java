@@ -64,7 +64,7 @@ public class IndexViewManagerTest extends SAITester
     }
 
     @Test
-    public void testUpdateFromFlush() throws Throwable
+    public void testUpdateFromFlush()
     {
         createTable("CREATE TABLE %S (k INT PRIMARY KEY, v INT)");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
@@ -82,7 +82,7 @@ public class IndexViewManagerTest extends SAITester
     }
 
     @Test
-    public void testUpdateFromCompaction() throws Throwable
+    public void testUpdateFromCompaction()
     {
         createTable("CREATE TABLE %S (k INT PRIMARY KEY, v INT)");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
