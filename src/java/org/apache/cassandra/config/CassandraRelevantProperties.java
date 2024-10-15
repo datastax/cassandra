@@ -509,7 +509,7 @@ public enum CassandraRelevantProperties
     /**
      * If true, the coordinator will propagate request sensors via the native protocol custom payload flag.
      */
-    PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCAL("cassandra.propagate_request_sensors_via_native_protocal", "false");;
+    PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL("cassandra.propagate_request_sensors_via_native_protocol", "false");;
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

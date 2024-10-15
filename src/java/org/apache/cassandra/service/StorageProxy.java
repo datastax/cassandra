@@ -1072,7 +1072,7 @@ public class StorageProxy implements StorageProxyMBean
         QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(state, false, mutations, consistencyLevel);
 
         // Request sensors are utilized to track usages from replicas serving a write request
-        RequestSensors requestSensors = CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCAL.getBoolean() ?
+        RequestSensors requestSensors = CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
                                         new ActiveRequestSensors() : NoOpRequestSensors.instance;
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
@@ -1970,7 +1970,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       group.queries,
                                                                                       consistencyLevel);
         // Request sensors are utilized to track usages from replicas serving a read request
-        RequestSensors requestSensors = CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCAL.getBoolean() ?
+        RequestSensors requestSensors = CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
                                         new ActiveRequestSensors() : NoOpRequestSensors.instance;
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);

@@ -61,7 +61,7 @@ public class SensorsTest extends TestBaseImpl
     @Test
     public void testSensorsInResultMessage() throws Throwable
     {
-        CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCAL.setBoolean(true);
+        CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
         try (Cluster cluster = builder().withNodes(1).start())
         {
             // resister a noop sensor listener before init(cluster) which creates the test keyspace to ensure that the registry singleton instance is subscribed to schema notifications
