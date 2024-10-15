@@ -48,7 +48,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         Message.Builder<NoPayload> response = respondToMessage.emptyResponseBuilder();
         // no need to calculate outbound internode bytes because the response is NoPayload
-        SensorsCustomParams.addSensorsToResponse(requestSensors, response);
+        SensorsCustomParams.addSensorsToResponse(requestSensors, response, true);
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 

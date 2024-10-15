@@ -30,8 +30,15 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -108,6 +115,21 @@ public class UpdateStatement extends ModificationStatement
     public void addUpdateForKey(PartitionUpdate.Builder update, Slice slice, UpdateParameters params)
     {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    {
+        ResultMessage result = super.execute(state, options, queryStartNanoTime);
+
+        if (result == null) result = new ResultMessage.Void();
+
+        RequestSensors sensors = RequestTracker.instance.get();
+        Context context = Context.from(this.metadata());
+        Type sensorType = Type.WRITE_BYTES;
+        SensorsCustomParams.addSensorToMessageResponse(result, options.getProtocolVersion(), sensors, context, sensorType);
+
+        return result;
     }
 
     public static class ParsedInsert extends ModificationStatement.Parsed

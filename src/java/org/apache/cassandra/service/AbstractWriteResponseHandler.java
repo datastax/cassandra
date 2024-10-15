@@ -22,9 +22,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Suppliers;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 
@@ -44,6 +46,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.utils.concurrent.Accumulator;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -64,6 +67,14 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
     protected volatile int failures = 0;
     protected final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
+
+    /**
+     * Response messages accumulator used to collect sensor data from replicas that responded.
+     * Laziliy initialized as candidateReplicaCount() used to set it's size is overriden in BatchlogResponseHandler and
+     * may not be ready at AbstractWriteResponseHandler construction time.
+     */
+    protected final Supplier<Accumulator<Message<T>>> responseMessages = Suppliers.memoize(() -> new Accumulator<>(candidateReplicaCount()));
+
     private final long queryStartNanoTime;
 
     /**
@@ -287,6 +298,11 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     public boolean isCompletedExceptionally()
     {
         return isCompleted() && blockFor() + failures > candidateReplicaCount();
+    }
+
+    public Accumulator<Message<T>> getResponseMessages()
+    {
+        return responseMessages.get();
     }
 
     @Override

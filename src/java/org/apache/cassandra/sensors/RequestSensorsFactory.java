@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.function.Function;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -43,5 +45,16 @@ public interface RequestSensorsFactory
     default RequestSensors create(String keyspace)
     {
         return NoOpRequestSensors.instance;
+    }
+
+    /**
+     * Returns a supplier of the sensor suffix to be used for request that support batch operations. Implemenations
+     * should use this supplier to differentiate sensors for different keyspaces/tables in the same batch.
+     *
+     * @return a supplier of the sensor suffix to be used for the given context
+     */
+    default Function<Context, String> requestSensorSuffixSupplier()
+    {
+        return (context) -> "";
     }
 }
