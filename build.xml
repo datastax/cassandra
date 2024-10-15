@@ -14,7 +14,7 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<project basedir="." default="check" name="dse-db"
+<project basedir="." default="check" name="ds-db"
          xmlns:if="ant:if"
          xmlns:unless="ant:unless">
 
@@ -742,7 +742,7 @@
     -->
     <target name="_main-jar"
             depends="build"
-            description="Assemble DSE DB JAR files">
+            description="Assemble DS DB JAR files">
       <mkdir dir="${build.classes.main}/META-INF" />
       <copy file="LICENSE.txt"
             tofile="${build.classes.main}/META-INF/LICENSE.txt"/>
@@ -756,7 +756,7 @@
         <manifest>
         <!-- <section name="org/apache/cassandra/infrastructure"> -->
           <attribute name="Multi-Release" value="true"/>
-          <attribute name="Implementation-Title" value="DSE DB"/>
+          <attribute name="Implementation-Title" value="DS DB"/>
           <attribute name="Implementation-Version" value="${version}"/>
           <attribute name="Implementation-Vendor" value="DataStax"/>
           <attribute name="Implementation-Git-SHA" value="${git.sha}"/>
@@ -767,7 +767,7 @@
 
     <target name="stress-jar"
             depends="stress-build"
-            description="Assemble DSE DB JAR files">
+            description="Assemble DS DB JAR files">
         <!-- Stress jar -->
         <manifest file="${stress.manifest}">
             <attribute name="Built-By" value="Pavel Yaskevich"/>
@@ -782,7 +782,7 @@
 
     <target name="fqltool-jar"
             depends="fqltool-build"
-            description="Assemble DSE DB JAR files">
+            description="Assemble DS DB JAR files">
 
         <!-- fqltool jar -->
         <manifest file="${fqltool.manifest}">
@@ -798,7 +798,7 @@
 
     <target name="simulator-jars"
             depends="simulator-asm-build,simulator-bootstrap-build"
-            description="Assemble DSE DB JAR files">
+            description="Assemble DS DB JAR files">
 
         <!-- simulator asm jar -->
         <manifest file="${simulator-asm.manifest}">
@@ -833,13 +833,13 @@
 
     <target name="jar"
             depends="_main-jar,build-test,stress-jar,fqltool-jar,simulator-jars,write-poms"
-            description="Assemble DSE DB JAR files">
+            description="Assemble DS DB JAR files">
     </target>
 
     <!--
         The javadoc-jar target makes cassandra-javadoc.jar output required for publishing to Maven central repository.
     -->
-    <target name="javadoc-jar" depends="javadoc" unless="no-javadoc" description="Assemble DSE DB JavaDoc JAR file">
+    <target name="javadoc-jar" depends="javadoc" unless="no-javadoc" description="Assemble DS DB JavaDoc JAR file">
       <jar jarfile="${build.dir}/${final.name}-javadoc.jar" basedir="${javadoc.dir}"/>
       <!-- javadoc task always rebuilds so might as well remove the generated docs to prevent
            being pulled into the distribution by accident -->
@@ -849,7 +849,7 @@
     <!--
         The sources-jar target makes cassandra-sources.jar output required for publishing to Maven central repository.
     -->
-    <target name="sources-jar" depends="init" description="Assemble DSE DB Sources JAR file">
+    <target name="sources-jar" depends="init" description="Assemble DS DB Sources JAR file">
       <jar jarfile="${build.dir}/${final.name}-sources.jar">
         <fileset dir="${build.src.java}" defaultexcludes="yes">
           <include name="org/apache/**/*.java"/>
@@ -917,7 +917,7 @@
 
     <!-- creates release tarballs -->
     <target name="artifacts" depends="_artifacts-init,eclipse-warnings,gen-doc,sources-jar,javadoc-jar"
-            description="Create DSE DB release artifacts">
+            description="Create DS DB release artifacts">
       <tar compression="gzip" longfile="gnu"
         destfile="${build.dir}/${final.name}-bin.tar.gz">
 
@@ -2172,7 +2172,7 @@
              file="${build.dir}/${final.name}-parent.pom"
              packaging="pom"/>
 
-    <!-- the dse-db-all jar -->
+    <!-- the db-all jar -->
     <install pomFile="${build.dir}/${final.name}.pom"
              file="${build.dir}/${final.name}.jar"/>
     <install pomFile="${build.dir}/${final.name}.pom"
@@ -2193,7 +2193,7 @@
             file="${build.dir}/${final.name}-parent.pom"
             packaging="pom"/>
 
-    <!-- the dse-db-all jar -->
+    <!-- the db-all jar -->
     <deploy pomFile="${build.dir}/${final.name}.pom"
             file="${build.dir}/${final.name}.jar"/>
     <deploy pomFile="${build.dir}/${final.name}.pom"
