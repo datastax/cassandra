@@ -367,6 +367,18 @@ public abstract class SSTable
     private static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Component.TOC);
+        // As this method *re*-write the TOC (and is currently only called by "unregisterComponents"), it should only
+        // be called in contexts where the TOC is expected to exist. If it doesn't, there is probably something
+        // unexpected happening, so we log relevant information to help diagnose a potential earlier problem.
+        // But in principle, this isn't a big deal for this method, and we still end up with the TOC in the state we
+        // expect.
+        if (!tocFile.exists())
+        {
+            // Note: we pass a dummy runtime exception as a simple way to get a stack-trace. Knowing from where this
+            // is called in this case is likely useful information.
+            logger.warn("Was asked to 'rewrite' TOC file {} for sstable {}, but it does not exists. The file will be created but this is unexpected. The components to 'overwrite' are: {}", tocFile, descriptor, components, new RuntimeException());
+        }
+
         writeTOC(tocFile, components, OVERWRITE);
     }
 
