@@ -18,10 +18,8 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.Set;
 import java.util.function.IntFunction;
 
-import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 
@@ -44,7 +42,6 @@ public class DelegatingShardManager implements ShardManager
     {
         return tableRange.left.size(tableRange.right);
     }
-
 
     @Override
     public double localSpaceCoverage()
@@ -71,35 +68,5 @@ public class DelegatingShardManager implements ShardManager
     {
         var tokens = tokenGenerator.apply(shardCount);
         return new SimpleShardTracker(tokens);
-    }
-
-    @Override
-    public double rangeSpanned(CompactionSSTable rdr)
-    {
-        return ShardManager.super.rangeSpanned(rdr);
-    }
-
-    @Override
-    public double rangeSpanned(PartitionPosition first, PartitionPosition last)
-    {
-        return ShardManager.super.rangeSpanned(first, last);
-    }
-
-    @Override
-    public double density(CompactionSSTable rdr)
-    {
-        return ShardManager.super.density(rdr);
-    }
-
-    @Override
-    public int compareByDensity(CompactionSSTable a, CompactionSSTable b)
-    {
-        return ShardManager.super.compareByDensity(a, b);
-    }
-
-    @Override
-    public double calculateCombinedDensity(Set<? extends CompactionSSTable> sstables)
-    {
-        return ShardManager.super.calculateCombinedDensity(sstables);
     }
 }

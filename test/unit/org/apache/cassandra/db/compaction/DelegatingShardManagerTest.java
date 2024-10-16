@@ -23,6 +23,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.mockito.Mockito;
 
@@ -46,6 +47,8 @@ public class DelegatingShardManagerTest
 
         DelegatingShardManager wrapper = new DelegatingShardManager((x) -> consumeTokens(delegate.boundaries(x)), 1);
 
+        var range = new Range<>(partitioner.getMinimumToken(), partitioner.getMinimumToken());
+        assertEquals(1, wrapper.rangeSpanned(range), 0);
         assertEquals(1, wrapper.localSpaceCoverage(), 0);
         assertEquals(1, wrapper.shardSetCoverage(), 0);
         assertEquals(1, wrapper.minimumPerPartitionSpan(), 0);
