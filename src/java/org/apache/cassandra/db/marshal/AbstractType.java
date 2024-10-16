@@ -415,6 +415,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return false;
     }
 
+    public boolean isTruncatable()
+    {
+        return false;
+    }
+
     /**
      * Whether the type is multi-cell, that is whether its value is encoded using multiple cells internally.
      * <p>

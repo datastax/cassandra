@@ -81,6 +81,12 @@ public final class IntegerType extends NumberType<BigInteger>
         return true;
     }
 
+    @Override
+    public boolean isTruncatable()
+    {
+        return true;
+    }
+
     public boolean isEmptyValueMeaningless()
     {
         return true;
