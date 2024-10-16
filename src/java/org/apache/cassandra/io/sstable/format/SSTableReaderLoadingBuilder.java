@@ -61,7 +61,14 @@ public abstract class SSTableReaderLoadingBuilder<R extends SSTableReader, B ext
     public SSTableReaderLoadingBuilder(SSTable.Builder<?, ?> builder)
     {
         this.descriptor = builder.descriptor;
-        this.components = builder.getComponents() != null ? ImmutableSet.copyOf(builder.getComponents()) : TOCComponent.loadOrCreate(this.descriptor);
+
+        Set<Component> ssTableComponents;
+        if (builder.getComponents() != null)
+            ssTableComponents = ImmutableSet.copyOf(builder.getComponents());
+        else
+            ssTableComponents = TOCComponent.loadOrCreate(this.descriptor);
+        this.components = SSTableWatcher.instance.discoverComponents(descriptor, ssTableComponents);
+
         this.tableMetadataRef = builder.getTableMetadataRef() != null ? builder.getTableMetadataRef() : resolveTableMetadataRef();
         this.ioOptions = builder.getIOOptions() != null ? builder.getIOOptions() : IOOptions.fromDatabaseDescriptor();
         this.chunkCache = builder.getChunkCache() != null ? builder.getChunkCache() : ChunkCache.instance;
@@ -72,17 +79,16 @@ public abstract class SSTableReaderLoadingBuilder<R extends SSTableReader, B ext
 
     public R build(SSTable.Owner owner, boolean validate, boolean online)
     {
-        Set<Component> discoveredComponents = SSTableWatcher.instance.discoverComponents(descriptor, components);
 
-        checkArgument(discoveredComponents.contains(Components.DATA), "Data component is missing for sstable %s", descriptor);
+        checkArgument(components.contains(Components.DATA), "Data component is missing for sstable %s", descriptor);
         if (validate)
-            checkArgument(discoveredComponents.containsAll(descriptor.getFormat().primaryComponents()), "Some required components (%s) are missing for sstable %s", Sets.difference(descriptor.getFormat().primaryComponents(), this.components), descriptor);
+            checkArgument(components.containsAll(descriptor.getFormat().primaryComponents()), "Some required components (%s) are missing for sstable %s", Sets.difference(descriptor.getFormat().primaryComponents(), this.components), descriptor);
 
         B builder = (B) descriptor.getFormat().getReaderFactory().builder(descriptor);
         builder.setOpenReason(NORMAL);
         builder.setMaxDataAge(Clock.Global.currentTimeMillis());
         builder.setTableMetadataRef(tableMetadataRef);
-        builder.setComponents(discoveredComponents);
+        builder.setComponents(components);
 
         R reader = null;
 
