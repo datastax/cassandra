@@ -138,7 +138,7 @@ public class TOCComponent
                     return components; // sstable doesn't exist yet
 
                 components.add(Components.TOC);
-                TOCComponent.appendTOC(descriptor, components);
+                updateTOC(descriptor, components);
                 return components;
             }
         }
