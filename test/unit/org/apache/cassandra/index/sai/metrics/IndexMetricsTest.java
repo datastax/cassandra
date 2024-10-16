@@ -22,7 +22,10 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.Throwables;
+import org.assertj.core.api.Assertions;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -38,7 +41,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
     private static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS " + INDEX + " ON %s." + TABLE + "(%s) USING 'StorageAttachedIndex'";
 
     @Test
-    public void testSameIndexNameAcrossKeyspaces() throws Throwable
+    public void testSameIndexNameAcrossKeyspaces()
     {
         String keyspace1 = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
         String keyspace2 = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
@@ -62,7 +65,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testMetricRelease() throws Throwable
+    public void testMetricRelease()
     {
         String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
 
@@ -80,7 +83,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testMetricsThroughWriteLifecycle() throws Throwable
+    public void testMetricsThroughWriteLifecycle()
     {
         String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
 
@@ -92,9 +95,13 @@ public class IndexMetricsTest extends AbstractMetricsTest
             execute("INSERT INTO " + keyspace + "." + TABLE + "(id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
 
         assertEquals(10L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertTrue((Long)getMetricValue(objectName("MemtableOnHeapIndexBytes", keyspace, TABLE, INDEX, "IndexMetrics")) > 0);
-        assertTrue((Long)getMetricValue(objectName("MemtableOffHeapIndexBytes", keyspace, TABLE, INDEX, "IndexMetrics")) > 0);
         assertEquals(0L, getMetricValue(objectName("MemtableIndexFlushCount", keyspace, TABLE, INDEX, "IndexMetrics")));
+        assertTrue((Long) getMetricValue(objectName("MemtableOnHeapIndexBytes", keyspace, TABLE, INDEX, "IndexMetrics")) > 0);
+        long bytes = (long) getMetricValue(objectName("MemtableOffHeapIndexBytes", keyspace, TABLE, INDEX, "IndexMetrics"));
+        if (DatabaseDescriptor.getMemtableAllocationType().toBufferType() == BufferType.ON_HEAP)
+            Assertions.assertThat(bytes).isZero();
+        else
+            Assertions.assertThat(bytes).isPositive();
 
         waitForAssert(() -> {
             try
