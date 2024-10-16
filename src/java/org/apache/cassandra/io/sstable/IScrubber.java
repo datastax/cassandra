@@ -64,12 +64,14 @@ public interface IScrubber extends Closeable
         public final boolean checkData;
         public final boolean reinsertOverflowedTTLRows;
         public final boolean skipCorrupted;
+        public final boolean overrideTxnIsOffline;
 
-        private Options(boolean checkData, boolean reinsertOverflowedTTLRows, boolean skipCorrupted)
+        private Options(boolean checkData, boolean reinsertOverflowedTTLRows, boolean skipCorrupted, boolean overrideTxnIsOffline)
         {
             this.checkData = checkData;
             this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
             this.skipCorrupted = skipCorrupted;
+            this.overrideTxnIsOffline = overrideTxnIsOffline;
         }
 
         @Override
@@ -87,6 +89,7 @@ public interface IScrubber extends Closeable
             private boolean checkData = false;
             private boolean reinsertOverflowedTTLRows = false;
             private boolean skipCorrupted = false;
+            private boolean overrideTxnIsOffline = false;
 
             public Builder checkData()
             {
@@ -124,9 +127,21 @@ public interface IScrubber extends Closeable
                 return this;
             }
 
+            public Builder overrideTxnIsOffline()
+            {
+                this.overrideTxnIsOffline = true;
+                return this;
+            }
+
+            public Builder overrideTxnIsOffline(boolean overrideTxnIsOffline)
+            {
+                this.overrideTxnIsOffline = overrideTxnIsOffline;
+                return this;
+            }
+
             public Options build()
             {
-                return new Options(checkData, reinsertOverflowedTTLRows, skipCorrupted);
+                return new Options(checkData, reinsertOverflowedTTLRows, skipCorrupted, overrideTxnIsOffline);
             }
         }
     }
