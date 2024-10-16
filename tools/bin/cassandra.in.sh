@@ -33,7 +33,7 @@ if [ -d $CASSANDRA_HOME/build ] ; then
     #dse_db_bin="$CASSANDRA_HOME/build/classes/main"
     ds_db_bin=`ls -1 $CASSANDRA_HOME/build/ds-db*.jar`
     ds_db_bin="$ds_db_bin:$CASSANDRA_HOME/build/classes/stress:$CASSANDRA_HOME/build/classes/fqltool"
-    CLASSPATH="$CLASSPATH:$dse_d_bin"
+    CLASSPATH="$CLASSPATH:$ds_db_bin"
 fi
 
 # the default location for commitlogs, sstables, and saved caches
