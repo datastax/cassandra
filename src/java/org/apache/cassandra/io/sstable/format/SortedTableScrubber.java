@@ -153,7 +153,8 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         // We'll also loop through the index at the same time, using the position from the index to recover if the
         // partition header (key or data size) is corrupt. (This means our position in the index file will be one
         // partition "ahead" of the data file.)
-        this.dataFile = transaction.isOffline()
+        boolean isOffline = options.overrideTxnIsOffline ? false : transaction.isOffline();
+        this.dataFile = isOffline
                         ? sstable.openDataReader()
                         : sstable.openDataReader(CompactionManager.instance.getRateLimiter());
 
@@ -206,7 +207,8 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         }
         finally
         {
-            if (transaction.isOffline())
+            boolean isOffline = options.overrideTxnIsOffline ? false : transaction.isOffline();
+            if (isOffline)
                 finished.forEach(sstable -> sstable.selfRef().release());
         }
 
