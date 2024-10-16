@@ -115,12 +115,12 @@ public class IndexFileUtils
         return out;
     }
 
-    public IndexInput openInput(FileHandle handle)
+    public IndexInputReader openInput(FileHandle handle)
     {
         return IndexInputReader.create(handle);
     }
 
-    public IndexInput openBlockingInput(FileHandle fileHandle)
+    public IndexInputReader openBlockingInput(FileHandle fileHandle)
     {
         final RandomAccessReader randomReader = fileHandle.createReader();
         return IndexInputReader.create(randomReader, fileHandle::close);
