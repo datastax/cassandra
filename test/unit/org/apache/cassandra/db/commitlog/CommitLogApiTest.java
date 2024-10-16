@@ -55,7 +55,7 @@ public class CommitLogApiTest
     {
         AbstractCommitLogSegmentManager original = CommitLog.instance.getSegmentManager();
         File location = FileUtils.getTempDir();
-        CommitLog.instance.forPath(location);
+        ((CommitLog) CommitLog.instance).forPath(location);
         Assert.assertNotEquals(original, CommitLog.instance.getSegmentManager());
         Assert.assertEquals(location, CommitLog.instance.getSegmentManager().storageDirectory);
     }

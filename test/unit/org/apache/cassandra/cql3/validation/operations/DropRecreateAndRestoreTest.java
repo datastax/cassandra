@@ -69,12 +69,12 @@ public class DropRecreateAndRestoreTest extends CQLTester
         try
         {
             // Restore to point in time.
-            CommitLog.instance.archiver.restorePointInTime = time;
+            CommitLog.instance.archiver().restorePointInTime = time;
             CommitLog.instance.resetUnsafe(false);
         }
         finally
         {
-            CommitLog.instance.archiver.restorePointInTime = Long.MAX_VALUE;
+            CommitLog.instance.archiver().restorePointInTime = Long.MAX_VALUE;
         }
 
         assertRows(execute("SELECT * FROM %s"), row(0, 0, 0), row(0, 1, 1));
