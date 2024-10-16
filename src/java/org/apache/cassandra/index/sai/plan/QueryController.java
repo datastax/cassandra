@@ -77,7 +77,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
-import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
@@ -121,7 +120,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private final ReadCommand command;
     private final Orderer orderer;
     private final QueryContext queryContext;
-    private final TableQueryMetrics tableQueryMetrics;
     private final IndexFeatureSet indexFeatureSet;
     private final List<DataRange> ranges;
     private final AbstractBounds<PartitionPosition> mergeRange;
@@ -157,24 +155,21 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
                            IndexFeatureSet indexFeatureSet,
-                           QueryContext queryContext,
-                           TableQueryMetrics tableQueryMetrics)
+                           QueryContext queryContext)
     {
-        this(cfs, command, null, indexFeatureSet, queryContext, tableQueryMetrics);
+        this(cfs, command, null, indexFeatureSet, queryContext);
     }
 
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
                            Orderer orderer,
                            IndexFeatureSet indexFeatureSet,
-                           QueryContext queryContext,
-                           TableQueryMetrics tableQueryMetrics)
+                           QueryContext queryContext)
     {
         this.cfs = cfs;
         this.command = command;
         this.orderer = orderer;
         this.queryContext = queryContext;
-        this.tableQueryMetrics = tableQueryMetrics;
         this.indexFeatureSet = indexFeatureSet;
         this.ranges = dataRanges(command);
         DataRange first = ranges.get(0);
@@ -693,15 +688,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             logger.error(index.getIndexContext().logMessage("Failed to release index on SSTable {}"), index.getSSTable().descriptor, e);
         }
-    }
-
-    /**
-     * Used to release all resources and record metrics when query finishes.
-     */
-    public void finish()
-    {
-        closeUnusedIterators();
-        if (tableQueryMetrics != null) tableQueryMetrics.record(queryContext);
     }
 
     private void closeUnusedIterators()
