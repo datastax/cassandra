@@ -241,7 +241,7 @@ public class IndexViewManagerTest extends SAITester
 
     private static void copySSTable(SSTableReader table, Path destDir)
     {
-        for (Component component : table.descriptor.discoverComponents())
+        for (Component component : table.components())
         {
             Path src = table.descriptor.fileFor(component).toPath();
             Path dst = destDir.resolve(src.getFileName());
