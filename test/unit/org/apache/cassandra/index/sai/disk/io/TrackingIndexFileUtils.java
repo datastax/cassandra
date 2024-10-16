@@ -20,7 +20,9 @@ package org.apache.cassandra.index.sai.disk.io;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.common.base.Throwables;
 import org.junit.Assert;
@@ -31,6 +33,7 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 public class TrackingIndexFileUtils extends IndexFileUtils
 {
     private final Map<TrackingIndexInput, String> openInputs = Collections.synchronizedMap(new HashMap<>());
+    private final Set<TrackingIndexInput> closedInputs = Collections.synchronizedSet(new HashSet<>());
 
     public TrackingIndexFileUtils(SequentialWriterOption writerOption)
     {
@@ -38,7 +41,7 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     }
 
     @Override
-    public IndexInput openInput(FileHandle handle)
+    public IndexInputReader openInput(FileHandle handle)
     {
         TrackingIndexInput input = new TrackingIndexInput((IndexInputReader) super.openInput(handle));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Input created")));
@@ -46,9 +49,9 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     }
 
     @Override
-    public IndexInput openBlockingInput(FileHandle fileHandle)
+    public IndexInputReader openBlockingInput(FileHandle fileHandle)
     {
-        TrackingIndexInput input = new TrackingIndexInput((IndexInputReader) super.openBlockingInput(fileHandle));
+        TrackingIndexInput input = new TrackingIndexInput(super.openBlockingInput(fileHandle));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Blocking input created")));
         return input;
     }
@@ -58,15 +61,15 @@ public class TrackingIndexFileUtils extends IndexFileUtils
         return new HashMap<>(openInputs);
     }
 
-    public class TrackingIndexInput extends FilterIndexInput
+    private class TrackingIndexInput extends FilterIndexInput
     {
-        TrackingIndexInput(IndexInputReader delegate)
+        protected TrackingIndexInput(IndexInputReader delegate)
         {
             super(delegate);
         }
 
         @Override
-        public void close()
+        public synchronized void close()
         {
             super.close();
             final String creationStackTrace = openInputs.remove(this);
@@ -78,46 +81,9 @@ public class TrackingIndexFileUtils extends IndexFileUtils
         }
 
         @Override
-        public long getFilePointer()
-        {
-            return delegate.getFilePointer();
-        }
-
-        @Override
-        public void seek(long pos)
-        {
-            delegate.seek(pos);
-        }
-
-        @Override
-        public long length()
-        {
-            return delegate.length();
-        }
-
-        @Override
         public IndexInput slice(String sliceDescription, long offset, long length)
         {
-            return delegate.slice(sliceDescription, offset, length);
-        }
-
-        @Override
-        public byte readByte() throws IOException
-        {
-            return delegate.readByte();
-        }
-
-        @Override
-        public void readBytes(byte[] b, int offset, int len) throws IOException
-        {
-            delegate.readBytes(b, offset, len);
-        }
-
-        @Override
-        public String toString()
-        {
-            return delegate.toString();
+            return super.slice(sliceDescription, offset, length);
         }
     }
-
 }
