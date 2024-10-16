@@ -138,6 +138,7 @@ public class BaseCompactionStrategyTest
         when(realm.getKeyspaceName()).thenReturn(keyspace);
         when(realm.getTableName()).thenReturn(table);
         when(realm.getDiskBoundaries()).thenReturn(diskBoundaries);
+        when(realm.buildShardManager()).thenCallRealMethod();
         when(diskBoundaries.getLocalRanges()).thenReturn(localRanges);
         when(diskBoundaries.isOutOfDate()).thenReturn(false);
         when(realm.getLiveSSTables()).thenAnswer(request -> dataTracker.getLiveSSTables());
