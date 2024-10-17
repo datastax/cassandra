@@ -17,8 +17,8 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <modelVersion>4.0.0</modelVersion>
   <parent>
-    <artifactId>dse-db-parent</artifactId>
-    <groupId>com.datastax.dse</groupId>
+    <artifactId>db-parent</artifactId>
+    <groupId>com.datastax.db</groupId>
     <version>@version@</version>
     <relativePath>@final.name@-parent.pom</relativePath>
   </parent>
