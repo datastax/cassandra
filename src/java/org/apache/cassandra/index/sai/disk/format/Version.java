@@ -68,7 +68,7 @@ public class Version
     // The latest version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
     // use reflection to change it and safely publish across threads.
-    private static volatile Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", EB.version));
+    private static volatile Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", DB.version));
 
     private static final Pattern GENERATION_PATTERN = Pattern.compile("\\d+");
 
