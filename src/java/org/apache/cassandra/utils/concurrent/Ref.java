@@ -41,6 +41,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import jdk.internal.ref.Cleaner;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.lifecycle.View;
@@ -51,7 +52,7 @@ import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import sun.misc.Unsafe;
-
+import sun.nio.ch.DirectBuffer;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import static java.util.Collections.emptyList;
@@ -781,5 +782,58 @@ public final class Ref<T> implements RefCounted<T>
     public static void shutdownReferenceReaper(long timeout, TimeUnit unit) throws InterruptedException, TimeoutException
     {
         ExecutorUtils.shutdownNowAndWait(timeout, unit, EXEC, STRONG_LEAK_DETECTOR);
+    }
+
+    /**
+     * A version of {@link Ref} for objects that implement {@link DirectBuffer}.
+     */
+    public static final class DirectBufferRef<T extends DirectBuffer> implements RefCounted<T>, DirectBuffer
+    {
+        private final Ref<T> wrappedRef;
+        
+        public DirectBufferRef(T referent, Tidy tidy)
+        {
+            wrappedRef = new Ref<>(referent, tidy);
+        }
+
+        @Override
+        public long address()
+        {
+            return wrappedRef.referent != null ? wrappedRef.referent.address() : 0;
+        }
+
+        @Override
+        public Object attachment()
+        {
+            return wrappedRef.referent != null ? wrappedRef.referent.attachment() : null;
+        }
+
+        @Override
+        public Cleaner cleaner()
+        {
+            return wrappedRef.referent != null ? wrappedRef.referent.cleaner() : null;
+        }
+
+        @Override
+        public Ref<T> tryRef()
+        {
+            return wrappedRef.tryRef();
+        }
+
+        @Override
+        public Ref<T> ref()
+        {
+            return wrappedRef.ref();
+        }
+
+        public void release()
+        {
+            wrappedRef.release();
+        }
+
+        public T get()
+        {
+            return wrappedRef.get();
+        }
     }
 }
