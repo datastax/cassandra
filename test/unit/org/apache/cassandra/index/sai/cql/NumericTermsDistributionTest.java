@@ -32,7 +32,9 @@ import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -46,6 +48,10 @@ import static org.junit.Assert.assertTrue;
 @RunWith(Parameterized.class)
 public class NumericTermsDistributionTest extends SAITester
 {
+    static {
+        SAIUtil.setLatestVersion(Version.latest().onOrAfter(Version.EB) ? Version.latest() : Version.EB);
+    }
+
     @Parameterized.Parameter
     public CQL3Type.Native testType;
 
