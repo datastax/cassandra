@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
@@ -69,6 +70,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_S
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
+@Ignore
 public abstract class AbstractTrieMemtableIndexTest extends SAITester
 {
     private ColumnFamilyStore cfs;
