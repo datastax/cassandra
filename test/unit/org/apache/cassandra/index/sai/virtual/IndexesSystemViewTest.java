@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.virtual;
 
 import com.google.common.collect.ImmutableList;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -56,10 +57,11 @@ public class IndexesSystemViewTest extends SAITester
                                                        IndexesSystemView.KEYSPACE_NAME,
                                                        KEYSPACE);
 
-    private Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
-                                                           .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
-                                                                                  .onMethod("startInitialBuild"))
-                                                           .build();
+    private final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
+                                                                 .add(InvokePointBuilder.newInvokePoint()
+                                                                                        .onClass(StorageAttachedIndex.class)
+                                                                                        .onMethod("startInitialBuild"))
+                                                                 .build();
 
     @BeforeClass
     public static void setup() throws Exception
@@ -78,13 +80,14 @@ public class IndexesSystemViewTest extends SAITester
 
         // create the index simulating a long build and verify that there is an empty record in the virtual table
         Injections.inject(blockIndexBuild);
-        String v1IndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
+        String v1IndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
 
         assertRows(execute(SELECT), row(v1IndexName, "v1", false, true, false, 0, 0L));
 
         // unblock the long build and verify that there is an finished empty record in the virtual table
         blockIndexBuild.countDown();
         blockIndexBuild.disable();
+        waitForIndexQueryable(v1IndexName);
         assertRows(execute(SELECT), row(v1IndexName, "v1", true, false, false, 0, 0L));
 
         // insert some data and verify that virtual table record is still empty since we haven't flushed yet
@@ -118,13 +121,9 @@ public class IndexesSystemViewTest extends SAITester
         // compact and verify that the cell count decreases
         Util.forceFullCompaction(getCurrentColumnFamilyStore(), 30);
 
-        System.out.println(makeRowStrings(execute("SELECT * FROM %s")));
-
         assertRowsIgnoringOrderAndExtra(execute(SELECT),
                                         row(v1IndexName, "v1", true, false, false, 1, 3L),
                                         row(v2IndexName, "v2", true, false, true, 1, 3L));
-
-
 
         // drop the second index and verify that there is not entry for it in the virtual table
         dropIndex("DROP INDEX %s." + v2IndexName);
@@ -145,10 +144,11 @@ public class IndexesSystemViewTest extends SAITester
                          boolean isBuilding,
                          boolean isString,
                          int sstableCount,
-                         long cellCount) throws Exception
+                         long cellCount)
     {
             ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
             StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+            Assert.assertNotNull(group);
             StorageAttachedIndex sai = (StorageAttachedIndex) cfs.indexManager.getIndexByName(indexName);
             IndexContext context = sai.getIndexContext();
 
