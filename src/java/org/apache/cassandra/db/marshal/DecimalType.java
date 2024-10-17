@@ -74,6 +74,12 @@ public class DecimalType extends NumberType<BigDecimal>
         return true;
     }
 
+    @Override
+    public boolean isTruncatable()
+    {
+        return true;
+    }
+
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
     {
         return compareComposed(left, accessorL, right, accessorR, this);
