@@ -35,6 +35,8 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.utils.LongIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -53,6 +55,10 @@ import static org.junit.Assert.*;
 
 public class PlanTest
 {
+    static {
+        SAIUtil.setLatestVersion(Version.latest().onOrAfter(Version.EB) ? Version.latest() : Version.EB);
+    }
+
     private static final Orderer ordering = orderer();
 
     @BeforeClass
