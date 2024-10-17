@@ -592,6 +592,11 @@ public class CompressionMetadata implements AutoCloseable
         {
             return String.format("Chunk<offset: %d, length: %d>", offset, length);
         }
+
+        public long endOffset()
+        {
+            return offset + length;
+        }
     }
 
     static class ChunkSerializer implements IVersionedSerializer<Chunk>
