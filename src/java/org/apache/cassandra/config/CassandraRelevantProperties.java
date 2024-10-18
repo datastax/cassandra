@@ -394,6 +394,9 @@ public enum CassandraRelevantProperties
     CURSORS_ENABLED("cassandra.allow_cursor_compaction", "true"),
 
     SYNC_LAG_FACTOR("cassandra.commitlog_sync_block_lag_factor", "1.5"),
+    // When the list of peers is stored to an alternative metadata service (like etcd) we don't need to store
+    // it locally on disk.
+    PERSIST_PEER_NODES_TO_DISK("cassandra.persist_peer_nodes_to_disk", "true"),
 
     CDC_STREAMING_ENABLED("cassandra.cdc.enable_streaming", "true"),
     // Default metric aggegration strategy for tables without aggregation explicitly set.
