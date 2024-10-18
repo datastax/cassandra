@@ -134,6 +134,11 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     <In,Out> IVersionedAsymmetricSerializer<In, Out> responseSerializer(long id, InetAddressAndPort peer)
     {
         CallbackInfo info = get(id, peer);
+        /**
+         * For legacy {@link Verb#REQUEST_RSP} and {@link Verb#INTERNAL_RSP}, the response verb is null,
+         * so we can't use its serializer. That's ok these Verbs don't convey any payload, so they don't need a
+         * serializer.
+         */
         return info == null || info.responseVerb == null ? null : info.responseVerb.serializer();
     }
 
