@@ -103,7 +103,7 @@ public class ShardManagerReplicaAware implements ShardManager
         try
         {
             var splitPoints = splitPointCache.computeIfAbsent(shardCount, this::computeBoundaries);
-            return new ReplicaAlignedShardTracker(splitPoints);
+            return new SimpleShardTracker(splitPoints);
         }
         catch (Throwable t)
         {
@@ -117,6 +117,9 @@ public class ShardManagerReplicaAware implements ShardManager
         logger.debug("Creating shard boundaries for {} shards", shardCount);
         // Because sstables do not wrap around, we need shardCount - 1 splits.
         var splitPointCount = shardCount - 1;
+        if (splitPointCount == 0)
+            return new Token[]{partitioner.getMinimumToken()};
+
         // Copy array list. The current token allocation logic doesn't consider our copy of tokenMetadata, so
         // modifying the sorted tokens here won't give us much benefit.
         var sortedTokensList = new ArrayList<>(tokenMetadata.sortedTokens());
@@ -128,16 +131,23 @@ public class ShardManagerReplicaAware implements ShardManager
             sortedTokensList.addAll(newTokens);
             sortedTokensList.sort(Token::compareTo);
         }
-        var sortedTokens = sortedTokensList.toArray(EMPTY_TOKENS);
-        // Short circuit on equal and on count 1.
-        if (sortedTokens.length == splitPointCount)
+
+        // Short circuit on equal.
+        if (sortedTokensList.size() == splitPointCount)
+        {
+            var sortedTokens = new Token[shardCount];
+            sortedTokens[0] = partitioner.getMinimumToken();
+            for (int i = 0; i < splitPointCount; i++)
+                sortedTokens[i + 1] = sortedTokensList.get(i);
             return sortedTokens;
-        if (splitPointCount == 0)
-            return EMPTY_TOKENS;
+        }
+
+        var sortedTokens = sortedTokensList.toArray(EMPTY_TOKENS);
 
         // Get the ideal split points and then map them to their nearest neighbor.
         var evenSplitPoints = computeUniformSplitPoints(splitPointCount);
-        var nodeAlignedSplitPoints = new Token[splitPointCount];
+        var nodeAlignedSplitPoints = new Token[shardCount];
+        nodeAlignedSplitPoints[0] = partitioner.getMinimumToken();
 
         // UCS requires that the splitting points for a given density are also splitting points for
         // all higher densities, so we pick from among the existing tokens.
@@ -154,7 +164,7 @@ public class ShardManagerReplicaAware implements ShardManager
             if (pos == min)
             {
                 // No left neighbor, so choose the right neighbor
-                nodeAlignedSplitPoints[i] = sortedTokens[pos];
+                nodeAlignedSplitPoints[i + 1] = sortedTokens[pos];
                 pos++;
             }
             else if (pos == max)
@@ -162,7 +172,7 @@ public class ShardManagerReplicaAware implements ShardManager
                 // No right neighbor, so choose the left neighbor
                 // This also means that for all greater indexes we don't have a choice.
                 for (; i < evenSplitPoints.length; ++i)
-                    nodeAlignedSplitPoints[i] = sortedTokens[pos++ - 1];
+                    nodeAlignedSplitPoints[i + 1] = sortedTokens[pos++ - 1];
             }
             else
             {
@@ -174,12 +184,12 @@ public class ShardManagerReplicaAware implements ShardManager
                 // choose the same token twice.
                 if (leftNeighbor.size(value) <= value.size(rightNeighbor))
                 {
-                    nodeAlignedSplitPoints[i] = leftNeighbor;
+                    nodeAlignedSplitPoints[i + 1] = leftNeighbor;
                     // No need to bump pos because we decremented it to find the right split token.
                 }
                 else
                 {
-                    nodeAlignedSplitPoints[i] = rightNeighbor;
+                    nodeAlignedSplitPoints[i + 1] = rightNeighbor;
                     pos++;
                 }
             }
@@ -201,118 +211,5 @@ public class ShardManagerReplicaAware implements ShardManager
             tokens[i] = partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), ratioToLeft);
         }
         return tokens;
-    }
-
-    private class ReplicaAlignedShardTracker implements ShardTracker
-    {
-        private final Token minToken;
-        private final Token[] sortedTokens;
-        private int nextShardIndex = 0;
-        private Token currentEnd;
-
-        ReplicaAlignedShardTracker(Token[] sortedTokens)
-        {
-            this.sortedTokens = sortedTokens;
-            this.minToken = partitioner.getMinimumToken();
-            this.currentEnd = nextShardIndex < sortedTokens.length ? sortedTokens[nextShardIndex] : null;
-        }
-
-        @Override
-        public Token shardStart()
-        {
-            return nextShardIndex == 0 ? minToken : sortedTokens[nextShardIndex - 1];
-        }
-
-        @Nullable
-        @Override
-        public Token shardEnd()
-        {
-            return nextShardIndex < sortedTokens.length ? sortedTokens[nextShardIndex] : null;
-        }
-
-        @Override
-        public Range<Token> shardSpan()
-        {
-            return new Range<>(shardStart(), end());
-        }
-
-        @Override
-        public double shardSpanSize()
-        {
-            // No weight applied because weighting is a local range property.
-            return shardStart().size(end());
-        }
-
-        /**
-         * Non-nullable implementation of {@link ShardTracker#shardEnd()}
-         * @return
-         */
-        private Token end()
-        {
-            Token end = shardEnd();
-            return end != null ? end : minToken;
-        }
-
-        @Override
-        public boolean advanceTo(Token nextToken)
-        {
-            if (currentEnd == null || nextToken.compareTo(currentEnd) <= 0)
-                return false;
-            do
-            {
-                nextShardIndex++;
-                currentEnd = shardEnd();
-                if (currentEnd == null)
-                    break;
-            } while (nextToken.compareTo(currentEnd) > 0);
-            return true;
-        }
-
-        @Override
-        public int count()
-        {
-            return sortedTokens.length + 1;
-        }
-
-        @Override
-        public double fractionInShard(Range<Token> targetSpan)
-        {
-            Range<Token> shardSpan = shardSpan();
-            Range<Token> covered = targetSpan.intersectionNonWrapping(shardSpan);
-            if (covered == null)
-                return 0;
-            if (covered == targetSpan)
-                return 1;
-            double inShardSize = covered.left.size(covered.right);
-            double totalSize = targetSpan.left.size(targetSpan.right);
-            return inShardSize / totalSize;
-        }
-
-        @Override
-        public double rangeSpanned(PartitionPosition first, PartitionPosition last)
-        {
-            // Ignore local range owndership for initial implementation.
-            return first.getToken().size(last.getToken());
-        }
-
-        @Override
-        public int shardIndex()
-        {
-            return nextShardIndex - 1;
-        }
-
-        @Override
-        public long shardAdjustedKeyCount(Set<SSTableReader> sstables)
-        {
-            // Not sure if this needs a custom implementation yet
-            return ShardTracker.super.shardAdjustedKeyCount(sstables);
-        }
-
-        @Override
-        public void applyTokenSpaceCoverage(SSTableWriter writer)
-        {
-            // Not sure if this needs a custom implementation yet
-            ShardTracker.super.applyTokenSpaceCoverage(writer);
-        }
     }
 }
