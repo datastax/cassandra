@@ -37,6 +37,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.MapDifference;
+import com.google.common.collect.Sets;
 import org.apache.commons.lang3.ObjectUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -91,6 +92,8 @@ public class Schema implements SchemaProvider
 
     public static final String FORCE_LOAD_LOCAL_KEYSPACES_PROP = "cassandra.schema.force_load_local_keyspaces";
     private static final boolean FORCE_LOAD_LOCAL_KEYSPACES = Boolean.getBoolean(FORCE_LOAD_LOCAL_KEYSPACES_PROP);
+
+    private static final Set<String> TEMPORARILY_UNMAPPED_SYSTEM_TABLE = Sets.newConcurrentHashSet();
 
     public static final Schema instance = new Schema();
 
@@ -466,7 +469,7 @@ public class Schema implements SchemaProvider
         if (tableName.isEmpty())
             throw new InvalidRequestException("non-empty table is required");
 
-        if (NodeConstants.canBeMapped(keyspaceName, tableName))
+        if (NodeConstants.canBeMapped(keyspaceName, tableName) && isMapped(keyspaceName, tableName))
         {
             KeyspaceMetadata systemViews = VirtualKeyspaceRegistry.instance.getKeyspaceMetadataNullable(SchemaConstants.SYSTEM_VIEWS_KEYSPACE_NAME);
             if (systemViews == null)
@@ -483,6 +486,16 @@ public class Schema implements SchemaProvider
             throw new InvalidRequestException(format("table %s does not exist", tableName));
 
         return metadata;
+    }
+
+    private static boolean isMapped(String keyspaceName, String tableName)
+    {
+        if (SchemaConstants.SYSTEM_KEYSPACE_NAME.equals(keyspaceName))
+        {
+            return !TEMPORARILY_UNMAPPED_SYSTEM_TABLE.contains(tableName);
+        }
+
+        return true;
     }
 
     public TableMetadata getTableMetadata(Descriptor descriptor)
@@ -843,5 +856,15 @@ public class Schema implements SchemaProvider
     public static boolean isKeyspaceWithLocalStrategy(KeyspaceMetadata keyspace)
     {
         return SchemaConstants.isLocalSystemKeyspace(keyspace.name) || keyspace.params.replication.klass.equals(LocalStrategy.class);
+    }
+
+    public static void unmapSystemTable(String table)
+    {
+        TEMPORARILY_UNMAPPED_SYSTEM_TABLE.add(table);
+    }
+
+    public static void mapSystemTable(String table)
+    {
+        TEMPORARILY_UNMAPPED_SYSTEM_TABLE.remove(table);
     }
 }
