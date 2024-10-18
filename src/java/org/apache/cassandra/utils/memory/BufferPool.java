@@ -39,12 +39,13 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import jdk.internal.ref.Cleaner;
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
-import jdk.internal.ref.Cleaner;
-import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.concurrent.Shutdownable;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.FileUtils;
