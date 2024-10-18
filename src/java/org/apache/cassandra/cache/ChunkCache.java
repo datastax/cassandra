@@ -30,6 +30,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -52,6 +53,7 @@ import com.github.benmanes.caffeine.cache.RemovalListener;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
@@ -61,6 +63,8 @@ import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS;
 
 public class ChunkCache
         implements RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
@@ -422,12 +426,12 @@ public class ChunkCache
                         }
                         else
                         {
-                            chunk = existing.join();
+                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
                         }
                     }
                     else
                     {
-                        chunk = cachedValue.join();
+                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
                     }
 
                     buf = chunk.reference();
