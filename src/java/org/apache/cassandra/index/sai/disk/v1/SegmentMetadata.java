@@ -262,7 +262,10 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             case NOT_CONTAINS_VALUE:
             {
                 var value = asByteComparable(predicate.lower.value.encoded, predicate.validator);
-                return numRows - termsDistribution.estimateNumRowsMatchingExact(value);
+                if (TypeUtil.supportsRounding(predicate.validator))
+                    return numRows;
+                else
+                    return numRows - termsDistribution.estimateNumRowsMatchingExact(value);
             }
             case RANGE:
             {
