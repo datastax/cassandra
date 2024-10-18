@@ -38,7 +38,6 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.ActiveRequestSensorsFactory;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
@@ -51,6 +50,10 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.assertj.core.api.Assertions;
 
+/**
+ * Test to verify that the sensors are propagated via the native protocol in the custom payload respecting
+ * the configuration set in {@link CassandraRelevantProperties#PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL}
+ */
 public class SensorsTest extends TestBaseImpl
 {
     @BeforeClass
@@ -87,6 +90,32 @@ public class SensorsTest extends TestBaseImpl
 
                 double readBytesRequest = getReadBytesRequest(customPayload, expectedReadHeader);
                 Assertions.assertThat(readBytesRequest).isGreaterThan(0D);
+            });
+        }
+    }
+
+    @Test
+    public void testSensorsInResultMessageDisabled() throws Throwable
+    {
+        CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(false);
+        try (Cluster cluster = builder().withNodes(1).start())
+        {
+            // resister a noop sensor listener before init(cluster) which creates the test keyspace to ensure that the registry singleton instance is subscribed to schema notifications
+            cluster.get(1).runsOnInstance(initSensorsRegistry()).run();
+            init(cluster);
+            cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)"));
+            String write = withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')");
+            String query = withKeyspace("SELECT * FROM %s.tbl WHERE pk=1");
+
+            // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
+            cluster.get(1).runOnInstance(() -> {
+                ResultMessage writeResult = executeWithResult(write);
+                Map<String, ByteBuffer> customPayload = writeResult.getCustomPayload();
+                Assertions.assertThat(customPayload).isNull();
+
+                ResultMessage.Rows readResult = executeWithPagingWithResultMessage(query);
+                customPayload = readResult.getCustomPayload();
+                Assertions.assertThat(customPayload).isNull();
             });
         }
     }
@@ -160,7 +189,7 @@ public class SensorsTest extends TestBaseImpl
     /**
      * TODO: update SimpleQueryResult in the dtest-api project to expose custom payload and use Coordinator##executeWithResult instead
      */
-    private static ResultMessage executeWithResult(String query, Object... args)
+    private static ResultMessage executeWithResult(String query)
     {
         long nanoTime = System.nanoTime();
         QueryHandler.Prepared prepared = QueryProcessor.prepareInternal(query);
