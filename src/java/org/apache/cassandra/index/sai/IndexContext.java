@@ -446,7 +446,7 @@ public class IndexContext
     private RangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         RangeIterator allKeys = scanMemtable(keyRange);
-        if (expression.validator.isTruncatable())
+        if (TypeUtil.supportsRounding(expression.validator))
         {
             return allKeys;
         }

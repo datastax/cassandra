@@ -49,6 +49,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -210,7 +211,7 @@ public class SSTableIndex
                                            boolean defer) throws IOException
     {
         RangeIterator allKeys = allSSTableKeys(keyRange);
-        if (expression.validator.isTruncatable())
+        if (TypeUtil.supportsRounding(expression.validator))
         {
             return allKeys;
         }
