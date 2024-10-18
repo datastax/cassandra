@@ -504,7 +504,10 @@ public enum CassandraRelevantProperties
      * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class");
+    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+
+    /** Class used to discover/load the proper SAI index components file for a given sstable. */
+    CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY("cassandra.sai.custom_components_discovery_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

@@ -96,7 +96,7 @@ public class SSTableIndex
             return new EmptyIndex();
         }
 
-        return perIndexComponents.version().onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
+        return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
     }
 
     public IndexContext getIndexContext()
