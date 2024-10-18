@@ -64,7 +64,7 @@ import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_JOIN_TIMEOUT;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS;
 
 public class ChunkCache
         implements RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
@@ -426,12 +426,12 @@ public class ChunkCache
                         }
                         else
                         {
-                            chunk = existing.orTimeout(CHUNK_CACHE_REBUFFER_JOIN_TIMEOUT.getInt(), TimeUnit.MILLISECONDS).join();
+                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
                         }
                     }
                     else
                     {
-                        chunk = cachedValue.orTimeout(CHUNK_CACHE_REBUFFER_JOIN_TIMEOUT.getInt(), TimeUnit.MILLISECONDS).join();
+                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
                     }
 
                     buf = chunk.reference();

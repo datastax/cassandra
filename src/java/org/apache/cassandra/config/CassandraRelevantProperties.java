@@ -512,10 +512,10 @@ public enum CassandraRelevantProperties
     DEDICATED_STAGE_EXECUTOR_ENABLED("cassandra.stage.dedicated_executor", "false"),
 
     /**
-     * Hotfix property to allow setting the maximum time that CachingRebufferer.rebuffer will wait when joining
-     * a CompletableFuture fetched from the cache. This is part of a migitation for DBPE-13261
+     * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
+     * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
      */
-    CHUNK_CACHE_REBUFFER_JOIN_TIMEOUT("cassandra.chunk_cache_rebuffer_join_timeout_ms", "30000");
+    CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
