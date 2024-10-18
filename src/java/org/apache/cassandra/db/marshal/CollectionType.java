@@ -157,7 +157,7 @@ public abstract class CollectionType<T> extends MultiCellCapableType<T>
         // nameComparator() is hard-coded), but this method is not so performance sensitive that it's worth bothering.
         CollectionType<?> prev = (CollectionType<?>)previous;
         return nameComparator().isCompatibleWith(prev.nameComparator())
-               && valueComparator().isCompatibleWith(prev.valueComparator());
+               && valueComparator().isSerializationCompatibleWith(prev.valueComparator());
     }
 
     @Override
@@ -168,7 +168,7 @@ public abstract class CollectionType<T> extends MultiCellCapableType<T>
         // for sorting so value-compatibility is enough.
         CollectionType<?> prev = (CollectionType<?>)previous;
         return nameComparator().isCompatibleWith(prev.nameComparator())
-               && valueComparator().isValueCompatibleWith(prev.valueComparator());
+               && valueComparator().isSerializationCompatibleWith(prev.valueComparator());
     }
 
     @Override
@@ -177,7 +177,7 @@ public abstract class CollectionType<T> extends MultiCellCapableType<T>
         // When frozen, the full collection is a blob, so value-compatibility is all we care for everything.
         CollectionType<?> prev = (CollectionType<?>)previous;
         return nameComparator().isValueCompatibleWith(prev.nameComparator())
-               && valueComparator().isValueCompatibleWith(prev.valueComparator());
+               && valueComparator().isSerializationCompatibleWith(prev.valueComparator());
     }
 
     public CQL3Type asCQL3Type()
