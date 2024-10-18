@@ -53,6 +53,9 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
 
     public void onResponse(Message<T> m)
     {
+        if (m != null)
+            responseMessages.get().add(m);
+
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();
         //Must be last after all subclass processing

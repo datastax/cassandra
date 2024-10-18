@@ -19,13 +19,21 @@
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
 
+import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestSensorsFactory;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * A utility class that contains the definition of custom params added to the {@link Message} header to propagate {@link Sensor} values from
@@ -33,53 +41,6 @@ import org.apache.cassandra.sensors.SensorsRegistry;
  */
 public final class SensorsCustomParams
 {
-    /**
-     * The per-request read bytes value for a given keyspace and table.
-     */
-    public static final String READ_BYTES_REQUEST = "READ_BYTES_REQUEST";
-    /**
-     * The total read bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
-     */
-    public static final String READ_BYTES_TABLE = "READ_BYTES_TABLE";
-    /**
-     * The per-request write bytes value for a given keyspace and table.
-     * To support batch writes, table name is encoded in the following format: WRITE_BYTES_REQUEST.<table>
-     */
-    public static final String WRITE_BYTES_REQUEST_TEMPLATE = "WRITE_BYTES_REQUEST.%s";
-    /**
-     * The total write bytes value for a given keyspace and table, across all requests.
-     * To support batch writes, table name is encoded in the following format: WRITE_BYTES_TABLE.<table>
-     */
-    public static final String WRITE_BYTES_TABLE_TEMPLATE = "WRITE_BYTES_TABLE.%s";
-    /**
-     * The per-request index read bytes value for a given keyspace and table.
-     */
-    public static final String INDEX_READ_BYTES_REQUEST = "INDEX_READ_BYTES_REQUEST";
-    /**
-     * The total index read bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
-     */
-    public static final String INDEX_READ_BYTES_TABLE = "INDEX_READ_BYTES_TABLE";
-    /**
-     * The per-request index write bytes value for a given keyspace and table.
-     * To support batch writes, table name is encoded in the following format: INDEX_WRITE_BYTES_REQUEST.<table>
-     */
-    public static final String INDEX_WRITE_BYTES_REQUEST_TEMPLATE = "INDEX_WRITE_BYTES_REQUEST.%s";
-    /**
-     * The total index write bytes value for a given keyspace and table, across all requests.
-     * To support batch writes, table name is encoded in the following format: INDEX_WRITE_BYTES_TABLE.<table>
-     */
-    public static final String INDEX_WRITE_BYTES_TABLE_TEMPLATE = "INDEX_WRITE_BYTES_TABLE.%s";
-    /**
-     * The per-request internode message bytes received and sent by the writer for a given keyspace and table.
-     * To support batch writes, table name is encoded in the following format: INTERNODE_MSG_BYTES_REQUEST.<table>
-     */
-    public static final String INTERNODE_MSG_BYTES_REQUEST_TEMPLATE = "INTERNODE_MSG_BYTES_REQUEST.%s";
-    /**
-     * The total internode message bytes received by the writer or coordinator for a given keyspace and table.
-     * To support batch writes, table name is encoded in the following format: INTERNODE_MSG_BYTES_TABLE.<table>
-     */
-    public static final String INTERNODE_MSG_BYTES_TABLE_TEMPLATE = "INTERNODE_MSG_BYTES_TABLE.%s";
-
     private SensorsCustomParams()
     {
     }
@@ -95,42 +56,20 @@ public final class SensorsCustomParams
         return buffer.array();
     }
 
+    public static ByteBuffer sensorValueAsByteBuffer(double value)
+    {
+        ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
+        buffer.putDouble(value);
+        buffer.flip();
+        return buffer;
+    }
+
     public static double sensorValueFromBytes(byte[] bytes)
     {
         ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
         buffer.put(bytes);
         buffer.flip();
         return buffer.getDouble();
-    }
-
-    public static String encodeTableInWriteBytesRequestParam(String tableName)
-    {
-        return String.format(WRITE_BYTES_REQUEST_TEMPLATE, tableName);
-    }
-
-    public static String encodeTableInWriteBytesTableParam(String tableName)
-    {
-        return String.format(WRITE_BYTES_TABLE_TEMPLATE, tableName);
-    }
-
-    public static String encodeTableInIndexWriteBytesRequestParam(String tableName)
-    {
-        return String.format(INDEX_WRITE_BYTES_REQUEST_TEMPLATE, tableName);
-    }
-
-    public static String encodeTableInIndexWriteBytesTableParam(String tableName)
-    {
-        return String.format(INDEX_WRITE_BYTES_TABLE_TEMPLATE, tableName);
-    }
-
-    public static String encodeTableInInternodeBytesRequestParam(String tableName)
-    {
-        return String.format(INTERNODE_MSG_BYTES_REQUEST_TEMPLATE, tableName);
-    }
-
-    public static String encodeTableInInternodeBytesTableParam(String tableName)
-    {
-        return String.format(INTERNODE_MSG_BYTES_TABLE_TEMPLATE, tableName);
     }
 
     /**
@@ -152,51 +91,88 @@ public final class SensorsCustomParams
         }
     }
 
+    /**
+     * Reads the sensor value from the message header.
+     *
+     * @param message the message to read the sensor value from
+     * @param param   the name of the header to read the sensor value from
+     * @param <T>     the message type
+     * @return the sensor value
+     */
+    public static <T> double sensorValueFromCustomParam(Message<T> message, String param)
+    {
+        if (param == null)
+            return 0.0;
+
+        Map<String, byte[]> customParams = message.header.customParams();
+        if (customParams == null)
+            return 0.0;
+
+        byte[] readBytes = message.header.customParams().get(param);
+        if (readBytes == null)
+            return 0.0;
+
+        return sensorValueFromBytes(readBytes);
+    }
+
+
+
+    /**
+     * Adds the sensors to the native protocol response message as a custom payload.
+     *
+     * @param response        the response message to add the sensors to
+     * @param protocolVersion the protocol version as custom pauloads are only supported for protocol version >= 4
+     * @param sensors         the requests sensor tracker to get the sensor values from
+     * @param context         the context of the sensor
+     * @param type            the type of the sensor
+     */
+    public static void addSensorToMessageResponse(org.apache.cassandra.transport.Message.Response response,
+                                                  ProtocolVersion protocolVersion,
+                                                  RequestSensors sensors,
+                                                  Context context,
+                                                  Type type)
+    {
+        // Custom payload is not supported for protocol versions < 4
+        if (protocolVersion.isSmallerThan(ProtocolVersion.V4))
+        {
+            return;
+        }
+
+        if (response == null || sensors == null)
+        {
+            return;
+        }
+
+        Optional<Sensor> writeRequestSensor = sensors.getSensor(context, type);
+        writeRequestSensor.ifPresent(sensor -> {
+            ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
+            String headerName = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
+            Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(headerName, bytes);
+            response.setCustomPayload(sensorHeader);
+        });
+    }
+
     private static <T> void addSensorToResponse(Message.Builder<T> response, Sensor sensor)
     {
         byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-        String requestParam = requestParamForSensor(sensor);
+        String requestParam = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
         response.withCustomParam(requestParam, requestBytes);
 
         Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(sensor.getContext(), sensor.getType());
         registrySensor.ifPresent(registry -> {
             byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(registry.getValue());
-            String tableParam = tableParamForSensor(sensor);
+            String tableParam = RequestSensorsFactory.instance.registrySensorEncoder().apply(sensor);
             response.withCustomParam(tableParam, tableBytes);
         });
     }
 
-    private static String requestParamForSensor(Sensor sensor)
+    public static String requestParamForSensor(Sensor sensor)
     {
-        switch (sensor.getType())
-        {
-            case INTERNODE_BYTES:
-                return SensorsCustomParams.encodeTableInInternodeBytesRequestParam(sensor.getContext().getTable());
-            case INDEX_WRITE_BYTES:
-                return SensorsCustomParams.encodeTableInIndexWriteBytesRequestParam(sensor.getContext().getTable());
-            case WRITE_BYTES:
-                return SensorsCustomParams.encodeTableInWriteBytesRequestParam(sensor.getContext().getTable());
-            case READ_BYTES:
-                return SensorsCustomParams.READ_BYTES_REQUEST;
-            default:
-                throw new IllegalArgumentException("Request param is unknown sensor type: " + sensor.getType().toString());
-        }
+        return RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
     }
 
-    private static String tableParamForSensor(Sensor sensor)
+    public static String tableParamForSensor(Sensor sensor)
     {
-        switch (sensor.getType())
-        {
-            case INTERNODE_BYTES:
-                return SensorsCustomParams.encodeTableInInternodeBytesTableParam(sensor.getContext().getTable());
-            case INDEX_WRITE_BYTES:
-                return SensorsCustomParams.encodeTableInIndexWriteBytesTableParam(sensor.getContext().getTable());
-            case WRITE_BYTES:
-                return SensorsCustomParams.encodeTableInWriteBytesTableParam(sensor.getContext().getTable());
-            case READ_BYTES:
-                return SensorsCustomParams.READ_BYTES_TABLE;
-            default:
-                throw new IllegalArgumentException("Table param is unknown for sensor type: " + sensor.getType().toString());
-        }
+        return RequestSensorsFactory.instance.registrySensorEncoder().apply(sensor);
     }
 }
