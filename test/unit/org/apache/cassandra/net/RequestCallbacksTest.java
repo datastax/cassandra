@@ -39,16 +39,16 @@ public class RequestCallbacksTest
     @Test
     public void testInternalResponseNullSerializer() throws Exception
     {
-        depractedResponsesShouldReturnNullSerializer(Verb.INTERNAL_RSP);
+        deprecatedResponsesShouldReturnNullSerializer(Verb.INTERNAL_RSP);
     }
 
     @Test
     public void testRequestResponseNullSerializer() throws Exception
     {
-        depractedResponsesShouldReturnNullSerializer(Verb.REQUEST_RSP);
+        deprecatedResponsesShouldReturnNullSerializer(Verb.REQUEST_RSP);
     }
 
-    public void depractedResponsesShouldReturnNullSerializer(Verb verb) throws Exception
+    public void deprecatedResponsesShouldReturnNullSerializer(Verb verb) throws Exception
     {
         MessagingService messagingService = mock(MessagingService.class);
         RequestCallbacks requestCallbacks = new RequestCallbacks(messagingService);
