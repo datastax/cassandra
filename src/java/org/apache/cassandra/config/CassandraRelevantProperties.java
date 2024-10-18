@@ -509,7 +509,13 @@ public enum CassandraRelevantProperties
      * If true, a set of Stages will be created with dedicated executors, as opposed to shared "low latency" executor.
      * @see Stage
      */
-    DEDICATED_STAGE_EXECUTOR_ENABLED("cassandra.stage.dedicated_executor", "false");
+    DEDICATED_STAGE_EXECUTOR_ENABLED("cassandra.stage.dedicated_executor", "false"),
+
+    /**
+     * Hotfix property to allow setting the maximum time that CachingRebufferer.rebuffer will wait when joining
+     * a CompletableFuture fetched from the cache. This is part of a migitation for DBPE-13261
+     */
+    CHUNK_CACHE_REBUFFER_JOIN_TIMEOUT("cassandra.chunk_cache_rebuffer_join_timeout_ms", "30000");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
