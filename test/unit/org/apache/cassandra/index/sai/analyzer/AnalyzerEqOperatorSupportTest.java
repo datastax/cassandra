@@ -37,7 +37,7 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
     @Before
     public void createTable()
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, f text)");
     }
 
     private void populateTable()
@@ -246,6 +246,14 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         assertIndexQueries("{'index_analyzer': 'standard', 'equals_behaviour_when_analyzed': 'UNSUPPORTED'}", () -> {
             assertIndexDoesNotSupportEquals();
             assertTokenizedIndexSupportsMatches();
+
+            // test mixed with another non-indexed column
+            assertInvalidMessage(": restriction is only supported on properly indexed columns",
+                                 "SELECT k FROM %s WHERE v : 'Quick' OR f : 'Lazy' ALLOW FILTERING");
+            assertRowsWithoutWarning("SELECT k FROM %s WHERE v : 'Quick' OR f = 'Lazy' ALLOW FILTERING", row(1));
+            assertInvalidMessage(": restriction is only supported on properly indexed columns",
+                                 "SELECT k FROM %s WHERE v = 'Quick' OR f : 'Lazy' ALLOW FILTERING");
+            assertRowsWithoutWarning("SELECT k FROM %s WHERE v = 'Quick' OR f = 'Lazy' ALLOW FILTERING");
         });
     }
 
@@ -314,6 +322,13 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'lazy'");
         assertRowsWithWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'dog'", row(1));
         assertRowsWithWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'Lazy'", row(1), row(2));
+
+        // test mixed with another non-indexed column
+        String errorMsg = ": restriction is only supported on properly indexed columns";
+        assertInvalidMessage(errorMsg, "SELECT k FROM %s WHERE v : 'Quick' OR f : 'Lazy' ALLOW FILTERING");
+        assertRowsWithoutWarning("SELECT k FROM %s WHERE v : 'Quick' OR f = 'Lazy' ALLOW FILTERING", row(1));
+        assertInvalidMessage(errorMsg, "SELECT k FROM %s WHERE v = 'Quick' OR f : 'Lazy' ALLOW FILTERING");
+        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' OR f = 'Lazy' ALLOW FILTERING", row(1));
     }
 
     private void assertIndexDoesNotSupportEquals()
