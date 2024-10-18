@@ -53,7 +53,6 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Shared;
 import sun.misc.Unsafe;
 import sun.nio.ch.DirectBuffer;
-
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import static java.util.Collections.emptyList;
