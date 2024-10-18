@@ -16,9 +16,6 @@
  * limitations under the License.
  */
 package org.apache.cassandra.service.reads;
-
-import java.util.Map;
-
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +26,6 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.transform.DuplicateRowChecker;
@@ -45,11 +41,6 @@ import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.metrics.ReadCoordinationMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.SensorsCustomParams;
-import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
-import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy.LocalReadRunnable;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
@@ -58,7 +49,6 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.collect.Iterables.all;
-import static com.google.common.collect.Iterables.transform;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 /**
@@ -84,8 +74,6 @@ public abstract class AbstractReadExecutor
     private   final int initialDataRequestCount;
     protected volatile PartitionIterator result = null;
     protected final QueryInfoTracker.ReadTracker readTracker;
-    private final RequestSensors requestSensors;
-
     static
     {
         MessagingService.instance().latencySubscribers.subscribe(ReadCoordinationMetrics::updateReplicaLatency);
@@ -109,7 +97,6 @@ public abstract class AbstractReadExecutor
         this.traceState = Tracing.instance.get();
         this.queryStartNanoTime = queryStartNanoTime;
         this.readTracker = readTracker;
-        this.requestSensors = RequestTracker.instance.get();
 
         // Set the digest version (if we request some digests). This is the smallest version amongst all our target replicas since new nodes
         // knows how to produce older digest but the reverse is not true.
@@ -411,7 +398,6 @@ public abstract class AbstractReadExecutor
         {
             handler.awaitResults();
             assert digestResolver.isDataPresent() : "awaitResults returned with no data present.";
-            incrementReadSensor();
         }
         catch (ReadTimeoutException e)
         {
@@ -472,23 +458,5 @@ public abstract class AbstractReadExecutor
     {
         Preconditions.checkState(result != null, "Result must be set first");
         return result;
-    }
-
-    /**
-     * Increments the sensor for the read bytes request by summing up the sensor value returned by atleast
-     * a quorum of replicas.
-     */
-    private void incrementReadSensor()
-    {
-        if (this.requestSensors == null)
-            return;
-
-        if (!handler.resolver.isDataPresent())
-            return;
-
-        Context context = Context.from(this.command);
-        transform(handler.resolver.getMessages().snapshot(),
-                  msg -> SensorsCustomParams.sensorValueFromCustomParam(msg, SensorsCustomParams.READ_BYTES_REQUEST))
-        .forEach(value -> requestSensors.incrementSensor(context, Type.READ_BYTES, value));
     }
 }

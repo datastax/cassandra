@@ -41,54 +41,6 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public final class SensorsCustomParams
 {
-    /**
-     * The per-request read bytes value for a given keyspace and table.
-     */
-    public static final String READ_BYTES_REQUEST = "READ_BYTES_REQUEST";
-    /**
-     * The total read bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
-     */
-    public static final String READ_BYTES_TABLE = "READ_BYTES_TABLE";
-    /**
-     * The per-request write bytes value for a given keyspace and table.
-     */
-    public static final String WRITE_BYTES_REQUEST = "WRITE_BYTES_REQUEST";
-    /**
-     * The total write bytes value for a given keyspace and table, across all requests.
-     */
-    public static final String WRITE_BYTES_TABLE = "WRITE_BYTES_TABLE";
-    /**
-     * The per-request index read bytes value for a given keyspace and table.
-     */
-    public static final String INDEX_READ_BYTES_REQUEST = "INDEX_READ_BYTES_REQUEST";
-    /**
-     * The total index read bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
-     */
-    public static final String INDEX_READ_BYTES_TABLE = "INDEX_READ_BYTES_TABLE";
-    /**
-     * The per-request index write bytes value for a given keyspace and table.
-     */
-    public static final String INDEX_WRITE_BYTES_REQUEST = "INDEX_WRITE_BYTES_REQUEST";
-    /**
-     * The total index write bytes value for a given keyspace and table, across all requests.
-     */
-    public static final String INDEX_WRITE_BYTES_TABLE = "INDEX_WRITE_BYTES_TABLE";
-    /**
-     * The per-request internode message bytes received and sent by the writer for a given keyspace and table.
-     */
-    public static final String INTERNODE_MSG_BYTES_REQUEST = "INTERNODE_MSG_BYTES_REQUEST";
-    /**
-     * The total internode message bytes received by the writer or coordinator for a given keyspace and table.
-     */
-    public static final String INTERNODE_MSG_BYTES_TABLE = "INTERNODE_MSG_BYTES_TABLE";
-
-    public static final Function<Context, String> SUFFIX_SUPPLIER = RequestSensorsFactory.instance.requestSensorSuffixSupplier();
-
-    /**
-     * The delimiter used to separate the header name and the suffix in the custom param name.
-     */
-    public static final String CUSTOM_PARAM_DELIMITER = ".";
-
     private SensorsCustomParams()
     {
     }
@@ -128,14 +80,14 @@ public final class SensorsCustomParams
      * @param response the response message builder to add the sensors to
      * @param <T>      the response message builder type
      */
-    public static <T> void addSensorsToResponse(RequestSensors sensors, Message.Builder<T> response, boolean applySuffix)
+    public static <T> void addSensorsToResponse(RequestSensors sensors, Message.Builder<T> response)
     {
         Preconditions.checkNotNull(sensors);
         Preconditions.checkNotNull(response);
 
         for (Sensor sensor : sensors.getSensors(ignored -> true))
         {
-            addSensorToResponse(response, sensor, applySuffix);
+            addSensorToResponse(response, sensor);
         }
     }
 
@@ -149,6 +101,9 @@ public final class SensorsCustomParams
      */
     public static <T> double sensorValueFromCustomParam(Message<T> message, String param)
     {
+        if (param == null)
+            return 0.0;
+
         Map<String, byte[]> customParams = message.header.customParams();
         if (customParams == null)
             return 0.0;
@@ -160,55 +115,7 @@ public final class SensorsCustomParams
         return sensorValueFromBytes(readBytes);
     }
 
-    /**
-     * Returns the request param name for the given sensor after optionally applying the suffix supplier by {@link RequestSensorsFactory#requestSensorSuffixSupplier()}.
-     *
-     * @param sensor      the sensor to get the request param name for
-     * @param applySuffix whether to apply the suffix or not. If applied, the {@link SensorsCustomParams#CUSTOM_PARAM_DELIMITER} is used to separate the header and the suffix.
-     *                    the flag will be ignored for read bytes sensor.
-     * @return the request param name
-     */
-    public static String requestParamForSensor(Sensor sensor, boolean applySuffix)
-    {
-        switch (sensor.getType())
-        {
-            case INTERNODE_BYTES:
-                return applySuffix ? applySuffix(INTERNODE_MSG_BYTES_REQUEST, sensor.getContext()) : INTERNODE_MSG_BYTES_REQUEST;
-            case INDEX_WRITE_BYTES:
-                return applySuffix ? applySuffix(INDEX_WRITE_BYTES_REQUEST, sensor.getContext()) : INDEX_WRITE_BYTES_REQUEST;
-            case WRITE_BYTES:
-                return applySuffix ? applySuffix(WRITE_BYTES_REQUEST, sensor.getContext()) : WRITE_BYTES_REQUEST;
-            case READ_BYTES:
-                return READ_BYTES_REQUEST;
-            default:
-                throw new IllegalArgumentException("Request param is unknown sensor type: " + sensor.getType().toString());
-        }
-    }
 
-    /**
-     * Returns the table param name for the given sensor after optionally applying the suffix supplier by {@link RequestSensorsFactory#requestSensorSuffixSupplier()}.
-     *
-     * @param sensor      the sensor to get the request param name for
-     * @param applySuffix whether to apply the suffix or not. If applied, the {@link SensorsCustomParams#CUSTOM_PARAM_DELIMITER} is used to separate the header and the suffix.
-     *                    the flag will be ignored for read bytes sensor.
-     * @return the request param name
-     */
-    public static String tableParamForSensor(Sensor sensor, boolean applySuffix)
-    {
-        switch (sensor.getType())
-        {
-            case INTERNODE_BYTES:
-                return applySuffix ? applySuffix(INTERNODE_MSG_BYTES_TABLE, sensor.getContext()) : INTERNODE_MSG_BYTES_TABLE;
-            case INDEX_WRITE_BYTES:
-                return applySuffix ? applySuffix(INDEX_WRITE_BYTES_TABLE, sensor.getContext()) : INDEX_WRITE_BYTES_TABLE;
-            case WRITE_BYTES:
-                return applySuffix ? applySuffix(WRITE_BYTES_TABLE, sensor.getContext()) : WRITE_BYTES_TABLE;
-            case READ_BYTES:
-                return READ_BYTES_TABLE;
-            default:
-                throw new IllegalArgumentException("Table param is unknown for sensor type: " + sensor.getType().toString());
-        }
-    }
 
     /**
      * Adds the sensors to the native protocol response message as a custom payload.
@@ -239,32 +146,33 @@ public final class SensorsCustomParams
         Optional<Sensor> writeRequestSensor = sensors.getSensor(context, type);
         writeRequestSensor.ifPresent(sensor -> {
             ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
-            String headerName = SensorsCustomParams.requestParamForSensor(sensor, true);
+            String headerName = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
             Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(headerName, bytes);
             response.setCustomPayload(sensorHeader);
         });
     }
 
-    private static <T> void addSensorToResponse(Message.Builder<T> response, Sensor sensor, boolean applySuffix)
+    private static <T> void addSensorToResponse(Message.Builder<T> response, Sensor sensor)
     {
         byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-        String requestParam = requestParamForSensor(sensor, applySuffix);
+        String requestParam = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
         response.withCustomParam(requestParam, requestBytes);
 
         Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(sensor.getContext(), sensor.getType());
         registrySensor.ifPresent(registry -> {
             byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(registry.getValue());
-            String tableParam = tableParamForSensor(sensor, applySuffix);
+            String tableParam = RequestSensorsFactory.instance.registrySensorEncoder().apply(sensor);
             response.withCustomParam(tableParam, tableBytes);
         });
     }
 
-    private static String applySuffix(String header, Context context)
+    public static String requestParamForSensor(Sensor sensor)
     {
-        String suffix = SUFFIX_SUPPLIER.apply(context);
-        if (Strings.isNullOrEmpty(suffix))
-            return header;
+        return RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
+    }
 
-        return header + CUSTOM_PARAM_DELIMITER + suffix;
+    public static String tableParamForSensor(Sensor sensor)
+    {
+        return RequestSensorsFactory.instance.registrySensorEncoder().apply(sensor);
     }
 }

@@ -1072,9 +1072,9 @@ public class StorageProxy implements StorageProxyMBean
         QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(state, false, mutations, consistencyLevel);
 
         // Request sensors are utilized to track usages from replicas serving a write request
-        RequestSensors requestSensors = CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
+        RequestSensors sensors = CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
                                         new ActiveRequestSensors() : NoOpRequestSensors.instance;
-        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
         long startTime = System.nanoTime();
@@ -1090,6 +1090,12 @@ public class StorageProxy implements StorageProxyMBean
                     responseHandlers.add(mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime));
                 else
                     responseHandlers.add(mutator.mutateStandard((Mutation)mutation, consistencyLevel, localDataCenter, standardWritePerformer, null, plainWriteType, queryStartNanoTime));
+
+                for (PartitionUpdate pu: mutation.getPartitionUpdates())
+                {
+                    if (pu.metadata().isIndex()) continue;
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                }
             }
 
             // upgrade to full quorum any failed cheap quorums
@@ -1102,24 +1108,6 @@ public class StorageProxy implements StorageProxyMBean
             // wait for writes.  throws TimeoutException if necessary
             for (AbstractWriteResponseHandler<IMutation> responseHandler : responseHandlers)
                 responseHandler.get();
-
-            for (int i = 0; i < mutations.size(); ++i)
-            {
-                for (PartitionUpdate pu : mutations.get(i).getPartitionUpdates())
-                {
-                    Context context = Context.from(pu.metadata());
-                    if (pu.metadata().isIndex()) continue;
-
-                    requestSensors.registerSensor(context, Type.WRITE_BYTES);
-                    Optional<Sensor> sensor = requestSensors.getSensor(context, Type.WRITE_BYTES);
-                    if (sensor.isEmpty()) continue;
-
-                    String customParam = SensorsCustomParams.requestParamForSensor(sensor.get(), true);
-                    transform(responseHandlers.get(i).getResponseMessages().snapshot(),
-                              msg -> SensorsCustomParams.sensorValueFromCustomParam(msg, customParam))
-                    .forEach(value -> requestSensors.incrementSensor(context, Type.WRITE_BYTES, value));
-                }
-            }
 
             writeTracker.onDone();
         }

@@ -604,7 +604,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(contex, Type.READ_BYTES);
         readRequestSensor.ifPresent(sensor -> {
             ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
-            Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(SensorsCustomParams.READ_BYTES_REQUEST, bytes);
+            Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(SensorsCustomParams.requestParamForSensor(sensor), bytes);
             msg.setCustomPayload(sensorHeader);
         });
     }

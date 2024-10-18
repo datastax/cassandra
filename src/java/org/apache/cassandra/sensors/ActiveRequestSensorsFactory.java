@@ -26,6 +26,9 @@ import java.util.function.Function;
  */
 public class ActiveRequestSensorsFactory implements RequestSensorsFactory
 {
+    private static final Function<Sensor, String> REQUEST_SENSOR_ENCODER = sensor -> sensor.getType() + "_REQUEST." + sensor.getContext().getTable();
+    private static final Function<Sensor, String> REGISTRY_SENSOR_ENCODER = sensor -> sensor.getType() + "_TABLE." + sensor.getContext().getTable();
+
     @Override
     public RequestSensors create(String keyspace)
     {
@@ -33,8 +36,14 @@ public class ActiveRequestSensorsFactory implements RequestSensorsFactory
     }
 
     @Override
-    public Function<Context, String> requestSensorSuffixSupplier()
+    public Function<Sensor, String> requestSensorEncoder()
     {
-        return Context::getTable;
+        return REQUEST_SENSOR_ENCODER;
+    }
+
+    @Override
+    public Function<Sensor, String> registrySensorEncoder()
+    {
+        return REGISTRY_SENSOR_ENCODER;
     }
 }

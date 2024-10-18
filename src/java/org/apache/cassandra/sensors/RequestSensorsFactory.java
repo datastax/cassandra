@@ -36,6 +36,8 @@ public interface RequestSensorsFactory
                                    new RequestSensorsFactory() {} :
                                    FBUtilities.construct(CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.getString(), "requests sensors factory");
 
+    Function<Sensor, String> DEFAULT_SENSOR_ENCODER = sensor -> "";
+
     /**
      * Creates a {@link RequestSensors} for the given keyspace. Implementations should be very efficient because this method is potentially invoked on each verb handler serving a user request.
      *
@@ -48,13 +50,30 @@ public interface RequestSensorsFactory
     }
 
     /**
-     * Returns a supplier of the sensor suffix to be used for request that support batch operations. Implemenations
-     * should use this supplier to differentiate sensors for different keyspaces/tables in the same batch.
+     * Returns a request sensor to string encoder that will be used to encode sensor as a custom header in the internode message response.
+     * Request sensors track usage for a table scoped to a given request. See {@link RequestSensors}
+     * Implemenations should:
+     * <li> memoize their ecnoders and make then very effiecnet as the ecoders are potentially called on each request</li>
+     * <li> encode enoough information to differentiate between sensors of the same type that belong to the same request but defferent keyspaces and/or tables. </li>
      *
      * @return a supplier of the sensor suffix to be used for the given context
      */
-    default Function<Context, String> requestSensorSuffixSupplier()
+    default Function<Sensor, String> requestSensorEncoder()
     {
-        return (context) -> "";
+        return DEFAULT_SENSOR_ENCODER;
+    }
+
+    /**
+     * Returns a registry sensor to string encoder that will be used to encode sensor as a custom header in the internode message response.
+     * Registry sensors track usage globally for each table across dufferet resquests. See {@link SensorsRegistry}
+     * Implemenations should:
+     * <li> memoize their ecnoders and make then very effiecnet as the ecoders are potentially called on each request</li>
+     * <li> encode enoough information to differentiate between sensors of the same type that belong to the same request but defferent keyspaces and/or tables. </li>
+     *
+     * @return a supplier of the sensor suffix to be used for the given context
+     */
+    default Function<Sensor, String> registrySensorEncoder()
+    {
+        return DEFAULT_SENSOR_ENCODER;
     }
 }

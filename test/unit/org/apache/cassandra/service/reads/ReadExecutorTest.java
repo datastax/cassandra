@@ -372,7 +372,7 @@ public class ReadExecutorTest
 
         return Message.builder(Verb.READ_RSP, response)
                       .from(from)
-                      .withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, SensorsCustomParams.sensorValueAsBytes(readSensorValue))
+                      .withCustomParam("READ_BYTES_REQUEST", SensorsCustomParams.sensorValueAsBytes(readSensorValue))
                       .build();
     }
 }

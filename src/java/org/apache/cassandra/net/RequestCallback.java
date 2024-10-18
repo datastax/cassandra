@@ -19,6 +19,8 @@ package org.apache.cassandra.net;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.sensors.NoOpRequestSensors;
+import org.apache.cassandra.sensors.RequestSensors;
 
 /**
  * implementors of {@link RequestCallback} need to make sure that any public methods
@@ -55,5 +57,13 @@ public interface RequestCallback<T>
     default boolean trackLatencyForSnitch()
     {
         return false;
+    }
+
+    /**
+     * @return the sensors associated with the request. Used to track sensors as reported by response replicas.
+     */
+    default RequestSensors getRequestSensors()
+    {
+        return NoOpRequestSensors.instance;
     }
 }

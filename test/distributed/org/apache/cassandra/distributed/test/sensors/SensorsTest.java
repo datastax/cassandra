@@ -76,35 +76,36 @@ public class SensorsTest extends TestBaseImpl
                 ResultMessage writeResult = executeWithResult(write);
                 Map<String, ByteBuffer> customPayload = writeResult.getCustomPayload();
 
-                double writeBytesRequest = getWriteBytesRequest(customPayload, "tbl");
+                String expectedWriteHeader = "WRITE_BYTES_REQUEST.tbl";
+                double writeBytesRequest = getWriteBytesRequest(customPayload, expectedWriteHeader);
                 Assertions.assertThat(writeBytesRequest).isGreaterThan(0D);
 
                 ResultMessage.Rows readResult = executeWithPagingWithResultMessage(query);
                 customPayload = readResult.getCustomPayload();
-                assertReadBytesHeadersExist(customPayload);
+                String expectedReadHeader = "READ_BYTES_REQUEST.tbl";
+                assertReadBytesHeadersExist(customPayload, expectedReadHeader);
 
-                double readBytesRequest = getReadBytesRequest(customPayload);
+                double readBytesRequest = getReadBytesRequest(customPayload, expectedReadHeader);
                 Assertions.assertThat(readBytesRequest).isGreaterThan(0D);
             });
         }
     }
 
-    private static void assertReadBytesHeadersExist(Map<String, ByteBuffer> customPayload)
+    private static void assertReadBytesHeadersExist(Map<String, ByteBuffer> customPayload, String expectedHeader)
     {
-        Assertions.assertThat(customPayload).containsKey(SensorsCustomParams.READ_BYTES_REQUEST);
+        Assertions.assertThat(customPayload).containsKey(expectedHeader);
     }
 
-    private static double getReadBytesRequest(Map<String, ByteBuffer> customPayload)
+    private static double getReadBytesRequest(Map<String, ByteBuffer> customPayload, String expectedHeader)
     {
-        Assertions.assertThat(customPayload).containsKey(SensorsCustomParams.READ_BYTES_REQUEST);
-        return ByteBufferUtil.toDouble(customPayload.get(SensorsCustomParams.READ_BYTES_REQUEST));
+        Assertions.assertThat(customPayload).containsKey(expectedHeader);
+        return ByteBufferUtil.toDouble(customPayload.get(expectedHeader));
     }
 
-    private static double getWriteBytesRequest(Map<String, ByteBuffer> customPayload, String table)
+    private static double getWriteBytesRequest(Map<String, ByteBuffer> customPayload, String expectedHeader)
     {
-        String headerName = SensorsCustomParams.WRITE_BYTES_REQUEST + '.' + table;
-        Assertions.assertThat(customPayload).containsKey(headerName);
-        return ByteBufferUtil.toDouble(customPayload.get(headerName));
+        Assertions.assertThat(customPayload).containsKey(expectedHeader);
+        return ByteBufferUtil.toDouble(customPayload.get(expectedHeader));
     }
 
     /**

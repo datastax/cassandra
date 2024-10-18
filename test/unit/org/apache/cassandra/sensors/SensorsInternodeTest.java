@@ -134,7 +134,7 @@ public class SensorsInternodeTest
         ReadCommand command = Util.cmd(store, key).build();
         Message request = Message.builder(Verb.READ_REQ, command).build();
         Runnable handler = () -> ReadCommandVerbHandler.instance.doVerb(request);
-        testInternodeSensors(request, handler, ImmutableSet.of(context), false);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
     @Test
@@ -149,7 +149,7 @@ public class SensorsInternodeTest
 
         Message request = Message.builder(Verb.MUTATION_REQ, mutation).build();
         Runnable handler = () -> MutationVerbHandler.instance.doVerb(request);
-        testInternodeSensors(request, handler, ImmutableSet.of(context), true);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
     @Test
@@ -177,7 +177,7 @@ public class SensorsInternodeTest
         Mutation mutation = Mutation.merge(mutations);
         Message request = Message.builder(Verb.MUTATION_REQ, mutation).build();
         Runnable handler = () -> MutationVerbHandler.instance.doVerb(request);
-        testInternodeSensors(request, handler, ImmutableSet.of(context1, context2), true);
+        testInternodeSensors(request, handler, ImmutableSet.of(context1, context2));
     }
 
     @Test
@@ -196,7 +196,7 @@ public class SensorsInternodeTest
 
         Message request = Message.builder(Verb.COUNTER_MUTATION_REQ, counterMutation).build();
         Runnable handler = () -> CounterMutationVerbHandler.instance.doVerb(request);
-        testInternodeSensors(request, handler, ImmutableSet.of(context), true);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
     @Test
@@ -210,7 +210,7 @@ public class SensorsInternodeTest
         Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), UUIDGen.getTimeUUID());
         Message request = Message.builder(Verb.PAXOS_PREPARE_REQ, proposal).build();
         Runnable handler = () -> PrepareVerbHandler.instance.doVerb(request);
-        testInternodeSensors(request, handler, ImmutableSet.of(context), true);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
     @Test
@@ -224,7 +224,7 @@ public class SensorsInternodeTest
         Commit proposal = Commit.newProposal(UUIDGen.getTimeUUID(), update);
         Message request = Message.builder(Verb.PAXOS_PROPOSE_REQ, proposal).build();
         Runnable handler = () -> ProposeVerbHandler.instance.doVerb(request);
-        testInternodeSensors(request, handler, ImmutableSet.of(context), true);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
     @Test
@@ -238,10 +238,10 @@ public class SensorsInternodeTest
         Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), UUIDGen.getTimeUUID());
         Message request = Message.builder(Verb.PAXOS_COMMIT_REQ, proposal).build();
         Runnable handler = () -> CommitVerbHandler.instance.doVerb(request);
-        testInternodeSensors(request, handler, ImmutableSet.of(context), true);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
-    private void testInternodeSensors(Message request, Runnable handler, Collection<Context> contexts, boolean applySuffix)
+    private void testInternodeSensors(Message request, Runnable handler, Collection<Context> contexts)
     {
         // Run the handler:
         handler.run();
@@ -262,8 +262,8 @@ public class SensorsInternodeTest
             assertThat(internodeBytes).isBetween(requestSizePerTable * 1.0, total * 1.0);
 
             // assert internode headers are added to the response messages
-            Supplier<String> requestParamSupplier = () -> SensorsCustomParams.requestParamForSensor(internodeBytesSensor, applySuffix);
-            Supplier<String> tableParamSupplier = () -> SensorsCustomParams.tableParamForSensor(internodeBytesSensor, applySuffix);
+            Supplier<String> requestParamSupplier = () -> SensorsCustomParams.requestParamForSensor(internodeBytesSensor);
+            Supplier<String> tableParamSupplier = () -> SensorsCustomParams.tableParamForSensor(internodeBytesSensor);
             assertResponseSensors(response, total, total, requestParamSupplier, tableParamSupplier);
         }
     }

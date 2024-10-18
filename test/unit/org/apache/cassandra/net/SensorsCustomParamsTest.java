@@ -78,99 +78,15 @@ public class SensorsCustomParamsTest
     }
 
     @Test
-    public void testEncodeTableInWriteByteRequestParam()
-    {
-        String table = "t1";
-        String expectedParam = String.format("WRITE_BYTES_REQUEST.%s", "t1");
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Sensor sensor = new mockingSensor(context, Type.WRITE_BYTES);
-        String actualParam = SensorsCustomParams.requestParamForSensor(sensor, true);
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
-    public void testEncodeTableInWriteByteTableParam()
-    {
-        String table = "t1";
-        String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Sensor sensor = new mockingSensor(context, Type.WRITE_BYTES);
-        String actualParam = SensorsCustomParams.tableParamForSensor(sensor, true);
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
-    public void testEncodeTableInIndexWriteBytesRequestParam()
-    {
-        String table = "t1";
-        String expectedParam = String.format("INDEX_WRITE_BYTES_REQUEST.%s", table);
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Sensor sensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
-        String actualParam = SensorsCustomParams.requestParamForSensor(sensor, true);
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
-    public void testEncodeTableInIndexWriteBytesTableParam()
-    {
-        String table = "t1";
-        String expectedParam = String.format("INDEX_WRITE_BYTES_TABLE.%s", "t1");
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Sensor sensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
-        String actualParam = SensorsCustomParams.tableParamForSensor(sensor, true);
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
-    public void testIndexReadBytesRequestParam()
-    {
-        String expectedParam = "INDEX_READ_BYTES_REQUEST";
-        String actualParam = SensorsCustomParams.INDEX_READ_BYTES_REQUEST;
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
-    public void testIndexReadBytesTableParam()
-    {
-        String expectedParam = "INDEX_READ_BYTES_TABLE";
-        String actualParam = SensorsCustomParams.INDEX_READ_BYTES_TABLE;
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
-    public void testEncodeTableInInternodeBytesRequestParam()
-    {
-        String table = "t1";
-        String expectedParam = String.format("INTERNODE_MSG_BYTES_REQUEST.%s", table);
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Sensor sensor = new mockingSensor(context, Type.INTERNODE_BYTES);
-        String actualParam = SensorsCustomParams.requestParamForSensor(sensor, true);
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
-    public void testEncodeTableInInternodeBytesTableParam()
-    {
-        String table = "t1";
-        String expectedParam = String.format("INTERNODE_MSG_BYTES_TABLE.%s", table);
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Sensor sensor = new mockingSensor(context, Type.INTERNODE_BYTES);
-        String actualParam = SensorsCustomParams.tableParamForSensor(sensor, true);
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
     public void testAddWriteSensorToResponse()
     {
-        testAddSensorsToResponse(Type.WRITE_BYTES,
-                                 true);
+        testAddSensorsToResponse(Type.WRITE_BYTES);
     }
 
     @Test
     public void testAddReadSensorToResponse()
     {
-        testAddSensorsToResponse(Type.READ_BYTES,
-                                 false);
+        testAddSensorsToResponse(Type.READ_BYTES);
     }
 
     @Test
@@ -200,7 +116,8 @@ public class SensorsCustomParamsTest
 
         assertNotNull(message.getCustomPayload());
 
-        String expectedHeader = SensorsCustomParams.requestParamForSensor(sensors.getSensor(context, type).get(), true);
+        Sensor sensor = sensors.getSensor(context, type).get();
+        String expectedHeader = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
         assertTrue(message.getCustomPayload().containsKey(expectedHeader));
         assertEquals(17.0, message.getCustomPayload().get(expectedHeader).getDouble(), 0.0);
     }
@@ -225,7 +142,7 @@ public class SensorsCustomParamsTest
         assertNull(message.getCustomPayload());
     }
 
-    private void testAddSensorsToResponse(Type sensorType, boolean applySuffix)
+    private void testAddSensorsToResponse(Type sensorType)
     {
         RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
         UUID tableId = UUID.randomUUID();
@@ -245,25 +162,18 @@ public class SensorsCustomParamsTest
         Message.builder(Verb._TEST_1, noPayload)
                .withId(1);
 
-        SensorsCustomParams.addSensorsToResponse(sensors, builder, applySuffix);
+        SensorsCustomParams.addSensorsToResponse(sensors, builder);
 
         Message<NoPayload> msg = builder.build();
         assertNotNull(msg.header.customParams());
         assertEquals(2, msg.header.customParams().size());
-        String requestParam = SensorsCustomParams.requestParamForSensor(sensors.getSensor(context, sensorType).get(), applySuffix);
-        String tableParam = SensorsCustomParams.tableParamForSensor(sensors.getSensor(context, sensorType).get(), applySuffix);
+        Sensor sensor = sensors.getSensor(context, sensorType).get();
+        String requestParam = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
+        String tableParam = RequestSensorsFactory.instance.registrySensorEncoder().apply(sensor);
         assertTrue(msg.header.customParams().containsKey(requestParam));
         assertTrue(msg.header.customParams().containsKey(tableParam));
         double epsilon = 0.000001;
         assertEquals(17.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(requestParam)), epsilon);
         assertEquals(17.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(tableParam)), epsilon);
-    }
-
-    static class mockingSensor extends Sensor
-    {
-        public mockingSensor(Context context, Type type)
-        {
-            super(context, type);
-        }
     }
 }

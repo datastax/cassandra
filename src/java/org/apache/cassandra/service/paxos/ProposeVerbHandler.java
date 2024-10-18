@@ -58,7 +58,7 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
         sensors.syncAllSensors();
-        SensorsCustomParams.addSensorsToResponse(sensors, reply, true);
+        SensorsCustomParams.addSensorsToResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }
 }

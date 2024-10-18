@@ -18,20 +18,127 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.UUID;
+
+import org.junit.Before;
 import org.junit.Test;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.junit.Assert.assertEquals;
 
 public class ActiveRequestSensorsFactoryTest
 {
+    private ActiveRequestSensorsFactory factory;
+
+    @Before
+    public void before()
+    {
+        factory = new ActiveRequestSensorsFactory();
+    }
+
     @Test
     public void testCreateActiveRequestSensors()
     {
-        ActiveRequestSensorsFactory factory = new ActiveRequestSensorsFactory();
         RequestSensors sensors = factory.create("ks1");
         assertThat(sensors).isNotNull();
         assertThat(sensors).isInstanceOf(ActiveRequestSensors.class);
         RequestSensors anotherSensors = factory.create("ks1");
         assertThat(sensors).isNotSameAs(anotherSensors);
+    }
+
+    @Test
+    public void testEncodeTableInReadByteRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("READ_BYTES_REQUEST.%s", "t1");
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Sensor sensor = new mockingSensor(context, Type.READ_BYTES);
+        String actualParam = factory.requestSensorEncoder().apply(sensor);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInReadByteTableParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("READ_BYTES_TABLE.%s", "t1");
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Sensor sensor = new mockingSensor(context, Type.READ_BYTES);
+        String actualParam = factory.registrySensorEncoder().apply(sensor);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInWriteByteRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("WRITE_BYTES_REQUEST.%s", "t1");
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Sensor sensor = new mockingSensor(context, Type.WRITE_BYTES);
+        String actualParam = factory.requestSensorEncoder().apply(sensor);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInWriteByteTableParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Sensor sensor = new mockingSensor(context, Type.WRITE_BYTES);
+        String actualParam = factory.registrySensorEncoder().apply(sensor);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInIndexWriteBytesRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INDEX_WRITE_BYTES_REQUEST.%s", table);
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Sensor sensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
+        String actualParam = factory.requestSensorEncoder().apply(sensor);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInIndexWriteBytesTableParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INDEX_WRITE_BYTES_TABLE.%s", "t1");
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Sensor sensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
+        String actualParam = factory.registrySensorEncoder().apply(sensor);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInInternodeBytesRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INTERNODE_BYTES_REQUEST.%s", table);
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Sensor sensor = new mockingSensor(context, Type.INTERNODE_BYTES);
+        String actualParam = factory.requestSensorEncoder().apply(sensor);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInInternodeBytesTableParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INTERNODE_BYTES_TABLE.%s", table);
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Sensor sensor = new mockingSensor(context, Type.INTERNODE_BYTES);
+        String actualParam = factory.registrySensorEncoder().apply(sensor);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    static class mockingSensor extends Sensor
+    {
+        public mockingSensor(Context context, Type type)
+        {
+            super(context, type);
+        }
     }
 }

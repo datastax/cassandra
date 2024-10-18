@@ -17,10 +17,20 @@
  */
 package org.apache.cassandra.net;
 
+import java.util.Optional;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.AbstractWriteResponseHandler;
+import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -56,6 +66,50 @@ public class ResponseVerbHandler implements IVerbHandler
         {
             MessagingService.instance().latencySubscribers.maybeAdd(cb, message.from(), latencyNanos, NANOSECONDS);
             cb.onResponse(message);
+            trackReplicaSensors(callbackInfo, message);
         }
+    }
+
+    private void trackReplicaSensors(RequestCallbacks.CallbackInfo callbackInfo, Message message)
+    {
+        RequestSensors sensors = callbackInfo.callback.getRequestSensors();
+        // Eventhough RequestCallback.getRequestSensors() returns a NoOpRequestSensors instance by default, callbacks
+        // that override this method may have been initialized from a context where sensors are not set.
+        if (sensors == null)
+            return;
+
+        if (callbackInfo instanceof RequestCallbacks.WriteCallbackInfo && callbackInfo.callback instanceof AbstractWriteResponseHandler)
+        {
+            RequestCallbacks.WriteCallbackInfo writerInfo = (RequestCallbacks.WriteCallbackInfo) callbackInfo;
+            Mutation mutation = writerInfo.mutation();
+            if (mutation == null)
+                return;
+
+            for (PartitionUpdate pu : mutation.getPartitionUpdates())
+            {
+                Context context = Context.from(pu.metadata());
+                if (pu.metadata().isIndex()) continue;
+                incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            }
+        }
+        else if (callbackInfo.callback instanceof ReadCallback)
+        {
+            ReadCallback readCallback = (ReadCallback) callbackInfo.callback;
+            Context context = Context.from(readCallback.command());
+            incrementSensor(sensors, context, Type.READ_BYTES, message);
+        }
+    }
+
+    /**
+     * Increments the sensor for the given context and type based on the value encoded in the message.
+     */
+    private void incrementSensor(RequestSensors sensors, Context context, Type type, Message message)
+    {
+        Optional<Sensor> sensor = sensors.getSensor(context, type);
+        sensor.ifPresent(s -> {
+            String customParam = SensorsCustomParams.requestParamForSensor(s);
+            double sensorValue = SensorsCustomParams.sensorValueFromCustomParam(message, customParam);
+            sensors.incrementSensor(context, type, sensorValue);
+        });
     }
 }
