@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.Collection;
 import java.util.Set;
 
 import org.apache.cassandra.db.PartitionPosition;
@@ -48,7 +49,7 @@ public class ShardManagerTrivial implements ShardManager
     }
 
     @Override
-    public double calculateCombinedDensity(Set<? extends CompactionSSTable> sstables)
+    public double calculateCombinedDensity(Collection<? extends CompactionSSTable> sstables, long approximatePartitionCount)
     {
         double totalSize = 0;
         for (CompactionSSTable sstable : sstables)
@@ -84,7 +85,7 @@ public class ShardManagerTrivial implements ShardManager
         @Override
         public Token shardEnd()
         {
-            return partitioner.getMinimumToken();
+            return null;
         }
 
         @Override

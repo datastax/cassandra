@@ -38,6 +38,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableList;
@@ -206,6 +207,152 @@ public class SSTableReaderTest
             assert section.lowerPosition < section.upperPosition : section.lowerPosition + " ! < " + section.upperPosition;
             previous = section.upperPosition;
         }
+    }
+
+    @Test
+    public void testOnDiskSizeForRanges()
+    {
+        ColumnFamilyStore store = discardSSTables(KEYSPACE1, CF_STANDARD2);
+        partitioner = store.getPartitioner();
+        int count = 1000;
+
+        // insert data and compact to a single sstable
+        for (int j = 0; j < count; j++)
+        {
+            new RowUpdateBuilder(store.metadata(), 15000 + j, k0(j))
+            .clustering("0")
+            .add("val", ByteBufferUtil.EMPTY_BYTE_BUFFER)
+            .build()
+            .applyUnsafe();
+        }
+        store.forceBlockingFlush(UNIT_TESTS);
+        CompactionManager.instance.performMaximal(store, false);
+
+        SSTableReader sstable = store.getLiveSSTables().iterator().next();
+
+        // Non-compression-dependent checks
+        // Check several ways of going through the whole file
+        assertEquals(sstable.onDiskLength(),
+                     sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t(cut(k0(0), 1)), t0(count - 1)))));
+
+        // Split at exact match
+        assertEquals(sstable.onDiskLength(),
+                     sstable.onDiskSizeForRanges(ImmutableList.of(new Range<>(t(cut(k0(0), 1)), t0(347)),
+                                                                  new Range<>(t0(347), t0(count - 1)))));
+
+        // Split at different prefixes pointing to the same position
+        assertEquals(sstable.onDiskLength(),
+                     sstable.onDiskSizeForRanges(ImmutableList.of(new Range<>(t(cut(k0(0), 1)), t(cut(k0(600), 2))),
+                                                                  new Range<>(t(cut(k0(600), 1)), t0(count - 1)))));
+
+        if (!sstable.compression)
+        {
+            // Size one row
+            double oneRowSize = 0;
+            double delta = 0.9;
+            for (int i = 1; i < count; ++i)
+                oneRowSize += sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t0(i), t0(i + 1))));
+            // add the first row (since ranges are start-exclusive, use a prefix of 0);
+            oneRowSize += sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t(cut(k0(0), 1)), t0(0))));
+            oneRowSize /= count;
+            System.out.println("One row size: " + oneRowSize);
+
+            // Ranges are end-inclusive, indexes are adjusted by one here to account for that.
+            assertEquals((52 - 38),
+                         sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t0(37), t0(51)))) / oneRowSize,
+                         delta);
+
+            // Try non-matching positions (inexact indexes are not adjusted for the count).
+            assertEquals((34 - 30),
+                         sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t(cut(k0(30), 1)),
+                                                                                       t0(33)))) / oneRowSize,
+                         delta);
+
+            assertEquals((700 - 554),
+                         sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t0(553),
+                                                                                       t(cut(k0(700), 2))))) / oneRowSize,
+                         delta);
+
+            assertEquals((500 - 30),
+                         sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t(cut(k0(30), 1)),
+                                                                                       t(cut(k0(500), 2))))) / oneRowSize,
+                         delta);
+
+            // Try a list
+            List<Range<Token>> ranges = ImmutableList.of(new Range<>(t0(37), t0(51)),
+                                                         new Range<>(t0(71), t(cut(k0(100), 2))),
+                                                         new Range<>(t(cut(k0(230), 1)), t0(243)),
+                                                         new Range<>(t(cut(k0(260), 1)), t(cut(k0(300), 2))),
+                                                         new Range<>(t0(373), t0(382)),
+                                                         new Range<>(t0(382), t0(385)),
+                                                         new Range<>(t(cut(k0(400), 2)), t(cut(k0(400), 1))),  // empty range
+                                                         new Range<>(t0(563), t(cut(k0(600), 2))), // touching ranges
+                                                         new Range<>(t(cut(k0(600), 1)), t0(621))
+                                                         );
+            assertEquals((52 - 38 + 100 - 72 + 244 - 230 + 300 - 260 + 383 - 374 + 386 - 383 + 400 - 400 + 622 - 564),
+                         sstable.onDiskSizeForRanges(ranges) / oneRowSize,
+                         delta);
+
+            // Check going through the whole file
+            assertEquals(sstable.onDiskLength(),
+                         sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t(cut(k0(0), 1)), t0(count - 1)))));
+
+            assertEquals(sstable.onDiskLength(),
+                         sstable.onDiskSizeForRanges(ImmutableList.of(new Range<>(t(cut(k0(0), 1)), t0(347)),
+                                                                      new Range<>(t0(347), t0(count - 1)))));
+
+            assertEquals(sstable.onDiskLength(),
+                         sstable.onDiskSizeForRanges(ImmutableList.of(new Range<>(t(cut(k0(0), 1)), t(cut(k0(600), 2))),
+                                                                      new Range<>(t(cut(k0(600), 1)), t0(count - 1)))));
+        }
+        else
+        {
+            // It's much harder to test with compression.
+
+            // Check first three rows have the same size (they must be in the same chunk)
+            final long row0size = sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t(cut(k0(0), 1)), t0(0))));
+            assertEquals(row0size, sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t0(0), t0(1)))));
+            assertEquals(row0size, sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t0(1), t0(2)))));
+
+            // As well as the first three rows together
+            assertEquals(row0size, sstable.onDiskSizeForRanges(Collections.singleton(new Range<>(t(cut(k0(0), 1)), t0(2)))));
+
+            // And also when we query for them in separate ranges
+            assertEquals(row0size, sstable.onDiskSizeForRanges(ImmutableList.of(new Range<>(t(cut(k0(0), 1)), t0(0)),
+                                                                                new Range<>(t0(0), t0(1)))));
+            assertEquals(row0size, sstable.onDiskSizeForRanges(ImmutableList.of(new Range<>(t(cut(k0(0), 1)), t0(0)),
+                                                                                new Range<>(t0(1), t0(2)))));
+            assertEquals(row0size, sstable.onDiskSizeForRanges(ImmutableList.of(new Range<>(t(cut(k0(0), 1)), t0(0)),
+                                                                                new Range<>(t0(0), t0(1)),
+                                                                                new Range<>(t0(1), t0(2)))));
+
+            // Finally, check that if we query for every second row we get the total size of the file.
+            assertEquals(sstable.onDiskLength(),
+                         sstable.onDiskSizeForRanges(IntStream.range(0, count)
+                                                              .filter(i -> i % 2 != 0)
+                                                              .mapToObj(i -> new Range<>(t0(i), t0(i + 1)))
+                                                              .collect(Collectors.toList())));
+        }
+    }
+
+    private Token t(String key)
+    {
+        return partitioner.getToken(ByteBufferUtil.bytes(key));
+    }
+
+    private String k0(int k)
+    {
+        return String.format("%08d", k);
+    }
+
+    private Token t0(int k)
+    {
+        return t(k0(k));
+    }
+
+    private String cut(String s, int n)
+    {
+        return s.substring(0, s.length() - n);
     }
 
     @Test
