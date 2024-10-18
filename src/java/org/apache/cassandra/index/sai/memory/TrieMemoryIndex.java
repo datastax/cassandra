@@ -261,8 +261,11 @@ public class TrieMemoryIndex extends MemoryIndex
             case NOT_EQ:
             case NOT_CONTAINS_KEY:
             case NOT_CONTAINS_VALUE:
-                // need to clamp at 0, because row count is imprecise
-                return Math.max(0, Memtable.estimateRowCount(memtable) - estimateNumRowsMatchingExact(expression));
+                if (TypeUtil.supportsRounding(expression.validator))
+                    return Memtable.estimateRowCount(memtable);
+                else
+                    // need to clamp at 0, because row count is imprecise
+                    return Math.max(0, Memtable.estimateRowCount(memtable) - estimateNumRowsMatchingExact(expression));
             case RANGE:
                 return estimateNumRowsMatchingRange(expression);
             default:
