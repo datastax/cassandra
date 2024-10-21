@@ -262,8 +262,8 @@ public class SensorsInternodeTest
             assertThat(internodeBytes).isBetween(requestSizePerTable * 1.0, total * 1.0);
 
             // assert internode headers are added to the response messages
-            Supplier<String> requestParamSupplier = () -> SensorsCustomParams.encodeTableInInternodeBytesRequestParam(context.getTable());
-            Supplier<String> tableParamSupplier = () -> SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable());
+            Supplier<String> requestParamSupplier = () -> SensorsCustomParams.requestParamForSensor(internodeBytesSensor);
+            Supplier<String> tableParamSupplier = () -> SensorsCustomParams.tableParamForSensor(internodeBytesSensor);
             assertResponseSensors(response, total, total, requestParamSupplier, tableParamSupplier);
         }
     }

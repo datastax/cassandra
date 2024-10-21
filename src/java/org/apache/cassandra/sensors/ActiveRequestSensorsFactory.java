@@ -18,15 +18,32 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.function.Function;
+
 /**
  * Implementation of the {@link RequestSensorsFactory} that creates a new instance of {@link ActiveRequestSensors}
  * enabled for all keyspaces.
  */
 public class ActiveRequestSensorsFactory implements RequestSensorsFactory
 {
+    private static final Function<Sensor, String> REQUEST_SENSOR_ENCODER = sensor -> sensor.getType() + "_REQUEST." + sensor.getContext().getTable();
+    private static final Function<Sensor, String> REGISTRY_SENSOR_ENCODER = sensor -> sensor.getType() + "_TABLE." + sensor.getContext().getTable();
+
     @Override
     public RequestSensors create(String keyspace)
     {
         return new ActiveRequestSensors();
+    }
+
+    @Override
+    public Function<Sensor, String> requestSensorEncoder()
+    {
+        return REQUEST_SENSOR_ENCODER;
+    }
+
+    @Override
+    public Function<Sensor, String> registrySensorEncoder()
+    {
+        return REGISTRY_SENSOR_ENCODER;
     }
 }

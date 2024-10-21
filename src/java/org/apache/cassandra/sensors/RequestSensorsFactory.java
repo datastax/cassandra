@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.function.Function;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.REQUEST_SENSORS_FACTORY;
@@ -34,6 +37,8 @@ public interface RequestSensorsFactory
                                    new RequestSensorsFactory() {} :
                                    FBUtilities.construct(CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.getString(), "requests sensors factory");
 
+    Function<Sensor, String> DEFAULT_SENSOR_ENCODER = sensor -> "";
+
     /**
      * Creates a {@link RequestSensors} for the given keyspace. Implementations should be very efficient because this method is potentially invoked on each verb handler serving a user request.
      *
@@ -43,5 +48,33 @@ public interface RequestSensorsFactory
     default RequestSensors create(String keyspace)
     {
         return NoOpRequestSensors.instance;
+    }
+
+    /**
+     * Returns a request sensor to string encoder that will be used to encode sensor as a custom header in the internode message {@link Message.Header#customParams()} bytes map.
+     * Request sensors track usage per request. See {@link RequestSensors}
+     * Implemenations should:
+     * <li> memoize their encoders and make them very efficient as encoders are potentially invoked on each request</li>
+     * <li> encode enough information to differentiate between sensors of the same type that belong to the same request but different keyspaces and/or tables. </li>
+     *
+     * @return a function that encodes a sensor to a string
+     */
+    default Function<Sensor, String> requestSensorEncoder()
+    {
+        return DEFAULT_SENSOR_ENCODER;
+    }
+
+    /**
+     * Returns a registry sensor to string encoder that will be used to encode sensor as a custom header in the internode message {@link Message.Header#customParams()} bytes map.
+     * Registry sensors track usage globally for each table across dufferet resquests. See {@link SensorsRegistry}
+     * Implemenations should:
+     * <li> memoize their encoders and make them very efficient as encoders are potentially invoked on each request </li>
+     * <li> encode enough information to differentiate between sensors of the same type that belong to the same request but different keyspaces and/or tables </li>
+     *
+     * @return a function that encodes a sensor to a string
+     */
+    default Function<Sensor, String> registrySensorEncoder()
+    {
+        return DEFAULT_SENSOR_ENCODER;
     }
 }
