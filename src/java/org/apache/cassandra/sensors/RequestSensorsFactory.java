@@ -57,7 +57,7 @@ public interface RequestSensorsFactory
      * <li> memoize their encoders and make them very efficient as encoders are potentially invoked on each request</li>
      * <li> encode enough information to differentiate between sensors of the same type that belong to the same request but different keyspaces and/or tables. </li>
      *
-     * @return a supplier of the sensor suffix to be used for the given context
+     * @return a function that encodes a sensor to a string
      */
     default Function<Sensor, String> requestSensorEncoder()
     {
@@ -71,7 +71,7 @@ public interface RequestSensorsFactory
      * <li> memoize their encoders and make them very efficient as encoders are potentially invoked on each request </li>
      * <li> encode enough information to differentiate between sensors of the same type that belong to the same request but different keyspaces and/or tables </li>
      *
-     * @return a supplier of the sensor suffix to be used for the given context
+     * @return a function that encodes a sensor to a string
      */
     default Function<Sensor, String> registrySensorEncoder()
     {
