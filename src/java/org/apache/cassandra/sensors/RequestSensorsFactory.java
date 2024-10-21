@@ -21,6 +21,7 @@ package org.apache.cassandra.sensors;
 import java.util.function.Function;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.REQUEST_SENSORS_FACTORY;
@@ -50,11 +51,11 @@ public interface RequestSensorsFactory
     }
 
     /**
-     * Returns a request sensor to string encoder that will be used to encode sensor as a custom header in the internode message response.
-     * Request sensors track usage for a table scoped to a given request. See {@link RequestSensors}
+     * Returns a request sensor to string encoder that will be used to encode sensor as a custom header in the internode message {@link Message.Header#customParams()} bytes map.
+     * Request sensors track usage per request. See {@link RequestSensors}
      * Implemenations should:
-     * <li> memoize their ecnoders and make then very effiecnet as the ecoders are potentially called on each request</li>
-     * <li> encode enoough information to differentiate between sensors of the same type that belong to the same request but defferent keyspaces and/or tables. </li>
+     * <li> memoize their encoders and make them very efficient as encoders are potentially invoked on each request</li>
+     * <li> encode enough information to differentiate between sensors of the same type that belong to the same request but different keyspaces and/or tables. </li>
      *
      * @return a supplier of the sensor suffix to be used for the given context
      */
@@ -64,11 +65,11 @@ public interface RequestSensorsFactory
     }
 
     /**
-     * Returns a registry sensor to string encoder that will be used to encode sensor as a custom header in the internode message response.
+     * Returns a registry sensor to string encoder that will be used to encode sensor as a custom header in the internode message {@link Message.Header#customParams()} bytes map.
      * Registry sensors track usage globally for each table across dufferet resquests. See {@link SensorsRegistry}
      * Implemenations should:
-     * <li> memoize their ecnoders and make then very effiecnet as the ecoders are potentially called on each request</li>
-     * <li> encode enoough information to differentiate between sensors of the same type that belong to the same request but defferent keyspaces and/or tables. </li>
+     * <li> memoize their encoders and make them very efficient as encoders are potentially invoked on each request </li>
+     * <li> encode enough information to differentiate between sensors of the same type that belong to the same request but different keyspaces and/or tables </li>
      *
      * @return a supplier of the sensor suffix to be used for the given context
      */

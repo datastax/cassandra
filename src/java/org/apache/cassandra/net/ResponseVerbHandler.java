@@ -74,7 +74,7 @@ public class ResponseVerbHandler implements IVerbHandler
     {
         RequestSensors sensors = callbackInfo.callback.getRequestSensors();
         // Eventhough RequestCallback.getRequestSensors() returns a NoOpRequestSensors instance by default, callbacks
-        // that override this method may have been initialized from a context where sensors are not set.
+        // that override this method may have been initialized from a code path where sensors are not set.
         if (sensors == null)
             return;
 
@@ -101,9 +101,9 @@ public class ResponseVerbHandler implements IVerbHandler
     }
 
     /**
-     * Increments the sensor for the given context and type based on the value encoded in the message.
+     * Increments the sensor for the given context and type based on the value encoded in the replica response message.
      */
-    private void incrementSensor(RequestSensors sensors, Context context, Type type, Message message)
+    private void incrementSensor(RequestSensors sensors, Context context, Type type, Message<?> message)
     {
         Optional<Sensor> sensor = sensors.getSensor(context, type);
         sensor.ifPresent(s -> {

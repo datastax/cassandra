@@ -60,7 +60,7 @@ public interface RequestCallback<T>
     }
 
     /**
-     * @return the sensors associated with the request. Used to track sensors as reported by response replicas.
+     * @return the {@link RequestSensors} associated with the request. Used to track sensors as reported by response replicas.
      */
     default RequestSensors getRequestSensors()
     {

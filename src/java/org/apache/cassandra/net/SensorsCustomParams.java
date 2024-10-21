@@ -92,10 +92,10 @@ public final class SensorsCustomParams
     }
 
     /**
-     * Reads the sensor value from the message header.
+     * Reads the sensor value encoded in the response message header as {@link Message.Header#customParams()} bytes map.
      *
      * @param message the message to read the sensor value from
-     * @param param   the name of the header to read the sensor value from
+     * @param param   the name of the header in custom params to read the sensor value from
      * @param <T>     the message type
      * @return the sensor value
      */
@@ -116,15 +116,14 @@ public final class SensorsCustomParams
     }
 
 
-
     /**
-     * Adds the sensors to the native protocol response message as a custom payload.
+     * Adds a sensor of a given type and context to the native protocol response message encoded in the custom payload bytes map
      *
      * @param response        the response message to add the sensors to
-     * @param protocolVersion the protocol version as custom pauloads are only supported for protocol version >= 4
-     * @param sensors         the requests sensor tracker to get the sensor values from
-     * @param context         the context of the sensor
-     * @param type            the type of the sensor
+     * @param protocolVersion the protocol version specified in query options to determine if custom payload is supported (should be V4 or later).
+     * @param sensors         the requests sensors associated with the request to get the sensor values from.
+     * @param context         the context of the sensor to add to the response
+     * @param type            the type of the sensor to add to the response
      */
     public static void addSensorToMessageResponse(org.apache.cassandra.transport.Message.Response response,
                                                   ProtocolVersion protocolVersion,

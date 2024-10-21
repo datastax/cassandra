@@ -507,7 +507,7 @@ public enum CassandraRelevantProperties
     REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
 
     /**
-     * If true, the coordinator will propagate request sensors via the native protocol custom payload flag.
+     * If true, the coordinator will propagate request sensors via the native protocol custom payload bytes map.
      */
     PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL("cassandra.propagate_request_sensors_via_native_protocol", "false");;
 
