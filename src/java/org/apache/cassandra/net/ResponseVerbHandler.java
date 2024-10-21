@@ -29,7 +29,6 @@ import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.Type;
-import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -78,7 +77,7 @@ public class ResponseVerbHandler implements IVerbHandler
         if (sensors == null)
             return;
 
-        if (callbackInfo instanceof RequestCallbacks.WriteCallbackInfo && callbackInfo.callback instanceof AbstractWriteResponseHandler)
+        if (callbackInfo instanceof RequestCallbacks.WriteCallbackInfo)
         {
             RequestCallbacks.WriteCallbackInfo writerInfo = (RequestCallbacks.WriteCallbackInfo) callbackInfo;
             Mutation mutation = writerInfo.mutation();
