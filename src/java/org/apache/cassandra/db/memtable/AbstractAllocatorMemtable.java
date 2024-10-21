@@ -130,6 +130,12 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         }
     }
 
+    @Override
+    public OpOrder readOrdering()
+    {
+        return owner.readOrdering();
+    }
+
     public void metadataUpdated()
     {
         scheduleFlush();

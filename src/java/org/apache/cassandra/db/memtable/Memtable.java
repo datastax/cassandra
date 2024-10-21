@@ -256,6 +256,16 @@ public interface Memtable extends Comparable<Memtable>
      */
     TableMetadata metadata();
 
+    /**
+     * The {@link OpOrder} that guards reads from this memtable. This is used to ensure that the memtable does not corrupt any
+     * active reads because of other operations on it. Returns null if the memtable is not protected by an OpOrder
+     * (overridden by {@link AbstractAllocatorMemtable}).
+     */
+    default OpOrder readOrdering()
+    {
+        return null;
+    }
+
 
     // Memory usage tracking
 

@@ -22,7 +22,6 @@ import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.*;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -653,7 +652,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
                 while (throttled.hasNext())
                 {
                     UnfilteredRowIterator next = throttled.next();
-                    TrieBackedPartition materializedPartition = TrieBackedPartition.create(next);
+                    TrieBackedPartition materializedPartition = TrieBackedPartition.fromIterator(next);
                     int unfilteredCount = Iterators.size(materializedPartition.unfilteredIterator());
 
                     System.out.println("batchsize " + batchSize + " unfilteredCount " + unfilteredCount + " materializedPartition " + materializedPartition);
@@ -682,7 +681,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
             }
 
             // Verify throttled data after merge
-            Partition partition = TrieBackedPartition.create(UnfilteredRowIterators.merge(unfilteredRowIterators));
+            Partition partition = TrieBackedPartition.fromIterator(UnfilteredRowIterators.merge(unfilteredRowIterators));
 
             int nowInSec = FBUtilities.nowInSeconds();
 
