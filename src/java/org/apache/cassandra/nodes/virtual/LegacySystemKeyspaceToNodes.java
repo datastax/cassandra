@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -69,9 +70,17 @@ public final class LegacySystemKeyspaceToNodes
 {
     private static final Logger logger = LoggerFactory.getLogger(LegacySystemKeyspaceToNodes.class);
 
+    @VisibleForTesting
+    static final AtomicBoolean initialized = new AtomicBoolean(false);
+
     public int peersMigrated;
     public boolean localMigrated;
     private final Nodes nodes;
+
+    public static boolean isInitialized()
+    {
+        return initialized.get();
+    }
 
     /**
      * Executes the system.local and system.peers tables migration to flat files
@@ -101,8 +110,7 @@ public final class LegacySystemKeyspaceToNodes
     @VisibleForTesting
     boolean convertToNodesFiles() throws Exception
     {
-        Schema.unmapSystemTable(LOCAL);
-        Schema.unmapSystemTable(LEGACY_PEERS);
+        initialized.set(false);
         boolean upgradeExecuted = false;
         try
         {
@@ -149,8 +157,7 @@ public final class LegacySystemKeyspaceToNodes
         }
         finally
         {
-            Schema.mapSystemTable(LOCAL);
-            Schema.mapSystemTable(LEGACY_PEERS);
+            initialized.set(true);
         }
     }
 

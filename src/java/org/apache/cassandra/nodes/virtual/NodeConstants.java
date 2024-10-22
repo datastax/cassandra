@@ -18,14 +18,11 @@
 
 package org.apache.cassandra.nodes.virtual;
 
-import java.util.HashSet;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
 
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.mina.util.ConcurrentHashSet;
 
 /**
  * This class is primarily in place to allow access to the table and view names without
@@ -49,7 +46,13 @@ public class NodeConstants
         if (keyspace.equals(SchemaConstants.SYSTEM_VIEWS_KEYSPACE_NAME))
             return ALL_VIEWS.contains(table);
         if (keyspace.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
+        {
+            if (table.equals(LOCAL) || table.equals(LEGACY_PEERS))
+            {
+                return LegacySystemKeyspaceToNodes.isInitialized();
+            }
             return ALL_TABLES.contains(table);
+        }
         return false;
     }
 

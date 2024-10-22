@@ -387,14 +387,12 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
     {
         try
         {
-            Schema.unmapSystemTable("local");
-            Schema.unmapSystemTable("peers");
+            LegacySystemKeyspaceToNodes.initialized.set(false);
             r.run();
         }
         finally
         {
-            Schema.mapSystemTable("local");
-            Schema.mapSystemTable("peers");
+            LegacySystemKeyspaceToNodes.initialized.set(true);
         }
     }
 
