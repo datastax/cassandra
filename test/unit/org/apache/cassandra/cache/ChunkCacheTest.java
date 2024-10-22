@@ -30,6 +30,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import com.google.common.base.Throwables;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -474,12 +475,8 @@ public class ChunkCacheTest
             {
                 RuntimeException error = new RuntimeException("some weird runtime error");
                 mockFileControl1.waitOnRead.completeExceptionally(error);
-                assertSame(error, assertThrows(CompletionException.class, thread1::join).getCause());
-                // thread2 will complete exceptionally, wrapping the exception from rebuffer in a CompletionException.
-                // This CompletionException contains a propagated RuntimeException wrapping an ExecutionException from
-                // getting the exceptionally completed CompletableFuture in rebuffer. The cause of this
-                // ExecutionException should be the original exception.
-                assertSame(error, assertThrows(CompletionException.class, thread2::join).getCause().getCause().getCause());
+                assertSame(error, Throwables.getRootCause(assertThrows(CompletionException.class, thread1::join)));
+                assertSame(error, Throwables.getRootCause(assertThrows(CompletionException.class, thread2::join)));
                 // assert that we didn't leak the buffer
                 assertEquals(allocated.size(), 0);
                 assertEquals(chunkCache.size(), 0);
