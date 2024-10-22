@@ -146,6 +146,11 @@ public enum CassandraRelevantProperties
     CHUNKCACHE_ASYNC_CLEANUP("cassandra.chunkcache.async_cleanup", "true"),
     CHUNKCACHE_CLEANER_THREADS("dse.chunk.cache.cleaner.threads","1"),
     CHUNKCACHE_INITIAL_CAPACITY("cassandra.chunkcache_initialcapacity", "16"),
+    /**
+     * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
+     * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
+     */
+    CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),
