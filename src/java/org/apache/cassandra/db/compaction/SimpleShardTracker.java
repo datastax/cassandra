@@ -43,7 +43,7 @@ class SimpleShardTracker implements ShardTracker
         assert sortedTokens[0].isMinimum();
         this.sortedTokens = sortedTokens;
         this.index = 0;
-        this.currentEnd = shardEnd();
+        this.currentEnd = calculateCurrentEnd();
     }
 
     @Override
@@ -56,7 +56,7 @@ class SimpleShardTracker implements ShardTracker
     @Override
     public Token shardEnd()
     {
-        return index + 1 < sortedTokens.length ? sortedTokens[index + 1] : null;
+        return currentEnd;
     }
 
     @Override
@@ -83,6 +83,11 @@ class SimpleShardTracker implements ShardTracker
         return end != null ? end : sortedTokens[0];
     }
 
+    private Token calculateCurrentEnd()
+    {
+        return index + 1 < sortedTokens.length ? sortedTokens[index + 1] : null;
+    }
+
     @Override
     public boolean advanceTo(Token nextToken)
     {
@@ -91,10 +96,11 @@ class SimpleShardTracker implements ShardTracker
         do
         {
             index++;
-            currentEnd = shardEnd();
+            currentEnd = calculateCurrentEnd();
             if (currentEnd == null)
                 break;
-        } while (nextToken.compareTo(currentEnd) > 0);
+        }
+        while (nextToken.compareTo(currentEnd) > 0);
         return true;
     }
 

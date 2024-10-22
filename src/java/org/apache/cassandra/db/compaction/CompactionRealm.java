@@ -64,8 +64,8 @@ public interface CompactionRealm
     Environment makeUCSEnvironment();
 
     /**
-     * @return a {@link ShardManager} for this specific compaction realm. By default, this shard manager is ignored
-     * and UCS will build its own shard manager.
+     * @return a {@link ShardManager} for this specific compaction realm. If null is returned, UCS will build its own
+     * shard manager.
      */
     default ShardManager buildShardManager()
     {
