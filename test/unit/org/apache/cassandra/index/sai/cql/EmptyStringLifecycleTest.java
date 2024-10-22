@@ -31,7 +31,6 @@ public class EmptyStringLifecycleTest extends SAITester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
         disableCompaction(KEYSPACE);
         createIndex(String.format(CREATE_INDEX_TEMPLATE, 'v'));
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (k, v) VALUES (0, '')");
         execute("INSERT INTO %s (k) VALUES (1)");
@@ -53,7 +52,6 @@ public class EmptyStringLifecycleTest extends SAITester
         execute("INSERT INTO %s (k, v) VALUES (0, '')");
         execute("INSERT INTO %s (k) VALUES (1)");
         createIndex(String.format(CREATE_INDEX_TEMPLATE, 'v'));
-        waitForIndexQueryable();
 
         UntypedResultSet rows = execute("SELECT * FROM %s WHERE v = ''");
         assertRows(rows, row(0, ""));

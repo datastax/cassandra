@@ -37,7 +37,6 @@ public class GenericOrderByTest extends SAITester
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val int, str_val ascii)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction();
 
         var expectedResults = new TreeMap<String, Integer>();
@@ -83,7 +82,6 @@ public class GenericOrderByTest extends SAITester
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val int, str_val ascii)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction();
 
         // 'A' will be first
@@ -113,7 +111,6 @@ public class GenericOrderByTest extends SAITester
         createTable("CREATE TABLE %s (pk int primary key, x int, val int, str_val ascii)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Insert many rows and then ensure we can get each of them when querying with specific bounds.
         for (int i = 0; i < 100; i++)
@@ -137,7 +134,6 @@ public class GenericOrderByTest extends SAITester
         createTable("CREATE TABLE %s (pk int, x int, val int, str_val ascii, PRIMARY KEY (pk, x))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // We use a primary key with the same partition column value to ensure it goes to the same shard in the
         // memtable, which reproduces a bug we hit.
@@ -163,7 +159,6 @@ public class GenericOrderByTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int, x int, v int, PRIMARY KEY (pk, x))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 1, 1, 1);
         execute("INSERT INTO %s (pk, x, v) VALUES (?, ?, ?)", 1, 2, 5);
@@ -195,8 +190,6 @@ public class GenericOrderByTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int, x int, v int, PRIMARY KEY (pk, x))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-
 
         Object[][] rows = new Object[100][];
         var lowerBound = asc ? 0 : 4900;

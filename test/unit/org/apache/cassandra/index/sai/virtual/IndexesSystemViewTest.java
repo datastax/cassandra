@@ -78,14 +78,14 @@ public class IndexesSystemViewTest extends SAITester
 
         // create the index simulating a long build and verify that there is an empty record in the virtual table
         Injections.inject(blockIndexBuild);
-        String v1IndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
+        String v1IndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
 
         assertRows(execute(SELECT), row(v1IndexName, "v1", false, true, false, 0, 0L));
 
         // unblock the long build and verify that there is an finished empty record in the virtual table
         blockIndexBuild.countDown();
         blockIndexBuild.disable();
-        waitForIndexQueryable();
+        waitForIndexQueryable(v1IndexName);
         assertRows(execute(SELECT), row(v1IndexName, "v1", true, false, false, 0, 0L));
 
         // insert some data and verify that virtual table record is still empty since we haven't flushed yet
@@ -104,7 +104,7 @@ public class IndexesSystemViewTest extends SAITester
 
         // create a second index, this should create a new additional entry in the table
         String v2IndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v2) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
+        waitForIndexQueryable(v2IndexName);
         assertRows(execute(SELECT),
                    row(v1IndexName, "v1", true, false, false, 2, 3L),
                    row(v2IndexName, "v2", true, false, true, 2, 3L));

@@ -576,7 +576,7 @@ public final class IntegerType extends NumberType<BigInteger>
     }
 
     @Override
-    protected BigDecimal toBigDecimal(ByteBuffer value)
+    public BigDecimal toBigDecimal(ByteBuffer value)
     {
         return new BigDecimal(compose(value));
     }

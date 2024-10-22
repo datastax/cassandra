@@ -29,11 +29,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class GeoDistanceInvalidQueryTest extends VectorTester
 {
     @Test
-    public void geoDistanceRequiresSearchVectorSizeTwo() throws Throwable
+    public void geoDistanceRequiresSearchVectorSizeTwo()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [5]) < 1000"))
         .isInstanceOf(InvalidRequestException.class)
@@ -44,11 +43,10 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     }
 
     @Test
-    public void geoDistanceRequiresVectorIndexSizeTwo() throws Throwable
+    public void geoDistanceRequiresVectorIndexSizeTwo()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // Even though the search vector size is 2, the index vector size is not 2, so the query is not valid.
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < 1000"))
@@ -63,11 +61,10 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     }
 
     @Test
-    public void geoDistanceRequiresPositiveSearchRadius() throws Throwable
+    public void geoDistanceRequiresPositiveSearchRadius()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < 0"))
         .isInstanceOf(InvalidRequestException.class)
@@ -87,11 +84,10 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     }
 
     @Test
-    public void geoDistanceRequiresValidLatLonPositions() throws Throwable
+    public void geoDistanceRequiresValidLatLonPositions()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [-90.1, 1]) < 100"))
         .isInstanceOf(InvalidRequestException.class)
@@ -111,7 +107,7 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     }
 
     @Test
-    public void geoDistanceMissingOrIncorrectlyConfiguredIndex() throws Throwable
+    public void geoDistanceMissingOrIncorrectlyConfiguredIndex()
     {
         createTable("CREATE TABLE %s (pk int, x int, v vector<float, 2>, PRIMARY KEY(pk))");
 
@@ -122,7 +118,6 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
 
         // Intentionally create index with incorrect similarity function
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Query with incorrectly configured index
         assertThatThrownBy(() -> execute( "SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < 1000"))
@@ -131,11 +126,10 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     }
 
     @Test
-    public void geoDistanceUsageInIfClause() throws Throwable
+    public void geoDistanceUsageInIfClause()
     {
         createTable("CREATE TABLE %s (pk int, x int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // GEO_DISTANCE is not parsable at this part of the CQL
         assertThatThrownBy(() -> execute("UPDATE %s SET x = 100 WHERE pk = 1 IF GEO_DISTANCE(v, [1, 1]) < 1000"))
@@ -147,7 +141,6 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, x int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // All of these queries fail with and without filtering
         assertThatThrownBy(() -> execute("select pk from %s WHERE pk > 4 AND geo_distance(v,[5,5]) <= 1000000 ORDER BY v ANN of [5,5] limit 3"))

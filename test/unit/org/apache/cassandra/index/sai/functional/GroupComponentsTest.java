@@ -39,17 +39,16 @@ import static org.junit.Assert.assertEquals;
 public class GroupComponentsTest extends SAITester
 {
     @Test
-    public void testInvalidateWithoutObsolete() throws Throwable
+    public void testInvalidateWithoutObsolete()
     {
         createTable("CREATE TABLE %s (pk int primary key, value int)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         execute("INSERT INTO %s (pk) VALUES (1)");
         flush();
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
-        StorageAttachedIndex index = (StorageAttachedIndex) group.getIndexes().iterator().next();
+        StorageAttachedIndex index = group.getIndexes().iterator().next();
         SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
 
         Set<Component> components = group.activeComponents(sstable);
@@ -63,11 +62,10 @@ public class GroupComponentsTest extends SAITester
     }
 
     @Test
-    public void getLiveComponentsForEmptyIndex() throws Throwable
+    public void getLiveComponentsForEmptyIndex()
     {
         createTable("CREATE TABLE %s (pk int primary key, value int)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         execute("INSERT INTO %s (pk) VALUES (1)");
         flush();
 
@@ -83,11 +81,10 @@ public class GroupComponentsTest extends SAITester
     }
 
     @Test
-    public void getLiveComponentsForPopulatedIndex() throws Throwable
+    public void getLiveComponentsForPopulatedIndex()
     {
         createTable("CREATE TABLE %s (pk int primary key, value int)");
         IndexContext indexContext = createIndexContext(createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'"), Int32Type.instance);
-        waitForIndexQueryable();
         execute("INSERT INTO %s (pk, value) VALUES (1, 1)");
         flush();
 

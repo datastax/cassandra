@@ -50,7 +50,6 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
@@ -440,7 +439,6 @@ public class CassandraIndexTest extends CQLTester
 
         dropIndex("DROP INDEX %s.no_regulars_idx");
         createIndex("CREATE INDEX no_regulars_idx ON %s(c)");
-        assertTrue(waitForIndex(keyspace(), tableName, "no_regulars_idx"));
 
         assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE c = ?", "c0"), row1, row3);
         assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE c = ?", "c1"), row2, row4);
@@ -572,16 +570,15 @@ public class CassandraIndexTest extends CQLTester
                   .untilAsserted(() -> assertRows(execute(selectBuiltIndexesQuery)));
 
         String indexName = "build_remove_test_idx";
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         createIndex(String.format("CREATE INDEX %s ON %%s(c)", indexName));
-        waitForIndex(KEYSPACE, tableName, indexName);
 
         // check that there are no other rows in the built indexes table
         assertRows(execute(selectBuiltIndexesQuery), row(KEYSPACE, indexName, null));
 
         // rebuild the index and verify the built status table
         getCurrentColumnFamilyStore().rebuildSecondaryIndex(indexName);
-        waitForIndex(KEYSPACE, tableName, indexName);
+        waitForIndexQueryable(indexName);
 
         // check that there are no other rows in the built indexes table
         assertRows(execute(selectBuiltIndexesQuery), row(KEYSPACE, indexName, null));

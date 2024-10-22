@@ -60,6 +60,7 @@ import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
@@ -131,6 +132,12 @@ public class V1OnDiskFormat implements OnDiskFormat
 
         @Override
         public boolean hasVectorIndexChecksum()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasTermsHistogram()
         {
             return false;
         }
@@ -295,6 +302,14 @@ public class V1OnDiskFormat implements OnDiskFormat
     {
         return TypeUtil.isLiteral(type) ? v -> ByteSource.preencoded(input)
                                         : TypeUtil.asComparableBytes(input, type);
+    }
+
+    @Override
+    public ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type)
+    {
+        return TypeUtil.isLiteral(type)
+               ? ByteBuffer.wrap(ByteSourceInverse.readBytes(value.asComparableBytes(ByteComparable.Version.OSS41)))
+               : TypeUtil.fromComparableBytes(value, type, ByteComparable.Version.OSS41);
     }
 
     /** vector data components (that did not have checksums before v3) */

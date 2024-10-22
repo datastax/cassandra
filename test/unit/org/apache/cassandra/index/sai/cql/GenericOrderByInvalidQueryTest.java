@@ -50,7 +50,7 @@ public class GenericOrderByInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void cannotOrderVarintColumn() throws Throwable
+    public void cannotOrderVarintColumn()
     {
         createTable("CREATE TABLE %s (pk int primary key, val varint)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -58,14 +58,14 @@ public class GenericOrderByInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void cannotOrderDecimalColumn() throws Throwable
+    public void cannotOrderDecimalColumn()
     {
         createTable("CREATE TABLE %s (pk int primary key, val decimal)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         executeOrderByAndAssertInvalidRequestException("decimal");
     }
 
-    private void executeOrderByAndAssertInvalidRequestException(String cqlType) throws Throwable
+    private void executeOrderByAndAssertInvalidRequestException(String cqlType)
     {
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ASC LIMIT 1"))
         .isInstanceOf(InvalidRequestException.class)
@@ -73,7 +73,7 @@ public class GenericOrderByInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void cannotOrderTextColumnWithoutIndex() throws Throwable
+    public void cannotOrderTextColumnWithoutIndex()
     {
         createTable("CREATE TABLE %s (pk int, val text, PRIMARY KEY(pk))");
 
@@ -84,25 +84,21 @@ public class GenericOrderByInvalidQueryTest extends SAITester
                              "SELECT * FROM %s ORDER BY val LIMIT 5 ALLOW FILTERING");
     }
 
-
-
     @Test
-    public void testTextOrderingIsNotAllowedWithClusteringOrdering() throws Throwable
+    public void testTextOrderingIsNotAllowedWithClusteringOrdering()
     {
         createTable("CREATE TABLE %s (pk int, ck int, val text, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         assertInvalidMessage("Cannot combine clustering column ordering with non-clustering column ordering",
                              "SELECT * FROM %s ORDER BY val, ck ASC LIMIT 2");
     }
 
     @Test
-    public void textOrderingMustHaveLimit() throws Throwable
+    public void textOrderingMustHaveLimit()
     {
         createTable("CREATE TABLE %s (pk int primary key, val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         assertInvalidMessage("SAI based ORDER BY clause requires a LIMIT that is not greater than 1000. LIMIT was NO LIMIT",
                              "SELECT * FROM %s ORDER BY val");
@@ -110,7 +106,7 @@ public class GenericOrderByInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void testInvalidColumnName() throws Throwable
+    public void testInvalidColumnName()
     {
         String table = createTable(KEYSPACE, "CREATE TABLE %s (k int, c int, v int, primary key (k, c))");
         assertInvalidMessage(String.format("Undefined column name bad_col in table %s", KEYSPACE + "." + table),
@@ -118,11 +114,10 @@ public class GenericOrderByInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void disallowClusteringColumnPredicateWithoutSupportingIndex() throws Throwable
+    public void disallowClusteringColumnPredicateWithoutSupportingIndex()
     {
         createTable("CREATE TABLE %s (pk int, num int, v text, PRIMARY KEY(pk, num))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         execute("INSERT INTO %s (pk, num, v) VALUES (3, 1, 'a')");
         execute("INSERT INTO %s (pk, num, v) VALUES (3, 4, 'b')");
         flush();
@@ -139,7 +134,6 @@ public class GenericOrderByInvalidQueryTest extends SAITester
 
         // Cover the alternative code path
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertRows(execute("SELECT num FROM %s WHERE pk=3 AND num > 3 ORDER BY v LIMIT 1"), row(4));
     }
 

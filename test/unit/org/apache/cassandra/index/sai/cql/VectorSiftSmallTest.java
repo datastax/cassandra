@@ -62,7 +62,6 @@ public class VectorSiftSmallTest extends VectorTester
         // Create table and index
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         insertVectors(baseVectors, 0);
         double memoryRecall = testRecall(100, queryVectors, groundTruth);
@@ -83,7 +82,6 @@ public class VectorSiftSmallTest extends VectorTester
         // Create table and index
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // we're going to compact manually, so disable background compactions to avoid interference
         disableCompaction();
@@ -132,7 +130,6 @@ public class VectorSiftSmallTest extends VectorTester
 
         SegmentBuilder.updateLastValidSegmentRowId(2000); // 2000 rows per segment, enough for PQ to be created
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // verify that we got the expected number of segments and that PQ is present in all of them
         var sim = getCurrentColumnFamilyStore().getIndexManager();

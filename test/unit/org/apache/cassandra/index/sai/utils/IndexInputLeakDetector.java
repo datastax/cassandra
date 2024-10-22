@@ -29,7 +29,6 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.TrackingIndexFileUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.SequentialWriterOption;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertTrue;
 
@@ -41,6 +40,7 @@ public class IndexInputLeakDetector extends TestRuleAdapter
     {
         TrackingIndexFileUtils trackingIndexFileUtils = new TrackingIndexFileUtils(sequentialWriterOption);
         trackedIndexFileUtils.add(trackingIndexFileUtils);
+        IndexFileUtils.instance = trackingIndexFileUtils;
         return IndexDescriptor.empty(descriptor);
     }
 
@@ -58,6 +58,6 @@ public class IndexInputLeakDetector extends TestRuleAdapter
     protected void afterAlways(List<Throwable> errors)
     {
         trackedIndexFileUtils.clear();
-        TrackingIndexFileUtils.reset();
+        IndexFileUtils.instance = null;
     }
 }

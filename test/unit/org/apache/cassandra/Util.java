@@ -1240,6 +1240,11 @@ public class Util
         return new File(targetBasePath.toPath().resolve(relative));
     }
 
+    public static void flush(ColumnFamilyStore cfs)
+    {
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+    }
+
     public static void assertSSTableIds(SSTableId v1, SSTableId v2, IntFunction<Boolean> predicate)
     {
         Assertions.assertThat(Pair.create(v1, v2))

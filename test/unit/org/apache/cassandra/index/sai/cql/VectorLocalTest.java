@@ -101,7 +101,6 @@ public class VectorLocalTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX lat_high_precision_index ON %s (lat_high_precision) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex';");
         createIndex("CREATE CUSTOM INDEX lat_lon_embedding_index ON %s (lat_lon_embedding) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'EUCLIDEAN'};");
         createIndex("CREATE CUSTOM INDEX lon_high_precision_index ON %s (lon_high_precision) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex';");
-        waitForIndexQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
         List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(2)).collect(Collectors.toList());
@@ -152,7 +151,6 @@ public class VectorLocalTest extends VectorTester
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
         List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
@@ -207,7 +205,6 @@ public class VectorLocalTest extends VectorTester
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction(keyspace());
 
         int sstableCount = getRandom().nextIntBetween(3, 6);
@@ -248,7 +245,6 @@ public class VectorLocalTest extends VectorTester
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
 
@@ -305,7 +301,6 @@ public class VectorLocalTest extends VectorTester
     {
         createTable(String.format("CREATE TABLE %%s (pk int, ck int, val vector<float, %d>, PRIMARY KEY(pk, ck))", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         int partitions = getRandom().nextIntBetween(20, 40);
         int vectorCountPerPartition = getRandom().nextIntBetween(50, 100);
@@ -368,7 +363,6 @@ public class VectorLocalTest extends VectorTester
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
 
@@ -475,7 +469,6 @@ public class VectorLocalTest extends VectorTester
         // create index on existing sstable to produce multiple segments
         SegmentBuilder.updateLastValidSegmentRowId(50); // 50 rows per segment
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         verifyChecksum();
 
         // query multiple on-disk indexes
@@ -537,7 +530,6 @@ public class VectorLocalTest extends VectorTester
         SegmentBuilder.updateLastValidSegmentRowId(50); // 50 rows per segment
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         flush();
         verifyChecksum();
 

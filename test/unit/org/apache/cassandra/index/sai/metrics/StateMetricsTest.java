@@ -39,7 +39,7 @@ public class StateMetricsTest extends AbstractMetricsTest
     public ExpectedException exception = ExpectedException.none();
 
     @Test
-    public void testMetricRelease() throws Throwable
+    public void testMetricRelease()
     {
         String table = "test_metric_release";
         String index = "test_metric_release_index";
@@ -48,7 +48,6 @@ public class StateMetricsTest extends AbstractMetricsTest
 
         createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
-        waitForIndexQueryable(keyspace, table);
 
         execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
 
@@ -66,7 +65,7 @@ public class StateMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testMetricCreation() throws Throwable
+    public void testMetricCreation()
     {
         String table = "test_table";
         String index = "test_index";
@@ -75,7 +74,6 @@ public class StateMetricsTest extends AbstractMetricsTest
         createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index+"_v1", keyspace, table, "v1"));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index+"_v2", keyspace, table, "v2"));
-        waitForIndexQueryable(keyspace, table);
 
         execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
         execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('1', 1, '1')");
@@ -96,7 +94,7 @@ public class StateMetricsTest extends AbstractMetricsTest
         waitForEquals(objectNameNoIndex("TotalQueryableIndexCount", keyspace, table, TABLE_STATE_METRIC_TYPE), 2);
     }
 
-    private int getTableStateMetrics(String keyspace, String table, String metricsName) throws Exception
+    private int getTableStateMetrics(String keyspace, String table, String metricsName)
     {
         return (int) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, TABLE_STATE_METRIC_TYPE));
     }

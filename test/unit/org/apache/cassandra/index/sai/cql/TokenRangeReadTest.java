@@ -39,7 +39,6 @@ public class TokenRangeReadTest extends SAITester
     {
         createTable("CREATE TABLE %s (k1 int, v1 text, PRIMARY KEY (k1))");
         createIndex(format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         execute("INSERT INTO %S(k1, v1) values(1, '1')");
 

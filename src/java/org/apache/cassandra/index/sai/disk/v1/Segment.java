@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -229,5 +230,10 @@ public class Segment implements Closeable
         int proportionalLimit = (int) Math.ceil(limit * ((double) segmentRows / totalRows));
         assert proportionalLimit >= 1 : proportionalLimit;
         return proportionalLimit;
+    }
+
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return metadata.estimateNumRowsMatching(predicate);
     }
 }

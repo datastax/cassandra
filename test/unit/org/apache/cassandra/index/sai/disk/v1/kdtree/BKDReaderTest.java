@@ -331,6 +331,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         assertEquals(PostingList.END_OF_STREAM, intersection.advance(numRows + 1));
 
         intersection.close();
+        reader.close();
     }
 
     @Test
@@ -351,9 +352,12 @@ public class BKDReaderTest extends SaiRandomizedTest
         }
 
         final BKDReader reader = finishAndOpenReaderOneDim(50, buffer);
-
         final PostingList intersection = reader.intersect(buildQuery(1017, 1096), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
+
         assertEquals(PostingList.EMPTY, intersection);
+
+        intersection.close();
+        reader.close();
     }
 
     private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)

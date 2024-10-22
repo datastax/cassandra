@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.utils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +52,13 @@ public class TermIterator extends RangeIterator
         this.union = union;
         this.referencedIndexes = referencedIndexes;
         this.context = queryContext;
+
+        for (SSTableIndex index : referencedIndexes)
+        {
+            boolean success = index.reference();
+            // Won't happen, because the indexes we get here must be already referenced by the query view
+            assert success : "Failed to reference the index " + index;
+        }
     }
 
 
@@ -78,8 +84,6 @@ public class TermIterator extends RangeIterator
                 queryContext.checkpoint();
                 queryContext.addSstablesHit(1);
                 assert !index.isReleased();
-
-
 
                 RangeIterator keyIterator = index.search(e, keyRange, queryContext, defer, limit);
 
@@ -131,7 +135,6 @@ public class TermIterator extends RangeIterator
     {
         FileUtils.closeQuietly(union);
         referencedIndexes.forEach(TermIterator::releaseQuietly);
-        referencedIndexes.clear();
     }
 
     private static void releaseQuietly(SSTableIndex index)
