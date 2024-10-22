@@ -475,7 +475,11 @@ public class ChunkCacheTest
                 RuntimeException error = new RuntimeException("some weird runtime error");
                 mockFileControl1.waitOnRead.completeExceptionally(error);
                 assertSame(error, assertThrows(CompletionException.class, thread1::join).getCause());
-                assertSame(error, assertThrows(CompletionException.class, thread2::join).getCause());
+                // thread2 will complete exceptionally, wrapping the exception from rebuffer in a CompletionException.
+                // This CompletionException contains a propagated RuntimeException wrapping an ExecutionException from
+                // getting the exceptionally completed CompletableFuture in rebuffer. The cause of this
+                // ExecutionException should be the original exception.
+                assertSame(error, assertThrows(CompletionException.class, thread2::join).getCause().getCause().getCause());
                 // assert that we didn't leak the buffer
                 assertEquals(allocated.size(), 0);
                 assertEquals(chunkCache.size(), 0);
