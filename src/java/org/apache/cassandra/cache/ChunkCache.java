@@ -27,6 +27,7 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -60,6 +61,7 @@ import org.apache.cassandra.utils.memory.BufferPools;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNKCACHE_ASYNC_CLEANUP;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNKCACHE_CLEANER_THREADS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNKCACHE_INITIAL_CAPACITY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS;
 
 public class ChunkCache
         implements RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
@@ -422,12 +424,12 @@ public class ChunkCache
                         }
                         else
                         {
-                            chunk = existing.join();
+                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
                         }
                     }
                     else
                     {
-                        chunk = cachedValue.join();
+                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
                     }
 
                     buf = chunk.reference();
