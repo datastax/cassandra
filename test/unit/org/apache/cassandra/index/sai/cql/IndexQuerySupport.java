@@ -30,6 +30,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.TimeType;
@@ -340,6 +341,15 @@ public class IndexQuerySupport
             ));
 
             rangeQuery(tester, model, DataModel.DATE_COLUMN, SimpleDateType.instance.fromString("2013-06-17"), SimpleDateType.instance.fromString("2018-06-19"));
+
+            query(tester, model, DataModel.DECIMAL_COLUMN, Operator.EQ, DecimalType.instance.fromString("300.27"));
+            query(tester, model, DataModel.DECIMAL_COLUMN, Operator.EQ, DecimalType.instance.fromString("-23.09"));
+            query(tester, model, DataModel.DECIMAL_COLUMN, Operator.NEQ, DecimalType.instance.fromString("300.27"));
+            query(tester, model, DataModel.DECIMAL_COLUMN, Operator.NEQ, DecimalType.instance.fromString("-23.09"));
+            query(tester, model, DataModel.DECIMAL_COLUMN, Operator.LT, DecimalType.instance.fromString("300.27"));
+            query(tester, model, DataModel.DECIMAL_COLUMN, Operator.LTE, DecimalType.instance.fromString("300.27"));
+            query(tester, model, DataModel.DECIMAL_COLUMN, Operator.GT, DecimalType.instance.fromString("300.27"));
+            query(tester, model, DataModel.DECIMAL_COLUMN, Operator.GTE, DecimalType.instance.fromString("300.27"));
 
             query(tester, model, DataModel.DOUBLE_COLUMN, Operator.EQ, 43203.90);
             query(tester, model, DataModel.DOUBLE_COLUMN, Operator.EQ, 7800.06);

@@ -49,6 +49,7 @@ public interface DataModel
     String BIGINT_COLUMN = "gdp";
     String BOOLEAN_COLUMN = "active";
     String DATE_COLUMN = "visited";
+    String DECIMAL_COLUMN = "price";
     String DOUBLE_COLUMN = "area_sq_miles";
     String FLOAT_COLUMN = "murder_rate";
     String INET_COLUMN = "ip";
@@ -72,6 +73,7 @@ public interface DataModel
                     .add(Pair.create(BIGINT_COLUMN, CQL3Type.Native.BIGINT.toString()))
                     .add(Pair.create(BOOLEAN_COLUMN, CQL3Type.Native.BOOLEAN.toString()))
                     .add(Pair.create(DATE_COLUMN, CQL3Type.Native.DATE.toString()))
+                    .add(Pair.create(DECIMAL_COLUMN, CQL3Type.Native.DECIMAL.toString()))
                     .add(Pair.create(DOUBLE_COLUMN, CQL3Type.Native.DOUBLE.toString()))
                     .add(Pair.create(FLOAT_COLUMN, CQL3Type.Native.FLOAT.toString()))
                     .add(Pair.create(INET_COLUMN, CQL3Type.Native.INET.toString()))
@@ -88,22 +90,23 @@ public interface DataModel
 
     List<String> NORMAL_COLUMN_DATA =
             ImmutableList.<String>builder()
-                    .add("'AK',   500000000,  true, '2009-07-15', 570640.95,  7.7,   '158.145.20.64',   737709,  164,  16,        'Alaska', '00:18:20', '2009-07-15T00:00:00', e37394dc-d17b-11e8-a8d5-f2801f1b9fd1, acfe5ada-d17c-11e8-a8d5-f2801f1b9fd1, 1")
-                    .add("'AL',  1000000000,  true, '2011-09-13',  50645.33,  7.0,   '206.16.212.91',  4853875,   57,   5,       'Alabama', '01:04:00', '2011-09-13T00:00:00', b7373af6-d7c1-45ae-b145-5bf4b5cdd00c, c592c37e-d17c-11e8-a8d5-f2801f1b9fd1, 1")
-                    .add("'AR',  2000000000, false, '2013-06-17', 113594.08,  5.5,  '170.94.194.134',  2977853,   99,   9,      'Arkansas', '00:55:23', '2013-06-17T00:00:00', a0daaeb4-c8a2-4c68-9899-e32d08238550, cfaae67a-d17c-11e8-a8d5-f2801f1b9fd1, 1")
-                    .add("'CA',  3000000000,  true, '2012-06-17', 155779.22,  4.8,    '67.157.98.46', 38993940, 1861, 117,    'California', '01:30:45', '2012-06-17T00:00:00', 96232af0-0af7-438b-9049-c5a5a944ff93, d7e80692-d17c-11e8-a8d5-f2801f1b9fd1, 1")
-                    .add("'DE',  4000000000, false, '2013-06-17',   1948.54,  6.7,   '167.21.128.20',   944076,   63,   6,      'Delaware', '00:23:45', '2013-06-17T00:00:00', b2a0a879-5223-40d2-9671-775ee209b6f2, dd10a5b6-d17c-11e8-a8d5-f2801f1b9fd1, 1")
-                    .add("'ID',  4500000000, false, '2015-06-18',  82643.12,  1.8,   '164.165.67.10',  1652828,   30,   3,         'Idaho', '00:18:45', '2015-06-18T00:00:00', c6eec0b0-0eef-40e8-ac38-3a82110443e4, e2788780-d17c-11e8-a8d5-f2801f1b9fd1, 1")
-                    .add("'KY',  4750000000, false, '2018-03-12',  39486.34,  4.7,  '205.204.196.64',  4424611,  209,  20,      'Kentucky', '00:45:00', '2018-03-12T00:00:00', 752355f8-405b-4d94-88f3-9992cda30f1e, e7c4e1d4-d17c-11e8-a8d5-f2801f1b9fd1, 1")
-                    .add("'LA',  4800000000,  true, '2013-06-10',  43203.90, 10.2,  '204.196.242.71',  4668960,  474,  47,     'Louisiana', '00:56:07', '2013-06-10T00:00:00', 17be691a-c1a4-4467-a4ad-64605c74fb1c, ee6136d2-d17c-11e8-a8d5-f2801f1b9fd1, 1")
-                    .add("'MA',  5000000000,  true,  '2010-07-04',   7800.06,  1.9,   '170.63.206.57',  6784240,  126,  12, 'Massachusetts', '01:01:34', '2010-07-04T00:00:00', e8a3c287-78cf-46b5-b554-42562e7dcfb3, f57a3b62-d17c-11e8-a8d5-f2801f1b9fd1, 2")
-                    .add("'MI',  6000000000, false, '2011-09-13',  56538.90,  5.8,    '23.72.184.64',  9917715,  571,  57,      'Michigan', '00:43:09', '2011-09-13T00:00:00', a0daaeb4-c8a2-4c68-9899-e32d08238550, 0497b886-d17d-11e8-a8d5-f2801f1b9fd1, 2")
-                    .add("'MS',  7000000000,  true, '2013-06-17',  46923.27,  5.3,   '192.251.58.38',  2989390,  159,  15,   'Mississippi', '01:04:23', '2013-06-17T00:00:00', 96232af0-0af7-438b-9049-c5a5a944ff93, 0b0205e6-d17d-11e8-a8d5-f2801f1b9fd1, 2")
-                    .add("'TN',  8000000000, false, '2018-03-10',  41234.90,  6.1, '170.141.221.177',  6595056,  402,  40,     'Tennessee', '00:39:45', '2018-03-10T00:00:00', b2a0a879-5223-40d2-9671-775ee209b6f2, 105dc746-d17d-11e8-a8d5-f2801f1b9fd1, 2")
-                    .add("'TX',  9000000000,  true, '2014-06-17', 261231.71,  4.7,   '204.66.40.181', 27429639, 1276, 107,         'Texas', '00:38:13', '2014-06-17T00:00:00', c6eec0b0-0eef-40e8-ac38-3a82110443e4, 155b6bcc-d17d-11e8-a8d5-f2801f1b9fd1, 2")
-                    .add("'UT',  9250000000,  true, '2014-06-20',  82169.62,  1.8,   '204.113.13.48',  2990632,   54,   5,          'Utah', '00:25:00', '2014-06-20T00:00:00', 752355f8-405b-4d94-88f3-9992cda30f1e, 1a267c50-d17d-11e8-a8d5-f2801f1b9fd1, 2")
-                    .add("'VA',  9500000000,  true, '2018-06-19',  39490.09,  4.6,  '152.130.96.221',  8367587,  383,  38,      'Virginia', '00:43:07', '2018-06-19T00:00:00', 17be691a-c1a4-4467-a4ad-64605c74fb1c, 1fc81a4c-d17d-11e8-a8d5-f2801f1b9fd1, 2")
-                    .add("'WY', 10000000000, false, '2015-06-17',  97093.14,  2.7,  '192.146.215.91',   586107,   57,   5,       'Wyoming', '00:15:50', '2015-06-17T00:00:00', e8a3c287-78cf-46b5-b554-42562e7dcfb3, 2576612e-d17d-11e8-a8d5-f2801f1b9fd1, 2")
+                    .add("'AK',   500000000,  true, '2009-07-15', 300.27, 570640.95,  7.7,   '158.145.20.64',   737709,  164,  16,        'Alaska', '00:18:20', '2009-07-15T00:00:00', e37394dc-d17b-11e8-a8d5-f2801f1b9fd1, acfe5ada-d17c-11e8-a8d5-f2801f1b9fd1, 1")
+                    .add("'AL',  1000000000,  true, '2011-09-13', 100.22,  50645.33,  7.0,   '206.16.212.91',  4853875,   57,   5,       'Alabama', '01:04:00', '2011-09-13T00:00:00', b7373af6-d7c1-45ae-b145-5bf4b5cdd00c, c592c37e-d17c-11e8-a8d5-f2801f1b9fd1, 1")
+                    .add("'AR',  2000000000, false, '2013-06-17', -23.09, 113594.08,  5.5,  '170.94.194.134',  2977853,   99,   9,      'Arkansas', '00:55:23', '2013-06-17T00:00:00', a0daaeb4-c8a2-4c68-9899-e32d08238550, cfaae67a-d17c-11e8-a8d5-f2801f1b9fd1, 1")
+                    .add("'CA',  3000000000,  true, '2012-06-17', 330.27, 155779.22,  4.8,    '67.157.98.46', 38993940, 1861, 117,    'California', '01:30:45', '2012-06-17T00:00:00', 96232af0-0af7-438b-9049-c5a5a944ff93, d7e80692-d17c-11e8-a8d5-f2801f1b9fd1, 1")
+                    .add("'DE',  4000000000, false, '2013-06-17', -23.49,   1948.54,  6.7,   '167.21.128.20',   944076,   63,   6,      'Delaware', '00:23:45', '2013-06-17T00:00:00', b2a0a879-5223-40d2-9671-775ee209b6f2, dd10a5b6-d17c-11e8-a8d5-f2801f1b9fd1, 1")
+                    .add("'ID',  4500000000, false, '2015-06-18', 640.27,  82643.12,  1.8,   '164.165.67.10',  1652828,   30,   3,         'Idaho', '00:18:45', '2015-06-18T00:00:00', c6eec0b0-0eef-40e8-ac38-3a82110443e4, e2788780-d17c-11e8-a8d5-f2801f1b9fd1, 1")
+                    .add("'KY',  4750000000, false, '2018-03-12', 300.93,  39486.34,  4.7,  '205.204.196.64',  4424611,  209,  20,      'Kentucky', '00:45:00', '2018-03-12T00:00:00', 752355f8-405b-4d94-88f3-9992cda30f1e, e7c4e1d4-d17c-11e8-a8d5-f2801f1b9fd1, 1")
+                    .add("'LA',  4800000000,  true, '2013-06-10', 110.22,  43203.90, 10.2,  '204.196.242.71',  4668960,  474,  47,     'Louisiana', '00:56:07', '2013-06-10T00:00:00', 17be691a-c1a4-4467-a4ad-64605c74fb1c, ee6136d2-d17c-11e8-a8d5-f2801f1b9fd1, 1")
+                    .add("'MA',  5000000000,  true, '2010-07-04', -40.27,   7800.06,  1.9,   '170.63.206.57',  6784240,  126,  12, 'Massachusetts', '01:01:34', '2010-07-04T00:00:00', e8a3c287-78cf-46b5-b554-42562e7dcfb3, f57a3b62-d17c-11e8-a8d5-f2801f1b9fd1, 2")
+                    .add("'MI',  6000000000, false, '2011-09-13', 350.37,  56538.90,  5.8,    '23.72.184.64',  9917715,  571,  57,      'Michigan', '00:43:09', '2011-09-13T00:00:00', a0daaeb4-c8a2-4c68-9899-e32d08238550, 0497b886-d17d-11e8-a8d5-f2801f1b9fd1, 2")
+                    .add("'MS',  7000000000,  true, '2013-06-17', 700.17,  46923.27,  5.3,   '192.251.58.38',  2989390,  159,  15,   'Mississippi', '01:04:23', '2013-06-17T00:00:00', 96232af0-0af7-438b-9049-c5a5a944ff93, 0b0205e6-d17d-11e8-a8d5-f2801f1b9fd1, 2")
+                    .add("'PA',  7500000000, false, '2015-03-10', 340.27,  41034.90,  3.6, '201.143.220.137',  6593956,  202,  23,  'Pennsylvania', '00:49:45', '2015-03-10T00:00:00', 9d4e93ed-a14e-4b9d-8749-739019195bdf, 22002940-9084-11ef-a7b4-325096b39f47, 2")
+                    .add("'TN',  8000000000, false, '2018-03-10', 900.27,  41234.90,  6.1, '170.141.221.177',  6595056,  402,  40,     'Tennessee', '00:39:45', '2018-03-10T00:00:00', b2a0a879-5223-40d2-9671-775ee209b6f2, 105dc746-d17d-11e8-a8d5-f2801f1b9fd1, 2")
+                    .add("'TX',  9000000000,  true, '2014-06-17', 100.92, 261231.71,  4.7,   '204.66.40.181', 27429639, 1276, 107,         'Texas', '00:38:13', '2014-06-17T00:00:00', c6eec0b0-0eef-40e8-ac38-3a82110443e4, 155b6bcc-d17d-11e8-a8d5-f2801f1b9fd1, 2")
+                    .add("'UT',  9250000000,  true, '2014-06-20', -23.19,  82169.62,  1.8,   '204.113.13.48',  2990632,   54,   5,          'Utah', '00:25:00', '2014-06-20T00:00:00', 752355f8-405b-4d94-88f3-9992cda30f1e, 1a267c50-d17d-11e8-a8d5-f2801f1b9fd1, 2")
+                    .add("'VA',  9500000000,  true, '2018-06-19', 120.32,  39490.09,  4.6,  '152.130.96.221',  8367587,  383,  38,      'Virginia', '00:43:07', '2018-06-19T00:00:00', 17be691a-c1a4-4467-a4ad-64605c74fb1c, 1fc81a4c-d17d-11e8-a8d5-f2801f1b9fd1, 2")
+                    .add("'WY', 10000000000, false, '2015-06-17', 550.25,  97093.14,  2.7,  '192.146.215.91',   586107,   57,   5,       'Wyoming', '00:15:50', '2015-06-17T00:00:00', e8a3c287-78cf-46b5-b554-42562e7dcfb3, 2576612e-d17d-11e8-a8d5-f2801f1b9fd1, 2")
                     .build();
 
     String STATIC_INT_COLUMN = "entered";
@@ -127,7 +130,8 @@ public interface DataModel
                                                        "1896, " + NORMAL_COLUMN_DATA.get(12),
                                                        "1896, " + NORMAL_COLUMN_DATA.get(13),
                                                        "1845, " + NORMAL_COLUMN_DATA.get(14),
-                                                       "1845, " + NORMAL_COLUMN_DATA.get(15));
+                                                       "1845, " + NORMAL_COLUMN_DATA.get(15),
+                                                       "1905, " + NORMAL_COLUMN_DATA.get(16));
 
     static AtomicInteger seq = new AtomicInteger();
 
@@ -286,17 +290,18 @@ public interface DataModel
             executeLocal(tester, String.format("UPDATE %%s SET %s = 9700000000 WHERE p = 0", BIGINT_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = false WHERE p = 1", BOOLEAN_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = '2018-03-10' WHERE p = 2", DATE_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 8788.06 WHERE p = 3", DOUBLE_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 2.9 WHERE p = 4", FLOAT_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = '205.204.196.65' WHERE p = 5", INET_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 27429638 WHERE p = 6", INT_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 31 WHERE p = 7", SMALLINT_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 116 WHERE p = 8", TINYINT_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 'State of Michigan' WHERE p = 9", TEXT_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = '00:20:26' WHERE p = 10", TIME_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = '2009-07-16T00:00:00' WHERE p = 11", TIMESTAMP_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = e37394dc-d17b-11e8-a8d5-f2801f1b9fd1 WHERE p = 12", UUID_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 1fc81a4c-d17d-11e8-a8d5-f2801f1b9fd1 WHERE p = 13", TIMEUUID_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 28.3 WHERE p = 3", DECIMAL_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 8788.06 WHERE p = 4", DOUBLE_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 2.9 WHERE p = 5", FLOAT_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = '205.204.196.65' WHERE p = 6", INET_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 27429638 WHERE p = 7", INT_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 31 WHERE p = 8", SMALLINT_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 116 WHERE p = 9", TINYINT_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 'State of Michigan' WHERE p = 10", TEXT_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = '00:20:26' WHERE p = 11", TIME_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = '2009-07-16T00:00:00' WHERE p = 12", TIMESTAMP_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = e37394dc-d17b-11e8-a8d5-f2801f1b9fd1 WHERE p = 13", UUID_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 1fc81a4c-d17d-11e8-a8d5-f2801f1b9fd1 WHERE p = 14", TIMEUUID_COLUMN));
         }
 
         public void deleteCells(Executor tester) throws Throwable
@@ -394,7 +399,8 @@ public interface DataModel
             executeLocal(tester, String.format("UPDATE %%s SET %s = '2009-07-16T00:00:00' WHERE p = 5 AND c = 1", TIMESTAMP_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = e37394dc-d17b-11e8-a8d5-f2801f1b9fd1 WHERE p = 6 AND c = 0", UUID_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = 1fc81a4c-d17d-11e8-a8d5-f2801f1b9fd1 WHERE p = 6 AND c = 1", TIMEUUID_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 1896 WHERE p = 7", STATIC_INT_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 28.3 WHERE p = 7 AND c = 0", DECIMAL_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 1896 WHERE p = 8", STATIC_INT_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = 2020 WHERE p = 100", STATIC_INT_COLUMN)); // static only
         }
 
@@ -484,6 +490,7 @@ public interface DataModel
             executeLocal(tester, String.format("UPDATE %%s SET %s = '2009-07-16T00:00:00' WHERE p1 = 5 AND p2 = 1", TIMESTAMP_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = e37394dc-d17b-11e8-a8d5-f2801f1b9fd1 WHERE p1 = 6 AND p2 = 0", UUID_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = 1fc81a4c-d17d-11e8-a8d5-f2801f1b9fd1 WHERE p1 = 6 AND p2 = 1", TIMEUUID_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 28.3 WHERE p1 = 7 AND p2 = 0", DECIMAL_COLUMN));
         }
 
         @Override
@@ -542,6 +549,7 @@ public interface DataModel
             executeLocal(tester, String.format("UPDATE %%s SET %s = '2009-07-16T00:00:00' WHERE p = 11 AND c = 0", TIMESTAMP_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = e37394dc-d17b-11e8-a8d5-f2801f1b9fd1 WHERE p = 12 AND c = 0", UUID_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = 1fc81a4c-d17d-11e8-a8d5-f2801f1b9fd1 WHERE p = 13 AND c = 0", TIMEUUID_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 28.3 WHERE p = 14 AND c = 0", DECIMAL_COLUMN));
         }
 
         @Override
