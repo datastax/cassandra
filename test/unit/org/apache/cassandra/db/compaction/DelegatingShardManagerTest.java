@@ -56,7 +56,14 @@ public class DelegatingShardManagerTest
         // We expect the same shards because the wrapper delegates.
         for (int i = 1; i < 512; i++)
         {
-            Token[] actualTokens = consumeTokens(wrapper.boundaries(i));
+            var wrapperTokenTracker = wrapper.boundaries(i);
+
+            // Make assertion about the first shard's fraction of the whole token range. This assertion relies
+            // on the fact that the delegate shard manager splits the space evenly for the given number of tokens.
+            var fractionInShard = wrapperTokenTracker.fractionInShard(range);
+            assertEquals(1d / i, fractionInShard, 0.001);
+
+            Token[] actualTokens = consumeTokens(wrapperTokenTracker);
             Token[] expectedTokens = consumeTokens(delegate.boundaries(i));
             assertArrayEquals(actualTokens, expectedTokens);
         }
