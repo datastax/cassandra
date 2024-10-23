@@ -187,7 +187,7 @@ public class TrieBackedPartition implements Partition
         assert stats != null;
     }
 
-    public static TrieBackedPartition create(UnfilteredRowIterator iterator)
+    public static TrieBackedPartition fromIterator(UnfilteredRowIterator iterator)
     {
         ContentBuilder builder = build(iterator, false);
         return new TrieBackedPartition(iterator.partitionKey(),
