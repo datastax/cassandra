@@ -287,7 +287,7 @@ public class SSTableIndex
              * components are not in use.
              */
             if (indexWasDropped.get())
-                SSTableWatcher.instance.onIndexDropped(perIndexComponents.forWrite());
+                SSTableWatcher.instance.onIndexDropped(sstable.metadata(), perIndexComponents.forWrite());
         }
     }
 
