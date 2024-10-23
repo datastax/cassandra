@@ -34,11 +34,13 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.AbstractCompactionController;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.NEVER_PURGE_TOMBSTONES;
 
@@ -257,17 +259,30 @@ public class CompactionController extends AbstractCompactionController
             }
         }
 
-        for (Memtable memtable : memtables)
+        OpOrder.Group readGroup = null;
+        try
         {
-            long memtableMinTimestamp = memtable.getMinTimestamp();
-            if (memtableMinTimestamp >= minTimestampSeen || memtableMinTimestamp == Memtable.NO_MIN_TIMESTAMP)
-                continue;
-
-            if (memtable.rowIterator(key) != null)
+            for (Memtable memtable : memtables)
             {
-                minTimestampSeen = Math.min(minTimestampSeen, memtable.getMinTimestamp());
-                hasTimestamp = true;
+                long memtableMinTimestamp = memtable.getMinTimestamp();
+                if (memtableMinTimestamp >= minTimestampSeen || memtableMinTimestamp == Memtable.NO_MIN_TIMESTAMP)
+                    continue;
+
+                if (readGroup == null)
+                    readGroup = memtable.readOrdering().start(); // the read order is the same for all memtables of a CFS
+
+                Partition partition = memtable.getPartition(key);
+                if (partition != null)
+                {
+                    minTimestampSeen = Math.min(minTimestampSeen, partition.stats().minTimestamp);
+                    hasTimestamp = true;
+                }
             }
+        }
+        finally
+        {
+            if (readGroup != null)
+                readGroup.close();
         }
 
         if (!hasTimestamp)
