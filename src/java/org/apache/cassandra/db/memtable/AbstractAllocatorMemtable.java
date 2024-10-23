@@ -179,6 +179,12 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         }
     }
 
+    @Override
+    public OpOrder readOrdering()
+    {
+        return owner.readOrdering();
+    }
+
     public void metadataUpdated()
     {
         // We decided not to swap out this memtable, but if the flush period has changed we must schedule it for the
