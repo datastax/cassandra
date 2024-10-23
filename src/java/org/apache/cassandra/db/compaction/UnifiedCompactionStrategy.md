@@ -373,15 +373,28 @@ any remainder for the top level, up to two times that number plus the remainder 
 still solves the original problem (higher-level compactions starving low levels of resources) while making better use of
 the compaction threads. This is the mode (with `max` reservations) used by default.
 
+## Output shard parallelization
+
+Because the sharding of the output of a compaction operation is known in advance, we can parallelize the compaction
+process by starting a separate task for each shard. This can dramatically speed the throughput of compaction and is
+especially helpful for the lower levels of the compaction heirarchy, where the number of input shards is very low
+(often just one). To make sure that we correctly change the state of input and output sstables, such operations will
+share a transaction and will complete only when all individual tasks complete (and, conversely, abort if any of the
+individual tasks abort). Early opening of sstables is not supported in this mode, because we currently do not support
+arbitraty filtering of the requests to an sstable; it is expected that the smaller size and quicker completion time of
+compactions should make up for this.
+
+This is controlled by the `parallelize_output_shards` parameter, which is `true` by default.
 
 ## Major compaction
 
-Under the working principles of UCS, a major compaction is an operation which compacts together all sstables that have
-(transitive) overlap, and where the output is split on shard boundaries appropriate for the expected result density.
-
-In other words, it is expected that a major compaction will result in $b$ concurrent compactions, each containing all
-sstables covered in each of the base shards, and that the result will be split on shard boundaries whose number
-depends on the total size of data contained in the shard.
+Major compaction in UCS always splits the output into a shard number suitable for the expected result density.
+Additionally, major compaction can be configured to act independently on sstables that do not transitively overlap
+by configuring `reshard_major_compactions` to `false`. This was originally implemented to allow for a bit of parallelism
+of major compactions, since the base shard count $b$ could define splitting points for all sstables in the system and
+thus allowing for major compactions with parallelism $b$. Since the introduction of `parallelize_output_shards`, this
+is no longer necessary, and by default disabled to make sure that major compactions can be used to reshard data after
+changes to the compaction configuration.
 
 ## Differences with STCS and LCS
 
@@ -511,6 +524,18 @@ UCS accepts these compaction strategy parameters:
   reservations are only used by the specific level. If set to `level_or_below`, the reservations can be used by this
   level as well as any one below it.  
   The default value is `level_or_below`.
+* `parallelize_output_shards` Enables or disables parallelization of compaction tasks for the output shards of a
+  compaction. This can dramatically improve compaction throughput especially on the lowest levels of the hierarchy,
+  but disables early open and thus may be less efficient when compaction is configured to produce for very large
+  sstables.   
+  The default value is `true`.
+* `reshard_major_compactions` If true, major compaction requiests will generate one single compaction operation over all
+  sstables in the arena (potentially parallelized as a result of `parallelize_output_shards`). If false, major
+  compactions will proceed as independent operations for any non-overlapping sets of sstables. The latter increases
+  parallelism but means that any preexisting splitting boundaries will remain in force after such a compaction and thus
+  often will not restructure data according to changed compaction parameters.   
+  The default value is unset, which sets the option to the value of `parallelize_output_shards` to split the input into
+  independent sets only when we don't have another method of providing parallelism.
 * `expired_sstable_check_frequency_seconds` Determines how often to check for expired SSTables.  
   The default value is 10 minutes.
 * `num_shards` Specifying this switches the strategy to UCS V1 mode, where the number of shards is fixed, but a
