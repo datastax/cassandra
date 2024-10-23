@@ -29,7 +29,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
-public class NotOnTruncatedKeyTest extends SAITester
+public class NotOnTruncatedKeyTest extends AbstractQueryTester
 {
     @Test
     public void testLossyDecimalQueries() throws Throwable
