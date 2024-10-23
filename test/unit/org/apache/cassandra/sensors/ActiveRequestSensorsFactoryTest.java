@@ -29,11 +29,13 @@ import static org.junit.Assert.assertEquals;
 public class ActiveRequestSensorsFactoryTest
 {
     private ActiveRequestSensorsFactory factory;
+    private SensorEncoder encoder;
 
     @Before
     public void before()
     {
         factory = new ActiveRequestSensorsFactory();
+        encoder = factory.createSensorEncoder();
     }
 
     @Test
@@ -53,7 +55,7 @@ public class ActiveRequestSensorsFactoryTest
         String expectedParam = String.format("READ_BYTES_REQUEST.%s", "t1");
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Sensor sensor = new mockingSensor(context, Type.READ_BYTES);
-        String actualParam = factory.requestSensorEncoder().apply(sensor);
+        String actualParam = encoder.encodeRequestSensor(sensor);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -61,10 +63,10 @@ public class ActiveRequestSensorsFactoryTest
     public void testEncodeTableInReadByteTableParam()
     {
         String table = "t1";
-        String expectedParam = String.format("READ_BYTES_TABLE.%s", "t1");
+        String expectedParam = String.format("READ_BYTES_GLOBAL.%s", "t1");
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Sensor sensor = new mockingSensor(context, Type.READ_BYTES);
-        String actualParam = factory.registrySensorEncoder().apply(sensor);
+        String actualParam = encoder.encodeGlobalSensor(sensor);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -75,7 +77,7 @@ public class ActiveRequestSensorsFactoryTest
         String expectedParam = String.format("WRITE_BYTES_REQUEST.%s", "t1");
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Sensor sensor = new mockingSensor(context, Type.WRITE_BYTES);
-        String actualParam = factory.requestSensorEncoder().apply(sensor);
+        String actualParam = encoder.encodeRequestSensor(sensor);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -83,10 +85,10 @@ public class ActiveRequestSensorsFactoryTest
     public void testEncodeTableInWriteByteTableParam()
     {
         String table = "t1";
-        String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
+        String expectedParam = String.format("WRITE_BYTES_GLOBAL.%s", "t1");
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Sensor sensor = new mockingSensor(context, Type.WRITE_BYTES);
-        String actualParam = factory.registrySensorEncoder().apply(sensor);
+        String actualParam = encoder.encodeGlobalSensor(sensor);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -97,7 +99,7 @@ public class ActiveRequestSensorsFactoryTest
         String expectedParam = String.format("INDEX_WRITE_BYTES_REQUEST.%s", table);
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Sensor sensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
-        String actualParam = factory.requestSensorEncoder().apply(sensor);
+        String actualParam = encoder.encodeRequestSensor(sensor);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -105,10 +107,10 @@ public class ActiveRequestSensorsFactoryTest
     public void testEncodeTableInIndexWriteBytesTableParam()
     {
         String table = "t1";
-        String expectedParam = String.format("INDEX_WRITE_BYTES_TABLE.%s", "t1");
+        String expectedParam = String.format("INDEX_WRITE_BYTES_GLOBAL.%s", "t1");
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Sensor sensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
-        String actualParam = factory.registrySensorEncoder().apply(sensor);
+        String actualParam = encoder.encodeGlobalSensor(sensor);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -119,7 +121,7 @@ public class ActiveRequestSensorsFactoryTest
         String expectedParam = String.format("INTERNODE_BYTES_REQUEST.%s", table);
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Sensor sensor = new mockingSensor(context, Type.INTERNODE_BYTES);
-        String actualParam = factory.requestSensorEncoder().apply(sensor);
+        String actualParam = encoder.encodeRequestSensor(sensor);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -127,10 +129,10 @@ public class ActiveRequestSensorsFactoryTest
     public void testEncodeTableInInternodeBytesTableParam()
     {
         String table = "t1";
-        String expectedParam = String.format("INTERNODE_BYTES_TABLE.%s", table);
+        String expectedParam = String.format("INTERNODE_BYTES_GLOBAL.%s", table);
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Sensor sensor = new mockingSensor(context, Type.INTERNODE_BYTES);
-        String actualParam = factory.registrySensorEncoder().apply(sensor);
+        String actualParam = encoder.encodeGlobalSensor(sensor);
         assertEquals(expectedParam, actualParam);
     }
 

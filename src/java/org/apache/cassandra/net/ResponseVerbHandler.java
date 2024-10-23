@@ -105,7 +105,7 @@ public class ResponseVerbHandler implements IVerbHandler
     {
         Optional<Sensor> sensor = sensors.getSensor(context, type);
         sensor.ifPresent(s -> {
-            String customParam = SensorsCustomParams.requestParamForSensor(s);
+            String customParam = SensorsCustomParams.paramForRequestSensor(s);
             double sensorValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam);
             sensors.incrementSensor(context, type, sensorValue);
         });

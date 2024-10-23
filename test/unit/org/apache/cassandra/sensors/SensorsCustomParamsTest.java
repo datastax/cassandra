@@ -113,7 +113,7 @@ public class SensorsCustomParamsTest
         assertNotNull(message.getCustomPayload());
 
         Sensor sensor = sensors.getSensor(context, type).get();
-        String expectedHeader = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
+        String expectedHeader = SensorsCustomParams.paramForRequestSensor(sensor);
         assertTrue(message.getCustomPayload().containsKey(expectedHeader));
         assertEquals(17.0, message.getCustomPayload().get(expectedHeader).getDouble(), 0.0);
     }
@@ -164,12 +164,12 @@ public class SensorsCustomParamsTest
         assertNotNull(msg.header.customParams());
         assertEquals(2, msg.header.customParams().size());
         Sensor sensor = sensors.getSensor(context, sensorType).get();
-        String requestParam = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
-        String tableParam = RequestSensorsFactory.instance.registrySensorEncoder().apply(sensor);
+        String requestParam = SensorsCustomParams.paramForRequestSensor(sensor);
+        String globalParam = SensorsCustomParams.paramForGlobalSensor(sensor);
         assertTrue(msg.header.customParams().containsKey(requestParam));
-        assertTrue(msg.header.customParams().containsKey(tableParam));
+        assertTrue(msg.header.customParams().containsKey(globalParam));
         double epsilon = 0.000001;
         assertEquals(17.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(requestParam)), epsilon);
-        assertEquals(17.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(tableParam)), epsilon);
+        assertEquals(17.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(globalParam)), epsilon);
     }
 }

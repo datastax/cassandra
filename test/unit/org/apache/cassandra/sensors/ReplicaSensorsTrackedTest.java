@@ -236,7 +236,7 @@ public class ReplicaSensorsTrackedTest
         return Message.builder(Verb.READ_RSP, response)
                       .from(from)
                       .withId(id)
-                      .withCustomParam(SensorsCustomParams.requestParamForSensor(readSensor), SensorsCustomParams.sensorValueAsBytes(readSensor.getValue()))
+                      .withCustomParam(SensorsCustomParams.paramForRequestSensor(readSensor), SensorsCustomParams.sensorValueAsBytes(readSensor.getValue()))
                       .build();
     }
 
@@ -245,7 +245,7 @@ public class ReplicaSensorsTrackedTest
         return Message.builder(Verb.MUTATION_RSP, NoPayload.noPayload)
                       .from(from)
                       .withId(id)
-                      .withCustomParam(SensorsCustomParams.requestParamForSensor(writeSensor), SensorsCustomParams.sensorValueAsBytes(writeSensor.getValue()))
+                      .withCustomParam(SensorsCustomParams.paramForRequestSensor(writeSensor), SensorsCustomParams.sensorValueAsBytes(writeSensor.getValue()))
                       .build();
     }
 

@@ -416,14 +416,14 @@ public class SensorsWriteTest
     private void assertResponseSensors(Message message, Sensor requestSensor, Sensor registrySensor)
     {
         assertThat(message.header.customParams()).isNotNull();
-        String expectedRequestParam = RequestSensorsFactory.instance.requestSensorEncoder().apply(requestSensor);
-        String expectedTableParam = RequestSensorsFactory.instance.registrySensorEncoder().apply(registrySensor);
+        String expectedRequestParam = SensorsCustomParams.paramForRequestSensor(requestSensor);
+        String expectedGlobalParam = SensorsCustomParams.paramForGlobalSensor(registrySensor);
 
         assertThat(message.header.customParams()).containsKey(expectedRequestParam);
-        assertThat(message.header.customParams()).containsKey(expectedTableParam);
-        double requestWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
-        double tableWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedTableParam));
-        assertThat(requestWriteBytes).isEqualTo(requestSensor.getValue());
-        assertThat(tableWriteBytes).isEqualTo(registrySensor.getValue());
+        assertThat(message.header.customParams()).containsKey(expectedGlobalParam);
+        double requestBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
+        double globalBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedGlobalParam));
+        assertThat(requestBytes).isEqualTo(requestSensor.getValue());
+        assertThat(globalBytes).isEqualTo(registrySensor.getValue());
     }
 }

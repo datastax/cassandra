@@ -39,12 +39,14 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public final class SensorsCustomParams
 {
+    private static final SensorEncoder SENSOR_ENCODER = RequestSensorsFactory.instance.createSensorEncoder();
+
     private SensorsCustomParams()
     {
     }
 
     /**
-     * Utility method to encode sensor value as byte buffer in the big endian order.
+     * Utility method to encode sensor value as byte[] in the big endian order.
      */
     public static byte[] sensorValueAsBytes(double value)
     {
@@ -54,6 +56,9 @@ public final class SensorsCustomParams
         return buffer.array();
     }
 
+    /**
+     * Utility method to encode sensor value as ByteBuffer in the big endian order.
+     */
     public static ByteBuffer sensorValueAsByteBuffer(double value)
     {
         ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
@@ -142,7 +147,7 @@ public final class SensorsCustomParams
         Optional<Sensor> requestSensor = sensors.getSensor(context, type);
         requestSensor.ifPresent(sensor -> {
             ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
-            String headerName = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
+            String headerName = SENSOR_ENCODER.encodeRequestSensor(sensor);
             Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(headerName, bytes);
             response.setCustomPayload(sensorHeader);
         });
@@ -151,24 +156,24 @@ public final class SensorsCustomParams
     private static <T> void addSensorToInternodeResponse(Message.Builder<T> response, Sensor sensor)
     {
         byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-        String requestParam = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
+        String requestParam = paramForRequestSensor(sensor);
         response.withCustomParam(requestParam, requestBytes);
 
         Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(sensor.getContext(), sensor.getType());
         registrySensor.ifPresent(registry -> {
-            byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(registry.getValue());
-            String tableParam = RequestSensorsFactory.instance.registrySensorEncoder().apply(sensor);
-            response.withCustomParam(tableParam, tableBytes);
+            byte[] globalBytes = SensorsCustomParams.sensorValueAsBytes(registry.getValue());
+            String globalParam = paramForGlobalSensor(registry);
+            response.withCustomParam(globalParam, globalBytes);
         });
     }
 
-    public static String requestParamForSensor(Sensor sensor)
+    public static String paramForRequestSensor(Sensor sensor)
     {
-        return RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
+        return SENSOR_ENCODER.encodeRequestSensor(sensor);
     }
 
-    public static String tableParamForSensor(Sensor sensor)
+    public static String paramForGlobalSensor(Sensor sensor)
     {
-        return RequestSensorsFactory.instance.registrySensorEncoder().apply(sensor);
+        return SENSOR_ENCODER.encodeGlobalSensor(sensor);
     }
 }

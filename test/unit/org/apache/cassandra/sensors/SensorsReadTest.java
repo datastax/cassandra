@@ -426,8 +426,8 @@ public class SensorsReadTest
 
     private void assertResponseSensors(Message message, Sensor requestSensor, Sensor registrySensor)
     {
-        String requestHeader = SensorsCustomParams.requestParamForSensor(registrySensor);
-        String tableHeader = SensorsCustomParams.requestParamForSensor(registrySensor);
+        String requestHeader = SensorsCustomParams.paramForRequestSensor(registrySensor);
+        String tableHeader = SensorsCustomParams.paramForRequestSensor(registrySensor);
         assertThat(message.header.customParams()).isNotNull();
         assertThat(message.header.customParams()).containsKey(requestHeader);
         assertThat(message.header.customParams()).containsKey(tableHeader);

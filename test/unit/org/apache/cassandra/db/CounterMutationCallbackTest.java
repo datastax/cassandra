@@ -167,7 +167,7 @@ public class CounterMutationCallbackTest
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_WRITE_BYTES * expectedSensorValueMultiplier);
                                                    });
-        assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_TABLE.Counter",
+        assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_GLOBAL.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_WRITE_BYTES * expectedSensorValueMultiplier);
@@ -177,7 +177,7 @@ public class CounterMutationCallbackTest
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES * expectedSensorValueMultiplier);
                                                    });
-        assertThat(customParam).hasEntrySatisfying("INTERNODE_BYTES_TABLE.Counter",
+        assertThat(customParam).hasEntrySatisfying("INTERNODE_BYTES_GLOBAL.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES * expectedSensorValueMultiplier);
