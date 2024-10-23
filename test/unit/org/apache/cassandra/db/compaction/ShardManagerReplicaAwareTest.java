@@ -95,7 +95,7 @@ public class ShardManagerReplicaAwareTest
                         assertEquals(shardCount, iterator.count());
                         var actualSplitPoints = new ArrayList<Token>();
                         var shardSpanSize = 0d;
-                        var index = -1;
+                        var index = 0;
                         for (Token end = iterator.shardEnd(); end != null; end = iterator.shardEnd())
                         {
                             shardSpanSize += iterator.shardSpanSize();

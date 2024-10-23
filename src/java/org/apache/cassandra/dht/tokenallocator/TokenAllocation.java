@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
@@ -206,6 +207,12 @@ public class TokenAllocation
         // alternatively: return false if the endpoint's ownership is independent of the node we are allocating tokens for
         public abstract boolean inAllocationRing(InetAddressAndPort other);
 
+        // Allows sub classes to override and provide custom partitioners
+        public IPartitioner partitioner()
+        {
+            return tokenMetadata.partitioner;
+        }
+
         final TokenAllocator<InetAddressAndPort> createAllocator()
         {
             NavigableMap<Token, InetAddressAndPort> sortedTokens = new TreeMap<>();
@@ -214,7 +221,7 @@ public class TokenAllocation
                 if (inAllocationRing(en.getValue()))
                     sortedTokens.put(en.getKey(), en.getValue());
             }
-            return TokenAllocatorFactory.createTokenAllocator(sortedTokens, this, tokenMetadata.partitioner);
+            return TokenAllocatorFactory.createTokenAllocator(sortedTokens, this, partitioner());
         }
 
         final Collection<Token> adjustForCrossDatacenterClashes(Collection<Token> tokens)
