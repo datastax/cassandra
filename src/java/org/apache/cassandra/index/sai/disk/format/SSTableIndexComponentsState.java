@@ -128,6 +128,17 @@ public class SSTableIndexComponentsState
         return new Builder();
     }
 
+    /**
+     * Returns a newly created builder initialized with the data of this state.
+     */
+    public Builder unbuild()
+    {
+        Builder builder = new Builder();
+        builder.addPerSSTable(perSSTableBuild);
+        perIndexBuilds.forEach(builder::addPerIndex);
+        return builder;
+    }
+
     public boolean isEmpty()
     {
         return perSSTableBuild == null && perIndexBuilds.isEmpty();
