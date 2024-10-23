@@ -105,7 +105,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.random()).thenCallRealMethod();
-        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.NONE);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.TRANSITIVE);
         // Calculate the minimum shard size such that the top bucket compactions won't be considered "oversized" and
         // all will be allowed to run. The calculation below assumes (1) that compactions are considered "oversized"
         // if they are more than 1/2 of the max shard size; (2) that mockSSTables uses 15% less than the max SSTable
@@ -168,7 +168,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.random()).thenCallRealMethod();
-        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.NONE);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.TRANSITIVE);
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
