@@ -58,6 +58,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.nodes.LocalInfo;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.nodes.virtual.LegacySystemKeyspaceToNodes;
 import org.apache.cassandra.nodes.virtual.NodeConstants;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
