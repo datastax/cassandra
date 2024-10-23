@@ -313,7 +313,9 @@ public class TrieMemtable extends AbstractShardedMemtable
 
     static boolean isPartitionBoundary(Object content)
     {
-        return content instanceof PartitionData;
+        // In the trie we use PartitionData for the root of a partition, but PartitionUpdates come with DeletionInfo.
+        // Both are descendants of DeletionInfo.
+        return content instanceof DeletionInfo;
     }
 
     @Override
