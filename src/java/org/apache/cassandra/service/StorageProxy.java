@@ -1083,16 +1083,17 @@ public class StorageProxy implements StorageProxyMBean
         {
             for (IMutation mutation : mutations)
             {
-                if (mutation instanceof CounterMutation)
-                    responseHandlers.add(mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime));
-                else
-                    responseHandlers.add(mutator.mutateStandard((Mutation)mutation, consistencyLevel, localDataCenter, standardWritePerformer, null, plainWriteType, queryStartNanoTime));
-
+                // register the sensors for the mutation before the actual write is performed
                 for (PartitionUpdate pu: mutation.getPartitionUpdates())
                 {
                     if (pu.metadata().isIndex()) continue;
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
                 }
+
+                if (mutation instanceof CounterMutation)
+                    responseHandlers.add(mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime));
+                else
+                    responseHandlers.add(mutator.mutateStandard((Mutation)mutation, consistencyLevel, localDataCenter, standardWritePerformer, null, plainWriteType, queryStartNanoTime));
             }
 
             // upgrade to full quorum any failed cheap quorums
