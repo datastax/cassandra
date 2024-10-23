@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.net;
+package org.apache.cassandra.sensors;
 
 import java.nio.ByteBuffer;
 import java.util.UUID;
@@ -27,16 +27,12 @@ import org.junit.Test;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.sensors.ActiveRequestSensorsFactory;
-import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
-import org.apache.cassandra.sensors.Sensor;
-import org.apache.cassandra.sensors.SensorsRegistry;
-import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -112,7 +108,7 @@ public class SensorsCustomParamsTest
         sensors.registerSensor(context, type);
         sensors.incrementSensor(context, type, expectedValue);
 
-        SensorsCustomParams.addSensorToMessageResponse(message, ProtocolVersion.V4, sensors, context, type);
+        SensorsCustomParams.addSensorToCQLResponse(message, ProtocolVersion.V4, sensors, context, type);
 
         assertNotNull(message.getCustomPayload());
 
@@ -135,9 +131,9 @@ public class SensorsCustomParamsTest
         sensors.registerSensor(context, type);
         sensors.incrementSensor(context, type, expectedValue);
 
-        SensorsCustomParams.addSensorToMessageResponse(null, ProtocolVersion.V4, sensors, context, type);
-        SensorsCustomParams.addSensorToMessageResponse(message, ProtocolVersion.V4, null, context, type);
-        SensorsCustomParams.addSensorToMessageResponse(message, ProtocolVersion.V3, null, context, type);
+        SensorsCustomParams.addSensorToCQLResponse(null, ProtocolVersion.V4, sensors, context, type);
+        SensorsCustomParams.addSensorToCQLResponse(message, ProtocolVersion.V4, null, context, type);
+        SensorsCustomParams.addSensorToCQLResponse(message, ProtocolVersion.V3, null, context, type);
 
         assertNull(message.getCustomPayload());
     }
@@ -162,7 +158,7 @@ public class SensorsCustomParamsTest
         Message.builder(Verb._TEST_1, noPayload)
                .withId(1);
 
-        SensorsCustomParams.addSensorsToResponse(sensors, builder);
+        SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
 
         Message<NoPayload> msg = builder.build();
         assertNotNull(msg.header.customParams());

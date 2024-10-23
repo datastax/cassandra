@@ -30,7 +30,7 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
@@ -127,7 +127,7 @@ public class UpdateStatement extends ModificationStatement
         RequestSensors sensors = RequestTracker.instance.get();
         Context context = Context.from(this.metadata());
         Type sensorType = Type.WRITE_BYTES;
-        SensorsCustomParams.addSensorToMessageResponse(result, options.getProtocolVersion(), sensors, context, sensorType);
+        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, sensorType);
 
         return result;
     }

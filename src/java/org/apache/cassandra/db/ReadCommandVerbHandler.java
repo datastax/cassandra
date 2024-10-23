@@ -29,7 +29,7 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestSensorsFactory;
@@ -87,7 +87,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         int size = reply.currentPayloadSize(MessagingService.current_version);
         requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
         requestSensors.syncAllSensors();
-        SensorsCustomParams.addSensorsToResponse(requestSensors, reply);
+        SensorsCustomParams.addSensorsToInternodeResponse(requestSensors, reply);
 
         Tracing.trace("Enqueuing response to {}", message.from());
         MessagingService.instance().send(reply.build(), message.from());

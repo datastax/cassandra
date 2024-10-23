@@ -16,28 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.net;
+package org.apache.cassandra.sensors;
 
 import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 
-import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
-import org.apache.cassandra.sensors.Sensor;
-import org.apache.cassandra.sensors.SensorsRegistry;
-import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
- * A utility class that contains the definition of custom params added to the {@link Message} header to propagate {@link Sensor} values from
- * writer to coordinator and necessary methods to encode sensor values as appropriate for the internode message format.
+ * A utility class that contains the groups methods to facilitate encoding sensors in native or internode protocol message
+ * responses as follows:
+ * <p>Sensors in internode messages: Use to communicate sensors values from replicas to coordinators in the internode
+ * message response {@link Message.Header#customParams()} bytes map. See {@link SensorsCustomParams#addSensorsToInternodeResponse(RequestSensors, Message.Builder)} and
+ * {@link SensorsCustomParams#sensorValueFromInternodeResponse(Message, String)}.
+ * <p>Sensors in native protocol messages: Use to communicate sensors values from coordinator to upstream callers native
+ * protocol response {@link org.apache.cassandra.transport.Message#getCustomPayload()} bytes map. See {@link SensorsCustomParams#addSensorsToInternodeResponse(RequestSensors, Message.Builder)}.
  */
 public final class SensorsCustomParams
 {
@@ -80,14 +78,14 @@ public final class SensorsCustomParams
      * @param response the response message builder to add the sensors to
      * @param <T>      the response message builder type
      */
-    public static <T> void addSensorsToResponse(RequestSensors sensors, Message.Builder<T> response)
+    public static <T> void addSensorsToInternodeResponse(RequestSensors sensors, Message.Builder<T> response)
     {
         Preconditions.checkNotNull(sensors);
         Preconditions.checkNotNull(response);
 
         for (Sensor sensor : sensors.getSensors(ignored -> true))
         {
-            addSensorToResponse(response, sensor);
+            addSensorToInternodeResponse(response, sensor);
         }
     }
 
@@ -95,26 +93,25 @@ public final class SensorsCustomParams
      * Reads the sensor value encoded in the response message header as {@link Message.Header#customParams()} bytes map.
      *
      * @param message the message to read the sensor value from
-     * @param param   the name of the header in custom params to read the sensor value from
+     * @param customParam   the name of the header in custom params to read the sensor value from
      * @param <T>     the message type
      * @return the sensor value
      */
-    public static <T> double sensorValueFromCustomParam(Message<T> message, String param)
+    public static <T> double sensorValueFromInternodeResponse(Message<T> message, String customParam)
     {
-        if (param == null)
+        if (customParam == null)
             return 0.0;
 
         Map<String, byte[]> customParams = message.header.customParams();
         if (customParams == null)
             return 0.0;
 
-        byte[] readBytes = message.header.customParams().get(param);
+        byte[] readBytes = message.header.customParams().get(customParam);
         if (readBytes == null)
             return 0.0;
 
         return sensorValueFromBytes(readBytes);
     }
-
 
     /**
      * Adds a sensor of a given type and context to the native protocol response message encoded in the custom payload bytes map
@@ -125,11 +122,11 @@ public final class SensorsCustomParams
      * @param context         the context of the sensor to add to the response
      * @param type            the type of the sensor to add to the response
      */
-    public static void addSensorToMessageResponse(org.apache.cassandra.transport.Message.Response response,
-                                                  ProtocolVersion protocolVersion,
-                                                  RequestSensors sensors,
-                                                  Context context,
-                                                  Type type)
+    public static void addSensorToCQLResponse(org.apache.cassandra.transport.Message.Response response,
+                                              ProtocolVersion protocolVersion,
+                                              RequestSensors sensors,
+                                              Context context,
+                                              Type type)
     {
         // Custom payload is not supported for protocol versions < 4
         if (protocolVersion.isSmallerThan(ProtocolVersion.V4))
@@ -142,8 +139,8 @@ public final class SensorsCustomParams
             return;
         }
 
-        Optional<Sensor> writeRequestSensor = sensors.getSensor(context, type);
-        writeRequestSensor.ifPresent(sensor -> {
+        Optional<Sensor> requestSensor = sensors.getSensor(context, type);
+        requestSensor.ifPresent(sensor -> {
             ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
             String headerName = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);
             Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(headerName, bytes);
@@ -151,7 +148,7 @@ public final class SensorsCustomParams
         });
     }
 
-    private static <T> void addSensorToResponse(Message.Builder<T> response, Sensor sensor)
+    private static <T> void addSensorToInternodeResponse(Message.Builder<T> response, Sensor sensor)
     {
         byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
         String requestParam = RequestSensorsFactory.instance.requestSensorEncoder().apply(sensor);

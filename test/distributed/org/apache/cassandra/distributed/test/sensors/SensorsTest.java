@@ -52,7 +52,7 @@ import org.assertj.core.api.Assertions;
 
 /**
  * Test to verify that the sensors are propagated via the native protocol in the custom payload respecting
- * the configuration set in {@link CassandraRelevantProperties#PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL}
+ * the configuration set in {@link CassandraRelevantProperties#REQUEST_SENSORS_VIA_NATIVE_PROTOCOL}
  */
 public class SensorsTest extends TestBaseImpl
 {
@@ -64,7 +64,7 @@ public class SensorsTest extends TestBaseImpl
     @Test
     public void testSensorsInResultMessage() throws Throwable
     {
-        CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
+        CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
         try (Cluster cluster = builder().withNodes(1).start())
         {
             // resister a noop sensor listener before init(cluster) which creates the test keyspace to ensure that the registry singleton instance is subscribed to schema notifications
@@ -97,7 +97,7 @@ public class SensorsTest extends TestBaseImpl
     @Test
     public void testSensorsInResultMessageDisabled() throws Throwable
     {
-        CassandraRelevantProperties.PROPAGATE_REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(false);
+        CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(false);
         try (Cluster cluster = builder().withNodes(1).start())
         {
             // resister a noop sensor listener before init(cluster) which creates the test keyspace to ensure that the registry singleton instance is subscribed to schema notifications

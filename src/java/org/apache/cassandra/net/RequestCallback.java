@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.net;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.sensors.NoOpRequestSensors;
@@ -60,10 +62,12 @@ public interface RequestCallback<T>
     }
 
     /**
-     * @return the {@link RequestSensors} associated with the request. Used to track sensors as reported by response replicas.
+     * @return the {@link RequestSensors} associated with the request to track sensors as reported by response replicas.
+     * If null, sensor tracking will be disabled for this request.
      */
+    @Nullable
     default RequestSensors getRequestSensors()
     {
-        return NoOpRequestSensors.instance;
+        return null;
     }
 }

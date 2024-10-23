@@ -28,6 +28,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
@@ -72,8 +73,6 @@ public class ResponseVerbHandler implements IVerbHandler
     private void trackReplicaSensors(RequestCallbacks.CallbackInfo callbackInfo, Message message)
     {
         RequestSensors sensors = callbackInfo.callback.getRequestSensors();
-        // Eventhough RequestCallback.getRequestSensors() returns a NoOpRequestSensors instance by default, callbacks
-        // that override this method may have been initialized from a code path where sensors are not set.
         if (sensors == null)
             return;
 
@@ -107,7 +106,7 @@ public class ResponseVerbHandler implements IVerbHandler
         Optional<Sensor> sensor = sensors.getSensor(context, type);
         sensor.ifPresent(s -> {
             String customParam = SensorsCustomParams.requestParamForSensor(s);
-            double sensorValue = SensorsCustomParams.sensorValueFromCustomParam(message, customParam);
+            double sensorValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam);
             sensors.incrementSensor(context, type, sensorValue);
         });
     }
