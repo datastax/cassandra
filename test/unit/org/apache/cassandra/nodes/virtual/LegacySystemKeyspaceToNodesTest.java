@@ -23,6 +23,8 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -150,9 +152,9 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
 
         try
         {
-            //TODO
-            //assertEquals(0L, nodes.getLocal().getLastSaveTimeNanos());
-            //assertEquals(0L, nodes.getPeers().getLastSaveTimeNanos());
+            long localSaveTime = nodes.getLocal().getLastSaveTimeNanos();
+            assertNotEquals(0L, localSaveTime);
+            assertEquals(0L, nodes.getPeers().getLastSaveTimeNanos());
 
             Collection<Token> tokens = persistLocalMetadata();
 
@@ -191,7 +193,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
                                .getSnapshotDetails()
                                .isEmpty());
 
-            assertNotEquals(0L, nodes.getLocal().getLastSaveTimeNanos());
+            assertNotEquals(localSaveTime, nodes.getLocal().getLastSaveTimeNanos());
             assertEquals(0L, nodes.getPeers().getLastSaveTimeNanos());
 
             LocalInfo local = nodes.getLocal().get();
@@ -231,20 +233,23 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
     public void verifyLocalAndPeersUpgrade() throws Exception
     {
         Nodes nodes = new Nodes(folder.newFolder().toPath());
-
-        int nPeers = 1000;
+        int peersCount = 1000;
 
         try
         {
+            long localSaveTime = nodes.getLocal().getLastSaveTimeNanos();
+            assertNotEquals(0L, localSaveTime);
+            assertEquals(0L, nodes.getPeers().getLastSaveTimeNanos());
+
             persistLocalMetadata();
 
-            Collection[] tokens = new Collection[nPeers];
-            for (int i = 0; i < nPeers; i++)
-                tokens[i] = persistPeerMetadata(i);
+            List<Collection<Token>> tokens = new ArrayList<>(peersCount);
+            for (int i = 0; i < peersCount; i++)
+                tokens.add(i, persistPeerMetadata(i));
 
             umappedViews(() -> {
                 assertEquals(1, executeInternal("SELECT * FROM system.local").size());
-                assertEquals(nPeers, executeInternal("SELECT * FROM system.peers").size());
+                assertEquals(peersCount, executeInternal("SELECT * FROM system.peers").size());
             });
 
             LegacySystemKeyspaceToNodes legacySystemKeyspaceToNodes = new LegacySystemKeyspaceToNodes(nodes);
@@ -272,10 +277,10 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
                                     .getSnapshotDetails()
                                     .size());
 
-            assertNotEquals(0L, nodes.getLocal().getLastSaveTimeNanos());
+            assertNotEquals(localSaveTime, nodes.getLocal().getLastSaveTimeNanos());
             assertNotEquals(0L, nodes.getPeers().getLastSaveTimeNanos());
 
-            for (int i = 0; i < nPeers; i++)
+            for (int i = 0; i < peersCount; i++)
             {
                 InetAddressAndPort adrPeer = InetAddressAndPort.getByAddressOverrideDefaults(InetAddress.getByName("127.99." + (i / 256) + '.' + (i & 0xff)), DatabaseDescriptor.getStoragePort());
                 InetAddressAndPort adrPreferred = InetAddressAndPort.getByAddressOverrideDefaults(InetAddress.getByName("127.199." + (i / 256) + '.' + (i & 0xff)), DatabaseDescriptor.getStoragePort());
@@ -295,7 +300,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
                 assertEquals(adrNative, peer.getNativeTransportAddressAndPort());
                 assertEquals(UUID.nameUUIDFromBytes(adrPeer.address.getAddress()), peer.getHostId());
                 assertEquals(UUID.nameUUIDFromBytes(adrPreferred.address.getAddress()), peer.getSchemaVersion());
-                assertEquals(new ArrayList<Token>(tokens[i]), new ArrayList<>(peer.getTokens()));
+                assertEquals(tokens.get(i), peer.getTokens());
             }
         }
         finally
@@ -399,9 +404,10 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
     private static Collection<Token> makeTokens()
     {
         IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
-        Set<Token> tokens = new TreeSet<>();
+        List<Token> tokens = new ArrayList<>();
         for (int i = 0; i < 8; i++)
             tokens.add(partitioner.getRandomToken());
+        tokens.sort(Comparator.naturalOrder());
         return tokens;
     }
 

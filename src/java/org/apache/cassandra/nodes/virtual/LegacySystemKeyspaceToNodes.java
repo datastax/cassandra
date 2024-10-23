@@ -108,7 +108,7 @@ public final class LegacySystemKeyspaceToNodes
     }
 
     @VisibleForTesting
-    boolean convertToNodesFiles() throws Exception
+    boolean convertToNodesFiles()
     {
         initialized.set(false);
         boolean upgradeExecuted = false;
@@ -161,7 +161,7 @@ public final class LegacySystemKeyspaceToNodes
         }
     }
 
-    private void migrateLocal(Nodes nodes, UntypedResultSet rows) throws Exception
+    private void migrateLocal(Nodes nodes, UntypedResultSet rows)
     {
         logger.info("Migrating system.local...");
         rows.forEach(row -> nodes.getLocal().update(l -> {
@@ -207,7 +207,7 @@ public final class LegacySystemKeyspaceToNodes
         logger.info("Migrated system.local and table truncated with snapshot...");
     }
 
-    private void migratePeers(Nodes nodes, UntypedResultSet rows) throws Exception
+    private void migratePeers(Nodes nodes, UntypedResultSet rows)
     {
         logger.info("Migrating system.peers...");
         rows.forEach(row -> {

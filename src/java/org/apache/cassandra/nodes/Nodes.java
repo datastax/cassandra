@@ -743,6 +743,7 @@ public class Nodes
             peerWriter.writeValue(output, peers.values());
         }
 
+        @VisibleForTesting
         public long getLastSaveTimeNanos()
         {
             return lastPeersSave;
