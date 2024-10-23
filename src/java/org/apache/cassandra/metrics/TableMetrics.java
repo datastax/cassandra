@@ -683,7 +683,7 @@ public class TableMetrics
         }, null);
         
         sstablesPerReadHistogram = createTableHistogram("SSTablesPerReadHistogram", cfs.getKeyspaceMetrics().sstablesPerReadHistogram, true);
-        sstablesPerRangeReadHistogram = createTableHistogram("SSTablesPerRangeReadHistogram", cfs.keyspace.metric.sstablesPerRangeReadHistogram, true);
+        sstablesPerRangeReadHistogram = createTableHistogram("SSTablesPerRangeReadHistogram", cfs.getKeyspaceMetrics().sstablesPerRangeReadHistogram, true);
         sstablePartitionReadLatency = ExpMovingAverage.decayBy100();
         compressionRatio = createTableGauge("CompressionRatio", new Gauge<Double>()
         {
@@ -1027,23 +1027,23 @@ public class TableMetrics
             return cnt;
         });
 
-        clientTombstoneWarnings = createTableMeter("ClientTombstoneWarnings", cfs.keyspace.metric.clientTombstoneWarnings);
-        clientTombstoneAborts = createTableMeter("ClientTombstoneAborts", cfs.keyspace.metric.clientTombstoneAborts);
+        clientTombstoneWarnings = createTableMeter("ClientTombstoneWarnings", cfs.getKeyspaceMetrics().clientTombstoneWarnings);
+        clientTombstoneAborts = createTableMeter("ClientTombstoneAborts", cfs.getKeyspaceMetrics().clientTombstoneAborts);
 
-        coordinatorReadSizeWarnings = createTableMeter("CoordinatorReadSizeWarnings", cfs.keyspace.metric.coordinatorReadSizeWarnings);
-        coordinatorReadSizeAborts = createTableMeter("CoordinatorReadSizeAborts", cfs.keyspace.metric.coordinatorReadSizeAborts);
-        coordinatorReadSize = createTableHistogram("CoordinatorReadSize", cfs.keyspace.metric.coordinatorReadSize, false);
+        coordinatorReadSizeWarnings = createTableMeter("CoordinatorReadSizeWarnings", cfs.getKeyspaceMetrics().coordinatorReadSizeWarnings);
+        coordinatorReadSizeAborts = createTableMeter("CoordinatorReadSizeAborts", cfs.getKeyspaceMetrics().coordinatorReadSizeAborts);
+        coordinatorReadSize = createTableHistogram("CoordinatorReadSize", cfs.getKeyspaceMetrics().coordinatorReadSize, false);
 
-        localReadSizeWarnings = createTableMeter("LocalReadSizeWarnings", cfs.keyspace.metric.localReadSizeWarnings);
-        localReadSizeAborts = createTableMeter("LocalReadSizeAborts", cfs.keyspace.metric.localReadSizeAborts);
-        localReadSize = createTableHistogram("LocalReadSize", cfs.keyspace.metric.localReadSize, false);
+        localReadSizeWarnings = createTableMeter("LocalReadSizeWarnings", cfs.getKeyspaceMetrics().localReadSizeWarnings);
+        localReadSizeAborts = createTableMeter("LocalReadSizeAborts", cfs.getKeyspaceMetrics().localReadSizeAborts);
+        localReadSize = createTableHistogram("LocalReadSize", cfs.getKeyspaceMetrics().localReadSize, false);
 
-        rowIndexSizeWarnings = createTableMeter("RowIndexSizeWarnings", cfs.keyspace.metric.rowIndexSizeWarnings);
-        rowIndexSizeAborts = createTableMeter("RowIndexSizeAborts", cfs.keyspace.metric.rowIndexSizeAborts);
-        rowIndexSize = createTableHistogram("RowIndexSize", cfs.keyspace.metric.rowIndexSize, false);
+        rowIndexSizeWarnings = createTableMeter("RowIndexSizeWarnings", cfs.getKeyspaceMetrics().rowIndexSizeWarnings);
+        rowIndexSizeAborts = createTableMeter("RowIndexSizeAborts", cfs.getKeyspaceMetrics().rowIndexSizeAborts);
+        rowIndexSize = createTableHistogram("RowIndexSize", cfs.getKeyspaceMetrics().rowIndexSize, false);
 
-        tooManySSTableIndexesReadWarnings = createTableMeter("TooManySSTableIndexesReadWarnings", cfs.keyspace.metric.tooManySSTableIndexesReadWarnings);
-        tooManySSTableIndexesReadAborts = createTableMeter("TooManySSTableIndexesReadAborts", cfs.keyspace.metric.tooManySSTableIndexesReadAborts);
+        tooManySSTableIndexesReadWarnings = createTableMeter("TooManySSTableIndexesReadWarnings", cfs.getKeyspaceMetrics().tooManySSTableIndexesReadWarnings);
+        tooManySSTableIndexesReadAborts = createTableMeter("TooManySSTableIndexesReadAborts", cfs.getKeyspaceMetrics().tooManySSTableIndexesReadAborts);
 
         formatSpecificGauges = createFormatSpecificGauges(cfs);
     }
