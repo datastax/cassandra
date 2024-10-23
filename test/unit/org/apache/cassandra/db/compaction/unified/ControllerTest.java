@@ -126,6 +126,7 @@ public abstract class ControllerTest
         when(cfs.getKeyspaceReplicationStrategy()).thenReturn(replicationStrategy);
         when(cfs.getKeyspaceName()).thenAnswer(invocation -> keyspaceName);
         when(cfs.getDiskBoundaries()).thenReturn(boundaries);
+        when(cfs.buildShardManager()).thenCallRealMethod();
         when(cfs.makeUCSEnvironment()).thenCallRealMethod();
         when(cfs.getTableName()).thenReturn(tableName);
         when(boundaries.getNumBoundaries()).thenAnswer(invocation -> numDirectories);
