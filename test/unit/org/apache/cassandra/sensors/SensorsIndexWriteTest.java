@@ -152,8 +152,8 @@ public class SensorsIndexWriteTest
         // check global registry is synchronized for Standard table
         assertThat(standardRegistrySensor.getValue()).isEqualTo(standardSensor.getValue());
         String writeRequestParam = SensorsCustomParams.paramForRequestSensor(standardSensor);
-        String writeTableParam = SensorsCustomParams.paramForRequestSensor(standardRegistrySensor);
-        assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), writeRequestParam, writeTableParam);
+        String writeGlobalParam = SensorsCustomParams.paramForRequestSensor(standardRegistrySensor);
+        assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), writeRequestParam, writeGlobalParam);
 
         Mutation saiMutation = new RowUpdateBuilder(saiStore.metadata(), 0, partitionKey)
                                .add("val", "hi there")
@@ -169,8 +169,8 @@ public class SensorsIndexWriteTest
         // check global registry is synchronized for SAI table
         assertThat(saiRegistrySensor.getValue()).isEqualTo(saiSensor.getValue());
         String requestParam = SensorsCustomParams.paramForRequestSensor(saiSensor);
-        String tableParam = SensorsCustomParams.paramForGlobalSensor(saiRegistrySensor);
-        assertResponseSensors(saiSensor.getValue(), saiRegistrySensor.getValue(), requestParam, tableParam);
+        String globalParam = SensorsCustomParams.paramForGlobalSensor(saiRegistrySensor);
+        assertResponseSensors(saiSensor.getValue(), saiRegistrySensor.getValue(), requestParam, globalParam);
     }
 
     @Test
@@ -196,8 +196,8 @@ public class SensorsIndexWriteTest
         // check global registry is synchronized for Standard table
         assertThat(standardRegistrySensor.getValue()).isEqualTo(standardSensor.getValue());
         String writeRequestParam = SensorsCustomParams.paramForRequestSensor(standardSensor);
-        String writeTableParam = SensorsCustomParams.paramForGlobalSensor(standardRegistrySensor);
-        assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), writeRequestParam, writeTableParam);
+        String writeGlobalParam = SensorsCustomParams.paramForGlobalSensor(standardRegistrySensor);
+        assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), writeRequestParam, writeGlobalParam);
 
         Mutation secondaryIndexMutation = new RowUpdateBuilder(secondaryIndexStore.metadata(), 0, partitionKey)
                                           .add("val", "hi there")
@@ -217,8 +217,8 @@ public class SensorsIndexWriteTest
         // check global registry is synchronized for Secondary Index table
         assertThat(secondaryIndexRegistrySensor.getValue()).isEqualTo(secondaryIndexSensor.getValue());
         String indexRequestParam = SensorsCustomParams.paramForRequestSensor(secondaryIndexSensor);
-        String indexTableParam = SensorsCustomParams.paramForGlobalSensor(secondaryIndexRegistrySensor);
-        assertResponseSensors(secondaryIndexSensor.getValue(), secondaryIndexRegistrySensor.getValue(), indexRequestParam, indexTableParam);
+        String indexGlobalParam = SensorsCustomParams.paramForGlobalSensor(secondaryIndexRegistrySensor);
+        assertResponseSensors(secondaryIndexSensor.getValue(), secondaryIndexRegistrySensor.getValue(), indexRequestParam, indexGlobalParam);
     }
 
     private static void handleMutation(Mutation mutation)
@@ -226,27 +226,27 @@ public class SensorsIndexWriteTest
         MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
     }
 
-    private void assertResponseSensors(double requestValue, double registryValue, String requestParam, String tableParam)
+    private void assertResponseSensors(double requestValue, double registryValue, String requestParam, String globalParam)
     {
         // verify against the last message to enable testing of multiple mutations in a for loop
         Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
-        assertResponseSensors(message, requestValue, registryValue, requestParam, tableParam);
+        assertResponseSensors(message, requestValue, registryValue, requestParam, globalParam);
 
         // make sure messages with sensor values can be deserialized on the receiving node
         DataOutputBuffer out = SensorsTestUtil.serialize(message);
         Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
-        assertResponseSensors(deserializedMessage, requestValue, registryValue, requestParam, tableParam);
+        assertResponseSensors(deserializedMessage, requestValue, registryValue, requestParam, globalParam);
     }
 
-    private void assertResponseSensors(Message message, double requestValue, double registryValue, String expectedRequestParam, String expectedTableParam)
+    private void assertResponseSensors(Message message, double requestValue, double registryValue, String expectedRequestParam, String expectedGlobalParam)
     {
         assertThat(message.header.customParams()).isNotNull();
         assertThat(message.header.customParams()).containsKey(expectedRequestParam);
-        assertThat(message.header.customParams()).containsKey(expectedTableParam);
+        assertThat(message.header.customParams()).containsKey(expectedGlobalParam);
 
         double requestBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
-        double tableBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedTableParam));
+        double globalBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedGlobalParam));
         assertThat(requestBytes).isEqualTo(requestValue);
-        assertThat(tableBytes).isEqualTo(registryValue);
+        assertThat(globalBytes).isEqualTo(registryValue);
     }
 }

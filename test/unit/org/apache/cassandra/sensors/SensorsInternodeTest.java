@@ -262,22 +262,22 @@ public class SensorsInternodeTest
 
             // assert internode headers are added to the response messages
             Supplier<String> requestParamSupplier = () -> SensorsCustomParams.paramForRequestSensor(internodeBytesSensor);
-            Supplier<String> tableParamSupplier = () -> SensorsCustomParams.paramForGlobalSensor(internodeBytesSensor);
-            assertResponseSensors(response, total, total, requestParamSupplier, tableParamSupplier);
+            Supplier<String> globalParamSupplier = () -> SensorsCustomParams.paramForGlobalSensor(internodeBytesSensor);
+            assertResponseSensors(response, total, total, requestParamSupplier, globalParamSupplier);
         }
     }
 
-    private void assertResponseSensors(Message message, double requestValue, double registryValue, Supplier<String> requestParamSupplier, Supplier<String> tableParamSupplier)
+    private void assertResponseSensors(Message message, double requestValue, double registryValue, Supplier<String> requestParamSupplier, Supplier<String> globalParamSupplier)
     {
         assertThat(message.header.customParams()).isNotNull();
         String expectedRequestParam = requestParamSupplier.get();
-        String expectedTableParam = tableParamSupplier.get();
+        String expectedGlobalParam = globalParamSupplier.get();
 
         assertThat(message.header.customParams()).containsKey(expectedRequestParam);
-        assertThat(message.header.customParams()).containsKey(expectedTableParam);
+        assertThat(message.header.customParams()).containsKey(expectedGlobalParam);
         double requestWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
-        double tableWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedTableParam));
+        double globalWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedGlobalParam));
         assertThat(requestWriteBytes).isEqualTo(requestValue);
-        assertThat(tableWriteBytes).isEqualTo(registryValue);
+        assertThat(globalWriteBytes).isEqualTo(registryValue);
     }
 }

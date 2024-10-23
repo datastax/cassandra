@@ -92,9 +92,9 @@ public class CounterMutationCallback implements Runnable
             // for each table in the mutation, send the global per table counter write bytes as recorded by the registry
             Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(sensor.getContext(), sensor.getType());
             registrySensor.ifPresent(s -> {
-                String tableBytesParam = SensorsCustomParams.paramForGlobalSensor(s);
-                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(s.getValue() * replicaMultiplier);
-                response.withCustomParam(tableBytesParam, tableBytes);
+                String globalParam = SensorsCustomParams.paramForGlobalSensor(s);
+                byte[] globalBytes = SensorsCustomParams.sensorValueAsBytes(s.getValue() * replicaMultiplier);
+                response.withCustomParam(globalParam, globalBytes);
             });
         }
     }

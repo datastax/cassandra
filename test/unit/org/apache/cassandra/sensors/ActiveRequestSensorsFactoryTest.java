@@ -60,7 +60,7 @@ public class ActiveRequestSensorsFactoryTest
     }
 
     @Test
-    public void testEncodeTableInReadByteTableParam()
+    public void testEncodeTableInReadByteGlobalParam()
     {
         String table = "t1";
         String expectedParam = String.format("READ_BYTES_GLOBAL.%s", "t1");
@@ -82,7 +82,7 @@ public class ActiveRequestSensorsFactoryTest
     }
 
     @Test
-    public void testEncodeTableInWriteByteTableParam()
+    public void testEncodeTableInWriteByteGlobalParam()
     {
         String table = "t1";
         String expectedParam = String.format("WRITE_BYTES_GLOBAL.%s", "t1");
@@ -104,7 +104,7 @@ public class ActiveRequestSensorsFactoryTest
     }
 
     @Test
-    public void testEncodeTableInIndexWriteBytesTableParam()
+    public void testEncodeTableInIndexWriteBytesGlobalParam()
     {
         String table = "t1";
         String expectedParam = String.format("INDEX_WRITE_BYTES_GLOBAL.%s", "t1");
@@ -126,7 +126,7 @@ public class ActiveRequestSensorsFactoryTest
     }
 
     @Test
-    public void testEncodeTableInInternodeBytesTableParam()
+    public void testEncodeTableInInternodeBytesGlobalParam()
     {
         String table = "t1";
         String expectedParam = String.format("INTERNODE_BYTES_GLOBAL.%s", table);
