@@ -464,7 +464,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
         // check that there are no snapshots (test sanity check)
         assertSnapshotCount(0, 0, 0);
 
-        assertTrue(LegacySystemKeyspaceToNodes.convertToNodesFilesIfNecessary());
+        LegacySystemKeyspaceToNodes.convertToNodesFilesIfNecessary();
 
         assertSnapshotCount(0, 1, 0);
 
@@ -485,7 +485,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
         // check that there are no snapshots (test sanity check)
         assertSnapshotCount(0, 0, 0);
 
-        assertFalse(LegacySystemKeyspaceToNodes.convertToNodesFilesIfNecessary());
+        LegacySystemKeyspaceToNodes.convertToNodesFilesIfNecessary();
 
         // check that there are no snapshots
         assertSnapshotCount(0, 0, 0);

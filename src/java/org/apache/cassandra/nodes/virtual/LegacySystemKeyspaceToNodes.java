@@ -86,15 +86,15 @@ public final class LegacySystemKeyspaceToNodes
      * Executes the system.local and system.peers tables migration to flat files
      * @return true if the flat files didn't exist and the tables contained data to be migrated, false otherwise
      */
-    public static boolean convertToNodesFilesIfNecessary()
+    public static void convertToNodesFilesIfNecessary()
     {
         if (Nodes.local().localInfoWasPresent())
             // nothing to do
-            return false;
+            return;
 
         try
         {
-            return new LegacySystemKeyspaceToNodes(Nodes.nodes()).convertToNodesFiles();
+            new LegacySystemKeyspaceToNodes(Nodes.nodes()).convertToNodesFiles();
         }
         catch (Exception e)
         {
@@ -108,10 +108,9 @@ public final class LegacySystemKeyspaceToNodes
     }
 
     @VisibleForTesting
-    boolean convertToNodesFiles()
+    void convertToNodesFiles()
     {
         initialized.set(false);
-        boolean upgradeExecuted = false;
         try
         {
             Keyspace systemKs = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
@@ -130,8 +129,6 @@ public final class LegacySystemKeyspaceToNodes
                 nodes.syncToDisk();
 
                 logger.info("{}.{} has been migrated and truncated.", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.LEGACY_PEERS);
-
-                upgradeExecuted = true;
             }
 
             cfs = systemKs.getColumnFamilyStore(SystemKeyspace.LOCAL);
@@ -149,11 +146,7 @@ public final class LegacySystemKeyspaceToNodes
                 nodes.syncToDisk();
 
                 logger.info("{}.{} has been migrated and truncated.", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.LOCAL);
-
-                upgradeExecuted = true;
             }
-
-            return upgradeExecuted;
         }
         finally
         {
