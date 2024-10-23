@@ -651,7 +651,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
                 while (throttled.hasNext())
                 {
                     UnfilteredRowIterator next = throttled.next();
-                    TrieBackedPartition materializedPartition = TrieBackedPartition.create(next);
+                    TrieBackedPartition materializedPartition = TrieBackedPartition.fromIterator(next);
                     int unfilteredCount = Iterators.size(materializedPartition.unfilteredIterator());
 
                     System.out.println("batchsize " + batchSize + " unfilteredCount " + unfilteredCount + " materializedPartition " + materializedPartition);
@@ -680,7 +680,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
             }
 
             // Verify throttled data after merge
-            Partition partition = TrieBackedPartition.create(UnfilteredRowIterators.merge(unfilteredRowIterators));
+            Partition partition = TrieBackedPartition.fromIterator(UnfilteredRowIterators.merge(unfilteredRowIterators));
 
             long nowInSec = FBUtilities.nowInSeconds();
 
