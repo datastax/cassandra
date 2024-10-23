@@ -18,9 +18,6 @@
 
 package org.apache.cassandra.index.sai.memory;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -28,141 +25,40 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.ExcludingBounds;
-import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.inject.Injections;
-import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.schema.MockSchema;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
-public class TrieMemtableIndexTest extends SAITester
+public class TrieMemtableIndexTest extends TrieMemtableIndexTestBase
 {
-    private static final Injections.Counter indexSearchCounter = Injections.newCounter("IndexSearchCounter")
-                                                                           .add(InvokePointBuilder.newInvokePoint()
-                                                                                                  .onClass(TrieMemoryIndex.class)
-                                                                                                  .onMethod("search"))
-                                                                           .build();
-
-    private ColumnFamilyStore cfs;
-    private IndexContext indexContext;
-    private TrieMemtableIndex memtableIndex;
-    private AbstractAllocatorMemtable memtable;
-    private IPartitioner partitioner;
-    private Map<DecoratedKey, Integer> keyMap;
-    private Map<Integer, Integer> rowMap;
-
     @BeforeClass
     public static void setShardCount()
     {
         System.setProperty("cassandra.trie.memtable.shard.count", "8");
-    }
-
-    @Before
-    public void setup() throws Throwable
-    {
-        assertEquals(8, TrieMemtable.SHARD_COUNT);
-
-        TokenMetadata metadata = StorageService.instance.getTokenMetadata();
-        metadata.updateNormalTokens(BootStrapper.getRandomTokens(metadata, 10), FBUtilities.getBroadcastAddressAndPort());
-
-        TableMetadata tableMetadata = TableMetadata.builder("ks", "tb")
-                                                   .addPartitionKeyColumn("pk", Int32Type.instance)
-                                                   .addRegularColumn("val", Int32Type.instance)
-                                                   .build();
-        cfs = MockSchema.newCFS(tableMetadata);
-        partitioner = cfs.getPartitioner();
-        memtable = (AbstractAllocatorMemtable) cfs.getCurrentMemtable();
-        indexContext = SAITester.createIndexContext("index", Int32Type.instance, cfs);
-        indexSearchCounter.reset();
-        keyMap = new TreeMap<>();
-        rowMap = new HashMap<>();
-
-        Injections.inject(indexSearchCounter);
-    }
-
-    @After
-    public void resetBufferType() throws Exception
-    {
-        setTrieMemtableBufferType(BufferType.OFF_HEAP);
-    }
-
-    @Test
-    public void onHeapAllocation() throws Exception
-    {
-        setTrieMemtableBufferType(BufferType.ON_HEAP);
-        memtableIndex = new TrieMemtableIndex(indexContext, memtable);
-        assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
-
-        assertTrue(memtable.getAllocator().onHeap().owns() == 0);
-        assertTrue(memtable.getAllocator().offHeap().owns() == 0);
-
-        for (int row = 0; row < 100; row++)
-        {
-            addRow(row, row);
-        }
-
-        assertTrue(memtable.getAllocator().onHeap().owns() > 0);
-        assertTrue(memtable.getAllocator().offHeap().owns() == 0);
-    }
-
-    @Test
-    public void offHeapAllocation() throws Exception
-    {
-        setTrieMemtableBufferType(BufferType.OFF_HEAP);
-        memtableIndex = new TrieMemtableIndex(indexContext, memtable);
-        assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
-
-        assertTrue(memtable.getAllocator().onHeap().owns() == 0);
-        assertTrue(memtable.getAllocator().offHeap().owns() == 0);
-
-        for (int row = 0; row < 100; row++)
-        {
-            addRow(row, row);
-        }
-
-        assertTrue(memtable.getAllocator().onHeap().owns() > 0);
-        assertTrue(memtable.getAllocator().offHeap().owns() > 0);
     }
 
     @Test
@@ -170,6 +66,7 @@ public class TrieMemtableIndexTest extends SAITester
     {
         memtableIndex = new TrieMemtableIndex(indexContext, memtable);
         assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
+        assertEquals(TrieMemtable.BUFFER_TYPE, BufferType.OFF_HEAP);
 
         for (int row = 0; row < getRandom().nextIntBetween(1000, 5000); row++)
         {
@@ -217,6 +114,7 @@ public class TrieMemtableIndexTest extends SAITester
     public void indexIteratorTest()
     {
         memtableIndex = new TrieMemtableIndex(indexContext, memtable);
+        assertEquals(TrieMemtable.BUFFER_TYPE, BufferType.OFF_HEAP);
 
         Map<Integer, Set<DecoratedKey>> terms = buildTermMap();
 
@@ -239,7 +137,7 @@ public class TrieMemtableIndexTest extends SAITester
             {
                 Pair<ByteComparable, Iterator<PrimaryKey>> termPair = iterator.next();
                 int term = termFromComparable(termPair.left);
-                // The iterator will return keys outside the range of min/max so we need to filter here to
+                // The iterator will return keys outside the range of min/max, so we need to filter here to
                 // get the correct keys
                 List<DecoratedKey> expectedPks = terms.get(term)
                                                       .stream()
@@ -341,32 +239,5 @@ public class TrieMemtableIndexTest extends SAITester
             pks.add(key);
         }
         return terms;
-    }
-
-    private void addRow(int pk, int value)
-    {
-        DecoratedKey key = makeKey(cfs.metadata(), pk);
-        memtableIndex.index(key,
-                            Clustering.EMPTY,
-                            Int32Type.instance.decompose(value),
-                            cfs.getCurrentMemtable(),
-                            new OpOrder().start());
-        keyMap.put(key, pk);
-    }
-
-    private DecoratedKey makeKey(TableMetadata table, Integer partitionKey)
-    {
-        ByteBuffer key = table.partitionKeyType.fromString(partitionKey.toString());
-        return table.partitioner.decorateKey(key);
-    }
-
-    private void setTrieMemtableBufferType(final BufferType newBufferType) throws Exception
-    {
-        Field bufferType = TrieMemtable.class.getDeclaredField("BUFFER_TYPE");
-        bufferType.setAccessible(true);
-        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(bufferType, bufferType.getModifiers() & ~Modifier.FINAL);
-        bufferType.set(null, newBufferType);
     }
 }
