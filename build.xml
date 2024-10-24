@@ -134,13 +134,10 @@
     <property name="cassandra.test.use_prepared" value="true" />
 
     <!-- The number of active processors seen by JVM -->
-    <property name="cassandra.test.processorCount" value="2"/>
+    <property name="cassandra.test.processorCount" value="4"/>
 
     <!-- skip flushing schema tables during tests -->
     <property name="cassandra.test.flush_local_schema_changes" value="true" />
-
-    <!-- fast shutdown of messaging service -->
-    <property name="cassandra.test.messagingService.nonGracefulShutdown" value="false"/>
 
     <!-- fast shutdown of messaging service -->
     <property name="cassandra.test.messagingService.nonGracefulShutdown" value="true"/>
