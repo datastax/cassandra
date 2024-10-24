@@ -210,7 +210,7 @@ public class IndexContext
 
         this.maxTermSize = isVector() ? MAX_VECTOR_TERM_SIZE
                                       : isAnalyzed ? MAX_ANALYZED_SIZE
-                                                   : isFrozen() ? MAX_FROZEN_TERM_SIZE : MAX_STRING_TERM_SIZE;
+                                                   : isNonVectorFrozenMultivalued() ? MAX_FROZEN_TERM_SIZE : MAX_STRING_TERM_SIZE;
 
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
@@ -562,9 +562,9 @@ public class IndexContext
         return column.type.isCollection();
     }
 
-    public boolean isFrozen()
+    public boolean isNonVectorFrozenMultivalued()
     {
-        return TypeUtil.isFrozen(column.type);
+        return TypeUtil.isNonVectorFrozenMultivalued(column.type);
     }
 
     public String getColumnName()
