@@ -1030,7 +1030,7 @@ public class PlanTest
     @Test
     public void testLazyAccessPropagation()
     {
-        Plan.KeysIteration indexScan1 = Mockito.mock(Plan.KeysIteration.class);
+        Plan.KeysIteration indexScan1 = Mockito.mock(Plan.KeysIteration.class, Mockito.CALLS_REAL_METHODS);
         Mockito.when(indexScan1.withAccess(Mockito.any())).thenReturn(indexScan1);
         Mockito.when(indexScan1.estimateCost()).thenReturn(new Plan.KeysIterationCost(20,0.0, 0.5));
         Mockito.when(indexScan1.estimateSelectivity()).thenReturn(0.001);
