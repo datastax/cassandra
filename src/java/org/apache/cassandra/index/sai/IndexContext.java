@@ -433,14 +433,26 @@ public class IndexContext
                             .orElse(null);
     }
 
-    public KeyRangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    private KeyRangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        if (e.getOp().isNonEquality())
+        KeyRangeIterator allKeys = scanMemtable(keyRange);
+        if (TypeUtil.supportsRounding(expression.validator))
         {
-            Expression negExpression = e.negated();
-            KeyRangeIterator allKeys = scanMemtable(keyRange);
+            return allKeys;
+        }
+        else
+        {
+            Expression negExpression = expression.negated();
             KeyRangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
             return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
+        }
+    }
+
+    public KeyRangeIterator searchMemtable(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        if (expression.getOp().isNonEquality())
+        {
+            return getNonEqIterator(context, expression, keyRange);
         }
 
         Collection<MemtableIndex> memtables = liveMemtables.values();
@@ -456,7 +468,7 @@ public class IndexContext
         {
             for (MemtableIndex index : memtables)
             {
-                builder.add(index.search(context, e, keyRange, limit));
+                builder.add(index.search(context, expression, keyRange, limit));
             }
 
             return builder.build();
