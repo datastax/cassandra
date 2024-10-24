@@ -148,9 +148,7 @@ public final class SensorsCustomParams
         requestSensor.ifPresent(sensor -> {
             ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
             String headerName = SENSOR_ENCODER.encodeRequestSensor(sensor);
-            Map<String, ByteBuffer> customPayload = response.getCustomPayload() == null ?
-                                                    new HashMap<>() :
-                                                    new HashMap<>(response.getCustomPayload()); // copy in case the custom payload is immutable
+            Map<String, ByteBuffer> customPayload = response.getCustomPayload() == null ? new HashMap<>() : response.getCustomPayload();
             customPayload.put(headerName, bytes);
             response.setCustomPayload(customPayload);
         });

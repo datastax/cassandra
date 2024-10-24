@@ -20,9 +20,10 @@ package org.apache.cassandra.sensors;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
-import com.google.common.collect.ImmutableMap;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -128,7 +129,9 @@ public class SensorsCustomParamsTest
         ResultMessage message = new ResultMessage.Void();
         String existingKey = "existingKey";
         String existingValue = "existingValue";
-        message.setCustomPayload(ImmutableMap.of(existingKey, StandardCharsets.UTF_8.encode(existingValue)));
+        Map<String, ByteBuffer> customPayload = new HashMap<>();
+        customPayload.put(existingKey, ByteBuffer.wrap(existingValue.getBytes(StandardCharsets.UTF_8)));
+        message.setCustomPayload(customPayload);
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Type type = Type.READ_BYTES;
         double expectedValue = 13.0;
