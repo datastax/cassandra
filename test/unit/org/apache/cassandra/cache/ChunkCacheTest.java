@@ -30,6 +30,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import com.google.common.base.Throwables;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -474,8 +475,8 @@ public class ChunkCacheTest
             {
                 RuntimeException error = new RuntimeException("some weird runtime error");
                 mockFileControl1.waitOnRead.completeExceptionally(error);
-                assertSame(error, assertThrows(CompletionException.class, thread1::join).getCause());
-                assertSame(error, assertThrows(CompletionException.class, thread2::join).getCause());
+                assertSame(error, Throwables.getRootCause(assertThrows(CompletionException.class, thread1::join)));
+                assertSame(error, Throwables.getRootCause(assertThrows(CompletionException.class, thread2::join)));
                 // assert that we didn't leak the buffer
                 assertEquals(allocated.size(), 0);
                 assertEquals(chunkCache.size(), 0);
