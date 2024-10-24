@@ -123,6 +123,7 @@ public abstract class ControllerTest
 
         when(metadata.toString()).thenReturn("");
         when(replicationStrategy.getReplicationFactor()).thenReturn(ReplicationFactor.fullOnly(3));
+        when(cfs.makeUCSEnvironment()).thenAnswer(invocation -> new RealEnvironment(cfs));
         when(cfs.getKeyspaceReplicationStrategy()).thenReturn(replicationStrategy);
         when(cfs.getKeyspaceName()).thenAnswer(invocation -> keyspaceName);
         when(cfs.getDiskBoundaries()).thenReturn(boundaries);
