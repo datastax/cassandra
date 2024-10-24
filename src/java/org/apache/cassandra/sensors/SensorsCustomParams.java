@@ -19,11 +19,11 @@
 package org.apache.cassandra.sensors;
 
 import java.nio.ByteBuffer;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -148,8 +148,11 @@ public final class SensorsCustomParams
         requestSensor.ifPresent(sensor -> {
             ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
             String headerName = SENSOR_ENCODER.encodeRequestSensor(sensor);
-            Map<String, ByteBuffer> sensorHeader = ImmutableMap.of(headerName, bytes);
-            response.setCustomPayload(sensorHeader);
+            Map<String, ByteBuffer> customPayload = response.getCustomPayload() == null ?
+                                                    new HashMap<>() :
+                                                    new HashMap<>(response.getCustomPayload()); // copy in case the custom payload is immutable
+            customPayload.put(headerName, bytes);
+            response.setCustomPayload(customPayload);
         });
     }
 

@@ -19,8 +19,10 @@
 package org.apache.cassandra.sensors;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
+import com.google.common.collect.ImmutableMap;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -74,15 +76,15 @@ public class SensorsCustomParamsTest
     }
 
     @Test
-    public void testAddWriteSensorToResponse()
+    public void testAddWriteSensorToInternodeResponse()
     {
-        testAddSensorsToResponse(Type.WRITE_BYTES);
+        testAddSensorsToInternodeResponse(Type.WRITE_BYTES);
     }
 
     @Test
-    public void testAddReadSensorToResponse()
+    public void testAddReadSensorToInternodeResponse()
     {
-        testAddSensorsToResponse(Type.READ_BYTES);
+        testAddSensorsToInternodeResponse(Type.READ_BYTES);
     }
 
     @Test
@@ -96,7 +98,7 @@ public class SensorsCustomParamsTest
     }
 
     @Test
-    public void testAddSensorsToMessageResponse()
+    public void testAddSensorsToCQLResponse()
     {
         String table = "t1";
         RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
@@ -115,11 +117,41 @@ public class SensorsCustomParamsTest
         Sensor sensor = sensors.getSensor(context, type).get();
         String expectedHeader = SensorsCustomParams.paramForRequestSensor(sensor);
         assertTrue(message.getCustomPayload().containsKey(expectedHeader));
-        assertEquals(17.0, message.getCustomPayload().get(expectedHeader).getDouble(), 0.0);
+        assertEquals(expectedValue, message.getCustomPayload().get(expectedHeader).getDouble(), 0.0);
     }
 
     @Test
-    public void testAddSensorsToMessageResponseSkipped()
+    public void testAddSensorsToCQLResponseWithExistingCustomPayload()
+    {
+        String table = "t1";
+        RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
+        ResultMessage message = new ResultMessage.Void();
+        String existingKey = "existingKey";
+        String existingValue = "existingValue";
+        message.setCustomPayload(ImmutableMap.of(existingKey, StandardCharsets.UTF_8.encode(existingValue)));
+        Context context = new Context("ks1", table, UUID.randomUUID().toString());
+        Type type = Type.READ_BYTES;
+        double expectedValue = 13.0;
+
+        sensors.registerSensor(context, type);
+        sensors.incrementSensor(context, type, expectedValue);
+
+        SensorsCustomParams.addSensorToCQLResponse(message, ProtocolVersion.V4, sensors, context, type);
+
+        assertNotNull(message.getCustomPayload());
+        assertEquals( 2, message.getCustomPayload().size());
+
+        Sensor sensor = sensors.getSensor(context, type).get();
+        String expectedHeader = SensorsCustomParams.paramForRequestSensor(sensor);
+        assertTrue(message.getCustomPayload().containsKey(expectedHeader));
+        assertEquals(expectedValue, message.getCustomPayload().get(expectedHeader).getDouble(), 0.0);
+
+        assertTrue(message.getCustomPayload().containsKey(existingKey));
+        assertEquals(existingValue, StandardCharsets.UTF_8.decode(message.getCustomPayload().get(existingKey)).toString());
+    }
+
+    @Test
+    public void testAddSensorsToCQLResponseSkipped()
     {
         String table = "t1";
         RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
@@ -138,7 +170,7 @@ public class SensorsCustomParamsTest
         assertNull(message.getCustomPayload());
     }
 
-    private void testAddSensorsToResponse(Type sensorType)
+    private void testAddSensorsToInternodeResponse(Type sensorType)
     {
         RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
         UUID tableId = UUID.randomUUID();
