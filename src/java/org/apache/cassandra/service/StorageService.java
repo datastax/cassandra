@@ -314,6 +314,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
+    // Newer versions of mockito contain mockito-inline which creates an issue in our test environment. Without this
+    // change, mocking of static methods is a problem with our DTest framework
     @VisibleForTesting // this is used for dtests only, see CASSANDRA-18152
     public volatile boolean skipNotificationListeners = false;
 
