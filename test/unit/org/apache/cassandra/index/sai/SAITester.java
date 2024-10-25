@@ -848,21 +848,6 @@ public class SAITester extends CQLTester
         return indexFiles.stream().filter(c -> c.name().endsWith(componentName)).collect(Collectors.toSet());
     }
 
-    protected static void setSegmentWriteBufferSpace(final int segmentSize) throws Exception
-    {
-        NamedMemoryLimiter limiter = (NamedMemoryLimiter) V1OnDiskFormat.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMITER").get(null);
-        Field limitBytes = limiter.getClass().getDeclaredField("limitBytes");
-        limitBytes.setAccessible(true);
-        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
-        limitBytes.set(limiter, segmentSize);
-        limitBytes = V1OnDiskFormat.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMIT");
-        limitBytes.setAccessible(true);
-        modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
-        limitBytes.set(limiter, segmentSize);
-    }
-
     /**
      * Run repeated verification task concurrently with target test
      */
