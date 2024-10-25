@@ -74,7 +74,7 @@ public class DiskBoundaryManager
         }
         while (directoriesVersion != DisallowedDirectories.getDirectoriesVersion()); // if directoriesVersion has changed we need to recalculate
 
-        if (localRanges == null || localRanges.getRanges().size() <= 1)
+        if (localRanges == null || localRanges.getRanges().isEmpty())
             return new DiskBoundaries(cfs, dirs, null, localRanges, directoriesVersion);
 
         List<Token> positions = getDiskBoundaries(localRanges.getRanges(), cfs.getPartitioner(), dirs);
