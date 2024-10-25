@@ -39,6 +39,7 @@ import org.junit.runners.Parameterized;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.IPartitioner;
@@ -80,9 +81,10 @@ public class VectorTypeTest extends VectorTester
     private static final IPartitioner partitioner = Murmur3Partitioner.instance;
 
     @BeforeClass
-    public static void setupClass()
+    public static void setUpClass()
     {
         CUSTOM_TRACING_CLASS.setString("org.apache.cassandra.tracing.TracingTestImpl");
+        CQLTester.setUpClass();
     }
 
     @Before
@@ -149,7 +151,7 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void tracingTest() throws Throwable
+    public void tracingTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
