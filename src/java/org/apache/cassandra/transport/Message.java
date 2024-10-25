@@ -20,11 +20,13 @@ package org.apache.cassandra.transport;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -34,10 +36,14 @@ import io.netty.channel.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.UUIDGen;
 
 /**
@@ -200,7 +206,9 @@ public abstract class Message
 
     public static abstract class Request extends Message
     {
+        private volatile boolean isExecutingAsync = false;
         private boolean tracingRequested;
+        private final long creationTimeNanos = MonotonicClock.approxTime.now();
 
         protected Request(Type type)
         {
@@ -215,10 +223,33 @@ public abstract class Message
             return false;
         }
 
+        protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
+        {
+            return timeUnit.convert(MonotonicClock.approxTime.now() - creationTimeNanos, TimeUnit.NANOSECONDS);
+        }
+
+        protected void markExecutingAsync()
+        {
+            isExecutingAsync = true;
+        }
+
+        protected boolean isExecutingAsync()
+        {
+            return isExecutingAsync;
+        }
+
         protected abstract CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
 
         public final CompletableFuture<Response> execute(QueryState queryState, long queryStartNanoTime)
         {
+            long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+            ClientMetrics.instance.queueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+            {
+                ClientMetrics.instance.markTimedOutBeforeProcessing();
+                return CompletableFuture.completedFuture(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
+            }
+
             boolean shouldTrace = false;
             UUID tracingSessionId = null;
 

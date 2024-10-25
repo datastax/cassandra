@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryEvents;
@@ -33,7 +34,9 @@ import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
+import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
@@ -43,6 +46,7 @@ import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 public class ExecuteMessage extends Message.Request
@@ -159,6 +163,7 @@ public class ExecuteMessage extends Message.Request
             Optional<Stage> asyncStage = Stage.fromStatement(statement);
             if (asyncStage.isPresent())
             {
+                markExecutingAsync();
                 QueryHandler.Prepared finalPrepared = prepared;
                 return CompletableFuture.supplyAsync(() -> handleRequest(queryState, queryStartNanoTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime),
                                                      asyncStage.get().executor());
@@ -176,6 +181,17 @@ public class ExecuteMessage extends Message.Request
     {
         try
         {
+            if (isExecutingAsync())
+            {
+                long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+                ClientMetrics.instance.asyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                {
+                    ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
+                    throw new OverloadedException("Query timed out before it could start");
+                }
+            }
+
             Response response = queryHandler.processPrepared(statement, queryState, queryOptions, getCustomPayload(), queryStartNanoTime);
 
             QueryEvents.instance.notifyExecuteSuccess(prepared.statement, options, queryState,

@@ -19,12 +19,14 @@
 package org.apache.cassandra.metrics;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.Reservoir;
+import com.codahale.metrics.Timer;
 import org.apache.cassandra.transport.*;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
@@ -44,8 +46,14 @@ public final class ClientMetrics
     
     @SuppressWarnings({ "unused", "FieldCanBeLocal" })
     private Gauge<Integer> pausedConnectionsGauge;
-    
+    private Meter connectionPaused;
+
     private Meter requestDiscarded;
+
+    private Meter timedOutBeforeProcessing;
+    private Meter timedOutBeforeAsyncProcessing;
+    private Timer queueTime;
+    private Timer asyncQueueTime;
 
     private Meter protocolException;
     private Meter unknownException;
@@ -64,7 +72,11 @@ public final class ClientMetrics
         authFailure.mark();
     }
 
-    public void pauseConnection() { pausedConnections.incrementAndGet(); }
+    public void pauseConnection() {
+        connectionPaused.mark();
+        pausedConnections.incrementAndGet();
+    }
+
     public void unpauseConnection() { pausedConnections.decrementAndGet(); }
 
     public void markRequestDiscarded() { requestDiscarded.mark(); }
@@ -77,6 +89,36 @@ public final class ClientMetrics
             clients.addAll(server.getConnectedClients());
 
         return clients;
+    }
+
+    public void markTimedOutBeforeProcessing()
+    {
+        timedOutBeforeProcessing.mark();
+    }
+
+    public void markTimedOutBeforeAsyncProcessing()
+    {
+        timedOutBeforeAsyncProcessing.mark();
+    }
+
+    /**
+     * Record time between Message creation and execution on NTR.
+     * @param value time elapsed
+     * @param unit time unit
+     */
+    public void queueTime(long value, TimeUnit unit)
+    {
+        queueTime.update(value, unit);
+    }
+
+    /**
+     * Record time between Message creation and execution on an async stage, if present.
+     * @param value time elapsed
+     * @param unit time unit
+     */
+    public void asyncQueueTime(long value, TimeUnit unit)
+    {
+        asyncQueueTime.update(value, unit);
     }
 
     public void markProtocolException()
@@ -117,8 +159,14 @@ public final class ClientMetrics
         authFailure = registerMeter("AuthFailure");
 
         pausedConnections = new AtomicInteger();
+        connectionPaused = registerMeter("ConnectionPaused");
         pausedConnectionsGauge = registerGauge("PausedConnections", pausedConnections::get);
         requestDiscarded = registerMeter("RequestDiscarded");
+
+        timedOutBeforeProcessing = registerMeter("TimedOutBeforeProcessing");
+        timedOutBeforeAsyncProcessing = registerMeter("TimedOutBeforeAsyncProcessing");
+        queueTime = registerTimer("QueueTime");
+        asyncQueueTime = registerTimer("AsyncQueueTime");
 
         protocolException = registerMeter("ProtocolException");
         unknownException = registerMeter("UnknownException");
@@ -187,5 +235,10 @@ public final class ClientMetrics
     private Meter registerMeter(String name)
     {
         return Metrics.meter(factory.createMetricName(name));
+    }
+
+    public Timer registerTimer(String name)
+    {
+        return Metrics.timer(factory.createMetricName(name));
     }
 }
