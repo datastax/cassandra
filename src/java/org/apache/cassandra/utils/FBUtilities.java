@@ -560,6 +560,29 @@ public class FBUtilities
         }
     }
 
+    // Used in CNDB
+    public static <T> T waitOnFuture(Future<T> future, Duration timeout)
+    {
+        Preconditions.checkArgument(!timeout.isNegative(), "Timeout must not be negative, provided %s", timeout);
+        try
+        {
+            return future.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
+        }
+        catch (ExecutionException ee)
+        {
+            logger.info("Exception occurred in async code", ee);
+            throw Throwables.cleaned(ee);
+        }
+        catch (InterruptedException ie)
+        {
+            throw new AssertionError(ie);
+        }
+        catch (TimeoutException e)
+        {
+            throw new RuntimeException("Timeout - task did not finish in " + timeout, e);
+        }
+    }
+
     public static <T, F extends Future<? extends T>> F waitOnFirstFuture(Iterable<? extends F> futures)
     {
         return waitOnFirstFuture(futures, 100);
