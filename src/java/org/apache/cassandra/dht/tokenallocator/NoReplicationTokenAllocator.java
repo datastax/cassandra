@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.PriorityQueue;
 import java.util.Queue;
+import java.util.function.Supplier;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -47,6 +48,14 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
                                        IPartitioner partitioner)
     {
         super(sortedTokens, strategy, partitioner);
+    }
+
+    public NoReplicationTokenAllocator(NavigableMap<Token, Unit> sortedTokens,
+                                       ReplicationStrategy<Unit> strategy,
+                                       IPartitioner partitioner,
+                                       Supplier<Token> seedTokenSupplier)
+    {
+        super(sortedTokens, strategy, partitioner, seedTokenSupplier);
     }
 
     /**
