@@ -15,18 +15,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.cassandra.index.sai.cql.datamodels;
 
-package org.apache.cassandra.distributed.test.sai;
-
+import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.cql.IndexQuerySupport;
+import org.apache.cassandra.config.DatabaseDescriptor;
 
-public class QueryTimeToLiveTest extends AbstractQueryTester
+/**
+ * Force generates segments due to a small RAM size on compaction, to test segment splitting
+ */
+@Ignore
+abstract class TinySegmentQueryTimeToLiveTester extends AbstractQueryTester
 {
+    @Before
+    public void setSegmentWriteBufferSpace()
+    {
+        DatabaseDescriptor.setSAISegmentWriteBufferSpace(0);
+    }
+
     @Test
     public void testTimeToLive() throws Throwable
     {
-        IndexQuerySupport.timeToLive(executor, dataModel.get(), sets);
+        IndexQuerySupport.timeToLive(executor, dataModel, sets);
     }
 }

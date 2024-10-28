@@ -15,15 +15,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.cql;
+
+package org.apache.cassandra.distributed.test.sai.datamodels;
 
 import org.junit.Test;
 
-public class QueryCellDeletionsTest extends AbstractQueryTester
+import org.apache.cassandra.index.sai.cql.datamodels.IndexQuerySupport;
+
+public class QueryRowDeletionsTest extends AbstractQueryTester
 {
     @Test
-    public void testCellDeletions() throws Throwable
+    public void testRowDeletions() throws Throwable
     {
-        IndexQuerySupport.cellDeletions(executor, dataModel, sets);
+        IndexQuerySupport.rowDeletions(executor, dataModel.get(), sets);
     }
 }
