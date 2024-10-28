@@ -15,15 +15,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.cql;
+
+package org.apache.cassandra.distributed.test.sai.datamodels;
 
 import org.junit.Test;
 
-public class QueryWriteLifecycleTest extends AbstractQueryTester
+import org.apache.cassandra.index.sai.cql.datamodels.IndexQuerySupport;
+
+public class QueryTimeToLiveTest extends AbstractQueryTester
 {
     @Test
-    public void testWriteLifecycle() throws Throwable
+    public void testTimeToLive() throws Throwable
     {
-        IndexQuerySupport.writeLifecycle(executor, dataModel, sets);
+        IndexQuerySupport.timeToLive(executor, dataModel.get(), sets);
     }
 }

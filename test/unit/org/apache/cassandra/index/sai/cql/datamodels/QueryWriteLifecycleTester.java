@@ -15,27 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.cql;
+package org.apache.cassandra.index.sai.cql.datamodels;
 
-import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-
-/**
- * Force generates segments due to a small RAM size on compaction, to test segment splitting
- */
-public class TinySegmentQueryCellDeletionsTest extends AbstractQueryTester
+@Ignore
+abstract class QueryWriteLifecycleTester extends AbstractQueryTester
 {
-    @Before
-    public void setSegmentWriteBufferSpace() throws Throwable
-    {
-        DatabaseDescriptor.setSAISegmentWriteBufferSpace(0);
-    }
-
     @Test
-    public void testCellDeletions() throws Throwable
+    public void testWriteLifecycle() throws Throwable
     {
-        IndexQuerySupport.cellDeletions(executor, dataModel, sets);
+        IndexQuerySupport.writeLifecycle(executor, dataModel, sets);
     }
 }
