@@ -24,6 +24,6 @@ public class QueryWriteLifecycleWithCompoundKeyTest extends QueryWriteLifecycleT
     @Parameterized.Parameters(name = "{0}")
     public static List<Object[]> params()
     {
-        return allIndexVersionsParams(AbstractQueryTester::compoundKeyParams);
+        return allIndexVersionsParams(SingleNodeQueryTester::compoundKeyParams);
     }
 }

@@ -90,12 +90,12 @@ public class MultiNodeExecutor implements DataModel.Executor
     @Override
     public void counterReset()
     {
-        AbstractQueryTester.Counter.reset();
+        MultiNodeQueryTester.Counter.reset();
     }
 
     @Override
     public long getCounter()
     {
-        return AbstractQueryTester.Counter.get();
+        return MultiNodeQueryTester.Counter.get();
     }
 }

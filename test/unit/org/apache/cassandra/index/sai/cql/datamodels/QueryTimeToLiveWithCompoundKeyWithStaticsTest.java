@@ -24,6 +24,6 @@ public class QueryTimeToLiveWithCompoundKeyWithStaticsTest extends QueryTimeToLi
     @Parameterized.Parameters(name = "{0}")
     public static List<Object[]> params()
     {
-        return allIndexVersionsParams(AbstractQueryTester::compoundKeyWithStaticsParams);
+        return allIndexVersionsParams(SingleNodeQueryTester::compoundKeyWithStaticsParams);
     }
 }

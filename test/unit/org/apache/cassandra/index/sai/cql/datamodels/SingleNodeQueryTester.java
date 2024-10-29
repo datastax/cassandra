@@ -39,7 +39,7 @@ import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 
 @Ignore
 @RunWith(Parameterized.class)
-abstract class AbstractQueryTester extends SAITester
+abstract class SingleNodeQueryTester extends SAITester
 {
     protected static final Injections.Counter INDEX_QUERY_COUNTER = Injections.newCounter("IndexQueryCounter")
                                                                               .add(newInvokePoint().onClass(StorageAttachedIndexSearcher.class).onMethod("search"))
@@ -81,10 +81,10 @@ abstract class AbstractQueryTester extends SAITester
     {
         List<Object[]> scenarios = new LinkedList<>();
 
-        scenarios.addAll(allIndexVersionsParams(AbstractQueryTester::baseDataModelParams));
-        scenarios.addAll(allIndexVersionsParams(AbstractQueryTester::compoundKeyParams));
-        scenarios.addAll(allIndexVersionsParams(AbstractQueryTester::compoundKeyWithStaticsParams));
-        scenarios.addAll(allIndexVersionsParams(AbstractQueryTester::compositePartitionKeyParams));
+        scenarios.addAll(allIndexVersionsParams(SingleNodeQueryTester::baseDataModelParams));
+        scenarios.addAll(allIndexVersionsParams(SingleNodeQueryTester::compoundKeyParams));
+        scenarios.addAll(allIndexVersionsParams(SingleNodeQueryTester::compoundKeyWithStaticsParams));
+        scenarios.addAll(allIndexVersionsParams(SingleNodeQueryTester::compositePartitionKeyParams));
 
         return scenarios;
     }

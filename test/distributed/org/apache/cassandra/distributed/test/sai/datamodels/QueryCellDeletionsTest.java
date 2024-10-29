@@ -22,7 +22,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.cql.datamodels.IndexQuerySupport;
 
-public class QueryCellDeletionsTest extends AbstractQueryTester
+public class QueryCellDeletionsTest extends MultiNodeQueryTester
 {
     @Test
     public void testCellDeletions() throws Throwable

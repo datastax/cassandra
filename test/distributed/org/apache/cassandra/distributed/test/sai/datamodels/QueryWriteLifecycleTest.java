@@ -22,7 +22,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.cql.datamodels.IndexQuerySupport;
 
-public class QueryWriteLifecycleTest extends AbstractQueryTester
+public class QueryWriteLifecycleTest extends MultiNodeQueryTester
 {
     @Test
     public void testWriteLifecycle() throws Throwable

@@ -38,7 +38,7 @@ import org.apache.cassandra.index.sai.cql.datamodels.IndexQuerySupport;
 import org.apache.cassandra.utils.Shared;
 
 @RunWith(Parameterized.class)
-abstract class AbstractQueryTester extends TestBaseImpl
+abstract class MultiNodeQueryTester extends TestBaseImpl
 {
     protected static final String INJECTION_SCRIPT = "RULE count searches\n" +
                                                      "CLASS org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher\n" +

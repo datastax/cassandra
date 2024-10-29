@@ -27,7 +27,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
  * Force generates segments due to a small RAM size on compaction, to test segment splitting
  */
 @Ignore
-abstract class TinySegmentQueryTimeToLiveTester extends AbstractQueryTester
+abstract class TinySegmentQueryTimeToLiveTester extends SingleNodeQueryTester
 {
     @Before
     public void setSegmentWriteBufferSpace()

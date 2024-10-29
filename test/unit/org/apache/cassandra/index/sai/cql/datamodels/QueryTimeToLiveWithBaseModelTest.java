@@ -24,6 +24,6 @@ public class QueryTimeToLiveWithBaseModelTest extends QueryTimeToLiveTester
     @Parameterized.Parameters(name = "{0}")
     public static List<Object[]> params()
     {
-        return allIndexVersionsParams(AbstractQueryTester::baseDataModelParams);
+        return allIndexVersionsParams(SingleNodeQueryTester::baseDataModelParams);
     }
 }
