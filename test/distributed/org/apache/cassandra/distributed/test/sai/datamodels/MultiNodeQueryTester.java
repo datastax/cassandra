@@ -40,7 +40,7 @@ import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 
 @RunWith(Parameterized.class)
-abstract class AbstractQueryTester extends TestBaseImpl
+abstract class MultiNodeQueryTester extends TestBaseImpl
 {
     protected static final String INJECTION_SCRIPT = "RULE count searches\n" +
                                                      "CLASS org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher\n" +

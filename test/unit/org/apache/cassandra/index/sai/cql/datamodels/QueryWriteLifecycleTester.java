@@ -21,7 +21,7 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 @Ignore
-abstract class QueryWriteLifecycleTester extends AbstractQueryTester
+abstract class QueryWriteLifecycleTester extends SingleNodeQueryTester
 {
     @Test
     public void testWriteLifecycle() throws Throwable

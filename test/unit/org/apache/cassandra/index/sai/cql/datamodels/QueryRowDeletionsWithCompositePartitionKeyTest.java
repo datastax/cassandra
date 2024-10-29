@@ -24,6 +24,6 @@ public class QueryRowDeletionsWithCompositePartitionKeyTest extends QueryRowDele
     @Parameterized.Parameters(name = "{0}")
     public static List<Object[]> params()
     {
-        return allIndexVersionsParams(AbstractQueryTester::compositePartitionKeyParams);
+        return allIndexVersionsParams(SingleNodeQueryTester::compositePartitionKeyParams);
     }
 }

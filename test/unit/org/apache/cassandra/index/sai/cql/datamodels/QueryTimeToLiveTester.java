@@ -21,7 +21,7 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 @Ignore
-abstract class QueryTimeToLiveTester extends AbstractQueryTester
+abstract class QueryTimeToLiveTester extends SingleNodeQueryTester
 {
     @Test
     public void testTimeToLive() throws Throwable

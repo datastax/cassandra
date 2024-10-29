@@ -21,7 +21,7 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 @Ignore
-abstract class QueryRowDeletionsTester extends AbstractQueryTester
+abstract class QueryRowDeletionsTester extends SingleNodeQueryTester
 {
     @Test
     public void testRowDeletions() throws Throwable
