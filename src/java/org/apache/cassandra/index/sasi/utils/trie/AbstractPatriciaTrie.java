@@ -790,6 +790,7 @@ abstract class AbstractPatriciaTrie<K, V> extends AbstractTrie<K, V>
      * This is implemented by going always to the left until
      * we encounter a valid uplink. That uplink is the first key.
      */
+    @Override
     public TrieEntry<K, V> firstEntry()
     {
         // if Trie is empty, no first node.

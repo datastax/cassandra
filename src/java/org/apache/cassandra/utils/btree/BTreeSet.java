@@ -312,30 +312,43 @@ public class BTreeSet<V> implements NavigableSet<V>, List<V>
         throw new UnsupportedOperationException();
     }
 
+    @Override
     public BTreeSet<V> reversed()
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
     public V removeLast()
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
     public V removeFirst()
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
     public V getLast()
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
     public V getFirst()
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
     public void addLast(V v)
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
     public void addFirst(V v)
     {
         throw new UnsupportedOperationException();
