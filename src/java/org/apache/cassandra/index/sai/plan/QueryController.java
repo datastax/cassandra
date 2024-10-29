@@ -550,14 +550,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         try
         {
-            if (!source.hasNext())
+            var primaryKeys = materializeKeys(source);
+            if (primaryKeys.isEmpty())
             {
                 FileUtils.closeQuietly(source);
                 return CloseableIterator.emptyIterator();
             }
-            List<PrimaryKey> primaryKeys = new ArrayList<>();
-            while (source.hasNext())
-                primaryKeys.add(source.next());
             var result = getTopKRows(primaryKeys, softLimit);
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
             // that might not be needed until a deeper search into the ordering index, which happens after
@@ -569,6 +567,32 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             FileUtils.closeQuietly(source);
             throw t;
         }
+    }
+
+    /**
+     * Materialize the keys from the given source iterator. If there is a meaningful {@link #mergeRange}, the keys
+     * are filtered to only include those within the range. Note: does not close the source iterator.
+     * @param source The source iterator to materialize keys from.
+     * @return The list of materialized keys within the {@link #mergeRange}.
+     */
+    private List<PrimaryKey> materializeKeys(RangeIterator source)
+    {
+        // Skip to the first key in the range
+        source.skipTo(primaryKeyFactory().createTokenOnly(mergeRange.left.getToken()));
+        if (!source.hasNext())
+            return List.of();
+
+        var maxToken = primaryKeyFactory().createTokenOnly(mergeRange.right.getToken());
+        var hasLimitingMaxToken = !maxToken.token().isMinimum() && maxToken.compareTo(source.getMaximum()) < 0;
+        List<PrimaryKey> primaryKeys = new ArrayList<>();
+        while (source.hasNext())
+        {
+            var next = source.next();
+            if (hasLimitingMaxToken && next.compareTo(maxToken) > 0)
+                break;
+            primaryKeys.add(next);
+        }
+        return primaryKeys;
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
