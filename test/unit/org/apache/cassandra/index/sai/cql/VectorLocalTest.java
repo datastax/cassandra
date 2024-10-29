@@ -20,21 +20,16 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
@@ -44,37 +39,17 @@ import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.SAIUtil;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.utils.Glove;
 import org.assertj.core.data.Percentage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@RunWith(Parameterized.class)
-public class VectorLocalTest extends VectorTester
+public class VectorLocalTest extends VectorTester.VersionedWithChecksums
 {
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "{0}")
-    public static Collection<Object[]> data()
-    {
-        return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v}).collect(Collectors.toList());
-    }
-
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private static Glove.WordVector word2vec;
-
-    @Before
-    public void setup() throws Throwable
-    {
-        super.setup();
-        SAIUtil.setLatestVersion(version);
-    }
 
     @BeforeClass
     public static void loadModel() throws Throwable
@@ -136,18 +111,18 @@ public class VectorLocalTest extends VectorTester
     }
 
     @Test
-    public void randomizedTest() throws Throwable
+    public void randomizedTest()
     {
         randomizedTest(word2vec.dimension());
     }
 
     @Test
-    public void randomizedBqCompressedTest() throws Throwable
+    public void randomizedBqCompressedTest()
     {
         randomizedTest(2048);
     }
 
-    private void randomizedTest(int dimension) throws Throwable
+    private void randomizedTest(int dimension)
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -201,7 +176,7 @@ public class VectorLocalTest extends VectorTester
     }
 
     @Test
-    public void multiSSTablesTest() throws Throwable
+    public void multiSSTablesTest()
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -241,7 +216,7 @@ public class VectorLocalTest extends VectorTester
     }
 
     @Test
-    public void partitionRestrictedTest() throws Throwable
+    public void partitionRestrictedTest()
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -280,24 +255,24 @@ public class VectorLocalTest extends VectorTester
     }
 
     @Test
-    public void partitionRestrictedWidePartitionTest() throws Throwable
+    public void partitionRestrictedWidePartitionTest()
     {
         partitionRestrictedWidePartitionTest(word2vec.dimension(), 0, 1000);
     }
 
     @Test
-    public void partitionRestrictedWidePartitionBqCompressedTest() throws Throwable
+    public void partitionRestrictedWidePartitionBqCompressedTest()
     {
         partitionRestrictedWidePartitionTest(2048, 0, Integer.MAX_VALUE);
     }
 
     @Test
-    public void partitionRestrictedWidePartitionPqCompressedTest() throws Throwable
+    public void partitionRestrictedWidePartitionPqCompressedTest()
     {
         partitionRestrictedWidePartitionTest(word2vec.dimension(), 2000, Integer.MAX_VALUE);
     }
 
-    public void partitionRestrictedWidePartitionTest(int dimension, int minvectorCount, int maxvectorCount) throws Throwable
+    public void partitionRestrictedWidePartitionTest(int dimension, int minvectorCount, int maxvectorCount)
     {
         createTable(String.format("CREATE TABLE %%s (pk int, ck int, val vector<float, %d>, PRIMARY KEY(pk, ck))", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -359,7 +334,7 @@ public class VectorLocalTest extends VectorTester
     }
 
     @Test
-    public void rangeRestrictedTest() throws Throwable
+    public void rangeRestrictedTest()
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -501,7 +476,7 @@ public class VectorLocalTest extends VectorTester
 
     // search across multiple segments, combined with a non-ann predicate
     @Test
-    public void multipleNonAnnSegmentsTest() throws Throwable
+    public void multipleNonAnnSegmentsTest()
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
         disableCompaction(KEYSPACE);
@@ -549,45 +524,45 @@ public class VectorLocalTest extends VectorTester
         }
     }
 
-    private UntypedResultSet search(String stringValue, float[] queryVector, int limit) throws Throwable
+    private UntypedResultSet search(String stringValue, float[] queryVector, int limit)
     {
         UntypedResultSet result = execute("SELECT * FROM %s WHERE str_val = '" + stringValue + "' ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT " + limit);
         assertThat(result).hasSize(limit);
         return result;
     }
 
-    private UntypedResultSet search(float[] queryVector, int limit) throws Throwable
+    private UntypedResultSet search(float[] queryVector, int limit)
     {
         UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT " + limit);
         assertThat(result.size()).isCloseTo(limit, Percentage.withPercentage(5));
         return result;
     }
 
-    private UntypedResultSet search(Vector<Float> queryVector, int limit) throws Throwable
+    private UntypedResultSet search(Vector<Float> queryVector, int limit)
     {
         UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of ? LIMIT " + limit, queryVector);
         assertThat(result.size()).isCloseTo(limit, Percentage.withPercentage(5));
         return result;
     }
 
-    private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize) throws Throwable
+    private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
     {
         UntypedResultSet result = execute("SELECT * FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
         assertThat(result.size()).isCloseTo(expectedSize, Percentage.withPercentage(5));
         return getVectorsFromResult(result);
     }
 
-    private void searchWithNonExistingKey(float[] queryVector, int key) throws Throwable
+    private void searchWithNonExistingKey(float[] queryVector, int key)
     {
         searchWithKey(queryVector, key, 0);
     }
 
-    private void searchWithNonExistingKey(Vector<Float> queryVector, int key) throws Throwable
+    private void searchWithNonExistingKey(Vector<Float> queryVector, int key)
     {
         searchWithKey(queryVector, key, 0);
     }
 
-    private void searchWithKey(float[] queryVector, int key, int expectedSize) throws Throwable
+    private void searchWithKey(float[] queryVector, int key, int expectedSize)
     {
         UntypedResultSet result = execute("SELECT * FROM %s WHERE pk = " + key + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
 
@@ -599,12 +574,12 @@ public class VectorLocalTest extends VectorTester
         result.stream().forEach(row -> assertThat(row.getInt("pk")).isEqualTo(key));
     }
 
-    private void searchWithKey(Vector<Float> queryVector, int key, int expectedSize) throws Throwable
+    private void searchWithKey(Vector<Float> queryVector, int key, int expectedSize)
     {
         searchWithKey(queryVector, key, expectedSize, 1000);
     }
 
-    private void searchWithKey(Vector<Float> queryVector, int key, int expectedSize, int limit) throws Throwable
+    private void searchWithKey(Vector<Float> queryVector, int key, int expectedSize, int limit)
     {
         UntypedResultSet result = execute("SELECT * FROM %s WHERE pk = ? ORDER BY val ann of ? LIMIT " + limit, key, queryVector);
 
@@ -652,6 +627,7 @@ public class VectorLocalTest extends VectorTester
     {
         return getVectorsFromResult(result, word2vec.dimension());
     }
+
     private List<float[]> getVectorsFromResult(UntypedResultSet result, int dimension)
     {
         List<float[]> vectors = new ArrayList<>();
@@ -664,17 +640,5 @@ public class VectorLocalTest extends VectorTester
         }
 
         return vectors;
-    }
-
-    @Override
-    public void flush() {
-        super.flush();
-        verifyChecksum();
-    }
-
-    @Override
-    public void compact() {
-        super.compact();
-        verifyChecksum();
     }
 }

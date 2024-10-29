@@ -18,14 +18,18 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.commons.lang.reflect.FieldUtils;
 import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
@@ -38,13 +42,12 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.inject.ActionBuilder;
-import org.apache.cassandra.inject.Injections;
-import org.apache.cassandra.inject.InvokePointBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -167,5 +170,50 @@ public class VectorTester extends SAITester
         }
 
         return matches * 1.0 / result.size();
+    }
+
+    /**
+     * {@link VectorTester} parameterized for {@link Version#CA} and {@link Version#DC}.
+     */
+    @Ignore
+    @RunWith(Parameterized.class)
+    abstract static class Versioned extends VectorTester
+    {
+        @Parameterized.Parameter
+        public Version version;
+
+        @Parameterized.Parameters(name = "{0}")
+        public static Collection<Object[]> data()
+        {
+            return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v }).collect(Collectors.toList());
+        }
+
+        @Before
+        @Override
+        public void setup() throws Throwable
+        {
+            super.setup();
+            SAIUtil.setLatestVersion(version);
+        }
+    }
+
+    /**
+     * {@link Versioned} that verifies checksums on flushing and compaction.
+     */
+    abstract static class VersionedWithChecksums extends Versioned
+    {
+        @Override
+        public void flush()
+        {
+            super.flush();
+            verifyChecksum();
+        }
+
+        @Override
+        public void compact()
+        {
+            super.compact();
+            verifyChecksum();
+        }
     }
 }
