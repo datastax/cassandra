@@ -1293,7 +1293,7 @@ public class VectorTypeTest extends VectorTester
         // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
         // in a peer index for an sstable's search index but not its vector index.
         createTable("CREATE TABLE %s (partition int, i int, v vector<float, 2>, c int, PRIMARY KEY(partition, i))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
 
         var partitionKeys = new ArrayList<Integer>();
