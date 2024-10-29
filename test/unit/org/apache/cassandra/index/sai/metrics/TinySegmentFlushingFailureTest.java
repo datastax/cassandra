@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.index.sai.metrics;
 
-import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.junit.BeforeClass;
 import org.junit.experimental.runners.Enclosed;
 import org.junit.runner.RunWith;
@@ -27,10 +26,7 @@ import java.lang.reflect.Field;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.service.StorageService;
 
-import static org.junit.Assert.assertEquals;
 
 @RunWith(Enclosed.class)
 public class TinySegmentFlushingFailureTest extends CQLTester
@@ -55,14 +51,7 @@ public class TinySegmentFlushingFailureTest extends CQLTester
             throw new RuntimeException("Failed to set configuration segment_write_buffer_space_mb = 0", e);
         }
         
-        if (ROW_CACHE_SIZE_IN_MB > 0)
-            DatabaseDescriptor.setRowCacheSizeInMB(ROW_CACHE_SIZE_IN_MB);
-        StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
-
-        // Once per-JVM is enough
-        prepareServer();
-
-        assertEquals(0, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMIT);
+        CQLTester.setUpClass();
     }
 
     /**
