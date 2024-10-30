@@ -414,7 +414,8 @@ public class PatriciaTrie<K, V> extends AbstractPatriciaTrie<K, V> implements Se
      * <p>This is implemented by going always to the right until
      * we encounter a valid uplink. That uplink is the last key.
      */
-    private TrieEntry<K, V> lastEntry()
+    // @Override needed in JDK 21+.
+    public TrieEntry<K, V> lastEntry()
     {
         return followRight(root.left);
     }
