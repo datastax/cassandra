@@ -43,16 +43,12 @@ export CCM_CONFIG_DIR="${TMPDIR}/.ccm"
 export NUM_TOKENS="16"
 export CASSANDRA_DIR=${WORKSPACE}
 
-# Kate, there was some conflict after CNDB-10190, check this later, for now I focused on the unit tests so ignore it...
 if [[ -z "${version}" ]]; then
   version=$(grep 'property\s*name=\"base.version\"' ${CASSANDRA_DIR}/build.xml |sed -ne 's/.*value=\"\([^"]*\)\".*/\1/p')
 fi
 
 if [[ -z "${java_version}" ]]; then
   java_version=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | sed 's/^1\.//g' | awk -F. '{print $1}')
-fi
-if [[ ${java_version} -ge 11 ]]; then
-  export CASSANDRA_USE_JDK11=true
 fi
 
 if [[ -z "${python_version}" ]]; then
