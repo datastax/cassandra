@@ -48,7 +48,7 @@ abstract class MultiNodeQueryTester extends TestBaseImpl
                                                      "AT ENTRY\n" +
                                                      "IF TRUE\n" +
                                                      "DO\n" +
-                                                     "   org.apache.cassandra.distributed.test.sai.datamodels.AbstractQueryTester$Counter.increment()\n" +
+                                                     "   org.apache.cassandra.distributed.test.sai.datamodels.MultiNodeQueryTester$Counter.increment()\n" +
                                                      "ENDRULE\n";
 
     @Parameterized.Parameter(0)
