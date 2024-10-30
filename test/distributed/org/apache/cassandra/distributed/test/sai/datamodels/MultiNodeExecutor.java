@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.distributed.test.sai;
+package org.apache.cassandra.distributed.test.sai.datamodels;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -25,8 +25,9 @@ import java.util.List;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.distributed.test.sai.SAIUtil;
 import org.apache.cassandra.distributed.util.ColumnTypeUtil;
-import org.apache.cassandra.index.sai.cql.DataModel;
+import org.apache.cassandra.index.sai.cql.datamodels.DataModel;
 
 public class MultiNodeExecutor implements DataModel.Executor
 {
@@ -89,12 +90,12 @@ public class MultiNodeExecutor implements DataModel.Executor
     @Override
     public void counterReset()
     {
-        AbstractQueryTester.Counter.reset();
+        MultiNodeQueryTester.Counter.reset();
     }
 
     @Override
     public long getCounter()
     {
-        return AbstractQueryTester.Counter.get();
+        return MultiNodeQueryTester.Counter.get();
     }
 }
