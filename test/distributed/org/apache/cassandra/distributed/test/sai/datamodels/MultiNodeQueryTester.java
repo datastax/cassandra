@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.distributed.test.sai;
+package org.apache.cassandra.distributed.test.sai.datamodels;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -32,15 +32,15 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.shared.Byteman;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.index.sai.cql.DataModel;
-import org.apache.cassandra.index.sai.cql.IndexQuerySupport;
+import org.apache.cassandra.index.sai.cql.datamodels.DataModel;
+import org.apache.cassandra.index.sai.cql.datamodels.IndexQuerySupport;
 import org.apache.cassandra.utils.Shared;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 
 @RunWith(Parameterized.class)
-public class AbstractQueryTester extends TestBaseImpl
+abstract class MultiNodeQueryTester extends TestBaseImpl
 {
     protected static final String INJECTION_SCRIPT = "RULE count searches\n" +
                                                      "CLASS org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher\n" +
@@ -48,7 +48,7 @@ public class AbstractQueryTester extends TestBaseImpl
                                                      "AT ENTRY\n" +
                                                      "IF TRUE\n" +
                                                      "DO\n" +
-                                                     "   org.apache.cassandra.distributed.test.sai.AbstractQueryTester$Counter.increment()\n" +
+                                                     "   org.apache.cassandra.distributed.test.sai.datamodels.MultiNodeQueryTester$Counter.increment()\n" +
                                                      "ENDRULE\n";
 
     @Parameterized.Parameter(0)
