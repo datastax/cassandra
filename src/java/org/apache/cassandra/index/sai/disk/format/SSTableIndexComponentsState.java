@@ -26,7 +26,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
-import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -57,17 +56,17 @@ public class SSTableIndexComponentsState
 {
     public static final SSTableIndexComponentsState EMPTY = new SSTableIndexComponentsState(null, Map.of());
 
-    private final @Nullable ComponentsBuildId perSSTableBuild;
+    // The state of the per-sstable group of components, if they exist.
+    private final @Nullable State perSSTableState;
 
-    // Version and generation for every "group" of components that is complete. The "null" key is used for the
-    // per-sstable components, otherwise it is the index name.
-    private final Map<String, ComponentsBuildId> perIndexBuilds;
+    // The state for every "group" of per-index components keyed by the index name.
+    private final Map<String, State> perIndexStates;
 
-    private SSTableIndexComponentsState(@Nullable ComponentsBuildId perSSTableBuild, Map<String, ComponentsBuildId> perIndexBuilds)
+    private SSTableIndexComponentsState(@Nullable State perSSTableState, Map<String, State> perIndexStates)
     {
-        Preconditions.checkNotNull(perIndexBuilds);
-        this.perSSTableBuild = perSSTableBuild;
-        this.perIndexBuilds = Collections.unmodifiableMap(perIndexBuilds);
+        Preconditions.checkNotNull(perIndexStates);
+        this.perSSTableState = perSSTableState;
+        this.perIndexStates = Collections.unmodifiableMap(perIndexStates);
     }
 
     /**
@@ -86,14 +85,14 @@ public class SSTableIndexComponentsState
         if (!perSSTable.isComplete())
             return EMPTY;
 
-        Map<String, ComponentsBuildId> perIndexBuilds = new HashMap<>();
+        Map<String, State> perIndexStates = new HashMap<>();
         for (IndexContext context : descriptor.includedIndexes())
         {
             var perIndex = descriptor.perIndexComponents(context);
             if (perIndex.isComplete())
-                perIndexBuilds.put(context.getIndexName(), perIndex.buildId());
+                perIndexStates.put(context.getIndexName(), State.of(perIndex));
         }
-        return new SSTableIndexComponentsState(perSSTable.buildId(), perIndexBuilds);
+        return new SSTableIndexComponentsState(State.of(perSSTable), perIndexStates);
     }
 
     /**
@@ -134,25 +133,37 @@ public class SSTableIndexComponentsState
     public Builder unbuild()
     {
         Builder builder = new Builder();
-        builder.addPerSSTable(perSSTableBuild);
-        perIndexBuilds.forEach(builder::addPerIndex);
+        builder.addPerSSTable(perSSTableState);
+        perIndexStates.forEach(builder::addPerIndex);
         return builder;
     }
 
     public boolean isEmpty()
     {
-        return perSSTableBuild == null && perIndexBuilds.isEmpty();
+        return perSSTableState == null && perIndexStates.isEmpty();
+    }
+
+    public @Nullable State perSSTable()
+    {
+        return perSSTableState;
+    }
+
+    public @Nullable State perIndex(String indexName)
+    {
+        Preconditions.checkNotNull(indexName);
+        return perIndexStates.get(indexName);
     }
 
     public @Nullable ComponentsBuildId perSSTableBuild()
     {
-        return perSSTableBuild;
+        return perSSTableState == null ? null : perSSTableState.buildId;
     }
 
     public @Nullable ComponentsBuildId perIndexBuild(String indexName)
     {
-        Preconditions.checkNotNull(indexName); // the `buildOf` method(s) should be used instead
-        return perIndexBuilds.get(indexName);
+        Preconditions.checkNotNull(indexName);
+        var state = perIndexStates.get(indexName);
+        return state == null ? null : state.buildId;
     }
 
     /**
@@ -176,7 +187,18 @@ public class SSTableIndexComponentsState
      */
     public Set<String> includedIndexes()
     {
-        return perIndexBuilds.keySet();
+        return perIndexStates.keySet();
+    }
+
+    /**
+     * The total size (in bytes) of all the components included in this state.
+     */
+    public long totalSizeInBytes()
+    {
+        long total = perSSTableState == null ? 0 : perSSTableState.sizeInBytes;
+        for (State state : perIndexStates.values())
+            total += state.sizeInBytes;
+        return total;
     }
 
     /**
@@ -194,7 +216,7 @@ public class SSTableIndexComponentsState
                                           .collect(Collectors.toSet());
         Set<String> removedIndexes = before.includedIndexes()
                                            .stream()
-                                           .filter(index -> !this.perIndexBuilds.containsKey(index))
+                                           .filter(index -> !this.perIndexStates.containsKey(index))
                                            .collect(Collectors.toSet());
         return new Diff(before, this, perSSTableModified, modifiedIndexes, removedIndexes);
     }
@@ -228,14 +250,14 @@ public class SSTableIndexComponentsState
 
         Builder builder = builder();
         builder.addPerSSTable(diff.perSSTableUpdated
-                              ? diffBuildId(diff.before.perSSTableBuild, diff.after.perSSTableBuild, this.perSSTableBuild, () -> "per-sstable components build")
-                              : this.perSSTableBuild);
+                              ? diffState(diff.before.perSSTableState, diff.after.perSSTableState, this.perSSTableState, () -> "per-sstable components build")
+                              : this.perSSTableState);
 
         // Adds anything modified to the "modified" version, but making sure the diff "applies", meaning that the
         // "current" state is still the origin of the diff.
         for (String modified : diff.perIndexesUpdated)
         {
-            builder.addPerIndex(modified, diffBuildId(diff.before.perIndexBuild(modified), diff.after.perIndexBuild(modified), this.perIndexBuild(modified), () -> "index " + modified + " components build"));
+            builder.addPerIndex(modified, diffState(diff.before.perIndex(modified), diff.after.perIndex(modified), this.perIndex(modified), () -> "index " + modified + " components build"));
         }
         // Then mirror all the current index that were not modified, but skipping removed ones.
         for (String index : includedIndexes())
@@ -245,12 +267,12 @@ public class SSTableIndexComponentsState
             if (diff.perIndexesUpdated.contains(index) || diff.perIndexesRemoved.contains(index))
                 continue;
 
-            builder.addPerIndex(index, this.perIndexBuild(index));
+            builder.addPerIndex(index, this.perIndex(index));
         }
         return builder.build();
     }
 
-    private static ComponentsBuildId diffBuildId(ComponentsBuildId diffBefore, ComponentsBuildId diffAfter, ComponentsBuildId current, Supplier<String> what)
+    private static State diffState(State diffBefore, State diffAfter, State current, Supplier<String> what)
     {
         // If current is `null`, but our "before" isn't, that means the index this is a component of has been dropped
         // since the state we use to create the diff (and for the per-sstable components, it was the only index that
@@ -269,7 +291,7 @@ public class SSTableIndexComponentsState
     @Override
     public int hashCode()
     {
-        return Objects.hash(perSSTableBuild, perIndexBuilds);
+        return Objects.hash(perSSTableState, perIndexStates);
     }
 
     @Override
@@ -279,21 +301,67 @@ public class SSTableIndexComponentsState
             return false;
 
         SSTableIndexComponentsState that = (SSTableIndexComponentsState) obj;
-        return Objects.equals(this.perSSTableBuild, that.perSSTableBuild)
-               && this.perIndexBuilds.equals(that.perIndexBuilds);
+        return Objects.equals(this.perSSTableState, that.perSSTableState)
+               && this.perIndexStates.equals(that.perIndexStates);
     }
 
     @Override
     public String toString()
     {
-        Stream<String> perIndex = perIndexBuilds.entrySet()
+        Stream<String> perIndex = perIndexStates.entrySet()
                                                 .stream()
                                                 .map(e -> e.getKey() + ": " + e.getValue());
-        Stream<String> all = perSSTableBuild == null
+        Stream<String> all = perSSTableState == null
                              ? perIndex
-                             : Stream.concat(Stream.of("<shared>: " + perSSTableBuild), perIndex);
+                             : Stream.concat(Stream.of("<shared>: " + perSSTableState), perIndex);
 
         return all.collect(Collectors.joining(", ", "{", "}"));
+    }
+
+    /**
+     * Represents the "state" for one "group" of components (so either the per-sstable one, or one of the per-index ones).
+     */
+    public static class State
+    {
+        /** The "build" (version and generaton) the components. */
+        public final ComponentsBuildId buildId;
+
+        /** The total size (in bytes) of the components. */
+        public final long sizeInBytes;
+
+        private State(ComponentsBuildId buildId, long sizeInBytes)
+        {
+            Preconditions.checkNotNull(buildId);
+            this.buildId = buildId;
+            this.sizeInBytes = sizeInBytes;
+        }
+
+        private static State of(IndexComponents.ForRead components)
+        {
+            return new State(components.buildId(), components.liveSizeOnDiskInBytes());
+        }
+
+        @Override
+        public boolean equals(Object obj)
+        {
+            if (!(obj instanceof State))
+                return false;
+
+            State that = (State) obj;
+            return this.buildId.equals(that.buildId) && this.sizeInBytes == that.sizeInBytes;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(buildId, sizeInBytes);
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s (%d bytes)", buildId, sizeInBytes);
+        }
     }
 
     /**
@@ -304,79 +372,54 @@ public class SSTableIndexComponentsState
      */
     public static class Builder
     {
-        private ComponentsBuildId perSSTableBuild;
+        private State perSSTableState;
         // We use a linked map to preserve order of insertions. This is not crucial, but the overhead is negligible and
         // in the case of tests, the predictability of entry order make things _a lot_ easier/natural.
-        private final Map<String, ComponentsBuildId> perIndexBuilds = new LinkedHashMap<>();
+        private final Map<String, State> perIndexStates = new LinkedHashMap<>();
         // This make extra sure we don't reuse a builder by accident as it is not safe to do so (we pass the map
         // directly when we build the state). If one wants to reuse a builder, it should `copy` manually first.
         private boolean built;
 
-        public Builder addPerSSTable(Version version, int generation)
+        public Builder addPerSSTable(Version version, int generation, long sizeInBytes)
         {
-            return addPerSSTable(ComponentsBuildId.of(version, generation));
+            return addPerSSTable(ComponentsBuildId.of(version, generation), sizeInBytes);
         }
 
-        public Builder addPerSSTable(ComponentsBuildId buildId)
+        public Builder addPerSSTable(ComponentsBuildId buildId, long sizeInBytes)
+        {
+            return addPerSSTable(new State(buildId, sizeInBytes));
+        }
+
+        public Builder addPerSSTable(State state)
         {
             Preconditions.checkState(!built, "Builder has already been used");
-            this.perSSTableBuild = buildId;
+            this.perSSTableState = state;
             return this;
         }
 
-        public Builder addPerIndex(String name, Version version, int generation)
+        public Builder addPerIndex(String name, Version version, int generation, long sizeInBytes)
         {
-            return addPerIndex(name, ComponentsBuildId.of(version, generation));
+            return addPerIndex(name, ComponentsBuildId.of(version, generation), sizeInBytes);
         }
 
-        public Builder addPerIndex(String name, ComponentsBuildId buildId)
+        public Builder addPerIndex(String name, ComponentsBuildId buildId, long sizeInBytes)
+        {
+            return addPerIndex(name, new State(buildId, sizeInBytes));
+        }
+
+        public Builder addPerIndex(String name, State state)
         {
             Preconditions.checkState(!built, "Builder has already been used");
             Preconditions.checkNotNull(name);
-            if (buildId != null)
-                perIndexBuilds.put(name, buildId);
-            return this;
-        }
-
-        public ComponentsBuildId addPerSSTableIfAbsent(ComponentsBuildId buildId)
-        {
-            if (perSSTableBuild == null)
-            {
-                addPerSSTable(buildId);
-                return null;
-            }
-            else
-            {
-                return perSSTableBuild;
-            }
-        }
-
-        public ComponentsBuildId addPerIndexIfAbsent(String name, ComponentsBuildId buildId)
-        {
-            Preconditions.checkState(!built, "Builder has already been used");
-            Preconditions.checkNotNull(name);
-            return perIndexBuilds.computeIfAbsent(name, __ -> buildId);
-        }
-
-        public Builder replacePerSSTable(UnaryOperator<ComponentsBuildId> updater)
-        {
-            Preconditions.checkState(!built, "Builder has already been used");
-            this.perSSTableBuild = updater.apply(perSSTableBuild);
-            return this;
-        }
-
-        public Builder replacePerIndex(String name, UnaryOperator<ComponentsBuildId> updater)
-        {
-            Preconditions.checkState(!built, "Builder has already been used");
-            Preconditions.checkNotNull(name);
-            perIndexBuilds.compute(name, (__, prev) -> updater.apply(prev));
+            if (state != null)
+                perIndexStates.put(name, state);
             return this;
         }
 
         public Builder removePerSSTable()
         {
             Preconditions.checkState(!built, "Builder has already been used");
-            perSSTableBuild = null;
+            perSSTableState = null;
             return this;
         }
 
@@ -384,22 +427,22 @@ public class SSTableIndexComponentsState
         {
             Preconditions.checkState(!built, "Builder has already been used");
             Preconditions.checkNotNull(name);
-            perIndexBuilds.remove(name);
+            perIndexStates.remove(name);
             return this;
         }
 
         public Builder copy()
         {
             Builder copy = new Builder();
-            copy.perSSTableBuild = perSSTableBuild;
-            copy.perIndexBuilds.putAll(perIndexBuilds);
+            copy.perSSTableState = perSSTableState;
+            copy.perIndexStates.putAll(perIndexStates);
             return copy;
         }
 
         public SSTableIndexComponentsState build()
         {
             built = true;
-            return new SSTableIndexComponentsState(perSSTableBuild, perIndexBuilds);
+            return new SSTableIndexComponentsState(perSSTableState, perIndexStates);
         }
     }
 

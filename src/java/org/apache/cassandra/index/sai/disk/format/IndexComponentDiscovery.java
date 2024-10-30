@@ -21,10 +21,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.NoSuchFileException;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.function.UnaryOperator;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -35,7 +37,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.Comparables;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -102,7 +103,7 @@ public abstract class IndexComponentDiscovery
 
         // We collect all the version/generation for which we have files on disk for the per-sstable parts and every
         // per-index found.
-        SSTableIndexComponentsState.Builder builder = SSTableIndexComponentsState.builder();
+        Map<String, StateBuilder> states = new HashMap<>();
         Set<String> invalid = new HashSet<>();
         for (Component component : componentsFromToc)
         {
@@ -117,23 +118,20 @@ public abstract class IndexComponentDiscovery
             if (invalid.contains(indexName))
                 continue;
 
-            ComponentsBuildId prev = indexName == null
-                                     ? builder.addPerSSTableIfAbsent(parsed.buildId)
-                                     : builder.addPerIndexIfAbsent(indexName, parsed.buildId);
-            if (prev != null && !prev.equals(parsed.buildId))
+            var prev = states.computeIfAbsent(indexName, k -> new StateBuilder(parsed.buildId));
+            if (!prev.buildId.equals(parsed.buildId))
             {
                 logger.error("Found multiple versions/generations of SAI components in TOC for SSTable {}: cannot load {}",
                              descriptor, indexName == null ? "per-SSTable components" : "per-index components of " + indexName);
 
-                if (indexName == null)
-                    builder.removePerSSTable();
-                else
-                    builder.removePerIndex(indexName);
+                states.remove(indexName);
                 invalid.add(indexName);
             }
+
+            prev.totalSizeInBytes += descriptor.fileFor(component).length();
         }
 
-        return builder.build();
+        return StateBuilder.convert(states);
     }
 
     private @Nullable Set<Component> readSAIComponentFromSSTableTOC(Descriptor descriptor)
@@ -210,8 +208,7 @@ public abstract class IndexComponentDiscovery
         // For each "component group" (of each individual index, plus the per-sstable group), the "active" group is the
         // one with the most recent build amongst complete ones. So we scan disk looking for completion markers (since
         // that's what tell us a group is complete), and keep for each group the max build we find.
-        SSTableIndexComponentsState.Builder builder = SSTableIndexComponentsState.builder();
-
+        Map<String, Map<ComponentsBuildId, StateBuilder>> states = new HashMap<>();
         PathUtils.forEach(descriptor.directory.toPath(), path -> {
             String filename = path.getFileName().toString();
             // First, we skip any file that do not belong to the sstable this is a descriptor for.
@@ -220,19 +217,52 @@ public abstract class IndexComponentDiscovery
 
             Version.tryParseFileName(filename)
                    .ifPresent(parsed -> {
+                       var forGroup = states.computeIfAbsent(parsed.indexName, k -> new HashMap<>());
+                       var state = forGroup.computeIfAbsent(parsed.buildId, k -> new StateBuilder(parsed.buildId));
+                       state.totalSizeInBytes += PathUtils.size(path);
                        if (parsed.component == completionMarker(parsed.indexName))
-                       {
-                           UnaryOperator<ComponentsBuildId> updater = other -> other == null
-                                                                               ? parsed.buildId
-                                                                               : Comparables.max(parsed.buildId, other);
-                           if (parsed.indexName == null)
-                               builder.replacePerSSTable(updater);
-                           else
-                               builder.replacePerIndex(parsed.indexName, updater);
-                       }
+                           state.isComplete = true;
                    });
         });
 
-        return builder.build();
+        Map<String, StateBuilder> maxStates = new HashMap<>();
+        for (var entry : states.entrySet())
+        {
+            entry.getValue()
+                 .values()
+                 .stream()
+                 .filter(s -> s.isComplete)
+                 .max(Comparator.comparing(s -> s.buildId))
+                 .ifPresent(max -> maxStates.put(entry.getKey(), max));
+        }
+
+        return StateBuilder.convert(maxStates);
+    }
+
+    private static class StateBuilder
+    {
+        private final ComponentsBuildId buildId;
+        private long totalSizeInBytes;
+        private boolean isComplete;
+
+        StateBuilder(ComponentsBuildId buildId)
+        {
+            this.buildId = buildId;
+        }
+
+        void addTo(SSTableIndexComponentsState.Builder builder, @Nullable String indexName)
+        {
+            if (indexName == null)
+                builder.addPerSSTable(buildId, totalSizeInBytes);
+            else
+                builder.addPerIndex(indexName, buildId, totalSizeInBytes);
+        }
+
+        static SSTableIndexComponentsState convert(Map<String, StateBuilder> states)
+        {
+            SSTableIndexComponentsState.Builder builder = SSTableIndexComponentsState.builder();
+            states.forEach((indexName, state) -> state.addTo(builder, indexName));
+            return builder.build();
+        }
     }
 }
