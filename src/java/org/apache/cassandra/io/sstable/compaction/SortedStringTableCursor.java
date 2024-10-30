@@ -242,6 +242,7 @@ public class SortedStringTableCursor implements SSTableCursor
             long timestamp = header.readTimestamp(dataFile);
             int ttl = hasTTL ? header.readTTL(dataFile) : LivenessInfo.NO_TTL;
             long localDeletionTime = hasTTL ? header.readLocalDeletionTime(dataFile) : LivenessInfo.NO_EXPIRATION_TIME;
+            localDeletionTime = Cell.decodeLocalDeletionTime(localDeletionTime, ttl, helper);
             rowLivenessInfo = LivenessInfo.withExpirationTime(timestamp, ttl, localDeletionTime);
             if (rowLivenessInfo.isExpiring() && (rowLivenessInfo.ttl() < 0 || rowLivenessInfo.localExpirationTime() < 0))
                 UnfilteredValidation.handleInvalid(sstable.metadata(), partitionKey, sstable, "rowLivenessInfo="+rowLivenessInfo.toString());
