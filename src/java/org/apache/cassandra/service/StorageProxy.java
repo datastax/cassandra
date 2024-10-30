@@ -32,6 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -163,6 +164,9 @@ public class StorageProxy implements StorageProxyMBean
     public static final StorageProxy instance = new StorageProxy();
 
     private static final Mutator mutator = MutatorProvider.instance;
+
+    public static final AtomicInteger maxNumReadTickets = new AtomicInteger(DatabaseDescriptor.getConcurrentReaders());
+    public static final Semaphore readTickets = new Semaphore(DatabaseDescriptor.getConcurrentReaders());
 
     public static class DefaultMutator implements Mutator
     {
@@ -2083,6 +2087,17 @@ public class StorageProxy implements StorageProxyMBean
     {
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
         long start = System.nanoTime();
+
+        try
+        {
+            readTickets.acquire();
+        }
+        catch (InterruptedException e)
+        {
+            // same as in ReadCallback::awaitFrom
+            throw new AssertionError(e);
+        }
+
         try
         {
             PartitionIterator result = fetchRows(group.queries, consistencyLevel, queryStartNanoTime, readTracker);
@@ -2127,6 +2142,7 @@ public class StorageProxy implements StorageProxyMBean
             // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
             for (ReadCommand command : group.queries)
                 Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+            readTickets.release();
         }
     }
 

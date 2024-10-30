@@ -235,6 +235,8 @@ import static org.apache.cassandra.index.SecondaryIndexManager.getIndexName;
 import static org.apache.cassandra.index.SecondaryIndexManager.isIndexColumnFamily;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.REPLICATION_DONE_REQ;
+import static org.apache.cassandra.service.StorageProxy.maxNumReadTickets;
+import static org.apache.cassandra.service.StorageProxy.readTickets;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 
 /**
@@ -2070,6 +2072,27 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (newCorePoolSize >= 0)
             stage.setCorePoolSize(newCorePoolSize);
         stage.setMaximumPoolSize(newMaximumPoolSize);
+
+        if (stage == Stage.READ)
+        {
+            logger.info("Setting read concurrency via the number of tickets to {}", newMaximumPoolSize);
+            int oldNumTickets = maxNumReadTickets.get();
+            while (!maxNumReadTickets.compareAndSet(oldNumTickets, newMaximumPoolSize))
+            {
+                oldNumTickets = maxNumReadTickets.get();
+            }
+            int delta = newMaximumPoolSize - oldNumTickets;
+            if (delta > 0)
+            {
+                logger.info("Adding {} read tickets", delta);
+                readTickets.release(delta);
+            }
+            else if (delta < 0)
+            {
+                logger.info("Removing {} read tickets", -delta);
+                readTickets.acquireUninterruptibly(-delta);
+            }
+        }
     }
 
     public boolean isBootstrapMode()
