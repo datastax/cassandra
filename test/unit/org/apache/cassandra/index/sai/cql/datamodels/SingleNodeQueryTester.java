@@ -16,14 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.cql;
+package org.apache.cassandra.index.sai.cql.datamodels;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.function.Function;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -35,8 +37,9 @@ import org.apache.cassandra.inject.Injections;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 
+@Ignore
 @RunWith(Parameterized.class)
-public class AbstractQueryTester extends SAITester
+abstract class SingleNodeQueryTester extends SAITester
 {
     protected static final Injections.Counter INDEX_QUERY_COUNTER = Injections.newCounter("IndexQueryCounter")
                                                                               .add(newInvokePoint().onClass(StorageAttachedIndexSearcher.class).onMethod("search"))
@@ -73,10 +76,20 @@ public class AbstractQueryTester extends SAITester
         SAIUtil.setLatestVersion(latest);
     }
 
-
-    @SuppressWarnings("unused")
     @Parameterized.Parameters(name = "{0}_{1}")
-    public static List<Object[]> params() throws Throwable
+    public static List<Object[]> allParams()
+    {
+        List<Object[]> scenarios = new LinkedList<>();
+
+        scenarios.addAll(allIndexVersionsParams(SingleNodeQueryTester::baseDataModelParams));
+        scenarios.addAll(allIndexVersionsParams(SingleNodeQueryTester::compoundKeyParams));
+        scenarios.addAll(allIndexVersionsParams(SingleNodeQueryTester::compoundKeyWithStaticsParams));
+        scenarios.addAll(allIndexVersionsParams(SingleNodeQueryTester::compositePartitionKeyParams));
+
+        return scenarios;
+    }
+
+    protected static List<Object[]> allIndexVersionsParams(Function<Version, Object[]> params)
     {
         List<Object[]> scenarios = new LinkedList<>();
 
@@ -86,14 +99,40 @@ public class AbstractQueryTester extends SAITester
             if (version.equals(Version.BA))
                 continue;
 
-            scenarios.add(new Object[]{ version, new DataModel.BaseDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), IndexQuerySupport.BASE_QUERY_SETS });
-            scenarios.add(new Object[]{ version, new DataModel.CompoundKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), IndexQuerySupport.BASE_QUERY_SETS });
-            scenarios.add(new Object[]{ version, new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA), IndexQuerySupport.STATIC_QUERY_SETS });
-            scenarios.add(new Object[]{ version, new DataModel.CompositePartitionKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA),
-                                        ImmutableList.builder().addAll(IndexQuerySupport.BASE_QUERY_SETS).addAll(IndexQuerySupport.COMPOSITE_PARTITION_QUERY_SETS).build()});
-
+            scenarios.add(params.apply(version));
         }
 
         return scenarios;
+    }
+
+    protected static Object[] baseDataModelParams(Version version)
+    {
+        return new Object[]{ version,
+                             new DataModel.BaseDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA),
+                             IndexQuerySupport.BASE_QUERY_SETS};
+    }
+
+    protected static Object[] compoundKeyParams(Version version)
+    {
+        return new Object[]{ version,
+                             new DataModel.CompoundKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA),
+                             IndexQuerySupport.BASE_QUERY_SETS};
+    }
+
+    protected static Object[] compoundKeyWithStaticsParams(Version version)
+    {
+        return new Object[]{ version,
+                             new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA),
+                             IndexQuerySupport.STATIC_QUERY_SETS};
+    }
+
+    protected static Object[] compositePartitionKeyParams(Version version)
+    {
+        return new Object[]{ version,
+                             new DataModel.CompositePartitionKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA),
+                             ImmutableList.<IndexQuerySupport.BaseQuerySet>builder()
+                                          .addAll(IndexQuerySupport.BASE_QUERY_SETS)
+                                          .addAll(IndexQuerySupport.COMPOSITE_PARTITION_QUERY_SETS)
+                                     .build() };
     }
 }
