@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.cql;
+package org.apache.cassandra.index.sai.cql.datamodels;
 
 import java.util.List;
 import java.util.stream.Collectors;
