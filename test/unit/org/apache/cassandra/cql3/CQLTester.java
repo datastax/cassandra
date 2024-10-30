@@ -77,6 +77,7 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.rules.TestName;
 import org.junit.rules.TestWatcher;
@@ -2874,6 +2875,7 @@ public abstract class CQLTester
                                                                             : "";
     }
 
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class Vector<T> extends AbstractList<T>
     {
         private final T[] values;
@@ -3159,6 +3161,8 @@ public abstract class CQLTester
             fs.clearListeners();
         }
     }
+
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class Randomization
     {
         private long seed;
@@ -3255,6 +3259,7 @@ public abstract class CQLTester
         }
     }
 
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class FailureWatcher extends TestWatcher
     {
         @Override
