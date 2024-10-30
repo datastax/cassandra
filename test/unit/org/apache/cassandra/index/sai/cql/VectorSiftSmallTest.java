@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
@@ -60,8 +61,8 @@ public class VectorSiftSmallTest extends VectorTester
         var groundTruth = readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", DATASET, DATASET));
 
         // Create table and index
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createTable();
+        createIndex();
 
         insertVectors(baseVectors, 0);
         double memoryRecall = testRecall(100, queryVectors, groundTruth);
@@ -80,8 +81,8 @@ public class VectorSiftSmallTest extends VectorTester
         var groundTruth = readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", DATASET, DATASET));
 
         // Create table and index
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createTable();
+        createIndex();
 
         // we're going to compact manually, so disable background compactions to avoid interference
         disableCompaction();
@@ -117,8 +118,8 @@ public class VectorSiftSmallTest extends VectorTester
         var queryVectors = readFvecs(String.format("test/data/%s/%s_query.fvecs", DATASET, DATASET));
         var groundTruth = readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", DATASET, DATASET));
 
-        // Create table and index
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
+        // Create table without index
+        createTable();
 
         // we're going to compact manually, so disable background compactions to avoid interference
         disableCompaction();
@@ -129,7 +130,7 @@ public class VectorSiftSmallTest extends VectorTester
         compact();
 
         SegmentBuilder.updateLastValidSegmentRowId(2000); // 2000 rows per segment, enough for PQ to be created
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createIndex();
 
         // verify that we got the expected number of segments and that PQ is present in all of them
         var sim = getCurrentColumnFamilyStore().getIndexManager();
@@ -221,6 +222,18 @@ public class VectorSiftSmallTest extends VectorTester
         });
 
         return (double) topKfound.get() / (queryVectors.size() * topK);
+    }
+
+    private void createTable()
+    {
+        createTable("CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
+    }
+
+    private void createIndex()
+    {
+        // we need a long timeout because we are adding many vectors
+        String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        waitForIndexQueryable(KEYSPACE, index, 5, TimeUnit.MINUTES);
     }
 
     private void insertVectors(List<float[]> vectors, int baseRowId)
