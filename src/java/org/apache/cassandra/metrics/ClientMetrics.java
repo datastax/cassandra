@@ -50,10 +50,10 @@ public final class ClientMetrics
 
     private Meter requestDiscarded;
 
-    private Meter timedOutBeforeProcessing;
-    private Meter timedOutBeforeAsyncProcessing;
-    private Timer queueTime;
-    private Timer asyncQueueTime;
+    public Meter timedOutBeforeProcessing;
+    public Meter timedOutBeforeAsyncProcessing;
+    public Timer queueTime;
+    public Timer asyncQueueTime;
 
     private Meter protocolException;
     private Meter unknownException;
