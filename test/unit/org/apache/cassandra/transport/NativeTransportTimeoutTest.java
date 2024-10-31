@@ -50,6 +50,7 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 public class NativeTransportTimeoutTest extends CQLTester
 {
     static Semaphore EXECUTE_BARRIER;
+    static Semaphore WAIT_BARRIER;
 
     @Test
     @BMRule(name = "Delay Message execution on NTR stage",
@@ -57,7 +58,8 @@ public class NativeTransportTimeoutTest extends CQLTester
             targetMethod = "execute",
             targetLocation = "AT ENTRY",
             condition = "$this.getCustomPayload() != null",
-            action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); System.out.println(\"Proceed\");")
+            action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                     "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire();")
     public void testNativeTransportLoadShedding() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
@@ -71,7 +73,8 @@ public class NativeTransportTimeoutTest extends CQLTester
     targetMethod = "execute",
     targetLocation = "AT INVOKE isTraceable",
     condition = "$this.getCustomPayload() != null",
-    action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire();")
+    action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+             "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire();")
     public void testAsyncStageLoadShedding() throws Throwable
     {
         CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.setBoolean(true);
@@ -100,6 +103,7 @@ public class NativeTransportTimeoutTest extends CQLTester
     private void doTestLoadShedding(boolean useAsyncStages, Statement statement) throws InterruptedException
     {
         EXECUTE_BARRIER = new Semaphore(0);
+        WAIT_BARRIER = new Semaphore(0);
         long originalTimeout = DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.MILLISECONDS);
 
         Meter timedOutMeter;
@@ -129,6 +133,7 @@ public class NativeTransportTimeoutTest extends CQLTester
             long initialTimedOut = timedOutMeter.getCount();
 
             ResultSetFuture rsf = session.executeAsync(statement);
+            WAIT_BARRIER.acquire();
             Thread.sleep(DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.MILLISECONDS) + TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2);
             EXECUTE_BARRIER.release();
 
