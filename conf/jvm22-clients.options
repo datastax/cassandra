@@ -16,6 +16,7 @@
 --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
 --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED
 --add-exports java.sql/java.sql=ALL-UNNAMED
+--add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED
 
 --add-opens java.base/java.lang.module=ALL-UNNAMED
 --add-opens java.base/jdk.internal.loader=ALL-UNNAMED
