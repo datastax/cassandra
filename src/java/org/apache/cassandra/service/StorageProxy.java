@@ -390,6 +390,8 @@ public class StorageProxy implements StorageProxyMBean
                         "the restricted case of upgrading from a pre-CASSANDRA-12126 version, and only if you " +
                         "understand the tradeoff.", DISABLE_SERIAL_READ_LINEARIZABILITY_KEY);
         }
+
+        logger.info("Using default ticket concurrency of {}", readTickets.availablePermits());
     }
 
     /**

@@ -2069,10 +2069,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public void setConcurrency(String threadPoolName, int newCorePoolSize, int newMaximumPoolSize)
     {
         Stage stage = Stage.fromPoolName(threadPoolName);
-        if (newCorePoolSize >= 0)
-            stage.setCorePoolSize(newCorePoolSize);
-        stage.setMaximumPoolSize(newMaximumPoolSize);
-
         if (stage == Stage.READ)
         {
             logger.info("Setting read concurrency via the number of tickets to {}", newMaximumPoolSize);
@@ -2093,6 +2089,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 readTickets.acquireUninterruptibly(-delta);
             }
         }
+        else
+        {
+            logger.info("not setting ticket concurrency for stage {}", stage);
+        }
+
+        if (newCorePoolSize >= 0)
+            stage.setCorePoolSize(newCorePoolSize);
+        stage.setMaximumPoolSize(newMaximumPoolSize);
     }
 
     public boolean isBootstrapMode()
