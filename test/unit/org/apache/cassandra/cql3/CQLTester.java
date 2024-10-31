@@ -1444,7 +1444,20 @@ public abstract class CQLTester
      */
     public void waitForIndexQueryable(String keyspace, String index)
     {
-        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, index)), 60, TimeUnit.SECONDS);
+        waitForIndexQueryable(keyspace, index, 1, TimeUnit.MINUTES);
+    }
+
+    /**
+     * Index creation is asynchronous. This method waits until the specified index is queryable.
+     *
+     * @param keyspace the index keyspace name
+     * @param index the index name
+     * @param timeout the timeout
+     * @param unit the timeout unit
+     */
+    public void waitForIndexQueryable(String keyspace, String index, long timeout, TimeUnit unit)
+    {
+        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, index)), timeout, unit);
     }
 
     protected void waitForIndexBuilds(String index)
