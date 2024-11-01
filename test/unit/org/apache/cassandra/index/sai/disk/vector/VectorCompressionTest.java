@@ -20,12 +20,15 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
 import static org.junit.Assert.assertEquals;
@@ -111,7 +114,9 @@ public class VectorCompressionTest extends VectorTester
 
     private void testOne(int rows, VectorSourceModel model, int originalDimension, VectorCompression expectedCompression) throws IOException
     {
-        createTable("CREATE TABLE %s " + String.format("(pk int, v vector<float, %d>, PRIMARY KEY(pk))", originalDimension));
+        createTable(String.format("CREATE TABLE %%s (pk int, v vector<float, %d>, PRIMARY KEY(pk)) " +
+                                  "WITH compaction = {'class': 'UnifiedCompactionStrategy', 'num_shards': 1, 'enabled': false}",
+                                  originalDimension));
 
         for (int i = 0; i < rows; i++)
             execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVectorBoxed(originalDimension));
@@ -120,22 +125,26 @@ public class VectorCompressionTest extends VectorTester
         // end up with a single sstable (otherwise PQ might conclude there aren't enough vectors to train on)
         compact();
         waitForCompactionsFinished();
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        Assertions.assertThat(cfs.getLiveSSTables()).hasSize(1); // Expected a single sstable after compaction
 
-        // create index after compaction so we don't have to wait for it to (potentially) build twice
-        createIndex("CREATE CUSTOM INDEX ON %s(v) " + String.format("USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model': '%s'}", model));
+        // create index after compaction, so we don't have to wait for it to (potentially) build twice,
+        // and give it extra time to build large models
+        String indexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(v) USING 'StorageAttachedIndex'" +
+                                                          " WITH OPTIONS = {'source_model': '%s'}", model));
+        waitForIndexQueryable(KEYSPACE, indexName, 5, TimeUnit.MINUTES);
 
         // get a View of the sstables that contain indexed data
-        var sim = getCurrentColumnFamilyStore().indexManager;
-        var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        var index = (StorageAttachedIndex) cfs.indexManager.getIndexByName(indexName);
         var view = index.getIndexContext().getView();
 
         // there should be one sstable with one segment
-        assert view.size() == 1 : "Expected a single sstable after compaction";
+        Assertions.assertThat(view).hasSize(1); // Expected a single sstable after compaction
         var ssti = view.iterator().next();
         var segments = ssti.getSegments();
-        assert segments.size() == 1 : "Expected a single segment";
+        Assertions.assertThat(segments).hasSize(1); // Expected a single segment
 
-        // open a Searcher for the segment so we can check that its compression is what we expected
+        // open a Searcher for the segment, so we can check that its compression is what we expected
         try (var segment = segments.iterator().next();
              var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher())
         {
