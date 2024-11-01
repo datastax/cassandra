@@ -44,7 +44,7 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsWriter;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -161,7 +161,7 @@ public abstract class AbstractOnDiskBenchmark
     private long writePostings(int rows) throws IOException
     {
         final int[] postings = IntStream.range(0, rows).map(this::toPosting).toArray();
-        final ArrayPostingList postingList = new ArrayPostingList(postings);
+        final IntArrayPostingList postingList = new IntArrayPostingList(postings);
 
         try (PostingsWriter writer = new PostingsWriter(indexDescriptor.newPerIndexComponentsForWrite(indexContext)))
         {

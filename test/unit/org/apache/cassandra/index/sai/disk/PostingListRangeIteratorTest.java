@@ -28,7 +28,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -43,7 +43,7 @@ public class PostingListRangeIteratorTest
     public void testRemoveDuplicatePostings() throws IOException
     {
         @SuppressWarnings("resource")
-        var postingList = new ArrayPostingList(new int[]{1,1,2,2,3});
+        var postingList = new IntArrayPostingList(new int[]{ 1, 1, 2, 2, 3});
         var mockIndexContext = mock(IndexContext.class);
         var indexContext = new IndexSearcherContext(pkm.primaryKeyFromRowId(1),
                                                     pkm.primaryKeyFromRowId(3),
@@ -65,9 +65,9 @@ public class PostingListRangeIteratorTest
     @SuppressWarnings("resource")
     public void testContrivedScenariosUnion() throws IOException
     {
-        var postingList1 = new ArrayPostingList(new int[]{3});
-        var postingList2 = new ArrayPostingList(new int[]{1});
-        var postingList3 = new ArrayPostingList(new int[]{3});
+        var postingList1 = new IntArrayPostingList(new int[]{ 3});
+        var postingList2 = new IntArrayPostingList(new int[]{ 1});
+        var postingList3 = new IntArrayPostingList(new int[]{ 3});
         var mockIndexContext = mock(IndexContext.class);
         var mpl = MergePostingList.merge(Lists.newArrayList(postingList1, postingList2));
         var indexContext1 = buildIndexContext(1, 3, mpl);
