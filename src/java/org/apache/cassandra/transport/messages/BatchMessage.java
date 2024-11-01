@@ -52,7 +52,6 @@ import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
-import org.apache.cassandra.utils.MonotonicClock;
 
 public class BatchMessage extends Message.Request
 {
@@ -251,7 +250,7 @@ public class BatchMessage extends Message.Request
             if (isExecutingAsync())
             {
                 long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-                ClientMetrics.instance.asyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
                 if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
                 {
                     ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();

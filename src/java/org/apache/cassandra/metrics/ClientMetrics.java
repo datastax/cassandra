@@ -106,7 +106,7 @@ public final class ClientMetrics
      * @param value time elapsed
      * @param unit time unit
      */
-    public void queueTime(long value, TimeUnit unit)
+    public void recordQueueTime(long value, TimeUnit unit)
     {
         queueTime.update(value, unit);
     }
@@ -116,7 +116,7 @@ public final class ClientMetrics
      * @param value time elapsed
      * @param unit time unit
      */
-    public void asyncQueueTime(long value, TimeUnit unit)
+    public void recordAsyncQueueTime(long value, TimeUnit unit)
     {
         asyncQueueTime.update(value, unit);
     }

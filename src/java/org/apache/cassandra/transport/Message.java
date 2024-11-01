@@ -20,7 +20,6 @@ package org.apache.cassandra.transport;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -243,7 +242,7 @@ public abstract class Message
         public final CompletableFuture<Response> execute(QueryState queryState, long queryStartNanoTime)
         {
             long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-            ClientMetrics.instance.queueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
