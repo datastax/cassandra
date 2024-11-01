@@ -24,6 +24,7 @@ import java.util.List;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 
 /**
  * Range iterators contain primary keys, in sorted order, with no duplicates.  They also

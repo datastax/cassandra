@@ -32,7 +32,6 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
-import org.apache.cassandra.index.sai.iterators.AbstractGuavaIterator;
 import org.apache.cassandra.index.sai.iterators.RangeIterator;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -42,6 +41,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 

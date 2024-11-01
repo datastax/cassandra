@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.iterators;
+package org.apache.cassandra.utils;
 
 import java.util.NoSuchElementException;
 
