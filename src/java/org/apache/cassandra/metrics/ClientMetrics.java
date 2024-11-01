@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Meter;
@@ -53,7 +54,9 @@ public final class ClientMetrics
     public Meter timedOutBeforeProcessing;
     public Meter timedOutBeforeAsyncProcessing;
     public Timer queueTime;
+    public Counter totalQueueTime; // total queue time (in nanoseconds) for use in histogram timer
     public Timer asyncQueueTime;
+    public Counter totalAsyncQueueTime; // total async queue time (in nanoseconds) for use in histogram timer
 
     private Meter protocolException;
     private Meter unknownException;
@@ -109,6 +112,7 @@ public final class ClientMetrics
     public void recordQueueTime(long value, TimeUnit unit)
     {
         queueTime.update(value, unit);
+        totalQueueTime.inc(TimeUnit.NANOSECONDS.convert(value, unit));
     }
 
     /**
@@ -119,6 +123,7 @@ public final class ClientMetrics
     public void recordAsyncQueueTime(long value, TimeUnit unit)
     {
         asyncQueueTime.update(value, unit);
+        totalAsyncQueueTime.inc(TimeUnit.NANOSECONDS.convert(value, unit));
     }
 
     public void markProtocolException()
@@ -166,7 +171,9 @@ public final class ClientMetrics
         timedOutBeforeProcessing = registerMeter("TimedOutBeforeProcessing");
         timedOutBeforeAsyncProcessing = registerMeter("TimedOutBeforeAsyncProcessing");
         queueTime = registerTimer("QueueTime");
+        totalQueueTime = registerCounter("TotalQueueTime");
         asyncQueueTime = registerTimer("AsyncQueueTime");
+        totalAsyncQueueTime = registerCounter("TotalAsyncQueueTime");
 
         protocolException = registerMeter("ProtocolException");
         unknownException = registerMeter("UnknownException");
@@ -237,8 +244,13 @@ public final class ClientMetrics
         return Metrics.meter(factory.createMetricName(name));
     }
 
-    public Timer registerTimer(String name)
+    private Timer registerTimer(String name)
     {
         return Metrics.timer(factory.createMetricName(name));
+    }
+
+    private Counter registerCounter(String name)
+    {
+        return Metrics.counter(factory.createMetricName(name));
     }
 }
