@@ -15,13 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.io.Closeable;
 import java.util.Collection;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
  * Range iterators contain primary keys, in sorted order, with no duplicates.  They also

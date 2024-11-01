@@ -16,10 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.io.IOException;
 import java.util.function.Supplier;
+
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
  * Delays creating an iterator to the first use.

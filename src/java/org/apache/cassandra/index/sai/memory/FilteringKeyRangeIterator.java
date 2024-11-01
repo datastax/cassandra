@@ -22,7 +22,7 @@ import java.io.IOException;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.RangeIterator;
 
 /**
  * A {@link RangeIterator} that filters the returned {@link PrimaryKey}s based on the provided keyRange
