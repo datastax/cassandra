@@ -178,7 +178,7 @@ public class QueryView implements AutoCloseable
 
                     // freeze referencedIndexes and memtableIndexes, so we can safely give access to them
                     // without risking something messes them up
-                    // (this was added after TermIterator messed them up which led to a bug)
+                    // (this was added after KeyRangeTermIterator messed them up which led to a bug)
                     return new QueryView(refViewFragment,
                                          Collections.unmodifiableSet(referencedIndexes),
                                          Collections.unmodifiableSet(memtableIndexes),
@@ -228,5 +228,3 @@ public class QueryView implements AutoCloseable
     }
 
 }
-
-

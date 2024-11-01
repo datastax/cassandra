@@ -69,9 +69,9 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.iterators.RangeIntersectionIterator;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
-import org.apache.cassandra.index.sai.iterators.TermIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeTermIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
@@ -127,12 +127,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Longer explanation why this is needed:
      * In order to construct a Plan for a query, we need predicate selectivity estimates. But at the moment
      * of writing this code, the only way to estimate an index predicate selectivity is to look at the posting
-     * list(s) in the index, by obtaining a {@link RangeIterator} and callling {@link RangeIterator#getMaxKeys()} on it.
+     * list(s) in the index, by obtaining a {@link KeyRangeIterator} and callling {@link KeyRangeIterator#getMaxKeys()} on it.
      * Hence, we need to create the iterators before creating the Plan.
      * But later when we assemble the final key iterator according to the optimized Plan, we need those iterators
      * again. In order to avoid recreating them, which would be costly, we just keep them here in this map.
      */
-    private final Multimap<Expression, RangeIterator> keyIterators = ArrayListMultimap.create();
+    private final Multimap<Expression, KeyRangeIterator> keyIterators = ArrayListMultimap.create();
 
     private final Map<IndexContext, QueryView> queryViews = new HashMap<>();
 
@@ -350,8 +350,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         optimizedPlan = QUERY_OPT_LEVEL > 0
                         ? rowsIteration.optimize()
                         : rowsIteration;
-        optimizedPlan = RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT > 0 && QUERY_OPT_LEVEL <= 1
-                        ? optimizedPlan.limitIntersectedClauses(RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT)
+        optimizedPlan = KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT > 0 && QUERY_OPT_LEVEL <= 1
+                        ? optimizedPlan.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT)
                         : optimizedPlan;
 
         if (optimizedPlan.contains(node -> node instanceof Plan.AnnIndexScan))
@@ -414,10 +414,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Creates an iterator over keys of rows that match given WHERE predicate.
      * Does not cache the iterator!
      */
-    private RangeIterator buildIterator(Expression predicate)
+    private KeyRangeIterator buildIterator(Expression predicate)
     {
         QueryView view = getQueryView(predicate.context);
-        return TermIterator.build(predicate, view.referencedIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE);
+        return KeyRangeTermIterator.build(predicate, view.referencedIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE);
     }
 
     /**
@@ -498,11 +498,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     @Override
     public Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate)
     {
-        Collection<RangeIterator> rangeIterators = keyIterators.get(predicate);
+        Collection<KeyRangeIterator> rangeIterators = keyIterators.get(predicate);
         // This will be non-empty only if we created the iterator as part of the query planning process.
         if (!rangeIterators.isEmpty())
         {
-            RangeIterator iterator = rangeIterators.iterator().next();
+            KeyRangeIterator iterator = rangeIterators.iterator().next();
             keyIterators.remove(predicate, iterator);  // remove so we never accidentally reuse the same iterator
             return iterator;
         }
@@ -539,7 +539,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Use the configured {@link Orderer} to sort the rows from the given source iterator.
      */
-    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(RangeIterator source, int softLimit)
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source, int softLimit)
     {
         try
         {
@@ -568,7 +568,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * @param source The source iterator to materialize keys from.
      * @return The list of materialized keys within the {@link #mergeRange}.
      */
-    private List<PrimaryKey> materializeKeys(RangeIterator source)
+    private List<PrimaryKey> materializeKeys(KeyRangeIterator source)
     {
         // Skip to the first key in the range
         source.skipTo(primaryKeyFactory().createTokenOnly(mergeRange.left.getToken()));
@@ -725,7 +725,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private void closeUnusedIterators()
     {
-        Iterator<Map.Entry<Expression, RangeIterator>> entries = keyIterators.entries().iterator();
+        Iterator<Map.Entry<Expression, KeyRangeIterator>> entries = keyIterators.entries().iterator();
         while (entries.hasNext())
         {
             FileUtils.closeQuietly(entries.next().getValue());
@@ -846,7 +846,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // For older indexes we don't have histograms, so we need to construct the iterator
         // and ask for the posting list size.
-        RangeIterator iterator = buildIterator(predicate);
+        KeyRangeIterator iterator = buildIterator(predicate);
 
         // We're not going to consume the iterator here, so memorize it for future uses.
         // It can be used when executing the plan.

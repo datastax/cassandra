@@ -26,12 +26,12 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 /**
  * Delays creating an iterator to the first use.
  */
-public class LazyRangeIterator extends RangeIterator
+public class KeyRangeLazyIterator extends KeyRangeIterator
 {
-    private RangeIterator inner;
-    private final Supplier<RangeIterator> factory;
+    private KeyRangeIterator inner;
+    private final Supplier<KeyRangeIterator> factory;
 
-    public LazyRangeIterator(Supplier<RangeIterator> factory, PrimaryKey min, PrimaryKey max, long count)
+    public KeyRangeLazyIterator(Supplier<KeyRangeIterator> factory, PrimaryKey min, PrimaryKey max, long count)
     {
         super(min, max, count);
         this.factory = factory;

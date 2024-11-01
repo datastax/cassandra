@@ -56,7 +56,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -128,7 +128,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             Orderer ordering = plan.ordering();
             if (ordering != null)
             {
-                assert !(keysIterator instanceof RangeIterator);
+                assert !(keysIterator instanceof KeyRangeIterator);
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
                 var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
                                                              executionController, queryContext);
@@ -136,8 +136,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             }
             else
             {
-                assert keysIterator instanceof RangeIterator;
-                return new ResultRetriever((RangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
+                assert keysIterator instanceof KeyRangeIterator;
+                return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
             }
         }
         catch (Throwable t)
@@ -168,7 +168,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> currentKeyRange;
 
-        private final RangeIterator operation;
+        private final KeyRangeIterator operation;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
@@ -177,7 +177,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         private PrimaryKey lastKey;
 
-        private ResultRetriever(RangeIterator operation,
+        private ResultRetriever(KeyRangeIterator operation,
                                 FilterTree filterTree,
                                 QueryController controller,
                                 ReadExecutionController executionController,

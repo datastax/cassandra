@@ -43,8 +43,8 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
-import org.apache.cassandra.index.sai.iterators.RangeAntiJoinIterator;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -205,12 +205,12 @@ public class SSTableIndex
     // but they are not a problem as post-filtering would get rid of them.
     // The keys matched in other indexes cannot be safely subtracted
     // as indexes may contain false positives caused by deletes and updates.
-    private RangeIterator getNonEqIterator(Expression expression,
-                                           AbstractBounds<PartitionPosition> keyRange,
-                                           QueryContext context,
-                                           boolean defer) throws IOException
+    private KeyRangeIterator getNonEqIterator(Expression expression,
+                                              AbstractBounds<PartitionPosition> keyRange,
+                                              QueryContext context,
+                                              boolean defer) throws IOException
     {
-        RangeIterator allKeys = allSSTableKeys(keyRange);
+        KeyRangeIterator allKeys = allSSTableKeys(keyRange);
         if (TypeUtil.supportsRounding(expression.validator))
         {
             return allKeys;
@@ -218,16 +218,16 @@ public class SSTableIndex
         else
         {
             Expression negExpression = expression.negated();
-            RangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer, Integer.MAX_VALUE);
-            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
+            KeyRangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer, Integer.MAX_VALUE);
+            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
     }
 
-    public RangeIterator search(Expression expression,
-                                AbstractBounds<PartitionPosition> keyRange,
-                                QueryContext context,
-                                boolean defer,
-                                int limit) throws IOException
+    public KeyRangeIterator search(Expression expression,
+                                   AbstractBounds<PartitionPosition> keyRange,
+                                   QueryContext context,
+                                   boolean defer,
+                                   int limit) throws IOException
     {
         if (expression.getOp().isNonEquality())
         {
@@ -346,7 +346,7 @@ public class SSTableIndex
                           .toString();
     }
 
-    protected final RangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange) throws IOException
+    protected final KeyRangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange) throws IOException
     {
         return PrimaryKeyMapIterator.create(sstableContext, keyRange);
     }

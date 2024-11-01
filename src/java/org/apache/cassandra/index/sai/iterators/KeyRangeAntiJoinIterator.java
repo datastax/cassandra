@@ -28,23 +28,23 @@ import org.apache.cassandra.io.util.FileUtils;
  * that do not match the primary keys from the right iterator. The keys returned by the wrapped iterators must
  * follow token-clustering order.
  */
-public class RangeAntiJoinIterator extends RangeIterator
+public class KeyRangeAntiJoinIterator extends KeyRangeIterator
 {
-    final RangeIterator left;
-    final RangeIterator right;
+    final KeyRangeIterator left;
+    final KeyRangeIterator right;
 
     private PrimaryKey nextKeyToSkip = null;
 
-    private RangeAntiJoinIterator(RangeIterator left, RangeIterator right)
+    private KeyRangeAntiJoinIterator(KeyRangeIterator left, KeyRangeIterator right)
     {
         super(left.getMinimum(), left.getMaximum(), left.getMaxKeys());
         this.left = left;
         this.right = right;
     }
 
-    public static RangeAntiJoinIterator create(RangeIterator left, RangeIterator right)
+    public static KeyRangeAntiJoinIterator create(KeyRangeIterator left, KeyRangeIterator right)
     {
-        return new RangeAntiJoinIterator(left, right);
+        return new KeyRangeAntiJoinIterator(left, right);
     }
 
     protected void performSkipTo(PrimaryKey nextKey)

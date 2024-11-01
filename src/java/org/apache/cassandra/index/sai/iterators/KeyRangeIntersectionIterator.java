@@ -36,7 +36,7 @@ import org.apache.cassandra.io.util.FileUtils;
  * initially sorting the ranges. This implementation also supports an intersection limit which limits
  * the number of ranges that will be included in the intersection. This currently defaults to 2.
  */
-public class RangeIntersectionIterator extends RangeIterator
+public class KeyRangeIntersectionIterator extends KeyRangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -54,10 +54,10 @@ public class RangeIntersectionIterator extends RangeIterator
         return (INTERSECTION_CLAUSE_LIMIT <= 0) || (numberOfExpressions <= INTERSECTION_CLAUSE_LIMIT);
     }
 
-    public final List<RangeIterator> ranges;
+    public final List<KeyRangeIterator> ranges;
     private final int[] rangeStats;
 
-    private RangeIntersectionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
+    private KeyRangeIntersectionIterator(Builder.Statistics statistics, List<KeyRangeIterator> ranges)
     {
         super(statistics);
         this.ranges = ranges;
@@ -82,7 +82,7 @@ public class RangeIntersectionIterator extends RangeIterator
             {
                 if (index != alreadyAdvanced)
                 {
-                    RangeIterator range = ranges.get(index);
+                    KeyRangeIterator range = ranges.get(index);
                     PrimaryKey nextKey = nextOrNull(range, highestKey);
                     rangeStats[index]++;
                     int comparisonResult;
@@ -151,7 +151,7 @@ public class RangeIntersectionIterator extends RangeIterator
      * Fetches the next available item from the iterator, such that the item is not lower than the given key.
      * If no such items are available, returns null.
      */
-    private PrimaryKey nextOrNull(RangeIterator iterator, PrimaryKey minKey)
+    private PrimaryKey nextOrNull(KeyRangeIterator iterator, PrimaryKey minKey)
     {
         iterator.skipTo(minKey);
         return iterator.hasNext() ? iterator.next() : null;
@@ -162,7 +162,7 @@ public class RangeIntersectionIterator extends RangeIterator
         ranges.forEach(FileUtils::closeQuietly);
     }
 
-    public static Builder builder(List<RangeIterator> ranges)
+    public static Builder builder(List<KeyRangeIterator> ranges)
     {
         var builder = new Builder(ranges.size());
         for (var range : ranges)
@@ -180,9 +180,9 @@ public class RangeIntersectionIterator extends RangeIterator
         return builder(4);
     }
 
-    public static class Builder extends RangeIterator.Builder
+    public static class Builder extends KeyRangeIterator.Builder
     {
-        protected List<RangeIterator> rangeIterators;
+        protected List<KeyRangeIterator> rangeIterators;
 
         private Builder(int size)
         {
@@ -190,7 +190,7 @@ public class RangeIntersectionIterator extends RangeIterator
             rangeIterators = new ArrayList<>(size);
         }
 
-        public RangeIterator.Builder add(RangeIterator range)
+        public KeyRangeIterator.Builder add(KeyRangeIterator range)
         {
             if (range == null)
                 return this;
@@ -204,7 +204,7 @@ public class RangeIntersectionIterator extends RangeIterator
             return this;
         }
 
-        public RangeIterator.Builder add(List<RangeIterator> ranges)
+        public KeyRangeIterator.Builder add(List<KeyRangeIterator> ranges)
         {
             if (ranges == null || ranges.isEmpty())
                 return this;
@@ -219,12 +219,12 @@ public class RangeIntersectionIterator extends RangeIterator
         }
 
         @Override
-        public Collection<RangeIterator> ranges()
+        public Collection<KeyRangeIterator> ranges()
         {
             return rangeIterators;
         }
 
-        protected RangeIterator buildIterator()
+        protected KeyRangeIterator buildIterator()
         {
             // if the range is disjoint or we have an intersection with an empty set,
             // we can simply return an empty iterator, because it's not going to produce any results.
@@ -232,13 +232,13 @@ public class RangeIntersectionIterator extends RangeIterator
             {
                 // release posting lists
                 FileUtils.closeQuietly(rangeIterators);
-                return RangeIterator.empty();
+                return KeyRangeIterator.empty();
             }
 
             if (rangeCount() == 1)
                 return rangeIterators.get(0);
 
-            return new RangeIntersectionIterator(statistics, rangeIterators);
+            return new KeyRangeIntersectionIterator(statistics, rangeIterators);
         }
     }
 }

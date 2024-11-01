@@ -69,9 +69,9 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
-import org.apache.cassandra.index.sai.iterators.RangeAntiJoinIterator;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
-import org.apache.cassandra.index.sai.iterators.RangeUnionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
@@ -442,9 +442,9 @@ public class IndexContext
     // but they are not a problem as post-filtering would get rid of them.
     // The keys matched in other indexes cannot be safely subtracted
     // as indexes may contain false positives caused by deletes and updates.
-    private RangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        RangeIterator allKeys = scanMemtable(keyRange);
+        KeyRangeIterator allKeys = scanMemtable(keyRange);
         if (TypeUtil.supportsRounding(expression.validator))
         {
             return allKeys;
@@ -452,12 +452,12 @@ public class IndexContext
         else
         {
             Expression negExpression = expression.negated();
-            RangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
-            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
+            KeyRangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
+            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
     }
 
-    public RangeIterator searchMemtable(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator searchMemtable(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         if (expression.getOp().isNonEquality())
         {
@@ -468,10 +468,10 @@ public class IndexContext
 
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         try
         {
@@ -489,21 +489,21 @@ public class IndexContext
         }
     }
 
-    private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
     {
         Collection<Memtable> memtables = liveMemtables.keySet();
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
-        RangeIterator.Builder builder = RangeUnionIterator.builder(memtables.size());
+        KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder(memtables.size());
 
         try
         {
             for (Memtable memtable : memtables)
             {
-                RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+                KeyRangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
                 builder.add(memtableIterator);
             }
 

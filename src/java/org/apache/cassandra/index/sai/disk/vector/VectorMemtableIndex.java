@@ -53,7 +53,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -185,7 +185,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public RangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         if (expr.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Only BOUNDED_ANN is supported, received: " + expr));
@@ -201,7 +201,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         if (keyQueue.size() == 0)
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue.build(Comparator.naturalOrder()), keyQueue.size());
     }
 
@@ -508,7 +508,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
     }
 
-    private class ReorderingRangeIterator extends RangeIterator
+    private class ReorderingRangeIterator extends KeyRangeIterator
     {
         private final SortingIterator<PrimaryKey> keyQueue;
 

@@ -28,7 +28,7 @@ import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -87,13 +87,13 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public RangeIterator search(Expression expression,
-                                AbstractBounds<PartitionPosition> keyRange,
-                                QueryContext context,
-                                boolean defer,
-                                int limit) throws IOException
+    public KeyRangeIterator search(Expression expression,
+                                   AbstractBounds<PartitionPosition> keyRange,
+                                   QueryContext context,
+                                   boolean defer,
+                                   int limit) throws IOException
     {
-        return RangeIterator.empty();
+        return KeyRangeIterator.empty();
     }
 
     @Override

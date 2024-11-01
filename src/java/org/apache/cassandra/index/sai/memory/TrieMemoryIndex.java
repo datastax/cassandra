@@ -59,7 +59,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -193,7 +193,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (logger.isTraceEnabled())
             logger.trace("Searching memtable index on expression '{}'...", expression);
@@ -212,18 +212,18 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    public RangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : asByteComparable(expression.lower.value.encoded);
         final PrimaryKeys primaryKeys = data.get(prefix);
         if (primaryKeys == null)
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
         return new FilteringKeyRangeIterator(new SortedSetRangeIterator(primaryKeys.keys()), keyRange);
     }
 
-    private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         Trie<PrimaryKeys> subtrie = getSubtrie(expression);
 
@@ -244,7 +244,7 @@ public class TrieMemoryIndex extends MemoryIndex
             subtrie.values().forEach(mergingIteratorBuilder::add);
 
         return mergingIteratorBuilder.isEmpty()
-               ? RangeIterator.empty()
+               ? KeyRangeIterator.empty()
                : new FilteringKeyRangeIterator(mergingIteratorBuilder.build(), keyRange);
     }
 
@@ -527,7 +527,7 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    static class MergingRangeIterator extends RangeIterator
+    static class MergingRangeIterator extends KeyRangeIterator
     {
         // A sorting iterator of items that can be either singletons or SortedSetRangeIterator
         SortingSingletonOrSetIterator keySets;  // class invariant: each object placed in this queue contains at least one key
@@ -616,7 +616,7 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    static class SortedSetRangeIterator extends RangeIterator
+    static class SortedSetRangeIterator extends KeyRangeIterator
     {
         private SortedSet<PrimaryKey> primaryKeySet;
         private Iterator<PrimaryKey> iterator;

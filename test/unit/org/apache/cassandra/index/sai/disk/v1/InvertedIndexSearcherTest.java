@@ -41,7 +41,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -105,7 +105,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         {
             for (int t = 0; t < numTerms; ++t)
             {
-                try (RangeIterator results = searcher.search(new Expression(indexContext)
+                try (KeyRangeIterator results = searcher.search(new Expression(indexContext)
                         .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
@@ -120,7 +120,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     assertFalse(results.hasNext());
                 }
 
-                try (RangeIterator results = searcher.search(new Expression(indexContext)
+                try (KeyRangeIterator results = searcher.search(new Expression(indexContext)
                         .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
@@ -142,7 +142,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
             // try searching for terms that weren't indexed
             final String tooLongTerm = randomSimpleString(10, 12);
-            RangeIterator results = searcher.search(new Expression(indexContext)
+            KeyRangeIterator results = searcher.search(new Expression(indexContext)
                                                     .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false, LIMIT);
             assertFalse(results.hasNext());
 
