@@ -32,7 +32,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
-import org.apache.cassandra.index.sai.iterators.AbstractIterator;
+import org.apache.cassandra.index.sai.iterators.AbstractGuavaIterator;
 import org.apache.cassandra.index.sai.iterators.RangeIterator;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -134,7 +134,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
         bkdReader.close();
     }
 
-    private static class RowIdIterator extends AbstractIterator<RowIdWithByteComparable> implements CloseableIterator<RowIdWithByteComparable>
+    private static class RowIdIterator extends AbstractGuavaIterator<RowIdWithByteComparable> implements CloseableIterator<RowIdWithByteComparable>
     {
         private final BKDReader.IteratorState iterator;
         RowIdIterator(BKDReader.IteratorState iterator)

@@ -46,7 +46,7 @@ import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.v1.postings.FilteringPostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
-import org.apache.cassandra.index.sai.iterators.AbstractIterator;
+import org.apache.cassandra.index.sai.iterators.AbstractGuavaIterator;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
@@ -110,7 +110,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         return iteratorState(Direction.FORWARD, null);
     }
 
-    public class IteratorState extends AbstractIterator<Integer> implements Comparable<IteratorState>, Closeable
+    public class IteratorState extends AbstractGuavaIterator<Integer> implements Comparable<IteratorState>, Closeable
     {
         public final byte[] scratch;
 
