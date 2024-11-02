@@ -25,7 +25,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 
-public class KeyKeyRangeAntiJoinIteratorTest
+public class KeyRangeAntiJoinIteratorTest
 {
     public static final long[] EMPTY = { };
 
