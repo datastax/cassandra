@@ -42,6 +42,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.assertj.core.api.Assertions;
 import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
@@ -53,13 +54,21 @@ public class NativeTransportTimeoutTest extends CQLTester
     static Semaphore WAIT_BARRIER;
 
     @Test
-    @BMRule(name = "Delay Message execution on NTR stage",
-            targetClass = "org.apache.cassandra.transport.Message$Request",
-            targetMethod = "execute",
-            targetLocation = "AT ENTRY",
-            condition = "$this.getCustomPayload() != null",
-            action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
-                     "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire();")
+    @BMRules(rules = { @BMRule(name = "Delay Message execution on NTR stage",
+                               targetClass = "org.apache.cassandra.transport.Message$Request",
+                               targetMethod = "execute",
+                               targetLocation = "AT ENTRY",
+                               condition = "$this.getCustomPayload() != null",
+                               action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                                        "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+                                        "flag(Thread.currentThread());"),
+                       @BMRule(name = "Mock NTR timeout from Request.execute",
+                       targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
+                       targetMethod = "getNativeTransportTimeout",
+                       targetLocation = "AT ENTRY",
+                       condition = "flagged(Thread.currentThread()) && callerEquals(\"Message$Request.execute\", true)",
+                       action = "clear(Thread.currentThread()); " +
+                                "return 10000000;") })
     public void testNativeTransportLoadShedding() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
@@ -68,13 +77,37 @@ public class NativeTransportTimeoutTest extends CQLTester
     }
 
     @Test
-    @BMRule(name = "Delay Message execution after NTR stage check, before async stage check",
-    targetClass = "org.apache.cassandra.transport.Message$Request",
-    targetMethod = "execute",
-    targetLocation = "AT INVOKE isTraceable",
-    condition = "$this.getCustomPayload() != null",
-    action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
-             "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire();")
+    @BMRules(rules = { @BMRule(name = "Delay BatchMessage handling",
+                       targetClass = "org.apache.cassandra.transport.messages.BatchMessage",
+                       targetMethod = "handleRequest",
+                       targetLocation = "AT ENTRY",
+                       condition = "$this.getCustomPayload() != null",
+                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+                                "flag(Thread.currentThread());"),
+                       @BMRule(name = "Delay QueryMessage handling",
+                       targetClass = "org.apache.cassandra.transport.messages.QueryMessage",
+                       targetMethod = "handleRequest",
+                       targetLocation = "AT ENTRY",
+                       condition = "$this.getCustomPayload() != null",
+                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+                                "flag(Thread.currentThread());"),
+                       @BMRule(name = "Delay ExecuteMessage handling",
+                       targetClass = "org.apache.cassandra.transport.messages.ExecuteMessage",
+                       targetMethod = "handleRequest",
+                       targetLocation = "AT ENTRY",
+                       condition = "$this.getCustomPayload() != null",
+                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+                                "flag(Thread.currentThread());"),
+                       @BMRule(name = "Mock NTR timeout from handleRequest",
+                       targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
+                       targetMethod = "getNativeTransportTimeout",
+                       targetLocation = "AT ENTRY",
+                       condition = "flagged(Thread.currentThread()) && callerEquals(\"handleRequest\")",
+                       action = "clear(Thread.currentThread()); " +
+                                "return 10000000;") })
     public void testAsyncStageLoadShedding() throws Throwable
     {
         CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.setBoolean(true);
@@ -111,39 +144,29 @@ public class NativeTransportTimeoutTest extends CQLTester
 
         Session session = sessionNet();
 
-        try
+        // custom payload used to make detection of this statement easy early in byteman rules
+        statement.setOutgoingPayload(Collections.singletonMap("sentinel", ByteBuffer.wrap(new byte[0])));
+
+        if (useAsyncStages)
         {
-            // custom payload used to make detection of this statement easy early in Message.Request handling BMRule
-            statement.setOutgoingPayload(Collections.singletonMap("sentinel", ByteBuffer.wrap(new byte[0])));
-
-            // Accelerate NTR load shedding by reducing the timeout below the 12 second default
-            DatabaseDescriptor.setNativeTransportTimeout(50, TimeUnit.MILLISECONDS);
-
-            if (useAsyncStages)
-            {
-                timedOutMeter = ClientMetrics.instance.timedOutBeforeAsyncProcessing;
-                queueTimer = ClientMetrics.instance.asyncQueueTime;
-            }
-            else
-            {
-                timedOutMeter = ClientMetrics.instance.timedOutBeforeProcessing;
-                queueTimer = ClientMetrics.instance.queueTime;
-            }
-
-            long initialTimedOut = timedOutMeter.getCount();
-
-            ResultSetFuture rsf = session.executeAsync(statement);
-            WAIT_BARRIER.acquire();
-            Thread.sleep(DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.MILLISECONDS) + TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2);
-            EXECUTE_BARRIER.release();
-
-            Assertions.assertThatThrownBy(rsf::get).hasCauseInstanceOf(OverloadedException.class);
-            Assert.assertEquals(initialTimedOut + 1, timedOutMeter.getCount());
-            Assert.assertTrue(queueTimer.getSnapshot().get999thPercentile() > TimeUnit.NANOSECONDS.convert(50, TimeUnit.MILLISECONDS));
+            timedOutMeter = ClientMetrics.instance.timedOutBeforeAsyncProcessing;
+            queueTimer = ClientMetrics.instance.asyncQueueTime;
         }
-        finally
+        else
         {
-            DatabaseDescriptor.setNativeTransportTimeout(originalTimeout, TimeUnit.MILLISECONDS);
+            timedOutMeter = ClientMetrics.instance.timedOutBeforeProcessing;
+            queueTimer = ClientMetrics.instance.queueTime;
         }
+
+        long initialTimedOut = timedOutMeter.getCount();
+
+        ResultSetFuture rsf = session.executeAsync(statement);
+        WAIT_BARRIER.acquire();
+        Thread.sleep(10 + TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2);
+        EXECUTE_BARRIER.release();
+
+        Assertions.assertThatThrownBy(rsf::get).hasCauseInstanceOf(OverloadedException.class);
+        Assert.assertEquals(initialTimedOut + 1, timedOutMeter.getCount());
+        Assert.assertTrue(queueTimer.getSnapshot().get999thPercentile() > TimeUnit.NANOSECONDS.convert(10, TimeUnit.MILLISECONDS));
     }
 }
