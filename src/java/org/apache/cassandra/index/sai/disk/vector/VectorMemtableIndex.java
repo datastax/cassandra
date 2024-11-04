@@ -163,14 +163,14 @@ public class VectorMemtableIndex implements MemtableIndex
                 overwriteCount.increment();
             }
             if (oldRemaining > 0)
-            {
                 graph.remove(oldValue, primaryKey);
-                removedCount.increment();
-            }
 
             // remove primary key if it's no longer indexed
             if (newRemaining <= 0 && oldRemaining > 0)
+            {
                 primaryKeys.remove(primaryKey);
+                removedCount.increment();
+            }
         }
     }
 
@@ -445,7 +445,7 @@ public class VectorMemtableIndex implements MemtableIndex
     {
         // Note that range deletions won't show up in the removed count, which is why it's just named removedCount and
         // not deleted count.
-        logger.debug("Writing {} nodes to disk after {} inserts, {} overwrites, and {} revomals for {}", graph.size(),
+        logger.debug("Writing {} nodes to disk after {} inserts, {} overwrites, and {} removals for {}", graph.size(),
                      writeCount.longValue(), overwriteCount.longValue(), removedCount.longValue(), perIndexComponents.descriptor());
         return graph.flush(perIndexComponents);
     }
