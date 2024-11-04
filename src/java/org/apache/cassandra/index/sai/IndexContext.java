@@ -919,7 +919,8 @@ public class IndexContext
                 }
 
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
-                logger.debug(logMessage("Successfully created index for SSTable {}."), context.descriptor());
+                long count = context.primaryKeyMapFactory().count();
+                logger.debug(logMessage("Successfully created index for SSTable {} with {} rows."), context.descriptor(), count);
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.
                 // This covers situation when SSTable collection has the same SSTable multiple
