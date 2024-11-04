@@ -84,9 +84,10 @@ public class ConnectionBurnTest
         static final NoGlobalInboundMetrics instance = new NoGlobalInboundMetrics();
         public LatencyConsumer internodeLatencyRecorder(InetAddressAndPort to)
         {
-            return (timeElapsed, timeUnit) -> {};
+            return (verb, timeElapsed, timeUnit) -> {};
         }
         public void recordInternalLatency(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit timeUnit) {}
+
         public void recordInternodeDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
     }
 
