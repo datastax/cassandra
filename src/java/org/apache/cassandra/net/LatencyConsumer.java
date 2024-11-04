@@ -21,5 +21,5 @@ import java.util.concurrent.TimeUnit;
 
 public interface LatencyConsumer
 {
-    void accept(long timeElapsed, TimeUnit unit);
+    void accept(Verb verb, long timeElapsed, TimeUnit unit);
 }
