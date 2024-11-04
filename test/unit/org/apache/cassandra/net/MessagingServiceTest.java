@@ -209,7 +209,7 @@ public class MessagingServiceTest
         long sentAt = now - latency;
 
         long count = updater.dcLatency.getCount();
-        updater.accept(now - sentAt, MILLISECONDS);
+        updater.accept(Verb.READ_REQ, now - sentAt, MILLISECONDS);
         // negative value shoudln't be recorded
         assertEquals(count, updater.dcLatency.getCount());
     }
@@ -243,7 +243,7 @@ public class MessagingServiceTest
 
     private static void addDCLatency(long sentAt, long nowTime)
     {
-        MessagingService.instance().metrics.internodeLatencyRecorder(InetAddressAndPort.getLocalHost()).accept(nowTime - sentAt, MILLISECONDS);
+        MessagingService.instance().metrics.internodeLatencyRecorder(InetAddressAndPort.getLocalHost()).accept(Verb.READ_REQ, nowTime - sentAt, MILLISECONDS);
     }
 
     /**
