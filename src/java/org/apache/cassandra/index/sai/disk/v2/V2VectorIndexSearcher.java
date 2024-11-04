@@ -510,7 +510,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private IntIntPairArray flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
     {
         var segmentOrdinalPairs = new IntIntPairArray(keysInRange.size());
-        int lastSegementRowId = -1;
+        int lastSegmentRowId = -1;
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
         {
@@ -597,10 +597,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 // This requirement is required by the ordinals view. There are cases where we have broken this
                 // requirement, and in order to make future debugging easier, we check here and throw an exception
                 // with additional detail.
-                if (segmentRowId <= lastSegementRowId)
-                    throw new IllegalStateException("Row ids must ascend monotonically. Got " + segmentRowId + " after " + lastSegementRowId
+                if (segmentRowId <= lastSegmentRowId)
+                    throw new IllegalStateException("Row ids must ascend monotonically. Got " + segmentRowId + " after " + lastSegmentRowId
                                                     + " for " + primaryKey + " on sstable " + primaryKeyMap.getSSTableId());
-                lastSegementRowId = segmentRowId;
+                lastSegmentRowId = segmentRowId;
                 int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
                 if (ordinal >= 0)
                     segmentOrdinalPairs.add(segmentRowId, ordinal);

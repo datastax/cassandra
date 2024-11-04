@@ -50,7 +50,7 @@ public interface PrimaryKeyMap extends Closeable
         /**
          * Returns the number of primary keys in the map. This is part of the factory because
          * it can be retrieved without opening the map.
-         * @return
+         * @return the number of primary keys in the map
          */
         default long count()
         {
