@@ -62,7 +62,8 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
             this.allLatency = allLatency;
         }
 
-        public void accept(long timeTaken, TimeUnit units)
+        @Override
+        public void accept(Verb verb, long timeTaken, TimeUnit units)
         {
             if (timeTaken > 0)
             {
