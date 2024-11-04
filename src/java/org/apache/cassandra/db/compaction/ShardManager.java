@@ -194,6 +194,11 @@ public interface ShardManager
             min = min == null || min.compareTo(sstable.getFirst()) > 0 ? sstable.getFirst() : min;
             max = max == null || max.compareTo(sstable.getLast()) < 0 ? sstable.getLast() : max;
         }
+        return density(onDiskLength, min, max, approximatePartitionCount);
+    }
+
+    default double density(long onDiskLength, PartitionPosition min, PartitionPosition max, long approximatePartitionCount)
+    {
         double span = rangeSpanned(min, max);
         return onDiskLength / adjustSmallSpans(span, approximatePartitionCount);
     }
@@ -223,7 +228,9 @@ public interface ShardManager
             while (firsts.hasNext() && (shardEnd == null || firsts.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
                 current.add(firsts.next());
 
-            tasks.add(maker.apply(current, boundaries.shardSpan()));
+            final T result = maker.apply(current, boundaries.shardSpan());
+            if (result != null)
+                tasks.add(result);
 
             while (lasts.hasNext() && (shardEnd == null || lasts.peek().getLast().getToken().compareTo(shardEnd) <= 0))
                 current.remove(lasts.next());
@@ -232,5 +239,15 @@ public interface ShardManager
                 boundaries.advanceTo(shardEnd.nextValidToken());
         }
         return tasks;
+    }
+
+    default int coveredShardCount(PartitionPosition first, PartitionPosition last, int numShardsForDensity)
+    {
+        var boundaries = boundaries(numShardsForDensity);
+        boundaries.advanceTo(first.getToken());
+        int firstShard = boundaries.shardIndex();
+        boundaries.advanceTo(last.getToken());
+        int lastShard = boundaries.shardIndex();
+        return lastShard - firstShard + 1;
     }
 }

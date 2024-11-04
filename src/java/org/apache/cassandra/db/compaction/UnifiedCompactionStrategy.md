@@ -384,23 +384,27 @@ individual tasks abort). Early opening of sstables is not supported in this mode
 arbitraty filtering of the requests to an sstable; it is expected that the smaller size and quicker completion time of
 compactions should make up for this.
 
-Currently, the compaction thread allocation scheme above does not take operation parallelization into account and may
-schedule more tasks per level than the thread allocation scheme permits. This is a limitation of the current
-implementation that should be fixed in the near future.
-
-This is controlled by the `parallelize_output_shards` parameter, which is `false` by default.
+This is controlled by the `parallelize_output_shards` parameter, which is `true` by default.
 
 ## Major compaction
 
 Major compaction in UCS always splits the output into a shard number suitable for the expected result density.
-Additionally, major compaction can be configured to act independently on sstables that do not transitively overlap
-by configuring `reshard_major_compactions` to `false`. This was originally implemented to allow for a bit of parallelism
-of major compactions, since the base shard count $b$ could define splitting points for all sstables in the system and
-thus allowing for major compactions with parallelism $b$. Since the introduction of `parallelize_output_shards`, 
-parallelism can be achieved by other means. By default, major compaction will split sstables in non-overlapping sets
-and compact them independently, but if the output shard parallelization option is enabled, it will produce a single
-compaction operation to make sure that major compactions can be used to reshard data after changes to the compaction
-configuration.
+If the input sstables can be split into non-overlapping sets that correspond to current shard boundaries, the compaction
+will construct independent operations that work over these sets, to improve the space overhead of the operation as well
+as the time needed to persistently complete individual steps. Because all levels will usually be split in $b$ shards,
+it will very often be the case that major compactions split into $b$ individual jobs, reducing the space overhead by a
+factor close to $b$. Note that this does not always apply; for example, if a topology change causes the sharding
+boundaries to move, the mismatch between old and new sharding boundaries will cause the compaction to produce a single
+operation and require 100% space overhead.
+
+Output shard parallelization also applies to major compactions: if the `parallelize_output_shards` option is enabled,
+shards of individual compactions will be compacted concurrently, which can significantly reduce the time needed to
+perform the compaction; if the option is not enabled, major compaction will only be parallelized up to the number of
+individual non-overlapping sets the sstables can be split into. In either case, the number of parallel operations is
+limited to a number specified as a parameter of the operation (e.g. `nodetool compact -j n`), which is set to half the
+compaction thread count by default. Using a jobs of 0 will let the compaction use all available threads and run
+as quickly as possible, but this will prevent other compaction operations from running until it completes and thus
+should be used with caution, only while the database is known to not receive any writes.
 
 ## Differences with STCS and LCS
 
@@ -534,7 +538,7 @@ UCS accepts these compaction strategy parameters:
   compaction. This can dramatically improve compaction throughput especially on the lowest levels of the hierarchy,
   but disables early open and thus may be less efficient when compaction is configured to produce very large
   sstables.   
-  The default value is `false`.
+  The default value is `true`.
 * `reshard_major_compactions` If true, major compaction requiests will generate one single compaction operation over all
   sstables in the arena (potentially parallelized as a result of `parallelize_output_shards`). If false, major
   compactions will proceed as independent operations for any non-overlapping sets of sstables. The latter increases

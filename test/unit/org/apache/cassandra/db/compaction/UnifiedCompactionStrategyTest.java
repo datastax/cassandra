@@ -1646,6 +1646,12 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     public void testCreateParallelTasks(int numShards, int[] perLevelCounts, int[]... dropsPerLevel)
     {
+        for (int parallelism = numShards; parallelism >= 1; --parallelism)
+            testCreateParallelTasks(numShards, parallelism, perLevelCounts, dropsPerLevel);
+    }
+
+    public void testCreateParallelTasks(int numShards, int concurrencyLimit, int[] perLevelCounts, int[]... dropsPerLevel)
+    {
         // Note: This test has a counterpart in ShardManagerTest that exercises splitSSTablesInShards directly and more thoroughly.
         // This one ensures the data is correctly passed to and presented in compaction tasks.
         Set<SSTableReader> allSSTables = new HashSet<>();
@@ -1670,7 +1676,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         strategy.startup();
         LifecycleTransaction txn = dataTracker.tryModify(allSSTables, OperationType.COMPACTION);
         var tasks = new ArrayList<CompactionTask>();
-        strategy.createAndAddTasks(0, txn, tasks);
+        strategy.createAndAddTasks(0, txn, strategy.makeShardingStats(txn), concurrencyLimit, tasks);
         int i = 0;
         int[] expectedSSTablesInTasks = new int[tasks.size()];
         int[] collectedSSTablesPerTask = new int[tasks.size()];
@@ -1687,6 +1693,13 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             assertNull(tasks.get(0).tokenRange()); // make sure single-task compactions are not ranged
         Assert.assertEquals(Arrays.toString(expectedSSTablesInTasks), Arrays.toString(collectedSSTablesPerTask));
         System.out.println(Arrays.toString(expectedSSTablesInTasks));
+        assertThat(tasks.size()).isLessThanOrEqualTo(concurrencyLimit);
+        assertEquals(allSSTables, tasks.stream().map(CompactionTask::inputSSTables).flatMap(Set::stream).collect(Collectors.toSet()));
+        for (var t : tasks)
+            for (var q : tasks)
+                if (t != q)
+                    assertFalse("Subranges " + t.tokenRange() + " and " + q.tokenRange() + "intersect", t.tokenRange().intersects(q.tokenRange()));
+
         // make sure the composite transaction has the correct number of tasks
         assertEquals(Transactional.AbstractTransactional.State.ABORTED, txn.state());
     }
@@ -1720,7 +1733,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         strategy.startup();
         LifecycleTransaction txn = dataTracker.tryModify(allSSTables, OperationType.COMPACTION);
         var tasks = new ArrayList<CompactionTask>();
-        strategy.createAndAddTasks(0, txn, tasks);
+        strategy.createAndAddTasks(0, txn, strategy.makeShardingStats(txn), 1000, tasks);
         assertEquals(1, tasks.size());
         assertEquals(allSSTables, tasks.get(0).inputSSTables());
     }
@@ -1751,6 +1764,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
         when(controller.parallelizeOutputShards()).thenReturn(parallelizeAndReshard);
         when(controller.reshardMajorCompactions()).thenReturn(parallelizeAndReshard);
+        when(controller.maxConcurrentCompactions()).thenReturn(1000);
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         CompactionTasks tasks = strategy.getMaximalTasks(0, false);
