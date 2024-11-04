@@ -37,18 +37,19 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 public class UnifiedCompactionTask extends CompactionTask
 {
     private final ShardManager shardManager;
-    private final Controller controller;
     private final Range<Token> operationRange;
     private final Set<SSTableReader> actuallyCompact;
     private final SharedCompactionProgress sharedProgress;
+    private final UnifiedCompactionStrategy.ShardingStats shardingStats;
 
     public UnifiedCompactionTask(CompactionRealm cfs,
                                  UnifiedCompactionStrategy strategy,
                                  ILifecycleTransaction txn,
                                  int gcBefore,
-                                 ShardManager shardManager)
+                                 ShardManager shardManager,
+                                 UnifiedCompactionStrategy.ShardingStats shardingStats)
     {
-        this(cfs, strategy, txn, gcBefore, shardManager, null, null, null, null);
+        this(cfs, strategy, txn, gcBefore, shardManager, shardingStats, null, null, null, null);
     }
 
 
@@ -57,14 +58,15 @@ public class UnifiedCompactionTask extends CompactionTask
                                  ILifecycleTransaction txn,
                                  int gcBefore,
                                  ShardManager shardManager,
+                                 UnifiedCompactionStrategy.ShardingStats shardingStats,
                                  Range<Token> operationRange,
                                  Set<SSTableReader> actuallyCompact,
                                  SharedCompactionProgress sharedProgress,
                                  SharedCompactionObserver sharedObserver)
     {
         super(cfs, txn, gcBefore, strategy.getController().getIgnoreOverlapsInExpirationCheck(), strategy, sharedObserver != null ? sharedObserver : strategy);
-        this.controller = strategy.getController();
         this.shardManager = shardManager;
+        this.shardingStats = shardingStats;
 
         if (operationRange != null)
         {
@@ -91,24 +93,16 @@ public class UnifiedCompactionTask extends CompactionTask
                                                           Directories directories,
                                                           Set<SSTableReader> nonExpiredSSTables)
     {
-        long approximateKeyCount = SSTableReader.getApproximateKeyCount(nonExpiredSSTables);
-        long totalKeyCount = nonExpiredSSTables.stream()
-                                               .mapToLong(SSTableReader::estimatedKeys)
-                                               .sum();
-        double uniqueKeyRatio = 1.0 * approximateKeyCount / totalKeyCount;
-
-        double density = shardManager.calculateCombinedDensity(nonExpiredSSTables, approximateKeyCount);
-        int numShards = controller.getNumShards(density * shardManager.shardSetCoverage());
         // In multi-task operations we need to expire many ranges in a source sstable for early open. Not doable yet.
         final boolean earlyOpenAllowed = operationRange == null;
         return new ShardedCompactionWriter(realm,
                                            directories,
                                            transaction,
                                            nonExpiredSSTables,
-                                           uniqueKeyRatio,
+                                           shardingStats.uniqueKeyRatio,
                                            keepOriginals,
                                            earlyOpenAllowed,
-                                           shardManager.boundaries(numShards));
+                                           shardManager.boundaries(shardingStats.shardCountForDensity));
     }
 
     @Override
