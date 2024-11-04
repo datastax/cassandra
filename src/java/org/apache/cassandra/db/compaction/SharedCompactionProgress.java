@@ -124,7 +124,7 @@ public class SharedCompactionProgress implements CompactionProgress
     @Override
     public boolean isStopRequested()
     {
-        return false;
+        return sources.stream().anyMatch(CompactionProgress::isStopRequested);
     }
 
     @Override
