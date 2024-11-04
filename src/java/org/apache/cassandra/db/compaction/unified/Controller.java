@@ -307,7 +307,7 @@ public abstract class Controller
     static final String PARALLELIZE_OUTPUT_SHARDS_OPTION = "parallelize_output_shards";
     static final boolean DEFAULT_PARALLELIZE_OUTPUT_SHARDS =
         Boolean.parseBoolean(getSystemProperty(PARALLELIZE_OUTPUT_SHARDS_OPTION,
-                                               "false"));
+                                               "true"));
 
     /**
      * Whether major compactions should not try to split the inputs into non-overlapping sets. Splitting the input is
