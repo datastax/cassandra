@@ -78,12 +78,11 @@ public class MessagePayloadTest extends CQLTester
     {
         Assert.assertSame(TestQueryHandler.class, ClientState.getCQLQueryHandler().getClass());
 
-        SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(),
-                nativePort,
-                ProtocolVersion.V5,
-                true,
-                new EncryptionOptions());
-        try
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(),
+                                                    nativePort,
+                                                    ProtocolVersion.V5,
+                                                    true,
+                                                    new EncryptionOptions()))
         {
             client.connect(false);
 
@@ -98,9 +97,9 @@ public class MessagePayloadTest extends CQLTester
             QueryOptions.DEFAULT.getPagingState(),
             QueryOptions.DEFAULT.getSerialConsistency(null),
             ProtocolVersion.V5,
-                    KEYSPACE);
+            KEYSPACE);
             QueryMessage queryMessage = new QueryMessage("CREATE TABLE atable (pk int PRIMARY KEY, v text)",
-                    queryOptions);
+                                                         queryOptions);
             PrepareMessage prepareMessage = new PrepareMessage("SELECT * FROM atable", KEYSPACE);
 
             reqMap = Collections.singletonMap("foo", bytes(42));
@@ -126,19 +125,15 @@ public class MessagePayloadTest extends CQLTester
             payloadEquals(respMap, executeResponse.getCustomPayload());
 
             BatchMessage batchMessage = new BatchMessage(BatchStatement.Type.UNLOGGED,
-                    Collections.<Object>singletonList("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')"),
-                                                             Collections.singletonList(Collections.<ByteBuffer>emptyList()),
-                                                             queryOptions);
+                                                         Collections.<Object>singletonList("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')"),
+                                                         Collections.singletonList(Collections.<ByteBuffer>emptyList()),
+                                                         queryOptions);
             reqMap = Collections.singletonMap("foo", bytes(45));
             responsePayload = respMap = Collections.singletonMap("bar", bytes(45));
             batchMessage.setCustomPayload(reqMap);
             Message.Response batchResponse = client.execute(batchMessage);
             payloadEquals(reqMap, requestPayload);
             payloadEquals(respMap, batchResponse.getCustomPayload());
-        }
-        finally
-        {
-            client.close();
         }
     }
 
@@ -147,8 +142,7 @@ public class MessagePayloadTest extends CQLTester
     {
         Assert.assertSame(TestQueryHandler.class, ClientState.getCQLQueryHandler().getClass());
 
-        SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort);
-        try
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort))
         {
             client.connect(false);
 
@@ -156,9 +150,9 @@ public class MessagePayloadTest extends CQLTester
             Map<String, ByteBuffer> respMap;
 
             QueryMessage queryMessage = new QueryMessage(
-                    "CREATE TABLE " + KEYSPACE + ".atable (pk int PRIMARY KEY, v text)",
-                    QueryOptions.DEFAULT
-                );
+            "CREATE TABLE " + KEYSPACE + ".atable (pk int PRIMARY KEY, v text)",
+            QueryOptions.DEFAULT
+            );
             PrepareMessage prepareMessage = new PrepareMessage("SELECT * FROM " + KEYSPACE + ".atable", null);
 
             reqMap = Collections.singletonMap("foo", bytes(42));
@@ -184,19 +178,15 @@ public class MessagePayloadTest extends CQLTester
             payloadEquals(respMap, executeResponse.getCustomPayload());
 
             BatchMessage batchMessage = new BatchMessage(BatchStatement.Type.UNLOGGED,
-                    Collections.<Object>singletonList("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')"),
-                    Collections.singletonList(Collections.<ByteBuffer>emptyList()),
-                    QueryOptions.DEFAULT);
+                                                         Collections.<Object>singletonList("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')"),
+                                                         Collections.singletonList(Collections.<ByteBuffer>emptyList()),
+                                                         QueryOptions.DEFAULT);
             reqMap = Collections.singletonMap("foo", bytes(45));
             responsePayload = respMap = Collections.singletonMap("bar", bytes(45));
             batchMessage.setCustomPayload(reqMap);
             Message.Response batchResponse = client.execute(batchMessage);
             payloadEquals(reqMap, requestPayload);
             payloadEquals(respMap, batchResponse.getCustomPayload());
-        }
-        finally
-        {
-            client.close();
         }
     }
 
@@ -205,16 +195,15 @@ public class MessagePayloadTest extends CQLTester
     {
         Assert.assertSame(TestQueryHandler.class, ClientState.getCQLQueryHandler().getClass());
 
-        SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, ProtocolVersion.V3);
-        try
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, ProtocolVersion.V3))
         {
             client.connect(false);
 
             Map<String, ByteBuffer> reqMap;
 
             QueryMessage queryMessage = new QueryMessage(
-                    "CREATE TABLE " + KEYSPACE + ".atable (pk int PRIMARY KEY, v text)",
-                    QueryOptions.DEFAULT
+            "CREATE TABLE " + KEYSPACE + ".atable (pk int PRIMARY KEY, v text)",
+            QueryOptions.DEFAULT
             );
             PrepareMessage prepareMessage = new PrepareMessage("SELECT * FROM " + KEYSPACE + ".atable", null);
 
@@ -274,9 +263,9 @@ public class MessagePayloadTest extends CQLTester
             client.connect(false);
 
             BatchMessage batchMessage = new BatchMessage(BatchStatement.Type.UNLOGGED,
-                    Collections.<Object>singletonList("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')"),
-                    Collections.singletonList(Collections.<ByteBuffer>emptyList()),
-                    QueryOptions.DEFAULT);
+                                                         Collections.<Object>singletonList("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')"),
+                                                         Collections.singletonList(Collections.<ByteBuffer>emptyList()),
+                                                         QueryOptions.DEFAULT);
             reqMap = Collections.singletonMap("foo", bytes(45));
             responsePayload = Collections.singletonMap("bar", bytes(45));
             batchMessage.setCustomPayload(reqMap);
@@ -289,10 +278,6 @@ public class MessagePayloadTest extends CQLTester
             {
                 Assert.assertTrue(e.getCause() instanceof ProtocolException);
             }
-        }
-        finally
-        {
-            client.close();
         }
     }
 
