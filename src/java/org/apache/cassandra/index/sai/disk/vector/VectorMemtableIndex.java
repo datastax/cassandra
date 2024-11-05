@@ -84,6 +84,8 @@ public class VectorMemtableIndex implements MemtableIndex
     private final IndexContext indexContext;
     private final CassandraOnHeapGraph<PrimaryKey> graph;
     private final LongAdder writeCount = new LongAdder();
+    private final LongAdder overwriteCount = new LongAdder();
+    private final LongAdder removedCount = new LongAdder();
 
     private PrimaryKey minimumKey;
     private PrimaryKey maximumKey;
@@ -155,13 +157,19 @@ public class VectorMemtableIndex implements MemtableIndex
 
             // make the changes in this order so we don't have a window where the row is not in the index at all
             if (newRemaining > 0)
+            {
                 graph.add(newValue, primaryKey);
+                overwriteCount.increment();
+            }
             if (oldRemaining > 0)
                 graph.remove(oldValue, primaryKey);
 
             // remove primary key if it's no longer indexed
             if (newRemaining <= 0 && oldRemaining > 0)
+            {
                 primaryKeys.remove(primaryKey);
+                removedCount.increment();
+            }
         }
     }
 
@@ -434,13 +442,17 @@ public class VectorMemtableIndex implements MemtableIndex
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
+        // Note that range deletions won't show up in the removed count, which is why it's just named removedCount and
+        // not deleted count.
+        logger.debug("Writing {} nodes to disk after {} inserts, {} overwrites, and {} removals for {}", graph.size(),
+                     writeCount.longValue(), overwriteCount.longValue(), removedCount.longValue(), perIndexComponents.descriptor());
         return graph.flush(perIndexComponents);
     }
 
     @Override
     public long writeCount()
     {
-        return writeCount.longValue();
+        return writeCount.longValue() + overwriteCount.longValue();
     }
 
     @Override
