@@ -85,6 +85,12 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     }
 
     @Test
+    public void testPrimaryKeyMapFactoryCount()
+    {
+        assertEquals(Long.MAX_VALUE, KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY.count());
+    }
+
+    @Test
     public void testEqQueriesAgainstStringIndex() throws Exception
     {
         doTestEqQueriesAgainstStringIndex(version);
