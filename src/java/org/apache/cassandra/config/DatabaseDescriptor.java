@@ -3716,5 +3716,4 @@ public class DatabaseDescriptor
     {
         conf.native_transport_timeout_in_ms = timeUnit.toMillis(timeout);
     }
-
 }

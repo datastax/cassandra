@@ -37,7 +37,6 @@ import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.Statement;
 import com.datastax.driver.core.exceptions.OverloadedException;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.assertj.core.api.Assertions;
@@ -55,13 +54,13 @@ public class NativeTransportTimeoutTest extends CQLTester
 
     @Test
     @BMRules(rules = { @BMRule(name = "Delay Message execution on NTR stage",
-                               targetClass = "org.apache.cassandra.transport.Message$Request",
-                               targetMethod = "execute",
-                               targetLocation = "AT ENTRY",
-                               condition = "$this.getCustomPayload() != null",
-                               action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
-                                        "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
-                                        "flag(Thread.currentThread());"),
+                       targetClass = "org.apache.cassandra.transport.Message$Request",
+                       targetMethod = "execute",
+                       targetLocation = "AT ENTRY",
+                       condition = "$this.getCustomPayload() != null",
+                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+                                "flag(Thread.currentThread());"),
                        @BMRule(name = "Mock NTR timeout from Request.execute",
                        targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
                        targetMethod = "getNativeTransportTimeout",
@@ -137,7 +136,6 @@ public class NativeTransportTimeoutTest extends CQLTester
     {
         EXECUTE_BARRIER = new Semaphore(0);
         WAIT_BARRIER = new Semaphore(0);
-        long originalTimeout = DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.MILLISECONDS);
 
         Meter timedOutMeter;
         Timer queueTimer;
