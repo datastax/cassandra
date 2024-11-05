@@ -74,6 +74,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final SortedTermsReader sortedTermsReader;
+        private final long count;
         private FileHandle token = null;
         private FileHandle termsDataBlockOffsets = null;
         private FileHandle termsData = null;
@@ -90,6 +91,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.perSSTableComponents = perSSTableComponents;
                 MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
+                count = tokensMeta.valueCount;
                 SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS)));
                 NumericValuesMeta blockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)));
 
@@ -128,6 +130,12 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             {
                 throw new UncheckedIOException(e);
             }
+        }
+
+        @Override
+        public long count()
+        {
+            return count;
         }
 
         @Override
