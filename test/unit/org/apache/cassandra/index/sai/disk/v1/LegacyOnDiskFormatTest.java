@@ -146,7 +146,12 @@ public class LegacyOnDiskFormatTest
         var perSSTableComponents = indexDescriptor.perSSTableComponents();
         PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.version().onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
 
+        long countFromFactory = primaryKeyMapFactory.count();
+
         PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+
+        long countFromMap = primaryKeyMap.count();
+        assertEquals(countFromFactory, countFromMap);
 
         PrimaryKey expected = pkFactory.createTokenOnly(Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(23)).getToken());
 
