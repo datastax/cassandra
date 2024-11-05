@@ -17,12 +17,23 @@
  */
 package org.apache.cassandra.index.sai.disk.format;
 
+import java.io.IOException;
 import java.util.Set;
 
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.SSTableIndexComponentsState.UnapplicableDiffException;
+import org.apache.cassandra.io.sstable.Descriptor;
 
+import static org.apache.cassandra.index.sai.disk.format.IndexDescriptorTest.createFakeDataFile;
+import static org.apache.cassandra.index.sai.disk.format.IndexDescriptorTest.createFakePerIndexComponents;
+import static org.apache.cassandra.index.sai.disk.format.IndexDescriptorTest.createFakePerSSTableComponents;
+import static org.apache.cassandra.index.sai.disk.format.IndexDescriptorTest.loadDescriptor;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
@@ -86,6 +97,24 @@ public class SSTableIndexComponentsStateTest
                      .build()
                      .includedIndexes(),
                      Set.of("index1", "index2"));
+    }
+
+    @Test
+    public void diffToStringTest()
+    {
+        var before = SSTableIndexComponentsState.builder()
+                                                .addPerSSTable(Version.EB, 0, 10)
+                                                .addPerIndex("index1", Version.DB, 0, 1)
+                                                .build();
+
+        var after = before.unbuild()
+                          .removePerSSTable()
+                          .addPerIndex("index2", Version.EB, 1, 4)
+                          .build();
+
+        var diff = after.diff(before);
+        // The details of that string are not that important, but just making sure it looks reasonable.
+        assertEquals("{<shared>: eb@0 (10 bytes), index1: db@0 (1 bytes)} -> {index1: db@0 (1 bytes), index2: eb@1 (4 bytes)} (-<shared> +index2)", diff.toString());
     }
 
     @Test
@@ -261,5 +290,86 @@ public class SSTableIndexComponentsStateTest
 
         SSTableIndexComponentsState.Diff diff = after.diff(before);
         assertEquals(after, before.tryApplyDiff(diff));
+    }
+
+    @Test
+    public void buildFromDescriptorTest() throws IOException
+    {
+        TemporaryFolder temporaryFolder = new TemporaryFolder();
+        temporaryFolder.create();
+        try
+        {
+            Descriptor descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/ca-1-bti-Data.db");
+
+            IndexContext idx1 = SAITester.createIndexContext("test_index1", Int32Type.instance);
+            IndexContext idx2 = SAITester.createIndexContext("test_index2", UTF8Type.instance);
+
+            createFakeDataFile(descriptor);
+            createFakePerSSTableComponents(descriptor, Version.latest(), 0);
+            createFakePerIndexComponents(descriptor, idx1, Version.latest(), 1);
+            createFakePerIndexComponents(descriptor, idx2, Version.DB, 0);
+
+            IndexDescriptor indexDescriptor = loadDescriptor(descriptor, idx1, idx2);
+
+            SSTableIndexComponentsState state = SSTableIndexComponentsState.of(indexDescriptor);
+            assertFalse(state.isEmpty());
+
+            assertEquals(Set.of(idx1.getIndexName(), idx2.getIndexName()), state.includedIndexes());
+
+            assertEquals(Version.latest(), state.perSSTable().buildId.version());
+            assertEquals(0, state.perSSTable().buildId.generation());
+
+            assertEquals(Version.latest(), state.perIndex(idx1.getIndexName()).buildId.version());
+            assertEquals(1, state.perIndex(idx1.getIndexName()).buildId.generation());
+
+            assertEquals(Version.DB, state.perIndex(idx2.getIndexName()).buildId.version());
+            assertEquals(0, state.perIndex(idx2.getIndexName()).buildId.generation());
+        }
+        finally
+        {
+            temporaryFolder.delete();
+        }
+    }
+
+    @Test
+    public void unbuildTest()
+    {
+        var state1 = SSTableIndexComponentsState.builder()
+                                                .addPerSSTable(Version.DC, 0, 1)
+                                                .addPerIndex("index1", Version.EB, 0, 1)
+                                                .addPerIndex("index2", Version.EB, 0, 1)
+                                                .build();
+
+        var state2 = state1.unbuild()
+                           .addPerSSTable(Version.EB, 0, 1)
+                           .addPerIndex("index3", Version.EB, 0, 1)
+                           .build();
+
+
+        assertEquals(Version.EB, state2.perSSTable().buildId.version());
+        assertEquals(0, state2.perSSTable().buildId.generation());
+
+        assertFalse(state1.includedIndexes().contains("index3"));
+        assertTrue(state2.includedIndexes().contains("index3"));
+
+        // Undoing the changes to state1
+        var state3 = state2.unbuild()
+                           .addPerSSTable(Version.DC, 0, 1)
+                           .removePerIndex("index3")
+                           .build();
+
+        assertEquals(state1, state3);
+    }
+
+    @Test
+    public void sizeInBytesTest()
+    {
+        var state1 = SSTableIndexComponentsState.builder()
+                                                .addPerSSTable(Version.DC, 0, 100)
+                                                .addPerIndex("index1", Version.EB, 0, 42)
+                                                .addPerIndex("index2", Version.EB, 0, 220)
+                                                .build();
+
+        assertEquals(100 + 42 + 220, state1.totalSizeInBytes());
     }
 }

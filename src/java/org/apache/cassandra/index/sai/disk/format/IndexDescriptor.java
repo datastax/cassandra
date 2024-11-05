@@ -273,7 +273,7 @@ public class IndexDescriptor
     {
         var currentBuildId = currentComponents == null ? null : currentComponents.buildId;
         return new IndexComponentsImpl(context, ComponentsBuildId.forNewBuild(currentBuildId, candidateId -> {
-            // This check that there is no existing files on disk we would overwrite by using `candidateId` for our
+            // This checks that there is no existing files on disk we would overwrite by using `candidateId` for our
             // new build.
             IndexComponentsImpl candidate = new IndexComponentsImpl(context, candidateId);
             boolean isUsable = candidate.expectedComponentsForVersion().stream().noneMatch(candidate::componentExistsOnDisk);

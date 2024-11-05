@@ -488,7 +488,12 @@ public class SSTableIndexComponentsState
 
             List<String> updates = new ArrayList<>();
             if (perSSTableUpdated)
-                updates.add("+<shared>");
+            {
+                if (after.perSSTableState == null)
+                    updates.add("-<shared>");
+                else
+                    updates.add("+<shared>");
+            }
             for (String updated : perIndexesUpdated)
                 updates.add('+' + updated);
             for (String removed : perIndexesRemoved)
