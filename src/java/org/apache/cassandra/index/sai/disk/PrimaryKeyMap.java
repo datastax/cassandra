@@ -47,6 +47,23 @@ public interface PrimaryKeyMap extends Closeable
          */
         PrimaryKeyMap newPerSSTablePrimaryKeyMap();
 
+        /**
+         * Returns the number of primary keys in the map. This is part of the factory because
+         * it can be retrieved without opening the map.
+         * @return the number of primary keys in the map
+         */
+        default long count()
+        {
+            try (PrimaryKeyMap map = newPerSSTablePrimaryKeyMap())
+            {
+                return map.count();
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+
         @Override
         default void close() throws IOException
         {
