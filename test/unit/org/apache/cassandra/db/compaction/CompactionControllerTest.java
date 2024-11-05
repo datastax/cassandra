@@ -208,7 +208,7 @@ public class CompactionControllerTest extends SchemaLoader
     targetClass = "CompactionTask",
     targetMethod = "runMayThrow",
     targetLocation = "INVOKE createCompactionOperation",
-    condition = "Thread.currentThread().getName().matches(\"[Cc]ompaction.*1\")",
+    condition = "Thread.currentThread().getName().equals(\"compaction1\")",
     action = "org.apache.cassandra.db.compaction.CompactionControllerTest.createCompactionControllerLatch.countDown();" +
              "com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly" +
              "(org.apache.cassandra.db.compaction.CompactionControllerTest.compaction2FinishLatch);"),
@@ -216,14 +216,14 @@ public class CompactionControllerTest extends SchemaLoader
     targetClass = "CompactionAwareWriter",
     targetMethod = "finish",
     targetLocation = "INVOKE finished",
-    condition = "Thread.currentThread().getName().matches(\"[Cc]ompaction.*1\")",
+    condition = "Thread.currentThread().getName().equals(\"compaction1\")",
     action = "org.apache.cassandra.db.compaction.CompactionControllerTest.compaction1RefreshLatch.countDown();" +
              "com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly" +
              "(org.apache.cassandra.db.compaction.CompactionControllerTest.refreshCheckLatch);"),
     @BMRule(name = "Increment overlap refresh counter",
     targetClass = "ColumnFamilyStore",
     targetMethod = "getAndReferenceOverlappingLiveSSTables",
-    condition = "Thread.currentThread().getName().matches(\"[Cc]ompaction.*1\")",
+    condition = "Thread.currentThread().getName().equals(\"compaction1\")",
     action = "org.apache.cassandra.db.compaction.CompactionControllerTest.incrementOverlapRefreshCounter();")
     })
     public void testIgnoreOverlaps() throws Exception
@@ -246,7 +246,7 @@ public class CompactionControllerTest extends SchemaLoader
               targetClass = "org.apache.cassandra.db.partitions.TrieBackedPartition",
               targetMethod = "create",
               targetLocation = "AT ENTRY",
-              condition = "Thread.currentThread().getName().matches(\"[Cc]ompaction.*1\")",
+              condition = "Thread.currentThread().getName().matches(\"CompactionExecutor:.*\")",
               action = "System.out.println(\"Byteman rule firing\");" +
                        "org.apache.cassandra.db.compaction.CompactionControllerTest.memtableRaceStartLatch.countDown();" +
                        "com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly(" +
