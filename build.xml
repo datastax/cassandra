@@ -46,7 +46,7 @@
     -->
     <property name="java.default" value="11" />
     <!-- Not sure whether we need 17 below, at least jvm options were added some time ago for 17 -->
-    <property name="java.supported" value="1.8,11,17,22" />
+    <property name="java.supported" value="11,17,22" />
 
     <!-- directory details -->
     <property name="basedir" value="."/>
