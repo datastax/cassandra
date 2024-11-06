@@ -44,6 +44,7 @@ import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.concurrent.SharedExecutorPool;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -70,6 +71,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.TopKSelector;
 
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+
 /**
  * Processor applied to SAI based ORDER BY queries. This class could likely be refactored into either two filter
  * methods depending on where the processing is happening or into two classes.
@@ -88,6 +91,8 @@ import org.apache.cassandra.utils.TopKSelector;
  */
 public class TopKProcessor
 {
+    private static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. Ordering on non-clustering " +
+                                                              "column requires the column to be indexed";
     protected static final Logger logger = LoggerFactory.getLogger(TopKProcessor.class);
     private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor();
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
@@ -104,7 +109,9 @@ public class TopKProcessor
         this.command = command;
 
         Pair<IndexContext, RowFilter.Expression> annIndexAndExpression = findTopKIndexContext();
-        Preconditions.checkNotNull(annIndexAndExpression);
+        //this can happen in case an index was dropped after the query was initiated
+        if (annIndexAndExpression == null)
+            throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
 
         this.indexContext = annIndexAndExpression.left;
         this.expression = annIndexAndExpression.right;
