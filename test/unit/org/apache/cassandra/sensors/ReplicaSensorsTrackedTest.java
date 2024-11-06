@@ -79,7 +79,7 @@ public class ReplicaSensorsTrackedTest
     public static void beforeClass() throws Exception
     {
 
-        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(ActiveRequestSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
         CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
 
         SchemaLoader.loadSchema();

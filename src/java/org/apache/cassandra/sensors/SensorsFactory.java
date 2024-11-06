@@ -18,24 +18,23 @@
 
 package org.apache.cassandra.sensors;
 
-import java.util.function.Function;
-
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.REQUEST_SENSORS_FACTORY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SENSORS_FACTORY;
 
 /**
- * Provides a customizable factory to create a {@link RequestSensors} to track sensors per user request.
- * Configured via the {@link CassandraRelevantProperties#REQUEST_SENSORS_FACTORY} system property, if unset a {@link NoOpRequestSensors} will be used.
- * To activate tracking of request sensors, use {@link ActiveRequestSensorsFactory}.
+ * Provides a factory to customize the behaviour of sensors tracking in CNDB by providing to factory methods:
+ * <li> {@link SensorsFactory#createRequestSensors} provides {@link RequestSensors} implementation to active or deactivate sensors per keyspace</li>
+ * <li> {@link SensorsFactory#createSensorEncoder} provides {@link SensorEncoder} implementations control how a sensors are encoded as string on the wire</li>
+ * <p>
+ * The concrete implementation of this factory is configured by the {@link CassandraRelevantProperties#SENSORS_FACTORY} system property.
  */
-public interface RequestSensorsFactory
+public interface SensorsFactory
 {
-    RequestSensorsFactory instance = REQUEST_SENSORS_FACTORY.getString() == null ?
-                                   new RequestSensorsFactory() {} :
-                                   FBUtilities.construct(CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.getString(), "requests sensors factory");
+    SensorsFactory instance = SENSORS_FACTORY.getString() == null ?
+                              new SensorsFactory() {} :
+                              FBUtilities.construct(CassandraRelevantProperties.SENSORS_FACTORY.getString(), "sensors factory");
 
     SensorEncoder DEFAULT_SENSOR_ENCODER = new SensorEncoder()
     {
@@ -58,13 +57,13 @@ public interface RequestSensorsFactory
      * @param keyspace the keyspace of the request
      * @return a {@link RequestSensors} instance. The default implementation returns a singleton no-op instance.
      */
-    default RequestSensors create(String keyspace)
+    default RequestSensors createRequestSensors(String keyspace)
     {
         return NoOpRequestSensors.instance;
     }
 
     /**
-     * Create a {@link SensorEncoder} that always return an empty string.
+     * Create a {@link SensorEncoder} that will be invoked when encoding the sensor on the wire. The default implementation returns an encode that always return an empty string.
      */
     default SensorEncoder createSensorEncoder()
     {

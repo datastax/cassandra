@@ -51,7 +51,7 @@ public class SensorsCustomParamsTest
     @BeforeClass
     public static void setUpClass() throws Exception
     {
-        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(ActiveRequestSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
 
         // enables constructing Messages with custom parameters
         DatabaseDescriptor.daemonInitialization();
@@ -102,7 +102,7 @@ public class SensorsCustomParamsTest
     public void testAddSensorsToCQLResponse()
     {
         String table = "t1";
-        RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
         ResultMessage message = new ResultMessage.Void();
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Type type = Type.WRITE_BYTES;
@@ -125,7 +125,7 @@ public class SensorsCustomParamsTest
     public void testAddSensorsToCQLResponseWithExistingCustomPayload()
     {
         String table = "t1";
-        RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
         ResultMessage message = new ResultMessage.Void();
         String existingKey = "existingKey";
         String existingValue = "existingValue";
@@ -157,7 +157,7 @@ public class SensorsCustomParamsTest
     public void testAddSensorsToCQLResponseSkipped()
     {
         String table = "t1";
-        RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
         ResultMessage message = new ResultMessage.Void();
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Type type = Type.WRITE_BYTES;
@@ -175,7 +175,7 @@ public class SensorsCustomParamsTest
 
     private void testAddSensorsToInternodeResponse(Type sensorType)
     {
-        RequestSensors sensors = RequestSensorsFactory.instance.create("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
         UUID tableId = UUID.randomUUID();
         KeyspaceMetadata ksm = KeyspaceMetadata.create("ks1", null);
         TableMetadata tm = TableMetadata.builder("ks1", "t1", TableId.fromString(tableId.toString()))

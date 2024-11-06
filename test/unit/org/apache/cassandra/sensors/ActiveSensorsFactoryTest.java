@@ -26,25 +26,25 @@ import org.junit.Test;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.Assert.assertEquals;
 
-public class ActiveRequestSensorsFactoryTest
+public class ActiveSensorsFactoryTest
 {
-    private ActiveRequestSensorsFactory factory;
+    private ActiveSensorsFactory factory;
     private SensorEncoder encoder;
 
     @Before
     public void before()
     {
-        factory = new ActiveRequestSensorsFactory();
+        factory = new ActiveSensorsFactory();
         encoder = factory.createSensorEncoder();
     }
 
     @Test
     public void testCreateActiveRequestSensors()
     {
-        RequestSensors sensors = factory.create("ks1");
+        RequestSensors sensors = factory.createRequestSensors("ks1");
         assertThat(sensors).isNotNull();
         assertThat(sensors).isInstanceOf(ActiveRequestSensors.class);
-        RequestSensors anotherSensors = factory.create("ks1");
+        RequestSensors anotherSensors = factory.createRequestSensors("ks1");
         assertThat(sensors).isNotSameAs(anotherSensors);
     }
 

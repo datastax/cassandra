@@ -77,7 +77,7 @@ public class SensorsInternodeTest
     @BeforeClass
     public static void beforeClass() throws Exception
     {
-        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(ActiveRequestSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
 
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,

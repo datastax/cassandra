@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
 /** A class that extracts system properties for the cassandra node it runs within. */
@@ -501,10 +502,10 @@ public enum CassandraRelevantProperties
     SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
 
     /**
-     * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
+     * Allows custom implementation of {@link SensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+    SENSORS_FACTORY("cassandra.sensors_factory_class"),
 
     /**
      * If true, the coordinator will propagate request sensors via the native protocol custom payload bytes map.

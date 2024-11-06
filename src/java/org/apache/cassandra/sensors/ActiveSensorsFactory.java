@@ -19,10 +19,11 @@
 package org.apache.cassandra.sensors;
 
 /**
- * Implementation of the {@link RequestSensorsFactory} that creates a new instance of {@link ActiveRequestSensors}
- * enabled for all keyspaces.
+ * Implementation of the {@link SensorsFactory} that creates:
+ * <li> a new {@link ActiveRequestSensors} instance for all keyspaces</li>
+ * <li> a singtlon {@link SensorEncoder} implemetation that encodes the sensor name as "<SENSOR_TYPE>_REQUEST.<TABLE_NAME>" for request sensors and "<SENSOR_TYPE>_GLOBAL.<TABLE_NAME>" for global sensors.
  */
-public class ActiveRequestSensorsFactory implements RequestSensorsFactory
+public class ActiveSensorsFactory implements SensorsFactory
 {
     private static final SensorEncoder SENSOR_ENCODER = new SensorEncoder()
     {
@@ -40,7 +41,7 @@ public class ActiveRequestSensorsFactory implements RequestSensorsFactory
     };
 
     @Override
-    public RequestSensors create(String keyspace)
+    public RequestSensors createRequestSensors(String keyspace)
     {
         return new ActiveRequestSensors();
     }

@@ -39,7 +39,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public final class SensorsCustomParams
 {
-    private static final SensorEncoder SENSOR_ENCODER = RequestSensorsFactory.instance.createSensorEncoder();
+    private static final SensorEncoder SENSOR_ENCODER = SensorsFactory.instance.createSensorEncoder();
 
     private SensorsCustomParams()
     {

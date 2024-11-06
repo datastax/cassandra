@@ -38,7 +38,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.sensors.ActiveRequestSensorsFactory;
+import org.apache.cassandra.sensors.ActiveSensorsFactory;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.SensorsRegistryListener;
@@ -59,7 +59,7 @@ public class SensorsTest extends TestBaseImpl
     @BeforeClass
     public static void setup()
     {
-        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(ActiveRequestSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
     }
     @Test
     public void testSensorsInResultMessage() throws Throwable
