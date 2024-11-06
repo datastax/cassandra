@@ -114,7 +114,7 @@ public class SSTableIndexComponentsStateTest
 
         var diff = after.diff(before);
         // The details of that string are not that important, but just making sure it looks reasonable.
-        assertEquals("{<shared>: eb@0 (10 bytes), index1: db@0 (1 bytes)} -> {index1: db@0 (1 bytes), index2: eb@1 (4 bytes)} (-<shared> +index2)", diff.toString());
+        assertEquals("{<shared>: eb@0 (10MB), index1: db@0 (1MB)} -> {index1: db@0 (1MB), index2: eb@1 (4MB)} (-<shared> +index2)", diff.toString());
     }
 
     @Test
@@ -370,6 +370,6 @@ public class SSTableIndexComponentsStateTest
                                                 .addPerIndex("index2", Version.EB, 0, 220)
                                                 .build();
 
-        assertEquals(100 + 42 + 220, state1.totalSizeInBytes());
+        assertEquals(100 + 42 + 220, state1.totalSizeInMB());
     }
 }

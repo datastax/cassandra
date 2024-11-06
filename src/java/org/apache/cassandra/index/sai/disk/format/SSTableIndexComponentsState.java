@@ -191,13 +191,13 @@ public class SSTableIndexComponentsState
     }
 
     /**
-     * The total size (in bytes) of all the components included in this state.
+     * The total size (in MB) of all the components included in this state.
      */
-    public long totalSizeInBytes()
+    public long totalSizeInMB()
     {
-        long total = perSSTableState == null ? 0 : perSSTableState.sizeInBytes;
+        long total = perSSTableState == null ? 0 : perSSTableState.sizeInMB;
         for (State state : perIndexStates.values())
-            total += state.sizeInBytes;
+            total += state.sizeInMB;
         return total;
     }
 
@@ -326,19 +326,30 @@ public class SSTableIndexComponentsState
         /** The "build" (version and generaton) the components. */
         public final ComponentsBuildId buildId;
 
-        /** The total size (in bytes) of the components. */
-        public final long sizeInBytes;
+        /** The total size (in MB) of the components (we use MB because this is meant to be indicative, is enough
+         * precision in practice and is more human-readable). */
+        public final long sizeInMB;
 
-        private State(ComponentsBuildId buildId, long sizeInBytes)
+        private State(ComponentsBuildId buildId, long sizeInMB)
         {
             Preconditions.checkNotNull(buildId);
             this.buildId = buildId;
-            this.sizeInBytes = sizeInBytes;
+            this.sizeInMB = sizeInMB;
         }
 
         private static State of(IndexComponents.ForRead components)
         {
-            return new State(components.buildId(), components.liveSizeOnDiskInBytes());
+            return new State(components.buildId(), toMB(components.liveSizeOnDiskInBytes()));
+        }
+
+        private static long toMB(long bytes)
+        {
+            if (bytes == 0)
+                return 0;
+
+            // We avoid returning 0 unless the size is truly zero to avoid making it look like the components do not
+            // exist. Mostly a detail in practice but ...
+            return Math.max(bytes / 1024 / 1024, 1);
         }
 
         @Override
@@ -348,19 +359,19 @@ public class SSTableIndexComponentsState
                 return false;
 
             State that = (State) obj;
-            return this.buildId.equals(that.buildId) && this.sizeInBytes == that.sizeInBytes;
+            return this.buildId.equals(that.buildId) && this.sizeInMB == that.sizeInMB;
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hash(buildId, sizeInBytes);
+            return Objects.hash(buildId, sizeInMB);
         }
 
         @Override
         public String toString()
         {
-            return String.format("%s (%d bytes)", buildId, sizeInBytes);
+            return String.format("%s (%dMB)", buildId, sizeInMB);
         }
     }
 
@@ -380,14 +391,14 @@ public class SSTableIndexComponentsState
         // directly when we build the state). If one wants to reuse a builder, it should `copy` manually first.
         private boolean built;
 
-        public Builder addPerSSTable(Version version, int generation, long sizeInBytes)
+        public Builder addPerSSTable(Version version, int generation, long sizeInMB)
         {
-            return addPerSSTable(ComponentsBuildId.of(version, generation), sizeInBytes);
+            return addPerSSTable(ComponentsBuildId.of(version, generation), sizeInMB);
         }
 
-        public Builder addPerSSTable(ComponentsBuildId buildId, long sizeInBytes)
+        public Builder addPerSSTable(ComponentsBuildId buildId, long sizeInMB)
         {
-            return addPerSSTable(new State(buildId, sizeInBytes));
+            return addPerSSTable(new State(buildId, sizeInMB));
         }
 
         public Builder addPerSSTable(State state)
@@ -397,14 +408,14 @@ public class SSTableIndexComponentsState
             return this;
         }
 
-        public Builder addPerIndex(String name, Version version, int generation, long sizeInBytes)
+        public Builder addPerIndex(String name, Version version, int generation, long sizeInMB)
         {
-            return addPerIndex(name, ComponentsBuildId.of(version, generation), sizeInBytes);
+            return addPerIndex(name, ComponentsBuildId.of(version, generation), sizeInMB);
         }
 
-        public Builder addPerIndex(String name, ComponentsBuildId buildId, long sizeInBytes)
+        public Builder addPerIndex(String name, ComponentsBuildId buildId, long sizeInMB)
         {
-            return addPerIndex(name, new State(buildId, sizeInBytes));
+            return addPerIndex(name, new State(buildId, sizeInMB));
         }
 
         public Builder addPerIndex(String name, State state)
