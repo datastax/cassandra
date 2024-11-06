@@ -29,13 +29,12 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
- * A utility class that contains the groups methods to facilitate encoding sensors in native or internode protocol message
- * responses as follows:
- * <p>Sensors in internode messages: Use to communicate sensors values from replicas to coordinators in the internode
+ * A utility class that groups methods to facilitate encoding sensors in native or internode protocol messages:
+ * <li>Sensors in internode messages: Use to communicate sensors values from replicas to coordinators in the internode
  * message response {@link Message.Header#customParams()} bytes map. See {@link SensorsCustomParams#addSensorsToInternodeResponse(RequestSensors, Message.Builder)} and
- * {@link SensorsCustomParams#sensorValueFromInternodeResponse(Message, String)}.
- * <p>Sensors in native protocol messages: Use to communicate sensors values from coordinator to upstream callers native
- * protocol response {@link org.apache.cassandra.transport.Message#getCustomPayload()} bytes map. See {@link SensorsCustomParams#addSensorsToInternodeResponse(RequestSensors, Message.Builder)}.
+ * {@link SensorsCustomParams#sensorValueFromInternodeResponse(Message, String)}.</li>
+ * <li>Sensors in native protocol messages: Use to communicate sensors values from coordinator to upstream callers native
+ * protocol response {@link org.apache.cassandra.transport.Message#getCustomPayload()} bytes map. See {@link SensorsCustomParams#addSensorToCQLResponse(org.apache.cassandra.transport.Message.Response, ProtocolVersion, RequestSensors, Context, Type)}.</li
  */
 public final class SensorsCustomParams
 {
