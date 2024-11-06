@@ -77,15 +77,16 @@ public interface CompactionStrategy extends CompactionObserver
     Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore);
 
     /**
-     * @param gcBefore throw away tombstones older than this
-     *
+     * @param gcBefore             throw away tombstones older than this
+     * @param permittedParallelism
+     * @param reshard
      * @return a compaction task that should be run to compact this table
      * as much as possible.  Null if nothing to do.
-     *
+     * <p>
      * Is responsible for marking its sstables as compaction-pending.
      */
     @SuppressWarnings("resource")
-    CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput);
+    CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism);
 
     /**
      * @param sstables SSTables to compact. Must be marked as compacting.

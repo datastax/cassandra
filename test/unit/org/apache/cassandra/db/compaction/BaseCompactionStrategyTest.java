@@ -307,8 +307,8 @@ public class BaseCompactionStrategyTest
         List<SSTableReader> sstables = new ArrayList<>(numSSTables);
         for (int i = 0; i < numSSTables; i++)
         {
-            DecoratedKey first = new BufferDecoratedKey(boundary(numSSTables, i).nextValidToken(), emptyBuffer);
-            DecoratedKey last =  new BufferDecoratedKey(boundary(numSSTables, i+1), emptyBuffer);
+            DecoratedKey first = new BufferDecoratedKey(boundary(numSSTables, i + 0.0001), emptyBuffer);
+            DecoratedKey last =  new BufferDecoratedKey(boundary(numSSTables, i + 0.9999), emptyBuffer);
             sstables.add(mockSSTable(level, bytesOnDisk, timestamp, 0., first, last));
 
             timestamp+=10;
@@ -317,9 +317,9 @@ public class BaseCompactionStrategyTest
         return sstables;
     }
 
-    private Token boundary(int numSSTables, int i)
+    private Token boundary(int numSSTables, double i)
     {
-        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), i * 1.0 / numSSTables);
+        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), i / numSSTables);
     }
 
     CompactionProgress mockCompletedCompactionProgress(Set<SSTableReader> compacting, UUID id)
