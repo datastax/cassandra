@@ -111,12 +111,12 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
     }
 
     @Override
-    public Collection<AbstractCompactionTask> getMaximalTasks(int gcBefore, boolean splitOutput)
+    public Collection<AbstractCompactionTask> getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
         List<AbstractCompactionTask> tasks = new ArrayList<>(strategies.size());
         for (CompactionStrategy strategy : strategies)
         {
-           tasks.addAll(strategy.getMaximalTasks(gcBefore, splitOutput));
+           tasks.addAll(strategy.getMaximalTasks(gcBefore, splitOutput, permittedParallelism));
         }
         return tasks;
     }

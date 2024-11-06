@@ -27,8 +27,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -159,19 +157,13 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         return cleanup(t);
     }
 
-    public Throwable cleanup(Throwable err)
+    protected Throwable cleanup(Throwable err)
     {
         final boolean isSuccess = err == null;
         for (CompactionObserver compObserver : compObservers)
             err = Throwables.perform(err, () -> compObserver.onCompleted(transaction.opId(), isSuccess));
 
         return Throwables.perform(err, () -> transaction.close());
-    }
-
-    @VisibleForTesting
-    public OperationType getCompactionType()
-    {
-        return compactionType;
     }
 
     protected void executeInternal()

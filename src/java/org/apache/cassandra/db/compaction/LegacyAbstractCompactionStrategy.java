@@ -251,10 +251,10 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
         }
     }
 
-    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
         removeDeadSSTables();
-        return super.getMaximalTasks(gcBefore, splitOutput);
+        return super.getMaximalTasks(gcBefore, splitOutput, permittedParallelism);
     }
 
     /**
