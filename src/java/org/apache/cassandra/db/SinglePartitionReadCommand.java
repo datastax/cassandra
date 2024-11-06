@@ -575,7 +575,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     {
         assert executionController != null && executionController.validForReadOn(cfs);
         if (Tracing.traceSinglePartitions())
-            Tracing.trace("Executing single-partition query on {}; stage READ pending: {}, active: {}", cfs.name, Stage.READ.executor().getPendingTaskCount(), Stage.READ.executor().getActiveTaskCount());
+            Tracing.trace("Executing single-partition query on {}; stage READ pending: {}, active: {}", cfs.name, Stage.READ.getPendingTaskCount(), Stage.READ.getActiveTaskCount());
 
         return queryMemtableAndDiskInternal(cfs, executionController, System.nanoTime());
     }
@@ -587,7 +587,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     {
         assert executionController != null && executionController.validForReadOn(cfs);
         if (Tracing.traceSinglePartitions())
-            Tracing.trace("Executing single-partition query on {}; stage READ pending: {}, active: {}", cfs.name, Stage.READ.executor().getPendingTaskCount(), Stage.READ.executor().getActiveTaskCount());
+            Tracing.trace("Executing single-partition query on {}; stage READ pending: {}, active: {}", cfs.name, Stage.READ.getPendingTaskCount(), Stage.READ.getActiveTaskCount());
 
         return queryMemtableAndDiskInternal(cfs, view, rowTransformer, executionController, System.nanoTime());
     }

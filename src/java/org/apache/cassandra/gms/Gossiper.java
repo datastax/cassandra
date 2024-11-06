@@ -281,7 +281,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     private static boolean isInGossipStage()
     {
-        return ((JMXEnabledSingleThreadExecutor) Stage.GOSSIP.executor()).isExecutedBy(Thread.currentThread());
+        return Stage.GOSSIP.runsInSingleThread(Thread.currentThread());
     }
 
     private static void checkProperThreadForStateMutation()
@@ -1048,7 +1048,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         long now = System.currentTimeMillis();
         long nowNano = System.nanoTime();
 
-        long pending = ((JMXEnabledThreadPoolExecutor) Stage.GOSSIP.executor()).metrics.pendingTasks.getValue();
+        long pending = Stage.GOSSIP.getPendingTaskCount();
         if (pending > 0 && lastProcessedMessageAt < now - 1000)
         {
             // if some new messages just arrived, give the executor some time to work on them

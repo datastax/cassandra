@@ -67,7 +67,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     private MigrationCoordinator createMigrationCoordinator(MessagingService messagingService)
     {
         return new MigrationCoordinator(messagingService,
-                                        Stage.MIGRATION.executor(),
+                                        Stage.MIGRATION,
                                         ScheduledExecutors.scheduledTasks,
                                         MAX_OUTSTANDING_VERSION_REQUESTS,
                                         Gossiper.instance,

@@ -37,7 +37,6 @@ import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -54,6 +53,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -223,16 +223,18 @@ public class MigrationCoordinator
     private final Supplier<UUID> schemaVersion;
     private final BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback;
 
-    final ExecutorService executor;
+    final Stage executor;
 
     /**
      * Creates but does not start migration coordinator instance.
+     *
      * @param messagingService      messaging service instance used to communicate with other nodes for pulling schema
      *                              and pushing changes
+     * @param executor
      * @param periodicCheckExecutor executor on which the periodic checks are scheduled
      */
     MigrationCoordinator(MessagingService messagingService,
-                         ExecutorService executor,
+                         Stage executor,
                          ScheduledExecutorService periodicCheckExecutor,
                          int maxOutstandingVersionRequests,
                          Gossiper gossiper,
@@ -619,7 +621,7 @@ public class MigrationCoordinator
         }
         else
         {
-            return CompletableFuture.runAsync(task, executor);
+            return executor.submit(task);
         }
     }
 
