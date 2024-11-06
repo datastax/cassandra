@@ -310,19 +310,6 @@ public abstract class Controller
                                                "true"));
 
     /**
-     * Whether major compactions should not try to split the inputs into non-overlapping sets. Splitting the input is
-     * helpful to increase parallelism when {@link #parallelizeOutputShards} is not enabled. The downside is that it
-     * does not re-shard data that has already been split into shards, which is something we may want to do in some
-     * scenarios.
-     * Defaults to null, in which case the option will be determined by the value of {@link #parallelizeOutputShards}.
-     */
-    static final String RESHARD_MAJOR_COMPACTIONS_OPTION = "reshard_major_compactions";
-    static final Boolean DEFAULT_RESHARD_MAJOR_COMPACTIONS =
-        getSystemProperty(RESHARD_MAJOR_COMPACTIONS_OPTION) != null
-            ? Boolean.parseBoolean(getSystemProperty(RESHARD_MAJOR_COMPACTIONS_OPTION))
-            : null;
-
-    /**
      * The scaling parameters W, one per bucket index and separated by a comma.
      * Higher indexes will use the value of the last index with a W specified.
      */
@@ -343,7 +330,6 @@ public abstract class Controller
     protected final long expiredSSTableCheckFrequency;
     protected final boolean ignoreOverlapsInExpirationCheck;
     protected final boolean parallelizeOutputShards;
-    protected final boolean reshardMajorCompactions;
     protected String keyspaceName;
     protected String tableName;
 
@@ -383,7 +369,6 @@ public abstract class Controller
                Reservations.Type reservationsType,
                Overlaps.InclusionMethod overlapInclusionMethod,
                boolean parallelizeOutputShards,
-               boolean reshardMajorCompactions,
                boolean hasVectorType)
     {
         this.clock = clock;
@@ -404,7 +389,6 @@ public abstract class Controller
         this.maxSpaceOverhead = maxSpaceOverhead;
         this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
         this.parallelizeOutputShards = parallelizeOutputShards;
-        this.reshardMajorCompactions = reshardMajorCompactions;
         this.hasVectorType = hasVectorType;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
@@ -609,11 +593,6 @@ public abstract class Controller
     public boolean parallelizeOutputShards()
     {
         return parallelizeOutputShards;
-    }
-
-    public boolean reshardMajorCompactions()
-    {
-        return reshardMajorCompactions;
     }
 
     public boolean isReplicaAware()
@@ -1053,12 +1032,6 @@ public abstract class Controller
         boolean parallelizeOutputShards = options.containsKey(PARALLELIZE_OUTPUT_SHARDS_OPTION)
                                           ? Boolean.parseBoolean(options.get(PARALLELIZE_OUTPUT_SHARDS_OPTION))
                                           : DEFAULT_PARALLELIZE_OUTPUT_SHARDS;
-        // reshardMajorCompactions defaults to the value of parallelizeOutputShards if not explicitly set
-        boolean reshardMajorCompactions = options.containsKey(RESHARD_MAJOR_COMPACTIONS_OPTION)
-                                          ? Boolean.parseBoolean(options.get(RESHARD_MAJOR_COMPACTIONS_OPTION))
-                                          : DEFAULT_RESHARD_MAJOR_COMPACTIONS != null
-                                            ? DEFAULT_RESHARD_MAJOR_COMPACTIONS
-                                            : parallelizeOutputShards;
 
         return adaptive
                ? AdaptiveController.fromOptions(env,
@@ -1078,7 +1051,6 @@ public abstract class Controller
                                                 reservationsType,
                                                 overlapInclusionMethod,
                                                 parallelizeOutputShards,
-                                                reshardMajorCompactions,
                                                 hasVectorType,
                                                 realm.getKeyspaceName(),
                                                 realm.getTableName(),
@@ -1100,7 +1072,6 @@ public abstract class Controller
                                               reservationsType,
                                               overlapInclusionMethod,
                                               parallelizeOutputShards,
-                                              reshardMajorCompactions,
                                               hasVectorType,
                                               realm.getKeyspaceName(),
                                               realm.getTableName(),
@@ -1154,8 +1125,6 @@ public abstract class Controller
         adaptive = validateBoolean(options, ADAPTIVE_OPTION, DEFAULT_ADAPTIVE);
         validateBoolean(options, IS_REPLICA_AWARE_OPTION, DEFAULT_IS_REPLICA_AWARE);
         validateBoolean(options, PARALLELIZE_OUTPUT_SHARDS_OPTION, DEFAULT_PARALLELIZE_OUTPUT_SHARDS);
-        if (options.containsKey(RESHARD_MAJOR_COMPACTIONS_OPTION))
-            validateBoolean(options, RESHARD_MAJOR_COMPACTIONS_OPTION, DEFAULT_RESHARD_MAJOR_COMPACTIONS);
 
         minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, DEFAULT_MIN_SSTABLE_SIZE);
         vectorMinSSTableSize = validateSizeWithSpecial(options, VECTOR_MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, VECTOR_DEFAULT_MIN_SSTABLE_SIZE);

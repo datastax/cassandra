@@ -28,16 +28,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
@@ -71,6 +67,7 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.utils.Throwables.perform;
 
@@ -199,36 +196,69 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     }
 
     @Override
-    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
         maybeUpdateSelector();
-        // The tasks are split by repair status and disk, as well as, when reshard_major_compactions is not in effect,
-        // in non-overlapping sections to enable some parallelism (to the amount that L0 sstables are split, i.e. likely
-        // base_shard_count). The result will be split across shards according to its density. Depending on the
-        // parallelism, the operation may require up to 100% extra space to complete.
+        // The tasks are split by repair status and disk, as well as in non-overlapping sections to enable some
+        // parallelism and use of extra space. The result will be split across shards according to its density.
+        // Depending on the parallelism, the operation may require up to 100% extra space to complete.
         List<AbstractCompactionTask> tasks = new ArrayList<>();
-        for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
-        {
-            var compactingSets = controller.reshardMajorCompactions()
-                                 ? ImmutableList.of(arena.sstables)
-                                 : splitInNonOverlappingSets(arena.sstables);
+        if (permittedParallelism <= 0)
+            permittedParallelism = Integer.MAX_VALUE;
 
-            for (Collection<CompactionSSTable> set : compactingSets)
+        try
+        {
+            for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
             {
-                // TODO: Introduce parallelism limit for maximal compactions.
-                // TODO: Test parallelized and resharding maximal compactions.
-                LifecycleTransaction txn = realm.tryModify(set, OperationType.COMPACTION);
-                if (txn != null)
-                    createAndAddTasks(gcBefore, txn, makeShardingStats(txn), controller.maxConcurrentCompactions() / 2, tasks);
-                // we ignore splitOutput (always split according to the strategy's sharding) and do not need isMaximal
+                // If possible, we want to issue separate compactions for non-overlapping sets of sstables, to allow
+                // for smaller extra space requirements. However, if the sharding configuration has changed, a major
+                // compaction should combine non-overlapping sets if they are split on a boundary that is no longer
+                // in effect.
+
+                // Select desired splitting of the sstables. If we are resharding, according to the sharding boundaries
+                // suitable for the size of the data. Otherwise, start with the overlap groups.
+                List<Set<CompactionSSTable>> groups =
+                    getShardManager().splitSSTablesInShards(arena.sstables,
+                                                            makeShardingStats(arena.sstables).shardCountForDensity,
+                                                            (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
+
+                // Now combine all of these groups that share an sstable so that we have valid independent transactions.
+                groups = combineSetsWithCommonElement(groups);
+
+                for (Collection<CompactionSSTable> set : groups)
+                {
+                    LifecycleTransaction txn = realm.tryModify(set, OperationType.COMPACTION);
+                    // Further split each of these into up to permittedParallelism tasks to run in parallel.
+                    if (txn != null)
+                        createAndAddTasks(gcBefore, txn, makeShardingStats(txn), permittedParallelism, tasks);
+                    // we ignore splitOutput (always split according to the strategy's sharding) and do not need isMaximal
+                }
             }
+
+            // If we have more arenas/non-overlapping sets than the permitted parallelism, we will try to run all the
+            // individual tasks in parallel (including as parallelized compactions) so that they finish quickest and release
+            // any space they hold, and then reuse the compaction thread to run the next set of tasks.
+            return CompactionTasks.create(CompositeCompactionTask.applyParallelismLimit(tasks, permittedParallelism));
         }
-        return CompactionTasks.create(tasks);
+        catch (Throwable t)
+        {
+            throw rejectTasks(tasks, t);
+        }
+    }
+
+    /**
+     * Split the given set of sstables into non-overlapping sets that split on boundaries that apply for the current
+     * sharding configuration.
+     */
+    public List<Set<CompactionSSTable>> splitInNonOverlappingShardSets(List<CompactionSSTable> sstables)
+    {
+        var outputShards = getShardManager().splitSSTablesInShards(sstables, makeShardingStats(sstables).shardCountForDensity,
+                                                                   (sstableShard, shardRange) -> new HashSet<>(sstableShard));
+        return combineSetsWithCommonElement(outputShards);
     }
 
     /**
      * Utility method to split a list of sstables into non-overlapping sets. Used by CNDB.
-     *
      *
      * @param sstables A list of items to distribute in overlap sets. This is assumed to be a transient list and the
      *                 method may modify or consume it. It is assumed that the start and end positions of an item are
@@ -241,12 +271,20 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                                  UnifiedCompactionStrategy::startsAfter,
                                                                                  CompactionSSTable.firstKeyComparator,
                                                                                  CompactionSSTable.lastKeyComparator);
-        Set<CompactionSSTable> group = overlapSets.get(0);
-        List<Set<CompactionSSTable>> groups = new ArrayList<>();
+        return combineSetsWithCommonElement(overlapSets);
+    }
+
+    /**
+     * Transform a list to transitively combine adjacent sets that have a common element, resulting in disjoint sets.
+     */
+    private static <T> List<Set<T>> combineSetsWithCommonElement(List<? extends Set<T>> overlapSets)
+    {
+        Set<T> group = overlapSets.get(0);
+        List<Set<T>> groups = new ArrayList<>();
         for (int i = 1; i < overlapSets.size(); ++i)
         {
-            Set<CompactionSSTable> current = overlapSets.get(i);
-            if (Sets.intersection(current, group).isEmpty())
+            Set<T> current = overlapSets.get(i);
+            if (Collections.disjoint(current, group))
             {
                 groups.add(group);
                 group = current;
@@ -333,15 +371,22 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         // if we found sstables to expire, split them to arenas to correctly isolate their repair status.
         var tasks = new ArrayList<AbstractCompactionTask>();
-        for (var arena : getCompactionArenas(expired, (i1, i2) -> true))
+        try
         {
-            LifecycleTransaction txn = realm.tryModify(arena.sstables, OperationType.COMPACTION);
-            if (txn != null)
-                tasks.add(createExpirationTask(txn));
-            else
-                logger.warn("Failed to submit expiration task because a transaction could not be created. If this happens frequently, it should be reported");
+            for (var arena : getCompactionArenas(expired, (i1, i2) -> true))
+            {
+                LifecycleTransaction txn = realm.tryModify(arena.sstables, OperationType.COMPACTION);
+                if (txn != null)
+                    tasks.add(createExpirationTask(txn));
+                else
+                    logger.warn("Failed to submit expiration task because a transaction could not be created. If this happens frequently, it should be reported");
+            }
+            return tasks;
         }
-        return tasks;
+        catch (Throwable t)
+        {
+            throw rejectTasks(tasks, t);
+        }
     }
 
     /**
@@ -357,29 +402,43 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     private Collection<AbstractCompactionTask> createCompactionTasks(Collection<CompactionAggregate> aggregates, int gcBefore)
     {
         Collection<AbstractCompactionTask> tasks = new ArrayList<>(aggregates.size());
-        for (CompactionAggregate aggregate : aggregates)
+        try
         {
-            CompactionPick selected = aggregate.getSelected();
-            int parallelism = ((CompactionAggregate.UnifiedAggregate) aggregate).getPermittedParallelism();
-            Preconditions.checkNotNull(selected);
-            Preconditions.checkArgument(!selected.isEmpty());
+            for (CompactionAggregate aggregate : aggregates)
+            {
+                CompactionPick selected = aggregate.getSelected();
+                int parallelism = ((CompactionAggregate.UnifiedAggregate) aggregate).getPermittedParallelism();
+                Preconditions.checkNotNull(selected);
+                Preconditions.checkArgument(!selected.isEmpty());
 
-            LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
-                                                               OperationType.COMPACTION,
-                                                               selected.id());
-            if (transaction != null)
-            {
-                backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-                createAndAddTasks(gcBefore, transaction, getShardingStats((CompactionAggregate.UnifiedAggregate) aggregate), parallelism, tasks);
+                LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
+                                                                   OperationType.COMPACTION,
+                                                                   selected.id());
+                if (transaction != null)
+                {
+                    backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
+                    createAndAddTasks(gcBefore, transaction, getShardingStats((CompactionAggregate.UnifiedAggregate) aggregate), parallelism, tasks);
+                }
+                else
+                {
+                    // This can happen e.g. due to a race with upgrade tasks
+                    logger.error("Failed to submit compaction {} because a transaction could not be created. If this happens frequently, it should be reported", aggregate);
+                }
             }
-            else
-            {
-                // This can happen e.g. due to a race with upgrade tasks
-                logger.error("Failed to submit compaction {} because a transaction could not be created. If this happens frequently, it should be reported", aggregate);
-            }
+
+            return tasks;
         }
+        catch (Throwable t)
+        {
+            throw rejectTasks(tasks, t);
+        }
+    }
 
-        return tasks;
+    private static RuntimeException rejectTasks(Iterable<? extends AbstractCompactionTask> tasks, Throwable error)
+    {
+        for (var task : tasks)
+            error = task.rejected(error);
+        throw Throwables.throwAsUncheckedException(error);
     }
 
     public static class ShardingStats
@@ -565,7 +624,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             int actualParallelism = shards.size();
             if (parallelism >= actualParallelism)
             {
-                // We can fit withing the parallelism limit without grouping
+                // We can fit within the parallelism limit without grouping
                 tasks = new ArrayList<>();
                 for (Pair<Set<SSTableReader>, Range<Token>> pair : shards)
                 {

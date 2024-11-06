@@ -616,24 +616,6 @@ public abstract class ControllerTest
         testBooleanOption(Controller.PARALLELIZE_OUTPUT_SHARDS_OPTION, Controller.DEFAULT_PARALLELIZE_OUTPUT_SHARDS, Controller::parallelizeOutputShards);
     }
 
-    @Test
-    public void testReshardMajorCompactions()
-    {
-        testBooleanOption(Controller.RESHARD_MAJOR_COMPACTIONS_OPTION,
-                          Controller.DEFAULT_RESHARD_MAJOR_COMPACTIONS != null ? Controller.DEFAULT_RESHARD_MAJOR_COMPACTIONS
-                                                                               : Controller.DEFAULT_PARALLELIZE_OUTPUT_SHARDS,
-                          Controller::reshardMajorCompactions);
-        // Check reshard defaults to the value of parallelize output shards if not set
-        testBooleanOption(Controller.RESHARD_MAJOR_COMPACTIONS_OPTION,
-                          false,
-                          Controller::reshardMajorCompactions,
-                          Controller.PARALLELIZE_OUTPUT_SHARDS_OPTION, "false");
-        testBooleanOption(Controller.RESHARD_MAJOR_COMPACTIONS_OPTION,
-                          true,
-                          Controller::reshardMajorCompactions,
-                          Controller.PARALLELIZE_OUTPUT_SHARDS_OPTION, "true");
-    }
-
     public void testBooleanOption(String name, boolean defaultValue, Predicate<Controller> getter, String... extraSettings)
     {
         Controller controller = Controller.fromOptions(cfs, newOptions(extraSettings));

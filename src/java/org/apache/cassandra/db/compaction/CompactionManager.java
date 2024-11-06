@@ -894,19 +894,39 @@ public class CompactionManager implements CompactionManagerMBean
         FBUtilities.waitOnFutures(submitMaximal(cfStore, getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()), splitOutput));
     }
 
+    public void performMaximal(final ColumnFamilyStore cfStore, boolean splitOutput, Integer parallelism)
+    {
+        FBUtilities.waitOnFutures(submitMaximal(cfStore, getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()), splitOutput, parallelism, active));
+    }
+
     public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final int gcBefore, boolean splitOutput)
     {
         return submitMaximal(cfStore, gcBefore, splitOutput, active);
     }
 
+    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore,
+                                         final int gcBefore,
+                                         boolean splitOutput,
+                                         TableOperationObserver obs)
+    {
+        return submitMaximal(cfStore, gcBefore, splitOutput, null, obs);
+    }
+
     @VisibleForTesting
     @SuppressWarnings("resource") // the tasks are executed in parallel on the executor, making sure that they get closed
-    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final int gcBefore, boolean splitOutput, TableOperationObserver obs)
+    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore,
+                                         final int gcBefore,
+                                         boolean splitOutput,
+                                         Integer parallelism,
+                                         TableOperationObserver obs)
     {
         // here we compute the task off the compaction executor, so having that present doesn't
         // confuse runWithCompactionsDisabled -- i.e., we don't want to deadlock ourselves, waiting
         // for ourselves to finish/acknowledge cancellation before continuing.
-        CompactionTasks tasks = cfStore.getCompactionStrategy().getMaximalTasks(gcBefore, splitOutput);
+
+        // The default parallelism is half the number of compaction threads to leave enough room for other compactions.
+        final int permittedParallelism = parallelism != null ? parallelism : executor.getCorePoolSize() / 2;
+        CompactionTasks tasks = cfStore.getCompactionStrategy().getMaximalTasks(gcBefore, splitOutput, permittedParallelism);
 
         if (tasks.isEmpty())
             return Collections.emptyList();
@@ -930,9 +950,15 @@ public class CompactionManager implements CompactionManagerMBean
             Future<?> fut = executor.submitIfRunning(runnable, "maximal task");
             if (!fut.isCancelled())
                 futures.add(fut);
+            else
+            {
+                Throwable error = task.rejected(null);
+                if (error != null)
+                    futures.add(Futures.immediateFailedFuture(error));
+            }
         }
         if (nonEmptyTasks > 1)
-            logger.info("Major compaction will not result in a single sstable - repaired and unrepaired data is kept separate and compaction runs per data_file_directory.");
+            logger.info("Major compaction will not result in a single sstable.");
 
         return futures;
     }

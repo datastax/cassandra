@@ -69,7 +69,6 @@ public class StaticController extends Controller
                             Reservations.Type reservationsType,
                             Overlaps.InclusionMethod overlapInclusionMethod,
                             boolean parallelizeOutputShards,
-                            boolean reshardMajorCompactions,
                             boolean hasVectorType,
                             String keyspaceName,
                             String tableName)
@@ -93,7 +92,6 @@ public class StaticController extends Controller
               reservationsType,
               overlapInclusionMethod,
               parallelizeOutputShards,
-              reshardMajorCompactions,
               hasVectorType);
         this.scalingParameters = scalingParameters;
         this.keyspaceName = keyspaceName;
@@ -117,7 +115,6 @@ public class StaticController extends Controller
                                   Reservations.Type reservationsType,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   boolean parallelizeOutputShards,
-                                  boolean reshardMajorCompactions,
                                   boolean hasVectorType,
                                   String keyspaceName,
                                   String tableName,
@@ -172,7 +169,6 @@ public class StaticController extends Controller
                                     reservationsType,
                                     overlapInclusionMethod,
                                     parallelizeOutputShards,
-                                    reshardMajorCompactions,
                                     hasVectorType,
                                     keyspaceName,
                                     tableName);
