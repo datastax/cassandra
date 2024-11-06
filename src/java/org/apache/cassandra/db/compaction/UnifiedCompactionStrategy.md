@@ -539,13 +539,6 @@ UCS accepts these compaction strategy parameters:
   but disables early open and thus may be less efficient when compaction is configured to produce very large
   sstables.   
   The default value is `true`.
-* `reshard_major_compactions` If true, major compaction requiests will generate one single compaction operation over all
-  sstables in the arena (potentially parallelized as a result of `parallelize_output_shards`). If false, major
-  compactions will proceed as independent operations for any non-overlapping sets of sstables. The latter increases
-  parallelism but means that any preexisting splitting boundaries will remain in force after such a compaction and thus
-  often will not restructure data according to changed compaction parameters.   
-  The default value is unset, which sets the option to the value of `parallelize_output_shards` to split the input into
-  independent sets only when we don't have another method of providing parallelism.
 * `expired_sstable_check_frequency_seconds` Determines how often to check for expired SSTables.  
   The default value is 10 minutes.
 * `num_shards` Specifying this switches the strategy to UCS V1 mode, where the number of shards is fixed, but a
