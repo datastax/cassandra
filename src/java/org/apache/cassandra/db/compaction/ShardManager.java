@@ -70,7 +70,7 @@ public interface ShardManager
             return new ShardManagerDiskAware(localRanges, diskPositions);
         else if (partitioner.splitter().isPresent())
             if (isReplicaAware)
-                return new ShardManagerReplicaAware(rs, localRanges.getRealm().estimatedPartitionCount());
+                return new ShardManagerReplicaAware(rs, localRanges.getRealm());
             else
                 return new ShardManagerNoDisks(localRanges);
         else
