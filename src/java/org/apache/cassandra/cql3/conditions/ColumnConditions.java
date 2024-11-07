@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -28,6 +29,7 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.CQL3CasRequest;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
@@ -75,6 +77,15 @@ public final class ColumnConditions extends AbstractConditions
         return Stream.concat(columnConditions.stream(), staticConditions.stream())
                      .map(e -> e.column)
                      .collect(Collectors.toList());
+    }
+
+    @Override
+    public Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry)
+    {
+        return Stream.concat(columnConditions.stream(), staticConditions.stream())
+                     .filter(c -> indexRegistry.getAnalyzerFor(c.column, c.operator).isPresent())
+                     .map(c -> c.column)
+                     .collect(Collectors.toSet());
     }
 
     @Override
