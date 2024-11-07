@@ -39,8 +39,6 @@ public class ShardManagerNoDisks implements ShardManager
      */
     final double[] localRangePositions;
 
-    private final double minimumPerPartitionSpan;
-
     public ShardManagerNoDisks(SortedLocalRanges localRanges)
     {
         this.localRanges = localRanges;
@@ -53,7 +51,6 @@ public class ShardManagerNoDisks implements ShardManager
             position += span;
             localRangePositions[i] = position;
         }
-        minimumPerPartitionSpan = localSpaceCoverage() / Math.max(1, localRanges.getRealm().estimatedPartitionCount());
     }
 
     @Override
@@ -90,7 +87,7 @@ public class ShardManagerNoDisks implements ShardManager
 
     public double minimumPerPartitionSpan()
     {
-        return minimumPerPartitionSpan;
+        return localSpaceCoverage() / Math.max(1, localRanges.getRealm().estimatedPartitionCount());
     }
 
     @Override

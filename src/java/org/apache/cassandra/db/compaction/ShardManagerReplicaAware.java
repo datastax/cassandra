@@ -52,9 +52,9 @@ public class ShardManagerReplicaAware implements ShardManager
     private final TokenMetadata tokenMetadata;
     private final IPartitioner partitioner;
     private final ConcurrentHashMap<Integer, Token[]> splitPointCache;
-    private final double minimumPerPartitionSpan;
+    private final CompactionRealm realm;
 
-    public ShardManagerReplicaAware(AbstractReplicationStrategy rs, long estimatedPartitionCount)
+    public ShardManagerReplicaAware(AbstractReplicationStrategy rs, CompactionRealm realm)
     {
         this.rs = rs;
         // Clone the map to ensure it has a consistent view of the tokenMetadata. UCS creates a new instance of the
@@ -62,7 +62,7 @@ public class ShardManagerReplicaAware implements ShardManager
         this.tokenMetadata = rs.getTokenMetadata().cloneOnlyTokenMap();
         this.splitPointCache = new ConcurrentHashMap<>();
         this.partitioner = tokenMetadata.partitioner;
-        this.minimumPerPartitionSpan = 1.0 / Math.max(1, estimatedPartitionCount);
+        this.realm = realm;
     }
 
     @Override
@@ -88,7 +88,7 @@ public class ShardManagerReplicaAware implements ShardManager
     @Override
     public double minimumPerPartitionSpan()
     {
-        return minimumPerPartitionSpan;
+        return localSpaceCoverage() / Math.max(1, realm.estimatedPartitionCount());
     }
 
     @Override

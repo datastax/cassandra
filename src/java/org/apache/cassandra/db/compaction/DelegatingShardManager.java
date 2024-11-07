@@ -29,12 +29,12 @@ import org.apache.cassandra.dht.Token;
 public class DelegatingShardManager implements ShardManager
 {
     private final IntFunction<Token[]> tokenGenerator;
-    private final double minimumPerPartitionSpan;
+    private CompactionRealm realm;
 
-    public DelegatingShardManager(IntFunction<Token[]> tokenGenerator, long minimumPerPartitionSpan)
+    public DelegatingShardManager(IntFunction<Token[]> tokenGenerator, CompactionRealm realm)
     {
         this.tokenGenerator = tokenGenerator;
-        this.minimumPerPartitionSpan = minimumPerPartitionSpan;
+        this.realm = realm;
     }
 
     @Override
@@ -60,7 +60,7 @@ public class DelegatingShardManager implements ShardManager
     @Override
     public double minimumPerPartitionSpan()
     {
-        return minimumPerPartitionSpan;
+        return localSpaceCoverage() / Math.max(1, realm.estimatedPartitionCount());
     }
 
     @Override
