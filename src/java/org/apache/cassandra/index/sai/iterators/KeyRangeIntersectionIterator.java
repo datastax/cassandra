@@ -71,7 +71,7 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
         // It can become null when we reach the end of the iterator.
         PrimaryKey highestKey = ranges.get(0).hasNext() ? ranges.get(0).next() : null;
         // Index of the range iterator that has advanced beyond the others
-        int alreadyAvanced = 0;
+        int alreadyAdvanced = 0;
         rangeStats[0]++;
 
         outer:
@@ -81,7 +81,7 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
             // Once this inner loop finishes normally, all iterators are guaranteed to be at the same value.
             for (int index = 0; index < ranges.size(); index++)
             {
-                if (index != alreadyAvanced)
+                if (index != alreadyAdvanced)
                 {
                     KeyRangeIterator range = ranges.get(index);
                     PrimaryKey nextKey = nextOrNull(range, highestKey);
@@ -92,7 +92,7 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
                         // We jumped over the highest key seen so far, so make it the new highest key.
                         highestKey = nextKey;
                         // Remember this iterator to avoid advancing it again, because it is already at the highest key
-                        alreadyAvanced = index;
+                        alreadyAdvanced = index;
                         // This iterator jumped over, so the other iterators are lagging behind now,
                         // including the ones already advanced in the earlier cycles of the inner loop.
                         // Therefore, restart the inner loop in order to advance
