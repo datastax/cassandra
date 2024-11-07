@@ -206,9 +206,9 @@ public class SSTableIndex implements Comparable<SSTableIndex>
     // The keys matched in other indexes cannot be safely subtracted
     // as indexes may contain false positives caused by deletes and updates.
     private KeyRangeIterator getNonEqIterator(Expression expression,
-                                           AbstractBounds<PartitionPosition> keyRange,
-                                           QueryContext context,
-                                           boolean defer) throws IOException
+                                              AbstractBounds<PartitionPosition> keyRange,
+                                              QueryContext context,
+                                              boolean defer) throws IOException
     {
         KeyRangeIterator allKeys = allSSTableKeys(keyRange);
         if (TypeUtil.supportsRounding(expression.validator))
