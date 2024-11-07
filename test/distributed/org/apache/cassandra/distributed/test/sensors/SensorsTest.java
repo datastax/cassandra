@@ -65,30 +65,43 @@ public class SensorsTest extends TestBaseImpl
     public void testSensorsInResultMessage() throws Throwable
     {
         CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
-        try (Cluster cluster = builder().withNodes(1).start())
+        try (Cluster cluster = builder().withNodes(3).start())
         {
             // resister a noop sensor listener before init(cluster) which creates the test keyspace to ensure that the registry singleton instance is subscribed to schema notifications
             cluster.get(1).runsOnInstance(initSensorsRegistry()).run();
             init(cluster);
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)"));
             String write = withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')");
-            String query = withKeyspace("SELECT * FROM %s.tbl WHERE pk=1");
+            String read = withKeyspace("SELECT * FROM %s.tbl WHERE pk=1");
+            String cas = withKeyspace("UPDATE %s.tbl SET v1 = 'cas update' WHERE pk = 1 IF v1 = 'read me'");
 
             // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
             cluster.get(1).runOnInstance(() -> {
-                ResultMessage writeResult = executeWithResult(write);
+                // Propagate WRITE sensors
+                ResultMessage<?> writeResult = executeWithResult(write);
                 Map<String, ByteBuffer> customPayload = writeResult.getCustomPayload();
 
                 String expectedWriteHeader = "WRITE_BYTES_REQUEST.tbl";
-                double writeBytesRequest = getWriteBytesRequest(customPayload, expectedWriteHeader);
+                double writeBytesRequest = getBytesForHeader(customPayload, expectedWriteHeader);
                 Assertions.assertThat(writeBytesRequest).isGreaterThan(0D);
 
-                ResultMessage.Rows readResult = executeWithPagingWithResultMessage(query);
+                // Propagate CAS sensors
+                ResultMessage<?> casResult = executeWithResult(cas);
+                customPayload = casResult.getCustomPayload();
+
+                String expectedCasWriteHeader = "WRITE_BYTES_REQUEST.tbl";
+                double casWriteBytesRequest = getBytesForHeader(customPayload, expectedCasWriteHeader);
+                Assertions.assertThat(casWriteBytesRequest).isGreaterThan(0D);
+
+                String expectedReadCasHeader = "READ_BYTES_REQUEST.tbl";
+                double casReadBytesRequest = getBytesForHeader(customPayload, expectedReadCasHeader);
+                Assertions.assertThat(casReadBytesRequest).isGreaterThan(0D);
+
+                // Propagate READ sensors
+                ResultMessage.Rows readResult = executeWithPagingWithResultMessage(read);
                 customPayload = readResult.getCustomPayload();
                 String expectedReadHeader = "READ_BYTES_REQUEST.tbl";
-                assertReadBytesHeadersExist(customPayload, expectedReadHeader);
-
-                double readBytesRequest = getReadBytesRequest(customPayload, expectedReadHeader);
+                double readBytesRequest = getBytesForHeader(customPayload, expectedReadHeader);
                 Assertions.assertThat(readBytesRequest).isGreaterThan(0D);
             });
         }
@@ -120,18 +133,7 @@ public class SensorsTest extends TestBaseImpl
         }
     }
 
-    private static void assertReadBytesHeadersExist(Map<String, ByteBuffer> customPayload, String expectedHeader)
-    {
-        Assertions.assertThat(customPayload).containsKey(expectedHeader);
-    }
-
-    private static double getReadBytesRequest(Map<String, ByteBuffer> customPayload, String expectedHeader)
-    {
-        Assertions.assertThat(customPayload).containsKey(expectedHeader);
-        return ByteBufferUtil.toDouble(customPayload.get(expectedHeader));
-    }
-
-    private static double getWriteBytesRequest(Map<String, ByteBuffer> customPayload, String expectedHeader)
+    private static double getBytesForHeader(Map<String, ByteBuffer> customPayload, String expectedHeader)
     {
         Assertions.assertThat(customPayload).containsKey(expectedHeader);
         return ByteBufferUtil.toDouble(customPayload.get(expectedHeader));

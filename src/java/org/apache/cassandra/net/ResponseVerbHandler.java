@@ -30,6 +30,7 @@ import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -95,6 +96,14 @@ public class ResponseVerbHandler implements IVerbHandler
             ReadCallback readCallback = (ReadCallback) callbackInfo.callback;
             Context context = Context.from(readCallback.command());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
+        }
+        // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo
+        else if (callbackInfo.callback instanceof AbstractPaxosCallback)
+        {
+            AbstractPaxosCallback paxosCallback = (AbstractPaxosCallback) callbackInfo.callback;
+            Context context = Context.from(paxosCallback.getMetadata());
+            incrementSensor(sensors, context, Type.READ_BYTES, message);
+            incrementSensor(sensors, context, Type.WRITE_BYTES, message);
         }
     }
 

@@ -472,6 +472,14 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 key,
                                                                                 consistencyForPaxos,
                                                                                 consistencyForCommit);
+        // Request sensors are utilized to track usages from replicas serving a cas request
+        RequestSensors sensors = CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
+                                        new ActiveRequestSensors() : NoOpRequestSensors.instance;
+        Context context = Context.from(metadata);
+        sensors.registerSensor(context, Type.WRITE_BYTES); // track user table + paxos table write bytes
+        sensors.registerSensor(context, Type.READ_BYTES); // track user table + paxos table read bytes
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
         try
         {
             consistencyForPaxos.validateForCas(keyspaceName, state);
@@ -901,7 +909,7 @@ public class StorageProxy implements StorageProxyMBean
         long startTimeNanos = System.nanoTime();
         try
         {
-            ProposeCallback callback = new ProposeCallback(replicaPlan.contacts().size(), replicaPlan.requiredParticipants(), !backoffIfPartial, replicaPlan.consistencyLevel(), queryStartNanoTime);
+            ProposeCallback callback = new ProposeCallback(proposal.update.metadata(), replicaPlan.contacts().size(), replicaPlan.requiredParticipants(), !backoffIfPartial, replicaPlan.consistencyLevel(), queryStartNanoTime);
             Message<Commit> message = Message.out(PAXOS_PROPOSE_REQ, proposal);
             for (Replica replica : replicaPlan.contacts())
             {

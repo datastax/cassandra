@@ -19,6 +19,7 @@
 package org.apache.cassandra.sensors;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 import com.google.common.base.Predicates;
 import org.junit.BeforeClass;
@@ -55,9 +56,16 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.QueryInfoTracker;
+import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
+import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.PrepareCallback;
+import org.apache.cassandra.service.paxos.PrepareResponse;
+import org.apache.cassandra.service.paxos.ProposeCallback;
 import org.apache.cassandra.service.reads.DigestResolver;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.UUIDGen;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.locator.ReplicaUtils.full;
@@ -121,7 +129,7 @@ public class ReplicaSensorsTrackedTest
         Sensor mockingReadSensor = new mockingSensor(context, Type.READ_BYTES);
         mockingReadSensor.increment(11.0);
 
-        assertReplicaSensorsTracked(readRequest, callback, acutalReadSensor, mockingReadSensor);
+        assertReplicaSensorsTracked(readRequest, callback, Pair.create(acutalReadSensor, mockingReadSensor));
     }
 
     @Test
@@ -134,7 +142,7 @@ public class ReplicaSensorsTrackedTest
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
-        Sensor acutalReadSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor acutalWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -145,30 +153,100 @@ public class ReplicaSensorsTrackedTest
         Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingWriteSensor.increment(13.0);
 
-        assertReplicaSensorsTracked(writeRequest, callback, acutalReadSensor, mockingWriteSensor);
+        assertReplicaSensorsTracked(writeRequest, callback, Pair.create(acutalWriteSensor, mockingWriteSensor));
     }
 
-    private void assertReplicaSensorsTracked(Message<?> request, RequestCallback<?> callback, Sensor trackingSensor, Sensor replicaSensor)
+    @Test
+    public void testCASSensors()
     {
-        assertThat(trackingSensor.getValue()).isZero();
-        assertThat(replicaSensor.getValue()).isGreaterThan(0);
+        Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
+        Message<Mutation> prepare = Message.builder(Verb.PAXOS_PREPARE_REQ, mutation).build();
+        Message<Mutation> propose = Message.builder(Verb.PAXOS_PROPOSE_REQ, mutation).build();
+        Message<Mutation> commit = Message.builder(Verb.PAXOS_COMMIT_REQ, mutation).build();
+
+        // init request sensors, must happen before the callback is created
+        RequestSensors requestSensors = new ActiveRequestSensors();
+        Context context = Context.from(cfs.metadata());
+        requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.READ_BYTES);
+        Sensor acutalWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor acutalReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
+        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
+        ExecutorLocals.set(locals);
+
+        // init callbacks
+        DecoratedKey key = cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("0"));
+        AbstractPaxosCallback<?> prepareCallback = new PrepareCallback(key, cfs.metadata(), targets.size(), ConsistencyLevel.LOCAL_QUORUM, 0);
+        AbstractPaxosCallback<?> proposeCallback = new ProposeCallback(cfs.metadata(), targets.size(), targets.size(), false, ConsistencyLevel.LOCAL_QUORUM, 0);
+        AbstractWriteResponseHandler<?> commitCallback = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM);
+
+        // mimic CAS sensors to be used in replica repsponse
+        // Prepare
+        Sensor mockingPrepareWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
+        mockingPrepareWriteSensor.increment(13.0);
+        Sensor mockingPrepareReadSensor = new mockingSensor(context, Type.READ_BYTES);
+        mockingPrepareReadSensor.increment(14.0);
+        Pair<Sensor, Sensor> prepareWriterSensors = Pair.create(acutalWriteSensor, mockingPrepareWriteSensor);
+        Pair<Sensor, Sensor> prepareReadSensors = Pair.create(acutalReadSensor, mockingPrepareReadSensor);
+
+        // Propse
+        Sensor mockingProposeWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
+        mockingProposeWriteSensor.increment(15.0);
+        Sensor mockingProposeReadSensor = new mockingSensor(context, Type.READ_BYTES);
+        mockingProposeReadSensor.increment(16.0);
+        Pair<Sensor, Sensor> proposeWriterSensors = Pair.create(acutalWriteSensor, mockingProposeWriteSensor);
+        Pair<Sensor, Sensor> proposeReadSensors = Pair.create(acutalReadSensor, mockingProposeReadSensor);
+
+        // Commit
+        Sensor mockingCommitWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
+        mockingCommitWriteSensor.increment(17.0);
+        acutalWriteSensor.reset();
+        Pair<Sensor, Sensor> commitWriterSensors = Pair.create(acutalWriteSensor, mockingCommitWriteSensor);
+
+        assertReplicaSensorsTracked(prepare, prepareCallback, prepareWriterSensors, prepareReadSensors);
+        assertReplicaSensorsTracked(propose, proposeCallback, proposeWriterSensors, proposeReadSensors);
+        assertReplicaSensorsTracked(commit, commitCallback, commitWriterSensors);
+    }
+
+    @SafeVarargs
+    private void assertReplicaSensorsTracked(Message<?> request, RequestCallback<?> callback, Pair<Sensor, Sensor>... trackingToReplicaSensors)
+    {
+        for (Pair<Sensor, Sensor> pair : trackingToReplicaSensors)
+        {
+            Sensor trackingSensor = pair.left;
+            Sensor replicaSensor = pair.right;
+            assertThat(trackingSensor.getValue()).isZero();
+            assertThat(replicaSensor.getValue()).isGreaterThan(0);
+        }
 
         // sensors should be incremented with each response
         for (int responses = 1; responses <= targets.size(); responses++)
         {
-            simulateResponseFromReplica(targets.get(responses - 1), request, callback, replicaSensor);
-            assertThat(trackingSensor.getValue()).isEqualTo(replicaSensor.getValue() * responses);
+            simulateResponseFromReplica(targets.get(responses - 1), request, callback, Arrays.stream(trackingToReplicaSensors).map(Pair::right).toArray(Sensor[]::new));
+            for (Pair<Sensor, Sensor> pair : trackingToReplicaSensors)
+            {
+                Sensor trackingSensor = pair.left;
+                Sensor replicaSensor = pair.right;
+                assertThat(trackingSensor.getValue()).isEqualTo(replicaSensor.getValue() * responses);
+            }
+        }
+
+        // reset tracking sensors for next assertions, if any
+        for (Pair<Sensor, Sensor> pair : trackingToReplicaSensors)
+        {
+            Sensor trackingSensor = pair.left;
+            trackingSensor.reset();
         }
     }
 
-    private void simulateResponseFromReplica(Replica replica, Message<?> request, RequestCallback<?> callback, Sensor sensor)
+    private void simulateResponseFromReplica(Replica replica, Message<?> request, RequestCallback<?> callback, Sensor... sensor)
     {
         // AbstractWriteResponseHandler has a special handling for the callback
         if (callback instanceof AbstractWriteResponseHandler)
             MessagingService.instance().callbacks.addWithExpiration((AbstractWriteResponseHandler<?>) callback, request, replica, ConsistencyLevel.ALL, true);
         else
             MessagingService.instance().callbacks.addWithExpiration(callback, request, replica.endpoint());
-        Message<?> response = createResponseMessageWithSensor(replica.endpoint(), request.id(), sensor);
+        Message<?> response = createResponseMessageWithSensor(request.verb(), replica.endpoint(), request.id(), sensor);
         ResponseVerbHandler.instance.doVerb(response);
     }
 
@@ -177,17 +255,24 @@ public class ReplicaSensorsTrackedTest
         return ReplicaPlan.shared(new ReplicaPlan.ForTokenRead(ks, ks.getReplicationStrategy(), consistencyLevel, replicas, replicas));
     }
 
-    private Message<?> createResponseMessageWithSensor(InetAddressAndPort from, long id, Sensor sensor)
+    private Message<?> createResponseMessageWithSensor(Verb requestVerb, InetAddressAndPort from, long id, Sensor... sensors)
     {
-        switch (sensor.getType())
+        if (requestVerb == Verb.READ_REQ)
+            return createReadResponseMessage(from, id, sensors[0]);
+        else if (requestVerb == Verb.MUTATION_REQ)
+            return createResponseMessage(Verb.MUTATION_RSP, NoPayload.noPayload, from, id, sensors);
+        else if (requestVerb == Verb.PAXOS_PREPARE_REQ)
         {
-            case READ_BYTES:
-                return createReadResponseMessage(from, id, sensor);
-            case WRITE_BYTES:
-                return createMutationResponseMessage(from, id, sensor);
-            default:
-                throw new IllegalArgumentException("Unsupported sensor type: " + sensor.getType());
+            DecoratedKey key = cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("4"));
+            Commit commit = Commit.newPrepare(key, cfs.metadata(), UUIDGen.getTimeUUID());
+            return createResponseMessage(Verb.PAXOS_PREPARE_RSP, new PrepareResponse(false, commit, commit), from, id, sensors);
         }
+        else if (requestVerb == Verb.PAXOS_PROPOSE_REQ)
+            return createResponseMessage(Verb.PAXOS_PROPOSE_RSP, true, from, id, sensors);
+        else if (requestVerb == Verb.PAXOS_COMMIT_REQ)
+            return createResponseMessage(Verb.PAXOS_COMMIT_RSP, NoPayload.noPayload, from, id, sensors);
+        else
+            throw new IllegalArgumentException("Unsupported verb: " + requestVerb);
     }
 
     private Message<ReadResponse> createReadResponseMessage(InetAddressAndPort from, long id, Sensor readSensor)
@@ -240,13 +325,16 @@ public class ReplicaSensorsTrackedTest
                       .build();
     }
 
-    private Message<NoPayload> createMutationResponseMessage(InetAddressAndPort from, long id, Sensor writeSensor)
+    private <T> Message<T> createResponseMessage(Verb responseVerb, T payload, InetAddressAndPort from, long id, Sensor... sensors)
     {
-        return Message.builder(Verb.MUTATION_RSP, NoPayload.noPayload)
-                      .from(from)
-                      .withId(id)
-                      .withCustomParam(SensorsCustomParams.paramForRequestSensor(writeSensor), SensorsCustomParams.sensorValueAsBytes(writeSensor.getValue()))
-                      .build();
+        Message.Builder<T> builder = Message.builder(responseVerb, payload)
+                                            .from(from)
+                                            .withId(id);
+
+        for (Sensor sensor : sensors)
+            builder.withCustomParam(SensorsCustomParams.paramForRequestSensor(sensor), SensorsCustomParams.sensorValueAsBytes(sensor.getValue()));
+
+        return builder.build();
     }
 
     private static AbstractWriteResponseHandler createWriteResponseHandler(ConsistencyLevel cl, ConsistencyLevel ideal)

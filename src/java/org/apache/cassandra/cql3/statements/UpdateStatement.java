@@ -126,8 +126,9 @@ public class UpdateStatement extends ModificationStatement
 
         RequestSensors sensors = RequestTracker.instance.get();
         Context context = Context.from(this.metadata());
-        Type sensorType = Type.WRITE_BYTES;
-        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, sensorType);
+        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
+        // CAS updates incorporate read sensors
+        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
 
         return result;
     }
