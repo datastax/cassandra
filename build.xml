@@ -42,7 +42,6 @@
         All releases are built with the default JDK.
         Builds with non-default JDKs are considered experimental and for development and testing purposes.
         When building, javac's source and target flags are set to the jdk used, so lower JDKs are not supported at runtime.
-        The use of both CASSANDRA_USE_JDK11 and use-jdk11 is deprecated.
     -->
     <property name="java.default" value="11" />
     <property name="java.supported" value="11,17,22" />
