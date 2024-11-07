@@ -39,6 +39,8 @@ import org.apache.cassandra.locator.TokenMetadata;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class ShardManagerReplicaAwareTest
 {
@@ -46,11 +48,14 @@ public class ShardManagerReplicaAwareTest
     @Test
     public void testRangeEndsForShardCountEqualtToNumTokensPlusOne() throws UnknownHostException
     {
+        var mockCompationRealm = mock(CompactionRealm.class);
+        when(mockCompationRealm.estimatedPartitionCount()).thenReturn(1L<<16);
+
         for (int numTokens = 1; numTokens < 32; numTokens++)
         {
             var rs = buildStrategy(numTokens, 1, 1, 1);
             var expectedTokens = rs.getTokenMetadata().sortedTokens();
-            var shardManager = new ShardManagerReplicaAware(rs, 1L<<16);
+            var shardManager = new ShardManagerReplicaAware(rs, mockCompationRealm);
 
             var shardCount = numTokens + 1;
             var iterator = shardManager.boundaries(shardCount);
@@ -69,6 +74,9 @@ public class ShardManagerReplicaAwareTest
     @Test
     public void testRangeEndsAreFromTokenListAndContainLowerRangeEnds() throws UnknownHostException
     {
+        var mockCompationRealm = mock(CompactionRealm.class);
+        when(mockCompationRealm.estimatedPartitionCount()).thenReturn(1L<<16);
+
         for (int nodeCount = 1; nodeCount <= 6; nodeCount++)
         {
             for (int numTokensPerNode = 1; numTokensPerNode < 16; numTokensPerNode++)
@@ -82,7 +90,7 @@ public class ShardManagerReplicaAwareTest
                     // Confirm test set up is correct.
                     assertEquals(numTokensPerNode * nodeCount, initialSplitPoints.size());
                     // Use a shared instance to
-                    var shardManager = new ShardManagerReplicaAware(rs, 1L<<16);
+                    var shardManager = new ShardManagerReplicaAware(rs, mockCompationRealm);
 
                     // The tokens for one level lower.
                     var lowerTokens = new ArrayList<Token>();
