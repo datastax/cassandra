@@ -67,7 +67,7 @@ public class CollatedViewIndexBuilder extends SecondaryIndexBuilder
         try
         {
             for (SSTableReader sstable : sstables)
-                SSTableWatcher.instance.onIndexBuild(sstable);
+                SSTableWatcher.instance.onIndexBuild(sstable, indexers);
 
             PageSize pageSize = cfs.indexManager.calculateIndexingPageSize();
             while (iter.hasNext())

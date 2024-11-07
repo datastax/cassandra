@@ -149,9 +149,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return false;
         }
 
-        SSTableWatcher.instance.onIndexBuild(sstable);
+        SSTableWatcher.instance.onIndexBuild(sstable, indexes);
 
         IndexDescriptor indexDescriptor = group.descriptorFor(sstable);
+
         Set<Component> replacedComponents = new HashSet<>();
 
         try (RandomAccessReader dataFile = sstable.openDataReader();

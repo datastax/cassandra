@@ -176,7 +176,7 @@ public class SSTableIndexComponentsState
     public boolean indexWasUpdated(SSTableIndexComponentsState stateBefore, String indexName)
     {
         Preconditions.checkNotNull(indexName);
-        return !Objects.equals( stateBefore.perSSTableBuild(), this.perSSTableBuild())
+        return !Objects.equals(stateBefore.perSSTableBuild(), this.perSSTableBuild())
                 || !Objects.equals(stateBefore.perIndexBuild(indexName), this.perIndexBuild(indexName));
     }
 

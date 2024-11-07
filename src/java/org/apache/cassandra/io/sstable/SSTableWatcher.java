@@ -20,7 +20,9 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.Set;
 
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -60,7 +62,7 @@ public interface SSTableWatcher
     /**
      * Called before executing index build on existing sstable
      */
-    default void onIndexBuild(SSTableReader sstable)
+    default void onIndexBuild(SSTableReader sstable, Set<? extends Index> indexes)
     {
     }
 

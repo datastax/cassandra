@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.UUID;
 
@@ -31,6 +32,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sasi.conf.ColumnIndex;
 import org.apache.cassandra.index.sasi.disk.PerSSTableIndexWriter;
@@ -51,12 +53,13 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     private final ColumnFamilyStore cfs;
     private final UUID compactionId = UUIDGen.getTimeUUID();
 
+    private final Set<Index> builtIndexes;
     private final SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables;
 
     private long bytesProcessed = 0;
     private final long totalSizeInBytes;
 
-    public SASIIndexBuilder(ColumnFamilyStore cfs, SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables)
+    public SASIIndexBuilder(ColumnFamilyStore cfs, SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables, Set<Index> indexes)
     {
         long totalIndexBytes = 0;
         for (SSTableReader sstable : sstables.keySet())
@@ -64,6 +67,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
 
         this.cfs = cfs;
         this.sstables = sstables;
+        this.builtIndexes = indexes;
         this.totalSizeInBytes = totalIndexBytes;
     }
 
@@ -75,7 +79,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
             SSTableReader sstable = e.getKey();
             Map<ColumnMetadata, ColumnIndex> indexes = e.getValue();
 
-            SSTableWatcher.instance.onIndexBuild(sstable);
+            SSTableWatcher.instance.onIndexBuild(sstable, builtIndexes);
             try (RandomAccessReader dataFile = sstable.openDataReader())
             {
                 PerSSTableIndexWriter indexWriter = SASIIndex.newWriter(keyValidator, sstable.descriptor, indexes, OperationType.COMPACTION);
