@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.iterators;
+package org.apache.cassandra.index.sai.utils;
 
 import java.util.Iterator;
 import java.util.Map;
@@ -24,21 +24,22 @@ import java.util.SortedMap;
 import java.util.TreeSet;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.index.sai.utils.PartitionInfo;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.schema.TableMetadata;
 
-public class InMemoryPartitionIterator implements PartitionIterator
+public class InMemoryUnfilteredPartitionIterator implements UnfilteredPartitionIterator
 {
     private final ReadCommand command;
     private final Iterator<Map.Entry<PartitionInfo, TreeSet<Unfiltered>>> partitions;
 
-    public InMemoryPartitionIterator(ReadCommand command, SortedMap<PartitionInfo, TreeSet<Unfiltered>> rowsByPartitions)
+    public InMemoryUnfilteredPartitionIterator(ReadCommand command, SortedMap<PartitionInfo, TreeSet<Unfiltered>> rowsByPartitions)
     {
         this.command = command;
         this.partitions = rowsByPartitions.entrySet().iterator();
@@ -56,21 +57,27 @@ public class InMemoryPartitionIterator implements PartitionIterator
     }
 
     @Override
-    public RowIterator next()
+    public UnfilteredRowIterator next()
     {
-        return new InMemoryRowIterator(partitions.next());
+        return new InMemoryUnfilteredRowIterator(partitions.next());
+    }
+
+    @Override
+    public TableMetadata metadata()
+    {
+        return command.metadata();
     }
 
 
-    private class InMemoryRowIterator implements RowIterator
+    private class InMemoryUnfilteredRowIterator implements UnfilteredRowIterator
     {
         private final PartitionInfo partitionInfo;
-        private final Iterator<Unfiltered> rows;
+        private final Iterator<Unfiltered> unfiltereds;
 
-        public InMemoryRowIterator(Map.Entry<PartitionInfo, TreeSet<Unfiltered>> rows)
+        public InMemoryUnfilteredRowIterator(Map.Entry<PartitionInfo, TreeSet<Unfiltered>> partition)
         {
-            this.partitionInfo = rows.getKey();
-            this.rows = rows.getValue().iterator();
+            this.partitionInfo = partition.getKey();
+            this.unfiltereds = partition.getValue().iterator();
         }
 
         @Override
@@ -81,13 +88,13 @@ public class InMemoryPartitionIterator implements PartitionIterator
         @Override
         public boolean hasNext()
         {
-            return rows.hasNext();
+            return unfiltereds.hasNext();
         }
 
         @Override
-        public Row next()
+        public Unfiltered next()
         {
-            return (Row) rows.next();
+            return unfiltereds.next();
         }
 
         @Override
@@ -118,6 +125,18 @@ public class InMemoryPartitionIterator implements PartitionIterator
         public Row staticRow()
         {
             return partitionInfo.staticRow;
+        }
+
+        @Override
+        public DeletionTime partitionLevelDeletion()
+        {
+            return partitionInfo.partitionDeletion;
+        }
+
+        @Override
+        public EncodingStats stats()
+        {
+            return partitionInfo.encodingStats;
         }
     }
 }
