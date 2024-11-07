@@ -40,6 +40,8 @@ import java.util.regex.Pattern;
 import com.google.common.io.ByteStreams;
 
 import org.apache.commons.lang3.StringUtils;
+import org.eclipse.jdt.internal.compiler.lookup.LookupEnvironment;
+import org.eclipse.jdt.internal.compiler.lookup.ModuleBinding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
