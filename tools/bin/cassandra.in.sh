@@ -92,7 +92,7 @@ elif [ "$short" = "11" ] ; then
 elif [ "$JVM_VERSION" \< "17" ] ; then
      echo "Cassandra 5.0 requires Java 11 or Java 17(or newer)."
 elif [ "$short" = "17" ] ; then
-     JAVA_VERSION=17     
+     JAVA_VERSION=17
 elif [ "$JVM_VERSION" \< "22" ] ; then
     echo "Cassandra requires Java 11 or Java 22(or newer)."
 fi
