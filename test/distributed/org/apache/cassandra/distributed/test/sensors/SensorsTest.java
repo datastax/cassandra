@@ -96,6 +96,7 @@ public class SensorsTest extends TestBaseImpl
                                              "INSERT INTO %s.tbl(pk, v1) VALUES (4, 'read me 2');\n" +
                                              "INSERT INTO %s.tbl(pk, v1) VALUES (4, 'read me 3');\n" +
                                              "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        String range = withKeyspace("SELECT * FROM %s.tbl");
 
         List<Object[]> result = new ArrayList<>();
         String[] noPrep = new String[0];
@@ -105,6 +106,7 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ noPrep, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER } });
         result.add(new Object[]{ noPrep, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ noPrep, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ new String[]{ write }, range, new String[]{ EXPECTED_READ_BYTES_HEADER } });
         return result;
     }
 

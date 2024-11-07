@@ -2351,6 +2351,13 @@ public class StorageProxy implements StorageProxyMBean
                                                                               command.metadata(),
                                                                               command,
                                                                               consistencyLevel);
+        // Request sensors are utilized to track usages from replicas serving a range request
+        RequestSensors sensors = CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
+                                 new ActiveRequestSensors() : NoOpRequestSensors.instance;
+        Context context = Context.from(command);
+        sensors.registerSensor(context, Type.READ_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
 
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
