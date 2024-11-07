@@ -433,6 +433,19 @@ public class IndexContext
                             .orElse(null);
     }
 
+    // Returns an iterator for NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE, which
+    // 1. Either includes everything if the column type values can be truncated and
+    // thus the keys cannot be matched precisely,
+    // 2. or includes everything minus the keys matching the expression
+    // if the column type values cannot be truncated, i.e., matching the keys is always precise.
+    // (not matching precisely will lead to false negatives)
+    //
+    // keys k such that row(k) not contains v = (all keys) \ (keys k such that row(k) contains v)
+    //
+    // Note that rows in other indexes are not matched, so this can return false positives,
+    // but they are not a problem as post-filtering would get rid of them.
+    // The keys matched in other indexes cannot be safely subtracted
+    // as indexes may contain false positives caused by deletes and updates.
     private KeyRangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         KeyRangeIterator allKeys = scanMemtable(keyRange);
