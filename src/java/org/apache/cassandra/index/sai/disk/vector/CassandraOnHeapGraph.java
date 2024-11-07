@@ -174,7 +174,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
     public int getOrdinal(VectorFloat<?> vector)
     {
         VectorPostings<T> postings = postingsMap.get(vector);
-        return postings == null ? -1 : postings.getOrdinal();
+        // There is a small race from when the postings list is created to when it is assigned an ordinal,
+        // so we do not assert that the ordinal is set here
+        return postings == null ? -1 : postings.getOrdinal(false);
     }
 
     /**
