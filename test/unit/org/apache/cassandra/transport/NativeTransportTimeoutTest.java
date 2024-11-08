@@ -143,6 +143,12 @@ public class NativeTransportTimeoutTest extends CQLTester
         long initialTimedOut = timedOutMeter.getCount();
 
         ResultSetFuture rsf = session.executeAsync(statement);
+
+        // once WAIT_BARRIER is acquired, the Stage we want an OverloadedException from is executing the statement,
+        // but it hasn't yet retrieved the elapsed time. It will not proceed until the EXECUTE_BARRIER is released.
+        // The Byteman rules in the tests will override the native transport timeout to 10 milliseconds from that
+        // callsite. Therefore, to ensure an OverloadedException by exceeding the timeout, we need to sleep for 10
+        // milliseconds plus 2x the error of approxTime (creation timestamp error + error when getting current time).
         WAIT_BARRIER.acquire();
         Thread.sleep(10 + TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2);
         EXECUTE_BARRIER.release();
