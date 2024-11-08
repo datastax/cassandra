@@ -23,14 +23,14 @@ import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
  * Range iterators contain primary keys, in sorted order, with no duplicates.  They also
  * know their minimum and maximum keys, and an upper bound on the number of keys they contain.
  */
-public abstract class KeyRangeIterator extends AbstractIterator<PrimaryKey> implements Closeable
+public abstract class KeyRangeIterator extends AbstractGuavaIterator<PrimaryKey> implements Closeable
 {
     private static final Builder.EmptyRangeIterator EMPTY = new Builder.EmptyRangeIterator();
 

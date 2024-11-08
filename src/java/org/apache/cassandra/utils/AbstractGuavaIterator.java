@@ -27,13 +27,13 @@ import com.google.common.collect.PeekingIterator;
 import static com.google.common.base.Preconditions.checkState;
 
 /**
- * This is fork of the Guava AbstractIterator, the only difference
+ * This is fork of the Guava AbstractGuavaIterator, the only difference
  * is that the next variable is now protected so that the KeyRangeIterator.skipTo
  * method can avoid early state changed.
  */
 public abstract class AbstractGuavaIterator<T> implements PeekingIterator<T>
 {
-    private State state = State.NOT_READY;
+    protected State state = State.NOT_READY;
 
     /** Constructor for use by subclasses. */
     protected AbstractGuavaIterator() {}
@@ -148,7 +148,7 @@ public abstract class AbstractGuavaIterator<T> implements PeekingIterator<T>
      * Returns the next element in the iteration without advancing the iteration,
      * according to the contract of {@link PeekingIterator#peek()}.
      *
-     * <p>Implementations of {@code AbstractIterator} that wish to expose this
+     * <p>Implementations of {@code AbstractGuavaIterator} that wish to expose this
      * functionality should implement {@code PeekingIterator}.
      */
     public final T peek()

@@ -37,7 +37,7 @@ import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.io.util.FileUtils;
@@ -132,7 +132,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
         bkdReader.close();
     }
 
-    private static class RowIdIterator extends AbstractIterator<RowIdWithByteComparable> implements CloseableIterator<RowIdWithByteComparable>
+    private static class RowIdIterator extends AbstractGuavaIterator<RowIdWithByteComparable> implements CloseableIterator<RowIdWithByteComparable>
     {
         private final BKDReader.IteratorState iterator;
         RowIdIterator(BKDReader.IteratorState iterator)
