@@ -220,7 +220,7 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             return KeyRangeIterator.empty();
         }
-        return new FilteringKeyRangeIterator(new SortedSetRangeIterator(primaryKeys.keys()), keyRange);
+        return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys()), keyRange);
     }
 
     private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
@@ -228,7 +228,7 @@ public class TrieMemoryIndex extends MemoryIndex
         Trie<PrimaryKeys> subtrie = getSubtrie(expression);
 
         var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
-        var mergingIteratorBuilder = MergingRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
+        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
         lastQueueSize.set(mergingIteratorBuilder.size());
 
         if (!Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
@@ -442,7 +442,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     /**
-     * A sorting iterator over items that can either be singleton PrimaryKey or a SortedSetRangeIterator.
+     * A sorting iterator over items that can either be singleton PrimaryKey or a SortedSetKeyRangeIterator.
      */
     static class SortingSingletonOrSetIterator extends BinaryHeap
     {
@@ -489,7 +489,7 @@ public class TrieMemoryIndex extends MemoryIndex
             if (keys instanceof PrimaryKey)
                 return null;
 
-            SortedSetRangeIterator iterator = (SortedSetRangeIterator) keys;
+            SortedSetKeyRangeIterator iterator = (SortedSetKeyRangeIterator) keys;
             assert iterator.hasNext();
             iterator.next();
             return iterator.hasNext() ? iterator : null;
@@ -508,7 +508,7 @@ public class TrieMemoryIndex extends MemoryIndex
             if (keys instanceof PrimaryKey)
                 return null;
 
-            SortedSetRangeIterator iterator = (SortedSetRangeIterator) keys;
+            SortedSetKeyRangeIterator iterator = (SortedSetKeyRangeIterator) keys;
             iterator.skipTo((PrimaryKey) target);
             return iterator.hasNext() ? iterator : null;
         }
@@ -520,22 +520,22 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             if (keys instanceof PrimaryKey)
                 return (PrimaryKey) keys;
-            if (keys instanceof SortedSetRangeIterator)
-                return ((SortedSetRangeIterator) keys).peek();
+            if (keys instanceof SortedSetKeyRangeIterator)
+                return ((SortedSetKeyRangeIterator) keys).peek();
 
             throw new AssertionError("Unreachable");
         }
     }
 
-    static class MergingRangeIterator extends KeyRangeIterator
+    static class MergingKeyRangeIterator extends KeyRangeIterator
     {
-        // A sorting iterator of items that can be either singletons or SortedSetRangeIterator
+        // A sorting iterator of items that can be either singletons or SortedSetKeyRangeIterator
         SortingSingletonOrSetIterator keySets;  // class invariant: each object placed in this queue contains at least one key
 
-        MergingRangeIterator(Collection<Object> keySets,
-                             PrimaryKey minKey,
-                             PrimaryKey maxKey,
-                             long count)
+        MergingKeyRangeIterator(Collection<Object> keySets,
+                                PrimaryKey minKey,
+                                PrimaryKey maxKey,
+                                long count)
         {
             super(minKey, maxKey, count);
 
@@ -594,7 +594,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 if (size == 1)
                     keySets.add(keys.first());
                 else
-                    keySets.add(new SortedSetRangeIterator(keys, min, max, size));
+                    keySets.add(new SortedSetKeyRangeIterator(keys, min, max, size));
 
                 count += size;
             }
@@ -609,26 +609,26 @@ public class TrieMemoryIndex extends MemoryIndex
                 return keySets.isEmpty();
             }
 
-            public MergingRangeIterator build()
+            public MergingKeyRangeIterator build()
             {
-                return new MergingRangeIterator(keySets, min, max, count);
+                return new MergingKeyRangeIterator(keySets, min, max, count);
             }
         }
     }
 
-    static class SortedSetRangeIterator extends KeyRangeIterator
+    static class SortedSetKeyRangeIterator extends KeyRangeIterator
     {
         private SortedSet<PrimaryKey> primaryKeySet;
         private Iterator<PrimaryKey> iterator;
         private PrimaryKey lastComputedKey;
 
-        public SortedSetRangeIterator(SortedSet<PrimaryKey> source)
+        public SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source)
         {
             super(source.first(), source.last(), source.size());
             this.primaryKeySet = source;
         }
 
-        private SortedSetRangeIterator(SortedSet<PrimaryKey> source, PrimaryKey min, PrimaryKey max, long count)
+        private SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source, PrimaryKey min, PrimaryKey max, long count)
         {
             super(min, max, count);
             this.primaryKeySet = source;

@@ -202,7 +202,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
         if (keyQueue.size() == 0)
             return KeyRangeIterator.empty();
-        return new ReorderingRangeIterator(keyQueue.build(Comparator.naturalOrder()), keyQueue.size());
+        return new ReorderingKeyRangeIterator(keyQueue.build(Comparator.naturalOrder()), keyQueue.size());
     }
 
     @Override
@@ -508,11 +508,11 @@ public class VectorMemtableIndex implements MemtableIndex
         }
     }
 
-    private class ReorderingRangeIterator extends KeyRangeIterator
+    private class ReorderingKeyRangeIterator extends KeyRangeIterator
     {
         private final SortingIterator<PrimaryKey> keyQueue;
 
-        ReorderingRangeIterator(SortingIterator<PrimaryKey> keyQueue, int expectedSize)
+        ReorderingKeyRangeIterator(SortingIterator<PrimaryKey> keyQueue, int expectedSize)
         {
             super(minimumKey, maximumKey, expectedSize);
             this.keyQueue = keyQueue;

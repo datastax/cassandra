@@ -43,7 +43,7 @@ import org.apache.cassandra.schema.TableMetadata;
 /**
  * Iterates over primary keys in a memtable
  */
-public class MemtableRangeIterator extends KeyRangeIterator
+public class MemtableKeyRangeIterator extends KeyRangeIterator
 {
     private final Memtable memtable;
     private final PrimaryKey.Factory pkFactory;
@@ -52,9 +52,9 @@ public class MemtableRangeIterator extends KeyRangeIterator
     private UnfilteredPartitionIterator partitionIterator;
     private UnfilteredRowIterator rowIterator;
 
-    public MemtableRangeIterator(Memtable memtable,
-                                 PrimaryKey.Factory pkFactory,
-                                 AbstractBounds<PartitionPosition> keyRange)
+    public MemtableKeyRangeIterator(Memtable memtable,
+                                    PrimaryKey.Factory pkFactory,
+                                    AbstractBounds<PartitionPosition> keyRange)
     {
         super(minKey(memtable, pkFactory),
               maxKey(memtable, pkFactory),
