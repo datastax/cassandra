@@ -228,8 +228,15 @@
         <string>--add-exports java.rmi/sun.rmi.server=ALL-UNNAMED</string>
         <string>--add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
         <string>--add-exports java.sql/java.sql=ALL-UNNAMED</string>
+        <string>--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
+        <string>--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.util=ALL-UNNAMED</string>
 
+        <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.lang.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.net=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
@@ -237,6 +244,7 @@
         <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED</string>
+        <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
         <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
 
     </resources>
