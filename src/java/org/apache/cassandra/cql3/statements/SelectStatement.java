@@ -94,7 +94,7 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 /**
  * Encapsulates a completely parsed SELECT query, including the target
  * column family, expression, result count, and ordering clause.
- *
+ * </p>
  * A number of public methods here are only used internally. However,
  * many of these are made accessible for the benefit of custom
  * QueryHandler implementations, so before reducing their accessibility
@@ -687,7 +687,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (filter == null || filter.isEmpty(table.comparator))
             return ReadQuery.empty(table);
 
-        RowFilter rowFilter = getRowFilter(options);
+        RowFilter rowFilter = getRowFilter(options, queryState);
 
         List<DecoratedKey> decoratedKeys = new ArrayList<>(keys.size());
         for (ByteBuffer key : keys)
@@ -732,7 +732,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
         ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter, state);
-        RowFilter rowFilter = getRowFilter(options);
+        RowFilter rowFilter = getRowFilter(options, state);
         return SinglePartitionReadCommand.create(table, nowInSec, columnFilter, rowFilter, DataLimits.NONE, key, filter);
     }
 
@@ -741,7 +741,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      */
     public RowFilter rowFilterForInternalCalls()
     {
-        return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()));
+        return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()), QueryState.forInternalCalls());
     }
 
     private ReadQuery getRangeCommand(QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec, QueryState queryState)
@@ -750,7 +750,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (clusteringIndexFilter == null)
             return ReadQuery.empty(table);
 
-        RowFilter rowFilter = getRowFilter(options);
+        RowFilter rowFilter = getRowFilter(options, queryState);
 
         // The LIMIT provided by the user is the number of CQL row he wants returned.
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
@@ -980,10 +980,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     /**
      * May be used by custom QueryHandler implementations
      */
-    public RowFilter getRowFilter(QueryOptions options) throws InvalidRequestException
+    public RowFilter getRowFilter(QueryOptions options, QueryState state) throws InvalidRequestException
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-        return restrictions.getRowFilter(indexRegistry, options);
+        return restrictions.getRowFilter(indexRegistry, options, state);
     }
 
     private ResultSet process(PartitionIterator partitions,

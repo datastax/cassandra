@@ -1600,3 +1600,12 @@ enable_drop_compact_storage: false
   # Default offset_rows_failure_threshold is 20000, may differ if emulate_dbaas_defaults is enabled
   # offset_rows_warn_threshold: 10000
   # offset_rows_failure_threshold: 20000
+
+  # Guardrail to warn or fail when a SELECT query has more column value filters than threshold.
+  # Note that restrictions on indexed columns can be expanded to multiple column filters if the indexes have an analyzer.
+  # In that case, there will be a filter for every token produced by the analyzer for the queried column value. This can
+  # prevent that productive analyzers such as n-gram explode the query to a large number of filtering operations.
+  # Default query_filters_warn_threshold is 20, may differ if emulate_dbaas_defaults is enabled
+  # Default query_filters_fail_threshold is 50, may differ if emulate_dbaas_defaults is enabled
+  # query_filters_warn_threshold: 50
+  # query_filters_fail_threshold: 100

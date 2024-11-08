@@ -47,6 +47,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
@@ -57,6 +58,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -328,8 +330,13 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             return new RowFilter(current.build());
         }
 
-        public RowFilter buildFromRestrictions(StatementRestrictions restrictions, TableMetadata table, QueryOptions options)
+        public RowFilter buildFromRestrictions(StatementRestrictions restrictions, TableMetadata table, QueryOptions options, QueryState queryState)
         {
+            FilterElement root = doBuild(restrictions, table, options);
+
+            if (Guardrails.queryFilters.enabled(queryState))
+                Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, queryState);
+
             return new RowFilter(doBuild(restrictions, table, options));
         }
 
@@ -611,6 +618,22 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             }
         }
 
+        /**
+         * Returns the number of values that this filter will filter out after applying any index analyzers.
+         */
+        private int numFilteredValues()
+        {
+            int result = 0;
+
+            for (Expression expression : expressions)
+                result += expression.numFilteredValues();
+
+            for (FilterElement child : children)
+                result += child.numFilteredValues();
+
+            return result;
+        }
+
         @Override
         public String toString()
         {
@@ -829,6 +852,14 @@ public class RowFilter implements Iterable<RowFilter.Expression>
          */
         public abstract boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row);
 
+        /**
+         * Returns the number of values that this expression will check after applying any index analyzers.
+         */
+        protected int numFilteredValues()
+        {
+            return 1;
+        }
+
         protected ByteBuffer getValue(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             switch (column.kind)
@@ -1010,6 +1041,14 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         public final Index.Analyzer analyzer()
         {
             return analyzer;
+        }
+
+        @Override
+        public int numFilteredValues()
+        {
+            return analyzer == null
+                   ? super.numFilteredValues()
+                   : analyzer().analyze(value).size();
         }
     }
 
