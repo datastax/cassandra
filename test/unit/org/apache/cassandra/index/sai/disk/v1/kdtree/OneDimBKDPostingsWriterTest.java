@@ -38,7 +38,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
@@ -157,7 +157,7 @@ public class OneDimBKDPostingsWriterTest extends SaiRandomizedTest
     {
         assertPostingReaderEquals(kdTreePostingLists.openInput(),
                                   postingsIndex.getPostingsFilePointer(nodeID),
-                                  new ArrayPostingList(postings));
+                                  new IntArrayPostingList(postings));
     }
 
     private void assertPostingReaderEquals(IndexInput input, long offset, PostingList expected) throws IOException

@@ -36,10 +36,10 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.utils.LongIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.LongIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.mockito.Mockito;
 
 import static java.lang.Math.ceil;
@@ -356,7 +356,7 @@ public class PlanTest
         // because we're getting top of the rows already prefiltered by the index:
         Plan.Executor executor = Mockito.mock(Plan.Executor.class);
         Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
-        Mockito.verify(executor, Mockito.times(1)).getTopKRows((RangeIterator) Mockito.any(), Mockito.eq(limit));
+        Mockito.verify(executor, Mockito.times(1)).getTopKRows((KeyRangeIterator) Mockito.any(), Mockito.eq(limit));
     }
 
     @Test
@@ -500,7 +500,7 @@ public class PlanTest
         Plan.KeysIteration s3 = factory.indexScan(saiPred3, 1);
         Plan.KeysIteration plan = factory.union(Lists.newArrayList(factory.intersection(Lists.newArrayList(s1, s2)), s3));
 
-        Map<Expression, RangeIterator> iterators = new HashMap<>();
+        Map<Expression, KeyRangeIterator> iterators = new HashMap<>();
         iterators.put(saiPred1, new LongIterator(new long[] { 1L, 2L, 3L }));
         iterators.put(saiPred2, new LongIterator(new long[] { 1L, 2L, 5L }));
         iterators.put(saiPred3, new LongIterator(new long[] { 100L }));
@@ -520,13 +520,13 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<PrimaryKeyWithSortKey> getTopKRows(RangeIterator keys, int softLimit)
+            public Iterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator keys, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
         };
 
-        RangeIterator iterator = (RangeIterator) plan.execute(executor);
+        KeyRangeIterator iterator = (KeyRangeIterator) plan.execute(executor);
         assertEquals(LongIterator.convert(1L, 2L, 100L), LongIterator.convert(iterator));
     }
 

@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -24,17 +24,18 @@ import java.util.List;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * Range Union Iterator is used to return sorted stream of elements from multiple RangeIterator instances.
+ * Range Union Iterator is used to return sorted stream of elements from multiple KeyRangeIterator instances.
  */
 @SuppressWarnings("resource")
-public class RangeUnionIterator extends RangeIterator
+public class KeyRangeUnionIterator extends KeyRangeIterator
 {
-    public final List<RangeIterator> ranges;
+    public final List<KeyRangeIterator> ranges;
 
-    private RangeUnionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
+    private KeyRangeUnionIterator(Builder.Statistics statistics, List<KeyRangeIterator> ranges)
     {
         super(statistics);
         this.ranges = new ArrayList<>(ranges);
@@ -44,8 +45,8 @@ public class RangeUnionIterator extends RangeIterator
     {
         // Keep track of the next best candidate. If another candidate has the same value, advance it to prevent
         // duplicate results. This design avoids unnecessary list operations.
-        RangeIterator candidate = null;
-        for (RangeIterator range : ranges)
+        KeyRangeIterator candidate = null;
+        for (KeyRangeIterator range : ranges)
         {
             if (!range.hasNext())
                 continue;
@@ -73,7 +74,7 @@ public class RangeUnionIterator extends RangeIterator
         // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
         // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.
         // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
-        for (RangeIterator range : ranges)
+        for (KeyRangeIterator range : ranges)
             range.skipTo(nextKey);
     }
 
@@ -93,14 +94,14 @@ public class RangeUnionIterator extends RangeIterator
         return builder(10);
     }
 
-    public static RangeIterator build(Iterable<RangeIterator> tokens)
+    public static KeyRangeIterator build(Iterable<KeyRangeIterator> tokens)
     {
-        return RangeUnionIterator.builder(Iterables.size(tokens)).add(tokens).build();
+        return KeyRangeUnionIterator.builder(Iterables.size(tokens)).add(tokens).build();
     }
 
-    public static class Builder extends RangeIterator.Builder
+    public static class Builder extends KeyRangeIterator.Builder
     {
-        protected List<RangeIterator> rangeIterators;
+        protected List<KeyRangeIterator> rangeIterators;
 
         public Builder(int size)
         {
@@ -108,7 +109,7 @@ public class RangeUnionIterator extends RangeIterator
             this.rangeIterators = new ArrayList<>(size);
         }
 
-        public RangeIterator.Builder add(RangeIterator range)
+        public KeyRangeIterator.Builder add(KeyRangeIterator range)
         {
             if (range == null)
                 return this;
@@ -125,7 +126,7 @@ public class RangeUnionIterator extends RangeIterator
         }
 
         @Override
-        public RangeIterator.Builder add(List<RangeIterator> ranges)
+        public KeyRangeIterator.Builder add(List<KeyRangeIterator> ranges)
         {
             if (ranges == null || ranges.isEmpty())
                 return this;
@@ -134,7 +135,7 @@ public class RangeUnionIterator extends RangeIterator
             return this;
         }
 
-        public RangeIterator.Builder add(Iterable<RangeIterator> ranges)
+        public KeyRangeIterator.Builder add(Iterable<KeyRangeIterator> ranges)
         {
             if (ranges == null || Iterables.isEmpty(ranges))
                 return this;
@@ -149,12 +150,12 @@ public class RangeUnionIterator extends RangeIterator
         }
 
         @Override
-        public Collection<RangeIterator> ranges()
+        public Collection<KeyRangeIterator> ranges()
         {
             return rangeIterators;
         }
 
-        protected RangeIterator buildIterator()
+        protected KeyRangeIterator buildIterator()
         {
             switch (rangeCount())
             {
@@ -163,7 +164,7 @@ public class RangeUnionIterator extends RangeIterator
 
                 default:
                     //TODO Need to test whether an initial sort improves things
-                    return new RangeUnionIterator(statistics, rangeIterators);
+                    return new KeyRangeUnionIterator(statistics, rangeIterators);
             }
         }
     }
