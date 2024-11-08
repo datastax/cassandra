@@ -117,9 +117,27 @@ public class QueryMessage extends Message.Request
             Optional<Stage> asyncStage = Stage.fromStatement(statement);
             if (asyncStage.isPresent())
             {
-                markExecutingAsync();
                 CQLStatement finalStatement = statement;
-                return CompletableFuture.supplyAsync(() -> handleRequest(state, queryHandler, queryStartNanoTime, finalStatement, requestStartMillisTime),
+                return CompletableFuture.supplyAsync(() ->
+                                                     {
+                                                         try
+                                                         {
+                                                             // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
+                                                             // and any time spent in the queue for the async stage
+                                                             long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+                                                             ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                             if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                             {
+                                                                 ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
+                                                                 throw new OverloadedException("Query timed out before it could start");
+                                                             }
+                                                         }
+                                                         catch (Exception e)
+                                                         {
+                                                             return handleException(state, finalStatement, e);
+                                                         }
+                                                         return handleRequest(state, queryHandler, queryStartNanoTime, finalStatement, requestStartMillisTime);
+                                                     },
                                                      asyncStage.get().executor());
             }
             else
@@ -135,17 +153,6 @@ public class QueryMessage extends Message.Request
     {
         try
         {
-            if (isExecutingAsync())
-            {
-                long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-                ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
-                if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
-                {
-                    ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
-                    throw new OverloadedException("Query timed out before it could start");
-                }
-            }
-
             Response response = queryHandler.process(statement, queryState, options, getCustomPayload(), queryStartNanoTime);
             QueryEvents.instance.notifyQuerySuccess(statement, query, options, queryState, requestStartMillisTime, response);
 

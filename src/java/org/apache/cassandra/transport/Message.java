@@ -205,7 +205,6 @@ public abstract class Message
 
     public static abstract class Request extends Message
     {
-        private volatile boolean isExecutingAsync = false;
         private boolean tracingRequested;
         private final long creationTimeNanos = MonotonicClock.approxTime.now();
 
@@ -222,25 +221,23 @@ public abstract class Message
             return false;
         }
 
+        /**
+         * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
+         * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
+         *
+         * @param timeUnit the time unit in which to return the elapsed time
+         * @return the time elapsed since this request was created
+         */
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
             return timeUnit.convert(MonotonicClock.approxTime.now() - creationTimeNanos, TimeUnit.NANOSECONDS);
-        }
-
-        protected void markExecutingAsync()
-        {
-            isExecutingAsync = true;
-        }
-
-        protected boolean isExecutingAsync()
-        {
-            return isExecutingAsync;
         }
 
         protected abstract CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
 
         public final CompletableFuture<Response> execute(QueryState queryState, long queryStartNanoTime)
         {
+            // at the time of the check, this is approximately the time spent in the NTR stage's queue
             long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
             ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))

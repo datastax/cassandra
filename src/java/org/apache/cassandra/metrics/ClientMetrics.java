@@ -53,9 +53,9 @@ public final class ClientMetrics
 
     public Meter timedOutBeforeProcessing;
     public Meter timedOutBeforeAsyncProcessing;
-    public Timer queueTime;
+    public Timer queueTime; // time between Message creation and execution on NTR
     public Counter totalQueueTime; // total queue time (in nanoseconds) for use in histogram timer
-    public Timer asyncQueueTime;
+    public Timer asyncQueueTime; // time between Message creation and execution on an async stage. This includes the time recorded in queueTime metric.
     public Counter totalAsyncQueueTime; // total async queue time (in nanoseconds) for use in histogram timer
 
     private Meter protocolException;
@@ -117,6 +117,8 @@ public final class ClientMetrics
 
     /**
      * Record time between Message creation and execution on an async stage, if present.
+     * Note that this includes the queue time previously recorded before execution on the NTR stage,
+     * so for a given request, asyncQueueTime >= queueTime.
      * @param value time elapsed
      * @param unit time unit
      */

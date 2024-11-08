@@ -229,9 +229,27 @@ public class BatchMessage extends Message.Request
             Optional<Stage> asyncStage = Stage.fromStatement(batch);
             if (asyncStage.isPresent())
             {
-                markExecutingAsync();
                 List<QueryHandler.Prepared> finalPrepared = prepared;
-                return CompletableFuture.supplyAsync(() -> handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime),
+                return CompletableFuture.supplyAsync(() ->
+                                                     {
+                                                         try
+                                                         {
+                                                             // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
+                                                             // and any time spent in the queue for the async stage
+                                                             long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+                                                             ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                             if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                             {
+                                                                 ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
+                                                                 throw new OverloadedException("Query timed out before it could start");
+                                                             }
+                                                         }
+                                                         catch (Exception e)
+                                                         {
+                                                             return handleException(state, finalPrepared, e);
+                                                         }
+                                                         return handleRequest(state, queryStartNanoTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
+                                                     },
                                                      asyncStage.get().executor());
             }
             else
@@ -247,17 +265,6 @@ public class BatchMessage extends Message.Request
     {
         try
         {
-            if (isExecutingAsync())
-            {
-                long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-                ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
-                if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
-                {
-                    ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
-                    throw new OverloadedException("Query timed out before it could start");
-                }
-            }
-
             Response response = queryHandler.processBatch(batch, queryState, batchOptions, getCustomPayload(), queryStartNanoTime);
             if (queries != null)
                 QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, queryState, requestStartMillisTime, response);

@@ -76,35 +76,19 @@ public class NativeTransportTimeoutTest extends CQLTester
     }
 
     @Test
-    @BMRules(rules = { @BMRule(name = "Delay BatchMessage handling",
-                       targetClass = "org.apache.cassandra.transport.messages.BatchMessage",
-                       targetMethod = "handleRequest",
+    @BMRules(rules = { @BMRule(name = "Delay elapsedTimeSinceCreationCheck from async stage",
+                       targetClass = "org.apache.cassandra.transport.Message$Request",
+                       targetMethod = "elapsedTimeSinceCreation",
                        targetLocation = "AT ENTRY",
-                       condition = "$this.getCustomPayload() != null",
+                       condition = "$this.getCustomPayload() != null && !callerEquals(\"Message$Request.execute\", true)",
                        action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
                                 "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
                                 "flag(Thread.currentThread());"),
-                       @BMRule(name = "Delay QueryMessage handling",
-                       targetClass = "org.apache.cassandra.transport.messages.QueryMessage",
-                       targetMethod = "handleRequest",
-                       targetLocation = "AT ENTRY",
-                       condition = "$this.getCustomPayload() != null",
-                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
-                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
-                                "flag(Thread.currentThread());"),
-                       @BMRule(name = "Delay ExecuteMessage handling",
-                       targetClass = "org.apache.cassandra.transport.messages.ExecuteMessage",
-                       targetMethod = "handleRequest",
-                       targetLocation = "AT ENTRY",
-                       condition = "$this.getCustomPayload() != null",
-                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
-                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
-                                "flag(Thread.currentThread());"),
-                       @BMRule(name = "Mock NTR timeout from handleRequest",
+                       @BMRule(name = "Mock native transport timeout from async stage",
                        targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
                        targetMethod = "getNativeTransportTimeout",
                        targetLocation = "AT ENTRY",
-                       condition = "flagged(Thread.currentThread()) && callerEquals(\"handleRequest\")",
+                       condition = "flagged(Thread.currentThread()) && callerMatches(\".*maybeExecuteAsync.*\", true)",
                        action = "clear(Thread.currentThread()); " +
                                 "return 10000000;") })
     public void testAsyncStageLoadShedding() throws Throwable
