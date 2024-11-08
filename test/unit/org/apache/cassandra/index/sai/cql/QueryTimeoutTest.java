@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import javax.management.ObjectName;
 
+import org.apache.cassandra.index.sai.disk.PostingListKeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.junit.After;
@@ -29,7 +30,6 @@ import com.datastax.driver.core.exceptions.ReadTimeoutException;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.PostingListKeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
