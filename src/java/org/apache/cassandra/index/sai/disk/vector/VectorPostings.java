@@ -151,7 +151,12 @@ public class VectorPostings<T>
 
     public int getOrdinal()
     {
-        assert ordinal >= 0 : "ordinal not set";
+        return getOrdinal(true);
+    }
+
+    public int getOrdinal(boolean assertSet)
+    {
+        assert !assertSet || ordinal >= 0 : "ordinal not set";
         return ordinal;
     }
 

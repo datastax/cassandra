@@ -41,8 +41,8 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.service.StorageService;
@@ -85,6 +85,12 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     }
 
     @Test
+    public void testPrimaryKeyMapFactoryCount()
+    {
+        assertEquals(Long.MAX_VALUE, KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY.count());
+    }
+
+    @Test
     public void testEqQueriesAgainstStringIndex() throws Exception
     {
         doTestEqQueriesAgainstStringIndex(version);
@@ -99,7 +105,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         {
             for (int t = 0; t < numTerms; ++t)
             {
-                try (RangeIterator results = searcher.search(new Expression(indexContext)
+                try (KeyRangeIterator results = searcher.search(new Expression(indexContext)
                         .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
@@ -114,7 +120,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     assertFalse(results.hasNext());
                 }
 
-                try (RangeIterator results = searcher.search(new Expression(indexContext)
+                try (KeyRangeIterator results = searcher.search(new Expression(indexContext)
                         .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
@@ -136,7 +142,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
             // try searching for terms that weren't indexed
             final String tooLongTerm = randomSimpleString(10, 12);
-            RangeIterator results = searcher.search(new Expression(indexContext)
+            KeyRangeIterator results = searcher.search(new Expression(indexContext)
                                                     .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false, LIMIT);
             assertFalse(results.hasNext());
 
@@ -173,23 +179,23 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         final String index = newIndex();
         final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
 
-        SegmentMetadata.ComponentMetadataMap indexMetas;
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, components);
+        metadataBuilder.setRowIdRange(0, Long.MAX_VALUE);
+        metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
+                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()));
+        metadataBuilder.setTermRange(termsEnum.get(0).originalTermBytes,
+                                     termsEnum.get(terms - 1).originalTermBytes);
+
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
             var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).iterator();
-            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter));
+            MemtableTermsIterator termsIterator = new MemtableTermsIterator(null, null, iter);
+            SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(termsIterator));
+            metadataBuilder.setComponentsMetadata(indexMetas);
         }
 
-        final SegmentMetadata segmentMetadata = new SegmentMetadata(0,
-                                                                    size,
-                                                                    0,
-                                                                    Long.MAX_VALUE,
-                                                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
-                                                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()),
-                                                                    termsEnum.get(0).originalTermBytes,
-                                                                    termsEnum.get(terms - 1).originalTermBytes,
-                                                                    indexMetas);
+        final SegmentMetadata segmentMetadata = metadataBuilder.build();
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(components))
         {

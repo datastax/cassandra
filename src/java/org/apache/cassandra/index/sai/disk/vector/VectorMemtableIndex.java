@@ -53,14 +53,13 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
@@ -85,6 +84,8 @@ public class VectorMemtableIndex implements MemtableIndex
     private final IndexContext indexContext;
     private final CassandraOnHeapGraph<PrimaryKey> graph;
     private final LongAdder writeCount = new LongAdder();
+    private final LongAdder overwriteCount = new LongAdder();
+    private final LongAdder removedCount = new LongAdder();
 
     private PrimaryKey minimumKey;
     private PrimaryKey maximumKey;
@@ -156,13 +157,19 @@ public class VectorMemtableIndex implements MemtableIndex
 
             // make the changes in this order so we don't have a window where the row is not in the index at all
             if (newRemaining > 0)
+            {
                 graph.add(newValue, primaryKey);
+                overwriteCount.increment();
+            }
             if (oldRemaining > 0)
                 graph.remove(oldValue, primaryKey);
 
             // remove primary key if it's no longer indexed
             if (newRemaining <= 0 && oldRemaining > 0)
+            {
                 primaryKeys.remove(primaryKey);
+                removedCount.increment();
+            }
         }
     }
 
@@ -178,7 +185,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public RangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         if (expr.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Only BOUNDED_ANN is supported, received: " + expr));
@@ -194,8 +201,15 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         if (keyQueue.size() == 0)
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue.build(Comparator.naturalOrder()), keyQueue.size());
+    }
+
+    @Override
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        // For BOUNDED_ANN we use the old way of estimating cardinality - by running the search.
+        throw new UnsupportedOperationException("Cardinality estimation not supported by vector indexes");
     }
 
     @Override
@@ -428,13 +442,17 @@ public class VectorMemtableIndex implements MemtableIndex
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
+        // Note that range deletions won't show up in the removed count, which is why it's just named removedCount and
+        // not deleted count.
+        logger.debug("Writing {} nodes to disk after {} inserts, {} overwrites, and {} removals for {}", graph.size(),
+                     writeCount.longValue(), overwriteCount.longValue(), removedCount.longValue(), perIndexComponents.descriptor());
         return graph.flush(perIndexComponents);
     }
 
     @Override
     public long writeCount()
     {
-        return writeCount.longValue();
+        return writeCount.longValue() + overwriteCount.longValue();
     }
 
     @Override
@@ -490,7 +508,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
     }
 
-    private class ReorderingRangeIterator extends RangeIterator
+    private class ReorderingRangeIterator extends KeyRangeIterator
     {
         private final SortingIterator<PrimaryKey> keyQueue;
 

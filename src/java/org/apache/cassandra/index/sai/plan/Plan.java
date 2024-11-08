@@ -38,13 +38,12 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -676,9 +675,9 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected KeyRangeIterator execute(Executor executor)
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
         @Override
@@ -728,7 +727,7 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected KeyRangeIterator execute(Executor executor)
         {
             // Not supported because it doesn't make a lot of sense.
             // A direct scan of table data would be certainly faster.
@@ -1041,13 +1040,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected KeyRangeIterator execute(Executor executor)
         {
-            RangeIterator.Builder builder = RangeUnionIterator.builder();
+            KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((RangeIterator) plan.execute(executor));
+                    builder.add((KeyRangeIterator) plan.execute(executor));
                 return builder.build();
             }
             catch (Throwable t)
@@ -1177,13 +1176,13 @@ abstract public class Plan
         }
 
         @Override
-        protected RangeIterator execute(Executor executor)
+        protected KeyRangeIterator execute(Executor executor)
         {
-            RangeIterator.Builder builder = RangeIntersectionIterator.builder();
+            KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((RangeIterator) plan.execute(executor));
+                    builder.add((KeyRangeIterator) plan.execute(executor));
 
                 return builder.build();
             }
@@ -1281,7 +1280,7 @@ abstract public class Plan
         @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
-            RangeIterator sourceIterator = (RangeIterator) source.execute(executor);
+            KeyRangeIterator sourceIterator = (KeyRangeIterator) source.execute(executor);
             int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
             return executor.getTopKRows(sourceIterator, softLimit);
         }
@@ -1835,7 +1834,7 @@ abstract public class Plan
     {
         Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
         Iterator<? extends PrimaryKey> getTopKRows(Expression predicate, int softLimit);
-        Iterator<? extends PrimaryKey> getTopKRows(RangeIterator keys, int softLimit);
+        Iterator<? extends PrimaryKey> getTopKRows(KeyRangeIterator keys, int softLimit);
     }
 
     /**

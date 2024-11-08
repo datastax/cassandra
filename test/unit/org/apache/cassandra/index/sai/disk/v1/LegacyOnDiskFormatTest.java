@@ -134,7 +134,7 @@ public class LegacyOnDiskFormatTest
         IndexComponents.ForRead components = indexDescriptor.perIndexComponents(intContext);
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, pkFactory);
+        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext);
 
         assertEquals(1, metadatas.size());
         assertEquals(100, metadatas.get(0).numRows);
@@ -146,7 +146,12 @@ public class LegacyOnDiskFormatTest
         var perSSTableComponents = indexDescriptor.perSSTableComponents();
         PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.version().onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
 
+        long countFromFactory = primaryKeyMapFactory.count();
+
         PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+
+        long countFromMap = primaryKeyMap.count();
+        assertEquals(countFromFactory, countFromMap);
 
         PrimaryKey expected = pkFactory.createTokenOnly(Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(23)).getToken());
 
@@ -162,7 +167,7 @@ public class LegacyOnDiskFormatTest
 
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, pkFactory);
+        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext);
 
         BKDReader bkdReader = new BKDReader(intContext,
                                             components.get(IndexComponentType.KD_TREE).createFileHandle(),
@@ -183,7 +188,7 @@ public class LegacyOnDiskFormatTest
 
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        SegmentMetadata metadata = SegmentMetadata.load(source, pkFactory).get(0);
+        SegmentMetadata metadata = SegmentMetadata.load(source, textContext).get(0);
 
         long root = metadata.getIndexRoot(IndexComponentType.TERMS_DATA);
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;

@@ -19,43 +19,17 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
-import org.apache.cassandra.index.sai.SAIUtil;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-@RunWith(Parameterized.class)
-public class VectorCompactionTest extends VectorTester
+public class VectorCompactionTest extends VectorTester.Versioned
 {
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "{0}")
-    public static Collection<Object[]> data()
-    {
-        return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v}).collect(Collectors.toList());
-    }
-
-    @Before
-    @Override
-    public void setup() throws Throwable
-    {
-        super.setup();
-        SAIUtil.setLatestVersion(version);
-    }
-
     @Test
     public void testCompactionWithEnoughRowsForPQAndDeleteARow()
     {
@@ -163,7 +137,6 @@ public class VectorCompactionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
     }
 
     private void validateQueries()

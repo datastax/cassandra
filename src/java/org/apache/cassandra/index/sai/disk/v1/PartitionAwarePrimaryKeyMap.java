@@ -68,6 +68,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
         private final SSTableId<?> sstableId;
+        private final long count;
 
         private FileHandle token = null;
         private FileHandle offset = null;
@@ -85,6 +86,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                 NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(offsetsComponent));
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(tokensComponent));
 
+                count = tokensMeta.valueCount;
                 token = tokensComponent.createFileHandle();
                 offset = offsetsComponent.createFileHandle();
 
@@ -108,6 +110,12 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
             final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
 
             return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);
+        }
+
+        @Override
+        public long count()
+        {
+            return count;
         }
 
         @Override

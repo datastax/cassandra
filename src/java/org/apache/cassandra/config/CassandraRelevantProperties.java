@@ -508,6 +508,12 @@ public enum CassandraRelevantProperties
     SENSORS_FACTORY("cassandra.sensors_factory_class"),
 
     /**
+     * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
+     * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
+     */
+    CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
+
+    /**
      * If true, the coordinator will propagate request sensors via the native protocol custom payload bytes map.
      */
     REQUEST_SENSORS_VIA_NATIVE_PROTOCOL("cassandra.request_sensors_via_native_protocol", "false");

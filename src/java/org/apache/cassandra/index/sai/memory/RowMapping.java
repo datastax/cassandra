@@ -26,9 +26,9 @@ import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -102,7 +102,7 @@ public class RowMapping
         assert complete : "RowMapping is not built.";
 
         Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
-        return new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        return new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             @Override
             protected Pair<ByteComparable, IntArrayList> computeNext()

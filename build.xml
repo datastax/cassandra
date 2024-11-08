@@ -65,6 +65,7 @@
     <property name="benchmark.name" value=""/>
     <property name="test.anttasks.src" value="${test.dir}/anttasks"/>
     <property name="test.methods" value=""/>
+    <property name="test.anttasks.src" value="${test.dir}/anttasks"/>
     <property name="test.unit.src" value="${test.dir}/unit"/>
     <property name="test.long.src" value="${test.dir}/long"/>
     <property name="test.burn.src" value="${test.dir}/burn"/>
@@ -178,19 +179,22 @@
         <os family="windows" />
     </condition>
 
-    <!-- Check if all tests are being run or just one. If it's all tests don't spam the console with test output.
+    <!-- Check if all tests are being run or just one (check testclasslist target). If it's all tests don't spam the
+         console with test output.
          If it's an individual test print the output from the test under the assumption someone is debugging the test
          and wants to know what is going on without having to context switch to the log file that is generated.
          Debug level output still needs to be retrieved from the log file.  -->
-    <script language="javascript">
-        if (project.getProperty("cassandra.keepBriefBrief") == null)
-        {
-            if (project.getProperty("test.name").equals("*Test"))
-                project.setProperty("cassandra.keepBriefBrief", "true");
-            else
-                project.setProperty("cassandra.keepBriefBrief", "false");
-        }
-    </script>
+    <macrodef name="set-keepbrief-property">
+        <attribute name="test-name" />
+        <sequential>
+            <condition property="cassandra.keepBriefBrief" value="false" else="true">
+                <not>
+                    <equals arg1="@{test-name}" arg2="*Test"/>
+                </not>
+            </condition>
+        </sequential>
+    </macrodef>
+    <set-keepbrief-property test-name="${test.name}" />
 
     <condition property="java.version.8">
         <equals arg1="${ant.java.version}" arg2="1.8"/>
@@ -275,16 +279,9 @@
     </condition>
 
     <!-- needed to compile org.apache.cassandra.utils.JMXServerUtils -->
-    <condition property="jdk11-javac-exports" value="--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED" else="">
-        <not>
-            <equals arg1="${ant.java.version}" arg2="1.8"/>
-        </not>
-    </condition>
-    <condition property="jdk11-javadoc-exports" value="${jdk11-javac-exports} --frames" else="">
-        <not>
-            <equals arg1="${ant.java.version}" arg2="1.8"/>
-        </not>
-    </condition>
+    <!-- needed to compile org.apache.cassandra.distributed.impl.Instance-->
+    <!-- needed to compile org.apache.cassandra.utils.memory.BufferPool -->
+    <property name="jdk11plus-javac-exports" value="--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED --add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED"/>
 
     <condition property="build.java.11">
         <istrue value="${use.jdk11}"/>
@@ -326,7 +323,7 @@
         windowtitle="${ant.project.name} API" classpathref="cassandra.classpath"
         bottom="Copyright &amp;copy; 2009- The Apache Software Foundation; All changes to the original code are Copyright DataStax, Inc."
         useexternalfile="yes" encoding="UTF-8" failonerror="false"
-        maxmemory="1024M" additionalparam="${jdk11-javadoc-exports}">
+        maxmemory="1024M" additionalparam="${jdk11plus-javac-exports}">
         <filesets/>
       </javadoc>
       <fail message="javadoc failed">
@@ -436,9 +433,15 @@
 
     <target name="gen-cql3-grammar" depends="check-gen-cql3-grammar" unless="cql3current">
       <echo>Building Grammar ${build.src.antlr}/Cql.g  ...</echo>
+      <!-- TODO - On jdk21/2 POC branches, antlr crashed first time through, then worked 2nd. Forking it fixes this, and it
+      works also with the current branch and JDK11. We do the change in preparation to be able to compile on newer JDK versions.
+      We may want to further investigate why this happens. -->
       <java classname="org.antlr.Tool"
             classpathref="cql3-grammar.classpath"
-            failonerror="true">
+            failonerror="true"
+            fork="true"
+            outputproperty="antlr.output"
+            errorproperty="antlr.error">
          <arg value="-Xconversiontimeout" />
          <arg value="10000" />
          <arg value="${build.src.antlr}/Cql.g" />
@@ -706,7 +709,7 @@
           <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="9.8.0-5ea8bb4f21" />
           <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common" version="9.8.0-5ea8bb4f21" />
           <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs" version="9.8.0-5ea8bb4f21" />
-          <dependency groupId="io.github.jbellis" artifactId="jvector" version="3.0.1" />
+          <dependency groupId="io.github.jbellis" artifactId="jvector" version="3.0.2" />
           <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.14" scope="test"/>
 
           <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" scope="test">
@@ -771,6 +774,7 @@
                 artifactId="dse-db-parent"
                 version="${version}"
                 relativePath="${final.name}-parent.pom"/>
+
         <dependency groupId="junit" artifactId="junit"/>
         <dependency groupId="org.assertj" artifactId="assertj-core"/>
         <dependency groupId="commons-io" artifactId="commons-io"/>
@@ -782,6 +786,7 @@
         <dependency groupId="org.openjdk.jmh" artifactId="jmh-core"/>
         <dependency groupId="org.openjdk.jmh" artifactId="jmh-generator-annprocess"/>
         <dependency groupId="org.apache.ant" artifactId="ant-junit"/>
+
         <!-- adding this dependency is necessary for assertj. When updating assertj, need to also update the version of
              this that the new assertj's `assertj-parent-pom` depends on. -->
         <dependency groupId="org.junit" artifactId="junit-bom" version="5.10.1" type="pom"/>
@@ -957,7 +962,7 @@
             <src path="${build.src.java}"/>
             <src path="${build.src.gen-java}"/>
             <compilerarg value="-XDignore.symbol.file"/>
-            <compilerarg line="${jdk11-javac-exports}"/>
+            <compilerarg line="${jdk11plus-javac-exports}"/>
             <classpath>
                 <path refid="cassandra.classpath"/>
             </classpath>
@@ -1361,7 +1366,8 @@
         <pathelement location="${fqltool.build.classes}"/>
      </classpath>
      <compilerarg value="-XDignore.symbol.file"/>
-     <compilerarg line="${jdk11-javac-exports}"/>
+     <!-- needed to compile org.apache.cassandra.utils.memory.BufferPoolTest -->
+     <compilerarg line="${jdk11plus-javac-exports}"/>
      <src path="${test.anttasks.src}"/>
      <src path="${test.unit.src}"/>
      <src path="${test.long.src}"/>
@@ -1371,31 +1377,32 @@
      <src path="${test.distributed.src}"/>
     </javac>
 
-    <checktestnameshelper/>
-
     <!-- Non-java resources needed by the test suite -->
     <copy todir="${test.classes}">
       <fileset dir="${test.resources}"/>
     </copy>
   </target>
 
-  <macrodef name="checktestnameshelper">
-    <sequential>
-      <taskdef name="test-name-check_" classname="org.apache.cassandra.anttasks.TestNameCheckTask" classpath="${test.classes}">
-        <classpath>
-          <path refid="cassandra.classpath.test"/>
-          <path location="${fqltool.build.classes}"/>
-        </classpath>
-      </taskdef>
-      <test-name-check_/>
-    </sequential>
-  </macrodef>
+  <target name="_check-test-names">
+    <java taskname="check-test-names" fork="true" failonerror="yes" classname="org.apache.cassandra.anttasks.TestNameCheckTask" classpath="${test.classes}">
+      <classpath>
+        <path refid="cassandra.classpath" />
+        <pathelement location="${test.classes}"/>
+        <pathelement location="${fqltool.build.classes}" />
+        <fileset dir="${test.lib}">
+          <include name="**/*.jar" />
+        </fileset>
+      </classpath>
+      <jvmarg line="${java11-jvmargs}"/>
+    </java>
+  </target>
 
   <!-- Run tests separately and report errors after and generate a junit report -->
   <macrodef name="testhelper">
     <attribute name="testdelegate"/>
     <sequential>
-      <testhelper_ testdelegate="@{testdelegate}"/>
+        <taskdef name="testhelper_" classname="org.apache.cassandra.anttasks.TestHelper" classpath="${test.classes}"/>
+        <testhelper_ property="@{testdelegate}"/>
       <fail message="Some test(s) failed.">
         <condition>
             <and>
@@ -1412,21 +1419,6 @@
   <!-- Run a list of junit tasks but don't track errors or generate a report after
        If a test fails the testfailed property will be set. All the tests are run using the testdelegate
        macro that is specified as an attribute and they will be run sequentially in this ant process -->
-  <scriptdef name="testhelper_" language="javascript">
-    <attribute name="testdelegate"/>
-    <![CDATA[
-        sep = project.getProperty("path.separator");
-        all = project.getProperty("all-test-classes").split(sep);
-        var p = project.createTask('sequential');
-        for (i = 0; i < all.length; i++) {
-            if (all[i] == undefined) continue;
-            task = project.createTask( attributes.get("testdelegate") );
-            task.setDynamicAttribute( "test.file.list", "" + all[i]);
-            p.addTask(task);
-        }
-        p.perform();
-    ]]>
-  </scriptdef>
 
   <!-- Defines how to run a set of tests. If you change the defaults for attributes
        you should also update them in testmacro.,
@@ -2203,7 +2195,10 @@
       <echo file=".idea/compiler.xml"><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="JavacSettings">
-    <option name="ADDITIONAL_OPTIONS_STRING" value="--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED" />
+    <option name="ADDITIONAL_OPTIONS_STRING" value="--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
+                                                    --add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED
+                                                    --add-exports java.base/jdk.internal.ref=ALL-UNNAMED
+                                                    --add-exports java.base/sun.nio.ch=ALL-UNNAMED" />
   </component>
 </project>]]></echo>
   </target>
@@ -2248,7 +2243,24 @@
   </natures>
 </projectDescription>]]>
     </echo>
-	<echo file=".classpath"><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+    <path id="eclipse-project-libs-path">
+        <fileset dir="lib">
+            <include name="**/*.jar" />
+        </fileset>
+        <fileset dir="build/lib/jars">
+            <include name="**/*.jar" />
+        </fileset>
+        <fileset dir="build/test/lib/jars">
+            <include name="**/*.jar" />
+        </fileset>
+    </path>
+    <pathconvert property="eclipse-libs-list" refid="eclipse-project-libs-path" pathsep="${line.separator}">
+        <mapper>
+            <regexpmapper from="^(.*)$$" to='&lt;classpathentry kind="lib" path="\1\" \/&gt;'/>
+        </mapper>
+    </pathconvert>
+    <property name="eclipse-project-libs" refid="eclipse-project-libs-path"/>
+    <echo file=".classpath"><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
 <classpath>
   <classpathentry kind="src" path="src/java"/>
   <classpathentry kind="src" path="src/resources"/>
@@ -2266,51 +2278,16 @@
   <classpathentry kind="output" path="build/classes/eclipse"/>
   <classpathentry kind="lib" path="test/conf"/>
   <classpathentry kind="lib" path="${java.home}/../lib/tools.jar"/>
+  ${eclipse-libs-list}
+</classpath>
 ]]>
 	</echo>
-  	<path id="eclipse-project-libs-path">
-  	 <fileset dir="lib">
-  	    <include name="**/*.jar" />
-     </fileset>
- 	 <fileset dir="build/lib/jars">
-  	    <include name="**/*.jar" />
-  	 </fileset>
-     <fileset dir="build/test/lib/jars">
-        <include name="**/*.jar" />
-     </fileset>
-  	</path>
-  	<property name="eclipse-project-libs" refid="eclipse-project-libs-path"/>
-       <script language="javascript">
+    <taskdef name="echoeclipseprojectslibs" classname="org.apache.cassandra.anttasks.EchoEclipseProjectLibs" classpath="${test.classes}">
         <classpath>
             <path refid="cassandra.classpath"/>
             <path refid="cassandra.classpath.test"/>
         </classpath>
-        <![CDATA[
-        var File = java.io.File;
-  		var FilenameUtils = Packages.org.apache.commons.io.FilenameUtils;
-  		jars = project.getProperty("eclipse-project-libs").split(project.getProperty("path.separator"));
-
-  		cp = "";
-  	    for (i=0; i< jars.length; i++) {
-  	       srcjar = FilenameUtils.getBaseName(jars[i]) + '-sources.jar';
-           srcdir = FilenameUtils.concat(project.getProperty("build.test.dir"), 'sources');
-  		   srcfile = new File(FilenameUtils.concat(srcdir, srcjar));
-
-  		   cp += ' <classpathentry kind="lib" path="' + jars[i] + '"';
-  		   if (srcfile.exists()) {
-  		      cp += ' sourcepath="' + srcfile.getAbsolutePath() + '"';
-  		   }
-  		   cp += '/>\n';
-  		}
-
-  		cp += '</classpath>';
-
-  		echo = project.createTask("echo");
-  	    echo.setMessage(cp);
-  		echo.setFile(new File(".classpath"));
-  		echo.setAppend(true);
-  	    echo.perform();
-  	]]> </script>
+    </taskdef>
     <mkdir dir=".settings" />
   </target>
 

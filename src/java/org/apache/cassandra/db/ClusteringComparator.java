@@ -56,8 +56,15 @@ public class ClusteringComparator implements Comparator<Clusterable>
     private final Comparator<IndexInfo> indexReverseComparator;
     private final Comparator<Clusterable> reverseComparator;
 
-    private final Comparator<Row> rowComparator = (r1, r2) -> compare((ClusteringPrefix<?>) r1.clustering(),
-                                                                      (ClusteringPrefix<?>) r2.clustering());
+    private final Comparator<Row> rowComparator = new Comparator<>()
+    {
+        @Override
+        public int compare(Row r1, Row r2)
+        {
+            return ClusteringComparator.this.compare((ClusteringPrefix<?>) r1.clustering(),
+                           (ClusteringPrefix<?>) r2.clustering());
+        }
+    };
 
     public ClusteringComparator(AbstractType<?>... clusteringTypes)
     {
@@ -69,11 +76,34 @@ public class ClusteringComparator implements Comparator<Clusterable>
         // copy the list to ensure despatch is monomorphic
         this.clusteringTypes = ImmutableList.copyOf(clusteringTypes);
 
-        this.indexComparator = (o1, o2) -> ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.lastName,
-                                                                             (ClusteringPrefix<?>) o2.lastName);
-        this.indexReverseComparator = (o1, o2) -> ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.firstName,
-                                                                                    (ClusteringPrefix<?>) o2.firstName);
-        this.reverseComparator = (c1, c2) -> ClusteringComparator.this.compare(c2, c1);
+        this.indexComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(IndexInfo o1, IndexInfo o2)
+            {
+                return ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.lastName,
+                               (ClusteringPrefix<?>) o2.lastName);
+            }
+        };
+
+        this.indexReverseComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(IndexInfo o1, IndexInfo o2)
+            {
+                return ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.firstName,
+                               (ClusteringPrefix<?>) o2.firstName);
+            }
+        };
+
+        this.reverseComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(Clusterable o1, Clusterable o2)
+            {
+                return ClusteringComparator.this.compare(o2, o1);
+            }
+        };
     }
 
     /**

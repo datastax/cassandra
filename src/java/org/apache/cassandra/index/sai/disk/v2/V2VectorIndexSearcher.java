@@ -21,9 +21,7 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -58,13 +56,13 @@ import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.plan.Plan.CostCoefficients;
 import org.apache.cassandra.index.sai.utils.IntIntPairArray;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
@@ -135,7 +133,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public RangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
     {
         PostingList results = searchPosting(context, exp, keyRange, limit);
         return toPrimaryKeyIterator(results, context);
@@ -510,6 +508,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private IntIntPairArray flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
     {
         var segmentOrdinalPairs = new IntIntPairArray(keysInRange.size());
+        int lastSegmentRowId = -1;
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
         {
@@ -593,6 +592,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
                 // convert the global row id to segment row id and from segment row id to graph ordinal
                 int segmentRowId = metadata.toSegmentRowId(sstableRowId);
+                // This requirement is required by the ordinals view. There are cases where we have broken this
+                // requirement, and in order to make future debugging easier, we check here and throw an exception
+                // with additional detail.
+                if (segmentRowId <= lastSegmentRowId)
+                    throw new IllegalStateException("Row ids must ascend monotonically. Got " + segmentRowId + " after " + lastSegmentRowId
+                                                    + " for " + primaryKey + " on sstable " + primaryKeyMap.getSSTableId());
+                lastSegmentRowId = segmentRowId;
                 int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
                 if (ordinal >= 0)
                     segmentOrdinalPairs.add(segmentRowId, ordinal);

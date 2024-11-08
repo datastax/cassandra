@@ -46,7 +46,6 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
-import com.google.common.collect.Table;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -90,6 +89,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
 import org.awaitility.Awaitility;
@@ -296,7 +296,7 @@ public class SAITester extends CQLTester
         cfs.indexManager.executePreJoinTasksBlocking(true);
         if (wait)
         {
-            waitForIndexQueryable();
+            waitForTableIndexesQueryable();
         }
     }
 
@@ -326,44 +326,6 @@ public class SAITester extends CQLTester
             File file = loadDescriptor(sstable, cfs).perIndexComponents(indexContext).get(indexComponentType).file();
             corruptionType.corrupt(file);
         }
-    }
-
-    protected void waitForAssert(Runnable runnableAssert, long timeout, TimeUnit unit)
-    {
-        Awaitility.await().dontCatchUncaughtExceptions().atMost(timeout, unit).untilAsserted(runnableAssert::run);
-    }
-
-    protected void waitForAssert(Runnable assertion)
-    {
-        waitForAssert(() -> assertion.run(), ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-    }
-
-    protected boolean indexNeedsFullRebuild(String index)
-    {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        return cfs.indexManager.needsFullRebuild(index);
-    }
-
-    protected boolean isIndexQueryable()
-    {
-        return isIndexQueryable(KEYSPACE, currentTable());
-    }
-
-    protected boolean isIndexQueryable(String keyspace, String table)
-    {
-        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
-        for (Index index : cfs.indexManager.listIndexes())
-        {
-            if (!cfs.indexManager.isIndexQueryable(index))
-                return false;
-        }
-        return true;
-    }
-
-    protected void verifyInitialIndexFailed(String indexName)
-    {
-        // Verify that the initial index build fails...
-        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
     }
 
     protected boolean verifyChecksum(IndexContext context)
@@ -444,25 +406,6 @@ public class SAITester extends CQLTester
             throw new RuntimeException(e);
         }
         return metricValue;
-    }
-
-    public void waitForIndexQueryable()
-    {
-        waitForIndexQueryable(KEYSPACE, currentTable());
-    }
-
-    public void waitForIndexQueryable(int seconds)
-    {
-        waitForIndexQueryable(KEYSPACE, currentTable(), seconds);
-    }
-
-    public void waitForIndexQueryable(String keyspace, String table) {
-        waitForIndexQueryable(keyspace, table, 60);
-    }
-
-    public void waitForIndexQueryable(String keyspace, String table, int seconds)
-    {
-        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), seconds, TimeUnit.SECONDS);
     }
 
     protected void startCompaction() throws Throwable
@@ -903,21 +846,6 @@ public class SAITester extends CQLTester
     {
         String componentName = Version.latest().fileNameFormatter().format(indexComponentType, indexContext, 0);
         return indexFiles.stream().filter(c -> c.name().endsWith(componentName)).collect(Collectors.toSet());
-    }
-
-    protected static void setSegmentWriteBufferSpace(final int segmentSize) throws Exception
-    {
-        NamedMemoryLimiter limiter = (NamedMemoryLimiter) V1OnDiskFormat.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMITER").get(null);
-        Field limitBytes = limiter.getClass().getDeclaredField("limitBytes");
-        limitBytes.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
-        limitBytes.set(limiter, segmentSize);
-        limitBytes = V1OnDiskFormat.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMIT");
-        limitBytes.setAccessible(true);
-        modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
-        limitBytes.set(limiter, segmentSize);
     }
 
     /**

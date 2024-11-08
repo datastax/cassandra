@@ -36,10 +36,10 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.utils.LongIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.LongIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.mockito.Mockito;
 
 import static java.lang.Math.ceil;
@@ -356,7 +356,7 @@ public class PlanTest
         // because we're getting top of the rows already prefiltered by the index:
         Plan.Executor executor = Mockito.mock(Plan.Executor.class);
         Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
-        Mockito.verify(executor, Mockito.times(1)).getTopKRows((RangeIterator) Mockito.any(), Mockito.eq(limit));
+        Mockito.verify(executor, Mockito.times(1)).getTopKRows((KeyRangeIterator) Mockito.any(), Mockito.eq(limit));
     }
 
     @Test
@@ -500,7 +500,7 @@ public class PlanTest
         Plan.KeysIteration s3 = factory.indexScan(saiPred3, 1);
         Plan.KeysIteration plan = factory.union(Lists.newArrayList(factory.intersection(Lists.newArrayList(s1, s2)), s3));
 
-        Map<Expression, RangeIterator> iterators = new HashMap<>();
+        Map<Expression, KeyRangeIterator> iterators = new HashMap<>();
         iterators.put(saiPred1, new LongIterator(new long[] { 1L, 2L, 3L }));
         iterators.put(saiPred2, new LongIterator(new long[] { 1L, 2L, 5L }));
         iterators.put(saiPred3, new LongIterator(new long[] { 100L }));
@@ -520,13 +520,13 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<PrimaryKeyWithSortKey> getTopKRows(RangeIterator keys, int softLimit)
+            public Iterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator keys, int softLimit)
             {
                 throw new UnsupportedOperationException();
             }
         };
 
-        RangeIterator iterator = (RangeIterator) plan.execute(executor);
+        KeyRangeIterator iterator = (KeyRangeIterator) plan.execute(executor);
         assertEquals(LongIterator.convert(1L, 2L, 100L), LongIterator.convert(iterator));
     }
 
@@ -562,10 +562,10 @@ public class PlanTest
 
         String prettyStr = limit.toStringRecursive();
 
-        assertEquals("Limit 3 (rows: 3.0, cost/row: 3895.8, cost: 56001.1..67688.5)\n" +
-                     " └─ Filter pred1 < X AND pred2 < X AND pred4 < X (sel: 1.000000000) (rows: 3.0, cost/row: 3895.8, cost: 56001.1..67688.5)\n" +
-                     "     └─ Fetch (rows: 3.0, cost/row: 3895.8, cost: 56001.1..67688.5)\n" +
-                     "         └─ KeysSort (keys: 3.0, cost/key: 3792.4, cost: 56001.1..67378.2)\n" +
+        assertEquals("Limit 3 (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
+                     " └─ Filter pred1 < X AND pred2 < X AND pred4 < X (sel: 1.000000000) (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
+                     "     └─ Fetch (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
+                     "         └─ KeysSort (keys: 3.0, cost/key: 3792.4, cost: 44171.3..55548.4)\n" +
                      "             └─ Union (keys: 1999.0, cost/key: 14.8, cost: 13500.0..43001.3)\n" +
                      "                 ├─ Intersection (keys: 1000.0, cost/key: 29.4, cost: 9000.0..38401.3)\n" +
                      "                 │   ├─ NumericIndexScan of pred2_idx (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 0.1, cost: 4500.0..4700.0)\n" +
@@ -689,8 +689,8 @@ public class PlanTest
     public void replaceIntersectionAndAnnSortWithAnnScan()
     {
         // Similar like the previous test, but now with an intersection:
-        Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.1 * factory.tableMetrics.rows));
-        Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.2 * factory.tableMetrics.rows));
+        Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.5 * factory.tableMetrics.rows));
+        Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.1 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2));
         Plan.KeysIteration sort = factory.sort(intersection, ordering);
         Plan.RowsIteration fetch = factory.fetch(sort);
@@ -903,8 +903,8 @@ public class PlanTest
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.00001, 0.00001), List.of(2));
 
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 1.0, 1.0), List.of(0));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 1.0), List.of(0));
-        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 1.0), List.of(0));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 1.0), List.of(0, 1));
+        testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 1.0), List.of(0, 1));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 0.5), List.of(1));
         testIntersectionsUnderAnnSort(table1M, Expression.Op.RANGE, List.of(0.1, 0.1, 0.2), List.of(1));
 

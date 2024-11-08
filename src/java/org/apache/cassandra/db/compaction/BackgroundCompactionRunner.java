@@ -446,20 +446,26 @@ public class BackgroundCompactionRunner implements Runnable
     {
         t = Throwables.unwrapped(t);
 
-        // in case of no-space-left exception, check with disk error handler in JVMStabilityInspector
-        if (Throwables.isCausedBy(t, IOException.class) && t.toString().contains(NO_SPACE_LEFT_MESSAGE))
-        {
-            logger.error("Encounter no space left error on {}", cfs, t);
-            JVMStabilityInspector.inspectThrowable(t);
-        }
-        // FSDiskFullWriteErrors caught during compaction are expected to be recoverable, so we don't explicitly
+        // FSDiskFullWriteErrors is thrown when checking disk space before starting flush or compaction task. They
+        // are expected to be recoverable because we haven't actually hit No-Space-Left error yet, so we don't explicitly
         // trigger the disk failure policy because of them (see CASSANDRA-12385).
-        else if (t instanceof IOError && !(t instanceof FSDiskFullWriteError))
+        if (t instanceof IOError && !(t instanceof FSDiskFullWriteError))
         {
             logger.error("Potentially unrecoverable error during background compaction of table {}", cfs, t);
             // Strictly speaking it's also possible to hit a read-related IOError during compaction, although the
             // chances for that are much lower than the chances for write-related IOError. If we want to handle that,
             // we might have to rely on error message parsing...
+            t = t instanceof FSError ? t : new FSWriteError(t);
+            JVMStabilityInspector.inspectThrowable(t);
+        }
+        // No-Space-Left IO exception is thrown by JDK when disk has reached its capacity. The key difference between this
+        // and the earlier case with `FSDiskFullWriteError` is that here we have definitively run out of disk space, and
+        // no further writes can be performed until disk space is freed, potentially leading to data corruption or
+        // system instability if not handled properly. We must trigger the disk failure policy.
+        else if (Throwables.isCausedBy(t, IOException.class) && t.toString().contains(NO_SPACE_LEFT_MESSAGE))
+        {
+            logger.error("Encountered no space left error on {}", cfs, t);
+            // wrap it with FSWriteError so that JVMStabilityInspector can properly stop or die
             t = t instanceof FSError ? t : new FSWriteError(t);
             JVMStabilityInspector.inspectThrowable(t);
         }

@@ -256,6 +256,16 @@ public interface Memtable extends Comparable<Memtable>
      */
     TableMetadata metadata();
 
+    /**
+     * The {@link OpOrder} that guards reads from this memtable. This is used to ensure that the memtable does not corrupt any
+     * active reads because of other operations on it. Returns null if the memtable is not protected by an OpOrder
+     * (overridden by {@link AbstractAllocatorMemtable}).
+     */
+    default OpOrder readOrdering()
+    {
+        return null;
+    }
+
 
     // Memory usage tracking
 
@@ -288,6 +298,16 @@ public interface Memtable extends Comparable<Memtable>
     }
 
     /**
+     * Estimates the total number of rows stored in the memtable.
+     * It is optimized for speed, not for accuracy.
+     */
+    static long estimateRowCount(Memtable memtable)
+    {
+        long rowSize = memtable.getEstimatedAverageRowSize();
+        return rowSize > 0 ? memtable.getLiveDataSize() / rowSize : 0;
+    }
+
+    /**
      * Returns the amount of on-heap memory that has been allocated for this memtable but is not yet used.
      * This is not counted in the memory usage to have a better flushing decision behaviour -- we do not want to flush
      * immediately after allocating a new buffer but when we have actually used the space provided.
@@ -298,7 +318,6 @@ public interface Memtable extends Comparable<Memtable>
     {
         return 0;
     }
-
 
     class MemoryUsage
     {

@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.Partition;
@@ -37,6 +36,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
  * Manage compaction options.
@@ -252,18 +252,30 @@ public class CompactionController extends AbstractCompactionController
             }
         }
 
-        for (Memtable memtable : memtables)
+        OpOrder.Group readGroup = null;
+        try
         {
-            long memtableMinTimestamp = memtable.getMinTimestamp();
-            if (memtableMinTimestamp >= minTimestampSeen || memtableMinTimestamp == Memtable.NO_MIN_TIMESTAMP)
-                continue;
-
-            Partition partition = memtable.getPartition(key);
-            if (partition != null)
+            for (Memtable memtable : memtables)
             {
-                minTimestampSeen = Math.min(minTimestampSeen, partition.stats().minTimestamp);
-                hasTimestamp = true;
+                long memtableMinTimestamp = memtable.getMinTimestamp();
+                if (memtableMinTimestamp >= minTimestampSeen || memtableMinTimestamp == Memtable.NO_MIN_TIMESTAMP)
+                    continue;
+
+                if (readGroup == null)
+                    readGroup = memtable.readOrdering().start(); // the read order is the same for all memtables of a CFS
+
+                Partition partition = memtable.getPartition(key);
+                if (partition != null)
+                {
+                    minTimestampSeen = Math.min(minTimestampSeen, partition.stats().minTimestamp);
+                    hasTimestamp = true;
+                }
             }
+        }
+        finally
+        {
+            if (readGroup != null)
+                readGroup.close();
         }
 
         if (!hasTimestamp)

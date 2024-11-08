@@ -32,7 +32,7 @@ import java.util.stream.IntStream;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -126,7 +126,7 @@ public class MergePostingListBenchmark
         var lists = new ArrayList<PostingList>();
         for (int[] postings : splitPostingLists)
         {
-            lists.add(new ArrayPostingList(postings));
+            lists.add(new IntArrayPostingList(postings));
         }
         merge = MergePostingList.merge(lists);
     }

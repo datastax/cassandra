@@ -285,6 +285,7 @@ public class Config
     /**
      * @deprecated since 4.0 This value was near useless, and we're not using it anymore
      */
+    @Deprecated
     public double commitlog_sync_batch_window_in_ms = Double.NaN;
     public double commitlog_sync_group_window_in_ms = Double.NaN;
     public int commitlog_sync_period_in_ms;

@@ -29,9 +29,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 
@@ -52,7 +52,7 @@ import org.apache.cassandra.utils.Throwables;
  */
 
 @NotThreadSafe
-public class PostingListRangeIterator extends RangeIterator
+public class PostingListRangeIterator extends KeyRangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 

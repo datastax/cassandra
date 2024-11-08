@@ -37,10 +37,10 @@ import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -190,7 +190,7 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(startTermInclusive);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(endTermExclusive);
 
-        final AbstractIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private int currentTerm = startTermInclusive;
             private int currentRowId = 0;

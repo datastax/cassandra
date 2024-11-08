@@ -24,9 +24,8 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.SSTableContext;
-import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -37,7 +36,7 @@ import org.apache.cassandra.schema.TableMetadata;
  * <p>
  * The keys are returned in token-clustering order.
  */
-public final class PrimaryKeyMapIterator extends RangeIterator
+public final class PrimaryKeyMapIterator extends KeyRangeIterator
 {
     // KeyFilter controls which keys we want to return from the iterator.
     // This is a hack to make this iterator work correctly on schemas with static columns.
@@ -66,7 +65,7 @@ public final class PrimaryKeyMapIterator extends RangeIterator
         this.currentRowId = startRowId;
     }
 
-    public static RangeIterator create(SSTableContext ctx, AbstractBounds<PartitionPosition> keyRange) throws IOException
+    public static KeyRangeIterator create(SSTableContext ctx, AbstractBounds<PartitionPosition> keyRange) throws IOException
     {
         KeyFilter filter;
         TableMetadata metadata = ctx.sstable().metadata();
@@ -78,14 +77,14 @@ public final class PrimaryKeyMapIterator extends RangeIterator
             filter = KeyFilter.ALL;
 
         if (perSSTableComponents.isEmpty())
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
 
         PrimaryKeyMap keys = ctx.primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         long count = keys.count();
         if (keys.count() == 0)
         {
             keys.close();
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
         PrimaryKey.Factory pkFactory = ctx.primaryKeyFactory();

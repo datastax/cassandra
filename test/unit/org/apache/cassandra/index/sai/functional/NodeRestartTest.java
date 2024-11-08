@@ -66,7 +66,7 @@ public class NodeRestartTest extends SAITester
         // We should have completed no actual SSTable validations:
         assertValidationCount(0, 0);
 
-        assertFalse(isIndexQueryable());
+        assertFalse(areAllTableIndexesQueryable());
     }
 
     // We don't allow the node to actually join the ring before a valid index is ready to accept queries.
@@ -115,7 +115,6 @@ public class NodeRestartTest extends SAITester
 
         IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
         IndexContext literalIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2")), UTF8Type.instance);
-        waitForIndexQueryable();
         verifyIndexFiles(numericIndexContext,literalIndexContext, 1, 1);
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertNumRows(1, "SELECT * FROM %%s WHERE v2 = '0'");
@@ -127,8 +126,6 @@ public class NodeRestartTest extends SAITester
 
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertNumRows(1, "SELECT * FROM %%s WHERE v2 = '0'");
-
-        waitForIndexQueryable();
 
         // index components are included after restart
         verifyIndexComponentsIncludedInSSTable();
@@ -176,7 +173,6 @@ public class NodeRestartTest extends SAITester
         flush();
 
         IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
-        waitForIndexQueryable();
         verifyIndexFiles(numericIndexContext, null, 1, 0);
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(0, 0);

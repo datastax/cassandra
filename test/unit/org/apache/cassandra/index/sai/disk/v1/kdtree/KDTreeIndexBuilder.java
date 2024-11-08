@@ -54,11 +54,12 @@ import org.apache.cassandra.index.sai.disk.v1.KDTreeIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadataBuilder;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -119,14 +120,14 @@ public class KDTreeIndexBuilder
 
     private final IndexDescriptor indexDescriptor;
     private final AbstractType<?> type;
-    private final AbstractIterator<Pair<ByteComparable, IntArrayList>> terms;
+    private final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> terms;
     private final int size;
     private final int minSegmentRowId;
     private final int maxSegmentRowId;
 
     public KDTreeIndexBuilder(IndexDescriptor indexDescriptor,
                               AbstractType<?> type,
-                              AbstractIterator<Pair<ByteComparable, IntArrayList>> terms,
+                              AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> terms,
                               int size,
                               int minSegmentRowId,
                               int maxSegmentRowId)
@@ -154,17 +155,15 @@ public class KDTreeIndexBuilder
                                                                 size,
                                                                 IndexWriterConfig.defaultConfig("test")))
         {
-            final SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(pointValues);
-            metadata = new SegmentMetadata(0,
-                                           size,
-                                           minSegmentRowId,
-                                           maxSegmentRowId,
-                                           // min/max is unused for now
-                                           SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
-                                           SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()),
-                                           UTF8Type.instance.fromString("c"),
-                                           UTF8Type.instance.fromString("d"),
-                                           indexMetas);
+            SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, components);
+            final SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(pointValues));
+            metadataBuilder.setComponentsMetadata(indexMetas);
+            metadataBuilder.setRowIdRange(minSegmentRowId, maxSegmentRowId);
+            metadataBuilder.setTermRange(UTF8Type.instance.fromString("c"),
+                                         UTF8Type.instance.fromString("d"));
+            metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
+                                        SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()));
+            metadata = metadataBuilder.build();
         }
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(components))
@@ -273,9 +272,9 @@ public class KDTreeIndexBuilder
      * Returns inverted index where each posting list contains exactly one element equal to the terms ordinal number +
      * given offset.
      */
-    public static AbstractIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
+    public static AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
     {
-        return new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        return new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private long currentTerm = 0;
             private int currentSegmentRowId = segmentRowIdOffset;

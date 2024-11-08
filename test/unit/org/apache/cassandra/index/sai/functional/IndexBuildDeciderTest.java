@@ -85,7 +85,7 @@ public class IndexBuildDeciderTest extends SAITester
     }
 
     @Test
-    public void testNoInitialBuildWithSAI() throws Throwable
+    public void testNoInitialBuildWithSAI()
     {
         createTable(CREATE_TABLE_TEMPLATE);
 
@@ -104,10 +104,10 @@ public class IndexBuildDeciderTest extends SAITester
 
         // create index: it's not queryable because IndexBuildDeciderWithoutInitialBuild skipped the initial build and
         // didn't consider the index queryable because there was already one sstable
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         Awaitility.await("Index is not queryable")
                   .pollDelay(5, TimeUnit.SECONDS)
-                  .until(() -> !isIndexQueryable());
+                  .until(() -> !areAllTableIndexesQueryable());
         assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v1>=0")).isInstanceOf(ReadFailureException.class);
 
         StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore());

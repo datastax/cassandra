@@ -43,15 +43,15 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.iterators.KeyRangeLazyIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.utils.LazyRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
-import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
@@ -82,7 +82,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
-        this.boundaries = indexContext.owner().localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(TrieMemtable.SHARD_COUNT);
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.indexContext = indexContext;
         this.validator = indexContext.getValidator();
@@ -193,23 +193,23 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public RangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
 
-        RangeConcatIterator.Builder builder = RangeConcatIterator.builder(endShard - startShard + 1);
+        KeyRangeConcatIterator.Builder builder = KeyRangeConcatIterator.builder(endShard - startShard + 1);
 
         // We want to run the search on the first shard only to get the estimate on the number of matching keys.
         // But we don't want to run the search on the other shards until the user polls more items from the
         // result iterator. Therefore, the first shard search is special - we run the search eagerly,
         // but the rest of the iterators are create lazily in the loop below.
         assert rangeIndexes[startShard] != null;
-        RangeIterator firstIterator = rangeIndexes[startShard].search(expression, keyRange);
+        KeyRangeIterator firstIterator = rangeIndexes[startShard].search(expression, keyRange);
         var keyCount = firstIterator.getMaxKeys();
         builder.add(firstIterator);
 
-        // Prepare the search on the remaining shards, but wrap them in LazyRangeIterator, so they don't run
+        // Prepare the search on the remaining shards, but wrap them in KeyRangeLazyIterator, so they don't run
         // until the user exhaust the results given from the first shard.
         for (int shard  = startShard + 1; shard <= endShard; ++shard)
         {
@@ -218,10 +218,10 @@ public class TrieMemtableIndex implements MemtableIndex
             var shardRange = boundaries.getBounds(shard);
             var minKey = index.indexContext.keyFactory().createTokenOnly(shardRange.left.getToken());
             var maxKey = index.indexContext.keyFactory().createTokenOnly(shardRange.right.getToken());
-            // Assume all shards are the same size, but we must not pass 0 because of some checks in RangeIterator
+            // Assume all shards are the same size, but we must not pass 0 because of some checks in KeyRangeIterator
             // that assume 0 means empty iterator and could fail.
             var count = Math.max(1, keyCount);
-            builder.add(new LazyRangeIterator(() -> index.search(expression, keyRange), minKey, maxKey, count));
+            builder.add(new KeyRangeLazyIterator(() -> index.search(expression, keyRange), minKey, maxKey, count));
         }
 
         return builder.build();
@@ -246,6 +246,14 @@ public class TrieMemtableIndex implements MemtableIndex
         }
 
         return iterators;
+    }
+
+    @Override
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        int startShard = boundaries.getShardForToken(keyRange.left.getToken());
+        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+        return rangeIndexes[startShard].estimateMatchingRowsCount(expression, keyRange) * (endShard - startShard + 1);
     }
 
     @Override
@@ -360,5 +368,11 @@ public class TrieMemtableIndex implements MemtableIndex
             Arrays.fill(rangeIndexEntriesToMerge, null);
             term = null;
         }
+    }
+
+    @VisibleForTesting
+    public MemoryIndex[] getRangeIndexes()
+    {
+        return rangeIndexes;
     }
 }

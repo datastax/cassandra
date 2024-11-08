@@ -247,6 +247,8 @@ public abstract class MemoryUtil
         return unsafe.getObject(instance, DIRECT_BYTE_BUFFER_ATTACHMENT_OFFSET);
     }
 
+    // Note: If encryption is used, the Object attached must implement sun.nio.ch.DirectBuffer
+    // @see CASSANDRA-18180
     public static void setAttachment(ByteBuffer instance, Object next)
     {
         assert instance.getClass() == DIRECT_BYTE_BUFFER_CLASS;

@@ -68,6 +68,7 @@ target/
 *.pyc
 *~
 *.bak
+*.log
 *.sw[o,p]
 *.tmp
 .DS_Store

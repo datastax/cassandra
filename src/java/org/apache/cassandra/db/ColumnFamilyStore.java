@@ -1357,7 +1357,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 reclaim(memtable);
                 return Collections.emptyList();
             }
-
+            long start = System.nanoTime();
             List<Future<SSTableMultiWriter>> futures = new ArrayList<>();
             long totalBytesOnDisk = 0;
             long maxBytesOnDisk = 0;
@@ -1445,7 +1445,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
                 Throwable accumulate = null;
                 for (SSTableMultiWriter writer : flushResults)
+                {
                     accumulate = writer.commit(accumulate);
+                    metric.flushSizeOnDisk().update(writer.getOnDiskBytesWritten());
+                }
 
                 maybeFail(txn.commit(accumulate));
 
@@ -1464,6 +1467,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         }
                     }
                 }
+                metric.memTableFlushCompleted(System.nanoTime() - start);
 
                 cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }

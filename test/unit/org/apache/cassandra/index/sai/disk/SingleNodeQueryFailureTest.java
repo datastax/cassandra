@@ -35,7 +35,6 @@ import org.apache.cassandra.utils.Throwables;
 import static org.apache.cassandra.inject.ActionBuilder.newActionBuilder;
 import static org.apache.cassandra.inject.Expression.quote;
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assume.assumeTrue;
 
@@ -89,8 +88,6 @@ public class SingleNodeQueryFailureTest extends SAITester
 
     private void testFailedMultiIndexesQuery(String name, Class<?> targetClass, String targetMethod) throws Throwable
     {
-        String table = "test_mixed_index_query_" + name;
-
         Injection injection = Injections.newCustom(name)
                                         .add(newInvokePoint().onClass(targetClass).onMethod(targetMethod))
                                         .add(newActionBuilder().actions().doThrow(RuntimeException.class, quote("Injected failure!")))
@@ -99,7 +96,6 @@ public class SingleNodeQueryFailureTest extends SAITester
         createTable(CREATE_TABLE_TEMPLATE);
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, v1, v2) VALUES ('1', 0, '0')");
         flush();

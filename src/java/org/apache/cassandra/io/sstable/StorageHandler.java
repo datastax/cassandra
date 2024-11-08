@@ -69,7 +69,9 @@ public abstract class StorageHandler
         /** When region status changed */
         REGION_CHANGED(false),
         /** When index is built */
-        INDEX_BUILT(false);
+        INDEX_BUILT(false),
+        /** New node restarted with existing on disk data*/
+        REPLACE(true);
 
         /** When this is true, a reload operation will reload all sstables even those that could
          * have been flushed by other nodes. */

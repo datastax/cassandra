@@ -27,12 +27,11 @@ import static org.junit.Assert.assertEquals;
 public class BooleanTypeTest extends SAITester
 {
     @Test
-    public void test() throws Throwable
+    public void test()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val boolean)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('0', false)");
         execute("INSERT INTO %s (id, val) VALUES ('1', true)");

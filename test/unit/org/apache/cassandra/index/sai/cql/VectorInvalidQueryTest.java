@@ -87,11 +87,10 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void cannotQueryWrongNumberOfDimensions() throws Throwable
+    public void cannotQueryWrongNumberOfDimensions()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -104,42 +103,39 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void testMultiVectorOrderingsNotAllowed() throws Throwable
+    public void testMultiVectorOrderingsNotAllowed()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val1 vector<float, 3>, val2 vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         assertInvalidMessage("Cannot specify more than one ordering column when using SAI indexes",
                              "SELECT * FROM %s ORDER BY val1 ann of [2.5, 3.5, 4.5], val2 ann of [2.1, 3.2, 4.0] LIMIT 2");
     }
 
     @Test
-    public void testDescendingVectorOrderingIsNotAllowed() throws Throwable
+    public void testDescendingVectorOrderingIsNotAllowed()
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         assertInvalidMessage("Descending ANN ordering is not supported",
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] DESC LIMIT 2");
     }
 
     @Test
-    public void testVectorOrderingIsNotAllowedWithClusteringOrdering() throws Throwable
+    public void testVectorOrderingIsNotAllowedWithClusteringOrdering()
     {
         createTable("CREATE TABLE %s (pk int, ck int, val vector<float, 3>, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         assertInvalidMessage("Cannot combine clustering column ordering with non-clustering column ordering",
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5], ck ASC LIMIT 2");
     }
 
     @Test
-    public void testVectorOrderingIsNotAllowedWithoutIndex() throws Throwable
+    public void testVectorOrderingIsNotAllowedWithoutIndex()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
 
@@ -151,11 +147,10 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void testVectorEqualityIsNotAllowed() throws Throwable
+    public void testVectorEqualityIsNotAllowed()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         assertInvalidMessage(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE,
                              "SELECT * FROM %s WHERE val = [2.5, 3.5, 4.5] LIMIT 1");
@@ -165,11 +160,10 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void annOrderingMustHaveLimit() throws Throwable
+    public void annOrderingMustHaveLimit()
     {
         createTable("CREATE TABLE %s (pk int, ck int, val vector<float, 3>, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         assertInvalidMessage("SAI based ORDER BY clause requires a LIMIT that is not greater than 1000. LIMIT was NO LIMIT",
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5]");
@@ -177,7 +171,7 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void testInvalidColumnNameWithAnn() throws Throwable
+    public void testInvalidColumnNameWithAnn()
     {
         String table = createTable(KEYSPACE, "CREATE TABLE %s (k int, c int, v int, primary key (k, c))");
         assertInvalidMessage(String.format("Undefined column name bad_col in table %s", KEYSPACE + "." + table),
@@ -185,7 +179,7 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void disallowZeroVectorsWithCosineSimilarity() throws Throwable
+    public void disallowZeroVectorsWithCosineSimilarity()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'cosine'}");
@@ -205,7 +199,7 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void disallowZeroVectorsWithDefaultSimilarity() throws Throwable
+    public void disallowZeroVectorsWithDefaultSimilarity()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
@@ -223,11 +217,10 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
-    public void disallowClusteringColumnPredicateWithoutSupportingIndex() throws Throwable
+    public void disallowClusteringColumnPredicateWithoutSupportingIndex()
     {
         createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk, num))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         execute("INSERT INTO %s (pk, num, v) VALUES (3, 1, [1,1])");
         execute("INSERT INTO %s (pk, num, v) VALUES (3, 4, [1,4])");
         flush();
@@ -244,7 +237,6 @@ public class VectorInvalidQueryTest extends SAITester
 
         // Cover the alternative code path
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertRows(execute("SELECT num FROM %s WHERE pk=3 AND num > 3 ORDER BY v ANN OF [1,1] LIMIT 1"), row(4));
     }
 

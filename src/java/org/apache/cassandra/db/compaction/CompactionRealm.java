@@ -64,6 +64,15 @@ public interface CompactionRealm
     Environment makeUCSEnvironment();
 
     /**
+     * @return a {@link ShardManager} for this specific compaction realm. If null is returned, UCS will build its own
+     * shard manager.
+     */
+    default ShardManager buildShardManager()
+    {
+        return null;
+    }
+
+    /**
      * @return the schema metadata of this table.
      */
     default TableMetadata metadata()

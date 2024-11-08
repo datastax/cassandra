@@ -78,6 +78,12 @@ public class V2OnDiskFormat extends V1OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean hasTermsHistogram()
+        {
+            return false;
+        }
     };
 
     protected V2OnDiskFormat()
