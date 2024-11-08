@@ -48,26 +48,18 @@ public class AnalyzerEqOperatorSupport
                                                            "Possible values are %s but found ",
                                                            OPTION, Arrays.toString(Value.values()));
 
-    public static final String DEPRECATION_WARNING =
-    String.format("Future versions will remove support for '=' on analyzed indexes preventing this ambiguity. " +
-                  "If you want to forbid the use of '=' on analyzed indexes now and prevent this warning, " +
-                  "please use '%s':'%s' in the index options.",
-                  AnalyzerEqOperatorSupport.OPTION,
-                  AnalyzerEqOperatorSupport.Value.UNSUPPORTED.toString().toLowerCase());
-
     public static final String EQ_RESTRICTION_ON_ANALYZED_WARNING =
-    "Columns [%s] are restricted by '=' and have analyzed indexes [%s] able to process those restrictions. " +
-    "Analyzed indexes might process '=' restrictions in a way that is inconsistent with non-indexed queries. " +
-    "While '=' is still supported on analyzed indexes for backwards compatibility, " +
-    "it is recommended to use the ':' operator instead to prevent the ambiguity. " +
-    DEPRECATION_WARNING;
+    String.format("Columns [%%s] are restricted by '=' and have analyzed indexes [%%s] able to process those restrictions. " +
+                  "Analyzed indexes might process '=' restrictions in a way that is inconsistent with non-indexed queries. " +
+                  "While '=' is still supported on analyzed indexes for backwards compatibility, " +
+                  "it is recommended to use the ':' operator instead to prevent the ambiguity. " +
+                  "Future versions will remove support for '=' on analyzed indexes. " +
+                  "If you want to forbid the use of '=' on analyzed indexes now, " +
+                  "please use '%s':'%s' in the index options.",
+                  OPTION, Value.UNSUPPORTED.toString().toLowerCase());
 
     public static final String LWT_CONDITION_ON_ANALYZED_WARNING =
-    "Index analyzers not applied to LWT conditions on columns [%s]. " +
-    "The LWT conditions use the '=' operator on columns supported by analyzed indexes " +
-    "that process the '=' operator same as the ':' operator in SELECT queries for backwards compatibility. " +
-    "This means that '=' has different meaning in LWT writes (not analyzed) than in SELECT queries (analyzed). " +
-    DEPRECATION_WARNING;
+    "Index analyzers not applied to LWT conditions on columns [%s].";
 
     public enum Value
     {
