@@ -121,7 +121,7 @@ public abstract class AbstractSensorsTest extends TestBaseImpl
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)"));
             for (String prepQuery : this.prepQueries)
                 cluster.coordinator(1).execute(withKeyspace(prepQuery), ConsistencyLevel.ALL);
-            // work around serializability of @Parameterized.Parameter by providing locally scoped variables
+            // work around serializability of @Parameterized.Parameter by providing a locally scoped variable
             String query = this.testQuery;
             // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
             cluster.get(1).acceptsOnInstance(

@@ -58,7 +58,7 @@ public class ResponseVerbHandler implements IVerbHandler
         long latencyNanos = approxTime.now() - callbackInfo.createdAtNanos;
         Tracing.trace("Processing response from {}", message.from());
 
-        RequestCallback cb = callbackInfo.callback;
+        RequestCallback<?> cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
             cb.onFailure(message.from(), (RequestFailureReason) message.payload);
@@ -71,7 +71,7 @@ public class ResponseVerbHandler implements IVerbHandler
         }
     }
 
-    private void trackReplicaSensors(RequestCallbacks.CallbackInfo callbackInfo, Message message)
+    private void trackReplicaSensors(RequestCallbacks.CallbackInfo callbackInfo, Message<?> message)
     {
         RequestSensors sensors = callbackInfo.callback.getRequestSensors();
         if (sensors == null)
@@ -93,14 +93,14 @@ public class ResponseVerbHandler implements IVerbHandler
         }
         else if (callbackInfo.callback instanceof ReadCallback)
         {
-            ReadCallback readCallback = (ReadCallback) callbackInfo.callback;
+            ReadCallback<?, ?> readCallback = (ReadCallback<?, ?>) callbackInfo.callback;
             Context context = Context.from(readCallback.command());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
         }
         // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo
         else if (callbackInfo.callback instanceof AbstractPaxosCallback)
         {
-            AbstractPaxosCallback paxosCallback = (AbstractPaxosCallback) callbackInfo.callback;
+            AbstractPaxosCallback<?> paxosCallback = (AbstractPaxosCallback<?>) callbackInfo.callback;
             Context context = Context.from(paxosCallback.getMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);

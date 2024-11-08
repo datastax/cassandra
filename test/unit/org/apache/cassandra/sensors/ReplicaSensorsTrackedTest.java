@@ -125,7 +125,7 @@ public class ReplicaSensorsTrackedTest
         final DigestResolver<EndpointsForToken, ReplicaPlan.ForTokenRead> resolver = new DigestResolver<>(command, plan, startNanos, QueryInfoTracker.ReadTracker.NOOP);
         final ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> callback = new ReadCallback<>(resolver, command, plan, startNanos);
 
-        // mimic a sensor to be used in replica repsponse
+        // mimic a sensor to be used in replica response
         Sensor mockingReadSensor = new mockingSensor(context, Type.READ_BYTES);
         mockingReadSensor.increment(11.0);
 
@@ -149,7 +149,7 @@ public class ReplicaSensorsTrackedTest
         // init callback
         AbstractWriteResponseHandler<?> callback = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM);
 
-        // mimic a sensor to be used in replica repsponse
+        // mimic a sensor to be used in replica response
         Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingWriteSensor.increment(13.0);
 
@@ -180,7 +180,7 @@ public class ReplicaSensorsTrackedTest
         AbstractPaxosCallback<?> proposeCallback = new ProposeCallback(cfs.metadata(), targets.size(), targets.size(), false, ConsistencyLevel.LOCAL_QUORUM, 0);
         AbstractWriteResponseHandler<?> commitCallback = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM);
 
-        // mimic CAS sensors to be used in replica repsponse
+        // mimic CAS sensors to be used in replica responses
         // Prepare
         Sensor mockingPrepareWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingPrepareWriteSensor.increment(13.0);
@@ -189,7 +189,7 @@ public class ReplicaSensorsTrackedTest
         Pair<Sensor, Sensor> prepareWriterSensors = Pair.create(acutalWriteSensor, mockingPrepareWriteSensor);
         Pair<Sensor, Sensor> prepareReadSensors = Pair.create(acutalReadSensor, mockingPrepareReadSensor);
 
-        // Propse
+        // Propose
         Sensor mockingProposeWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingProposeWriteSensor.increment(15.0);
         Sensor mockingProposeReadSensor = new mockingSensor(context, Type.READ_BYTES);
@@ -337,12 +337,12 @@ public class ReplicaSensorsTrackedTest
         return builder.build();
     }
 
-    private static AbstractWriteResponseHandler createWriteResponseHandler(ConsistencyLevel cl, ConsistencyLevel ideal)
+    private static AbstractWriteResponseHandler<?> createWriteResponseHandler(ConsistencyLevel cl, ConsistencyLevel ideal)
     {
         return createWriteResponseHandler(cl, ideal, System.nanoTime());
     }
 
-    private static AbstractWriteResponseHandler createWriteResponseHandler(ConsistencyLevel cl, ConsistencyLevel ideal, long queryStartTime)
+    private static AbstractWriteResponseHandler<?> createWriteResponseHandler(ConsistencyLevel cl, ConsistencyLevel ideal, long queryStartTime)
     {
         return ks.getReplicationStrategy().getWriteResponseHandler(ReplicaPlans.forWrite(ks, cl, targets, pending, Predicates.alwaysTrue(), ReplicaPlans.writeAll),
                                                                    null, WriteType.SIMPLE, queryStartTime, ideal);
