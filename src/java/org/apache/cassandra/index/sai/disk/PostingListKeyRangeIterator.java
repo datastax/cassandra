@@ -29,9 +29,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 
@@ -52,7 +52,7 @@ import org.apache.cassandra.utils.Throwables;
  */
 
 @NotThreadSafe
-public class PostingListRangeIterator extends RangeIterator
+public class PostingListKeyRangeIterator extends KeyRangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -71,12 +71,12 @@ public class PostingListRangeIterator extends RangeIterator
     private long lastSegmentRowId = -1;
 
     /**
-     * Create a direct PostingListRangeIterator where the underlying PostingList is materialised
+     * Create a direct PostingListKeyRangeIterator where the underlying PostingList is materialised
      * immediately so the posting list size can be used.
      */
-    public PostingListRangeIterator(IndexContext indexContext,
-                                    PrimaryKeyMap primaryKeyMap,
-                                    IndexSearcherContext searcherContext)
+    public PostingListKeyRangeIterator(IndexContext indexContext,
+                                       PrimaryKeyMap primaryKeyMap,
+                                       IndexSearcherContext searcherContext)
     {
         super(searcherContext.minimumKey, searcherContext.maximumKey, searcherContext.count());
 
@@ -142,8 +142,8 @@ public class PostingListRangeIterator extends RangeIterator
             FileUtils.closeQuietly(postingList, primaryKeyMap);
         }
         else {
-            logger.warn("PostingListRangeIterator is already closed",
-                        new IllegalStateException("PostingListRangeIterator is already closed"));
+            logger.warn("PostingListKeyRangeIterator is already closed",
+                        new IllegalStateException("PostingListKeyRangeIterator is already closed"));
         }
 
     }
