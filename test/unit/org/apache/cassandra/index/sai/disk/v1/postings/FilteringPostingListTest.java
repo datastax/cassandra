@@ -23,7 +23,7 @@ import java.util.Arrays;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.lucene.util.FixedBitSet;
 
@@ -108,20 +108,20 @@ public class FilteringPostingListTest extends SaiRandomizedTest
 
     private void verifyFilteringWithoutAdvance(int[] postingsArray, int from, int toExclusive) throws IOException
     {
-        ArrayPostingList delegate = new ArrayPostingList(postingsArray);
+        IntArrayPostingList delegate = new IntArrayPostingList(postingsArray);
 
         FixedBitSet filter = new FixedBitSet((int)delegate.size());
         filter.set(from, toExclusive);
 
         FilteringPostingList filteringPostings = new FilteringPostingList(filter, delegate);
 
-        ArrayPostingList expected = new ArrayPostingList(Arrays.copyOfRange(postingsArray, from, toExclusive));
+        IntArrayPostingList expected = new IntArrayPostingList(Arrays.copyOfRange(postingsArray, from, toExclusive));
         assertPostingListEquals(expected, filteringPostings);
     }
 
     private void verifyFilteringWithAdvance(int[] postingsArray, int from, int toExclusive, int target) throws IOException
     {
-        ArrayPostingList delegate = new ArrayPostingList(postingsArray);
+        IntArrayPostingList delegate = new IntArrayPostingList(postingsArray);
 
         FixedBitSet filter = new FixedBitSet((int)delegate.size());
         filter.set(from, toExclusive);
@@ -154,7 +154,7 @@ public class FilteringPostingListTest extends SaiRandomizedTest
             }
         }
 
-        ArrayPostingList expected = new ArrayPostingList(postingsArray);
+        IntArrayPostingList expected = new IntArrayPostingList(postingsArray);
         expected.advance(target);
 
         // Advance to the first actual match...

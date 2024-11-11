@@ -53,9 +53,9 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.FileUtils;
@@ -134,7 +134,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // thread this through.
                 queryContext.view = queryView;
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
-                assert !(keysIterator instanceof RangeIterator);
+                assert !(keysIterator instanceof KeyRangeIterator);
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
                 var result = new ScoreOrderedResultRetriever(queryView.view, scoredKeysIterator, filterTree, executionController);
                 return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
@@ -143,8 +143,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         else
         {
             Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
-            assert keysIterator instanceof RangeIterator;
-            return new ResultRetriever((RangeIterator) keysIterator, filterTree, executionController);
+            assert keysIterator instanceof KeyRangeIterator;
+            return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
         }
     }
 
@@ -168,14 +168,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> currentKeyRange;
 
-        private final RangeIterator operation;
+        private final KeyRangeIterator operation;
         private final FilterTree filterTree;
         private final ReadExecutionController executionController;
         private final PrimaryKey.Factory keyFactory;
 
         private PrimaryKey lastKey;
 
-        private ResultRetriever(RangeIterator operation,
+        private ResultRetriever(KeyRangeIterator operation,
                                 FilterTree filterTree,
                                 ReadExecutionController executionController)
         {

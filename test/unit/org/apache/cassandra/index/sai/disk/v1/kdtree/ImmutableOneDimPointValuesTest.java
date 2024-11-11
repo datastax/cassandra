@@ -28,7 +28,7 @@ import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
@@ -109,7 +109,7 @@ public class ImmutableOneDimPointValuesTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(from);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(to);
 
-        final AbstractIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private int currentTerm = from;
 

@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.util.Arrays;
 import java.util.Set;
@@ -23,9 +23,11 @@ import java.util.stream.Collectors;
 
 import org.junit.Assert;
 
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.utils.Pair;
 
-public class AbstractRangeIteratorTest extends SaiRandomizedTest
+public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 {
     protected long[] arr(long... longArray)
     {
@@ -37,49 +39,49 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
         return Arrays.stream(intArray).mapToLong(i -> i).toArray();
     }
 
-    final RangeIterator buildIntersection(RangeIterator... ranges)
+    final KeyRangeIterator buildIntersection(KeyRangeIterator... ranges)
     {
-        return RangeIntersectionIterator.<PrimaryKey>builder().add(Arrays.asList(ranges)).build();
+        return KeyRangeIntersectionIterator.<PrimaryKey>builder().add(Arrays.asList(ranges)).build();
     }
 
-    final RangeIterator buildSelectiveIntersection(int limit, RangeIterator... ranges)
+    final KeyRangeIterator buildSelectiveIntersection(int limit, KeyRangeIterator... ranges)
     {
-        return RangeIntersectionIterator.<PrimaryKey>builder(limit).add(Arrays.asList(ranges)).build();
+        return KeyRangeIntersectionIterator.<PrimaryKey>builder(limit).add(Arrays.asList(ranges)).build();
     }
 
-    final RangeIterator buildIntersection(long[]... ranges)
+    final KeyRangeIterator buildIntersection(long[]... ranges)
     {
         return buildIntersection(toRangeIterator(ranges));
     }
 
-    final RangeIterator buildSelectiveIntersection(int limit, long[]... ranges)
+    final KeyRangeIterator buildSelectiveIntersection(int limit, long[]... ranges)
     {
         return buildSelectiveIntersection(limit, toRangeIterator(ranges));
     }
 
-    static RangeIterator buildUnion(RangeIterator... ranges)
+    static KeyRangeIterator buildUnion(KeyRangeIterator... ranges)
     {
-        return RangeUnionIterator.<PrimaryKey>builder().add(Arrays.asList(ranges)).build();
+        return KeyRangeUnionIterator.<PrimaryKey>builder().add(Arrays.asList(ranges)).build();
     }
 
-    static RangeIterator buildUnion(long[]... ranges)
+    static KeyRangeIterator buildUnion(long[]... ranges)
     {
         return buildUnion(toRangeIterator(ranges));
     }
 
-    static RangeIterator buildConcat(RangeIterator... ranges)
+    static KeyRangeIterator buildConcat(KeyRangeIterator... ranges)
     {
-        return RangeConcatIterator.builder(ranges.length).add(Arrays.asList(ranges)).build();
+        return KeyRangeConcatIterator.builder(ranges.length).add(Arrays.asList(ranges)).build();
     }
 
-    static RangeIterator buildConcat(long[]... ranges)
+    static KeyRangeIterator buildConcat(long[]... ranges)
     {
         return buildConcat(toRangeIterator(ranges));
     }
 
-    private static RangeIterator[] toRangeIterator(long[]... ranges)
+    private static KeyRangeIterator[] toRangeIterator(long[]... ranges)
     {
-        return Arrays.stream(ranges).map(AbstractRangeIteratorTest::build).toArray(RangeIterator[]::new);
+        return Arrays.stream(ranges).map(AbstractKeyRangeIteratorTest::build).toArray(KeyRangeIterator[]::new);
     }
 
     protected static LongIterator build(long... tokens)
@@ -87,10 +89,10 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
         return new LongIterator(tokens);
     }
 
-    protected RangeIterator build(RangeIterator.Builder.IteratorType type, long[] tokensA, long[] tokensB)
+    protected KeyRangeIterator build(KeyRangeIterator.Builder.IteratorType type, long[] tokensA, long[] tokensB)
     {
-        RangeIterator rangeA = new LongIterator(tokensA);
-        RangeIterator rangeB = new LongIterator(tokensB);
+        KeyRangeIterator rangeA = new LongIterator(tokensA);
+        KeyRangeIterator rangeB = new LongIterator(tokensB);
 
         switch (type)
         {
@@ -105,7 +107,7 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
         }
     }
 
-    static void validateWithSkipping(RangeIterator ri, long[] totalOrdering)
+    static void validateWithSkipping(KeyRangeIterator ri, long[] totalOrdering)
     {
         int count = 0;
         while (ri.hasNext())
@@ -142,17 +144,17 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
      * @return a random {Concat,Intersection, Union} iterator, and a long[] of the elements in the iterator.
      *         elements will range from 0..1024.
      */
-    static Pair<RangeIterator, long[]> createRandomIterator()
+    static Pair<KeyRangeIterator, long[]> createRandomIterator()
     {
         var n = randomIntBetween(0, 3);
         switch (n)
         {
             case 0:
-                return RangeConcatIteratorTest.createRandom();
+                return KeyRangeConcatIteratorTest.createRandom();
             case 1:
-                return RangeIntersectionIteratorTest.createRandom(nextInt(1, 16));
+                return KeyRangeIntersectionIteratorTest.createRandom(nextInt(1, 16));
             case 2:
-                return RangeUnionIteratorTest.createRandom(nextInt(1, 16));
+                return KeyRangeUnionIteratorTest.createRandom(nextInt(1, 16));
             default:
                 throw new AssertionError();
         }
