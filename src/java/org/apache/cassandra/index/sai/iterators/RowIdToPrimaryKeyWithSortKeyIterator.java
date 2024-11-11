@@ -16,11 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
