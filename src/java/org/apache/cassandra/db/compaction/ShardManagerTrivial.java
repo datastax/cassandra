@@ -51,15 +51,6 @@ public class ShardManagerTrivial implements ShardManager
     }
 
     @Override
-    public double calculateCombinedDensity(Collection<? extends CompactionSSTable> sstables, long approximatePartitionCount)
-    {
-        double totalSize = 0;
-        for (CompactionSSTable sstable : sstables)
-            totalSize += sstable.onDiskLength();
-        return totalSize;
-    }
-
-    @Override
     public double density(long onDiskLength, PartitionPosition min, PartitionPosition max, long approximatePartitionCount)
     {
         return onDiskLength;
