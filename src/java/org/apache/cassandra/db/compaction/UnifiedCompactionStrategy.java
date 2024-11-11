@@ -90,6 +90,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
                                                                                                 .replace("\\d", "[0-9]");
 
+    /// Special level definition for major compactions.
+    static final Level LEVEL_MAJOR = new Level(-1, 0, 0, 0, 1, 0, Double.POSITIVE_INFINITY);
+
     private final Controller controller;
 
     private volatile ArenaSelector currentArenaSelector;
@@ -195,44 +198,66 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return CompactionTasks.create(tasks);
     }
 
+    public synchronized Collection<CompactionAggregate.UnifiedAggregate> getMaximalAggregates(int permittedParallelism)
+    {
+        maybeUpdateSelector();
+        // The aggregates are split by repair status and disk, as well as in non-overlapping sections to enable some
+        // parallelism and efficient use of extra space. The result will be split across shards according to its density.
+        // Depending on the parallelism, the operation may require up to 100% extra space to complete.
+        List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
+
+        for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
+        {
+            // If possible, we want to issue separate compactions for non-overlapping sets of sstables, to allow
+            // for smaller extra space requirements. However, if the sharding configuration has changed, a major
+            // compaction should combine non-overlapping sets if they are split on a boundary that is no longer
+            // in effect.
+            List<Set<CompactionSSTable>> groups =
+            getShardManager().splitSSTablesInShards(arena.sstables,
+                                                    makeShardingStats(arena.sstables).shardCountForDensity,
+                                                    (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
+
+            // Now combine all of these groups that share an sstable so that we have valid independent transactions.
+            groups = combineSetsWithCommonElement(groups);
+            for (var group : groups)
+            {
+                aggregates.add(CompactionAggregate.createUnified(group,
+                                                                 Overlaps.maxOverlap(group,
+                                                                                      UnifiedCompactionStrategy::startsAfter,
+                                                                                      CompactionSSTable.firstKeyComparator,
+                                                                                      CompactionSSTable.lastKeyComparator),
+                                                                 CompactionPick.create(LEVEL_MAJOR.index, group),
+                                                                 Collections.emptyList(),
+                                                                 arena,
+                                                                 LEVEL_MAJOR));
+            }
+        }
+        return aggregates;
+    }
+
     @Override
     public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
-        maybeUpdateSelector();
-        // The tasks are split by repair status and disk, as well as in non-overlapping sections to enable some
-        // parallelism and use of extra space. The result will be split across shards according to its density.
-        // Depending on the parallelism, the operation may require up to 100% extra space to complete.
-        List<AbstractCompactionTask> tasks = new ArrayList<>();
         if (permittedParallelism <= 0)
             permittedParallelism = Integer.MAX_VALUE;
 
+        // The tasks are split by repair status and disk, as well as in non-overlapping sections to enable some
+        // parallelism and efficient use of extra space. The result will be split across shards according to its density.
+        // Depending on the parallelism, the operation may require up to 100% extra space to complete.
+        List<AbstractCompactionTask> tasks = new ArrayList<>();
         try
         {
-            for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
+            for (var aggregate : getMaximalAggregates(permittedParallelism))
             {
-                // If possible, we want to issue separate compactions for non-overlapping sets of sstables, to allow
-                // for smaller extra space requirements. However, if the sharding configuration has changed, a major
-                // compaction should combine non-overlapping sets if they are split on a boundary that is no longer
-                // in effect.
-
-                // Select desired splitting of the sstables. If we are resharding, according to the sharding boundaries
-                // suitable for the size of the data. Otherwise, start with the overlap groups.
-                List<Set<CompactionSSTable>> groups =
-                    getShardManager().splitSSTablesInShards(arena.sstables,
-                                                            makeShardingStats(arena.sstables).shardCountForDensity,
-                                                            (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
-
-                // Now combine all of these groups that share an sstable so that we have valid independent transactions.
-                groups = combineSetsWithCommonElement(groups);
-
-                for (Collection<CompactionSSTable> set : groups)
+                LifecycleTransaction txn = realm.tryModify(aggregate.getSelected().sstables(),
+                                                           OperationType.COMPACTION,
+                                                           aggregate.getSelected().id());
+                if (txn != null)
                 {
-                    LifecycleTransaction txn = realm.tryModify(set, OperationType.COMPACTION);
-                    // Further split each of these into up to permittedParallelism tasks to run in parallel.
-                    if (txn != null)
-                        createAndAddTasks(gcBefore, txn, makeShardingStats(txn), permittedParallelism, tasks);
-                    // we ignore splitOutput (always split according to the strategy's sharding) and do not need isMaximal
+                    backgroundCompactions.setSubmitted(this, txn.opId(), aggregate);
+                    createAndAddTasks(gcBefore, txn, getShardingStats(aggregate), permittedParallelism, tasks);
                 }
+                // we ignore splitOutput (always split according to the strategy's sharding) and do not need isMaximal
             }
 
             // If we have more arenas/non-overlapping sets than the permitted parallelism, we will try to run all the
@@ -244,34 +269,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             throw rejectTasks(tasks, t);
         }
-    }
-
-    /**
-     * Split the given set of sstables into non-overlapping sets that split on boundaries that apply for the current
-     * sharding configuration.
-     */
-    public List<Set<CompactionSSTable>> splitInNonOverlappingShardSets(List<CompactionSSTable> sstables)
-    {
-        var outputShards = getShardManager().splitSSTablesInShards(sstables, makeShardingStats(sstables).shardCountForDensity,
-                                                                   (sstableShard, shardRange) -> new HashSet<>(sstableShard));
-        return combineSetsWithCommonElement(outputShards);
-    }
-
-    /**
-     * Utility method to split a list of sstables into non-overlapping sets. Used by CNDB.
-     *
-     * @param sstables A list of items to distribute in overlap sets. This is assumed to be a transient list and the
-     *                 method may modify or consume it. It is assumed that the start and end positions of an item are
-     *                 ordered, and the items are non-empty.
-     * @return list of non-overlapping sets of sstables
-     */
-    public static List<Set<CompactionSSTable>> splitInNonOverlappingSets(List<CompactionSSTable> sstables)
-    {
-        List<Set<CompactionSSTable>> overlapSets = Overlaps.constructOverlapSets(sstables,
-                                                                                 UnifiedCompactionStrategy::startsAfter,
-                                                                                 CompactionSSTable.firstKeyComparator,
-                                                                                 CompactionSSTable.lastKeyComparator);
-        return combineSetsWithCommonElement(overlapSets);
     }
 
     /**
