@@ -53,7 +53,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.KDTreeIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -119,14 +119,14 @@ public class KDTreeIndexBuilder
 
     private final IndexDescriptor indexDescriptor;
     private final AbstractType<?> type;
-    private final AbstractIterator<Pair<ByteComparable, IntArrayList>> terms;
+    private final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> terms;
     private final int size;
     private final int minSegmentRowId;
     private final int maxSegmentRowId;
 
     public KDTreeIndexBuilder(IndexDescriptor indexDescriptor,
                               AbstractType<?> type,
-                              AbstractIterator<Pair<ByteComparable, IntArrayList>> terms,
+                              AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> terms,
                               int size,
                               int minSegmentRowId,
                               int maxSegmentRowId)
@@ -273,9 +273,9 @@ public class KDTreeIndexBuilder
      * Returns inverted index where each posting list contains exactly one element equal to the terms ordinal number +
      * given offset.
      */
-    public static AbstractIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
+    public static AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
     {
-        return new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        return new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private long currentTerm = 0;
             private int currentSegmentRowId = segmentRowIdOffset;
