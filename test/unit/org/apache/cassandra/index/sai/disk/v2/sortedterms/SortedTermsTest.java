@@ -32,9 +32,10 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
@@ -42,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -50,34 +52,34 @@ import org.apache.lucene.store.IndexInput;
 
 public class SortedTermsTest extends SaiRandomizedTest
 {
+
+    public static final ByteComparable.Version VERSION = TypeUtil.BYTE_COMPARABLE_VERSION;
+
     @Test
     public void testLexicographicException() throws Exception
     {
         IndexDescriptor indexDescriptor = newIndexDescriptor();
-        try (MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META)))
+        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
+        try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
-                                                                        indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
-            IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
-            IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
+            try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
-                                                                  bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
             {
                 ByteBuffer buffer = Int32Type.instance.decompose(99999);
-                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
                 byte[] bytes1 = ByteSourceInverse.readBytes(byteSource);
 
-                writer.add(ByteComparable.fixedLength(bytes1));
+                writer.add(ByteComparable.preencoded(VERSION, bytes1));
 
                 buffer = Int32Type.instance.decompose(444);
-                byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
                 byte[] bytes2 = ByteSourceInverse.readBytes(byteSource);
 
-                assertThrows(IllegalArgumentException.class, () -> writer.add(ByteComparable.fixedLength(bytes2)));
+                assertThrows(IllegalArgumentException.class, () -> writer.add(ByteComparable.preencoded(VERSION, bytes2)));
             }
         }
     }
@@ -99,18 +101,15 @@ public class SortedTermsTest extends SaiRandomizedTest
 
         primaryKeys.sort(PrimaryKey::compareTo);
 
-        try (MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META)))
+        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
+        try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
-            IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
-            IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
-                                                                        indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
-            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
+            try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
-                                                                  bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
             {
                 primaryKeys.forEach(primaryKey -> {
                     try
@@ -124,12 +123,12 @@ public class SortedTermsTest extends SaiRandomizedTest
                 });
             }
         }
-        assertTrue(validateComponent(indexDescriptor, IndexComponent.PRIMARY_KEY_TRIE, true));
-        assertTrue(validateComponent(indexDescriptor, IndexComponent.PRIMARY_KEY_TRIE, false));
-        assertTrue(validateComponent(indexDescriptor, IndexComponent.PRIMARY_KEY_BLOCKS, true));
-        assertTrue(validateComponent(indexDescriptor, IndexComponent.PRIMARY_KEY_BLOCKS, false));
-        assertTrue(validateComponent(indexDescriptor, IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, true));
-        assertTrue(validateComponent(indexDescriptor, IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, false));
+        assertTrue(validateComponent(components, IndexComponentType.PRIMARY_KEY_TRIE, true));
+        assertTrue(validateComponent(components, IndexComponentType.PRIMARY_KEY_TRIE, false));
+        assertTrue(validateComponent(components, IndexComponentType.PRIMARY_KEY_BLOCKS, true));
+        assertTrue(validateComponent(components, IndexComponentType.PRIMARY_KEY_BLOCKS, false));
+        assertTrue(validateComponent(components, IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS, true));
+        assertTrue(validateComponent(components, IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS, false));
     }
 
     @Test
@@ -147,7 +146,7 @@ public class SortedTermsTest extends SaiRandomizedTest
             {
                 try (SortedTermsReader.Cursor cursor = reader.openCursor())
                 {
-                    long pointId = cursor.ceiling(ByteComparable.fixedLength(terms.get(x)));
+                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(x)));
                     assertEquals(x, pointId);
                 }
             }
@@ -160,7 +159,7 @@ public class SortedTermsTest extends SaiRandomizedTest
             {
                 try (SortedTermsReader.Cursor cursor = reader.openCursor())
                 {
-                    long pointId = cursor.ceiling(ByteComparable.fixedLength(terms.get(x)));
+                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(x)));
                     assertEquals(x, pointId);
                 }
             }
@@ -175,7 +174,7 @@ public class SortedTermsTest extends SaiRandomizedTest
 
                 try (SortedTermsReader.Cursor cursor = reader.openCursor())
                 {
-                    long pointId = cursor.ceiling(ByteComparable.fixedLength(terms.get(target)));
+                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(target)));
                     assertEquals(target, pointId);
                 }
             }
@@ -258,7 +257,7 @@ public class SortedTermsTest extends SaiRandomizedTest
             {
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
                 assertArrayEquals(terms.get(x), bytes);
 
                 x++;
@@ -283,11 +282,11 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             assertTrue(cursor.advance());
             assertTrue(cursor.advance());
-            String term1 = cursor.term().byteComparableAsString(ByteComparable.Version.OSS41);
+            String term1 = cursor.term().byteComparableAsString(VERSION);
             cursor.reset();
             assertTrue(cursor.advance());
             assertTrue(cursor.advance());
-            String term2 = cursor.term().byteComparableAsString(ByteComparable.Version.OSS41);
+            String term2 = cursor.term().byteComparableAsString(VERSION);
             assertEquals(term1, term2);
             assertEquals(1, cursor.pointId());
         });
@@ -309,7 +308,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(x);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
                 assertArrayEquals(terms.get(x), bytes);
             }
         });
@@ -322,7 +321,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(x);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
                 assertArrayEquals(terms.get(x), bytes);
             }
         });
@@ -336,7 +335,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(target);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
                 assertArrayEquals(terms.get(target), bytes);
             }
         });
@@ -359,46 +358,41 @@ public class SortedTermsTest extends SaiRandomizedTest
 
     private void writeTerms(IndexDescriptor indexDescriptor, List<byte[]> terms) throws IOException
     {
-        try (MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META)))
+        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
+        try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
-            IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
-            IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
-                                                                        indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
-            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
+            try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
-                                                                  bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
             {
                 for (int x = 0; x < 1000 * 4; x++)
                 {
                     ByteBuffer buffer = Int32Type.instance.decompose(x);
-                    ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                    ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
                     byte[] bytes = ByteSourceInverse.readBytes(byteSource);
                     terms.add(bytes);
 
-                    writer.add(ByteComparable.fixedLength(bytes));
+                    writer.add(ByteComparable.preencoded(VERSION, bytes));
                 }
             }
         }
+        components.markComplete();
     }
 
     private void writeTerms(IndexDescriptor indexDescriptor, List<ByteSource> termsMinPrefix, List<ByteSource> termsMaxPrefix, int numPerPrefix, boolean matchesData) throws IOException
     {
-        try (MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META)))
+        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
+        try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
-            IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
-            IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
-                                                                        indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
-            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
+            try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
-                                                                  bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
             {
                 for (int x = 0; x < 1000 ; x++)
                 {
@@ -413,18 +407,19 @@ public class SortedTermsTest extends SaiRandomizedTest
                 }
             }
         }
+        components.markComplete();
     }
 
     private ByteSource intByteSource(int value)
     {
         ByteBuffer buffer = Int32Type.instance.decompose(value);
-        return Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+        return Int32Type.instance.asComparableBytes(buffer, VERSION);
     }
 
     private ByteSource utfByteSource(String value)
     {
         ByteBuffer buffer = UTF8Type.instance.decompose(value);
-        return UTF8Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+        return UTF8Type.instance.asComparableBytes(buffer, VERSION);
     }
 
     @FunctionalInterface
@@ -435,12 +430,15 @@ public class SortedTermsTest extends SaiRandomizedTest
     private void withSortedTermsCursor(IndexDescriptor indexDescriptor,
                                        ThrowingConsumer<SortedTermsReader.Cursor> testCode) throws IOException
     {
-        MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
-        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS)));
-        try (FileHandle trieHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
-             FileHandle termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
-             FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))
+        IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
+        MetadataSource metadataSource = MetadataSource.loadMetadata(components);
+        IndexComponent.ForRead blocksComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCKS);
+        IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
+        NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent.fileNamePart()));
+        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(blocksComponent.fileNamePart()));
+        try (FileHandle trieHandle = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
+             FileHandle termsData = blocksComponent.createFileHandle();
+             FileHandle blockOffsets = blockOffsetsComponent.createFileHandle())
         {
             SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
             try (SortedTermsReader.Cursor cursor = reader.openCursor())
@@ -453,21 +451,24 @@ public class SortedTermsTest extends SaiRandomizedTest
     private void withSortedTermsReader(IndexDescriptor indexDescriptor,
                                        ThrowingConsumer<SortedTermsReader> testCode) throws IOException
     {
-        MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
-        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS)));
-        try (FileHandle trieHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
-             FileHandle termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
-             FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))
+        IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
+        MetadataSource metadataSource = MetadataSource.loadMetadata(components);
+        IndexComponent.ForRead blocksComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCKS);
+        IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
+        NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent.fileNamePart()));
+        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(blocksComponent.fileNamePart()));
+        try (FileHandle trieHandle = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
+             FileHandle termsData = blocksComponent.createFileHandle();
+             FileHandle blockOffsets = blockOffsetsComponent.createFileHandle())
         {
             SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
             testCode.accept(reader);
         }
     }
 
-    private boolean validateComponent(IndexDescriptor indexDescriptor, IndexComponent indexComponent, boolean checksum)
+    private boolean validateComponent(IndexComponents.ForRead components, IndexComponentType indexComponentType, boolean checksum)
     {
-        try (IndexInput input = indexDescriptor.openPerSSTableInput(indexComponent))
+        try (IndexInput input = components.get(indexComponentType).openInput())
         {
             if (checksum)
                 SAICodecUtils.validateChecksum(input);

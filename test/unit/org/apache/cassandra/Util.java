@@ -443,7 +443,7 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
+    public static List<Partition> getAllUnfiltered(ReadCommand command)
     {
         try (ReadExecutionController controller = command.executionController())
         {
@@ -451,9 +451,9 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
+    public static List<Partition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
     {
-        List<ImmutableBTreePartition> results = new ArrayList<>();
+        List<Partition> results = new ArrayList<>();
         try (UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
             while (iterator.hasNext())
@@ -526,7 +526,7 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
         try (ReadExecutionController controller = cmd.executionController())
         {
@@ -534,7 +534,7 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
     {
         try (UnfilteredPartitionIterator iterator = cmd.executeLocally(controller))
         {
@@ -1238,6 +1238,11 @@ public class Util
         Preconditions.checkArgument(path.toPath().getNameCount() >= components);
         Path relative = path.toPath().subpath(path.toPath().getNameCount() - components, path.toPath().getNameCount());
         return new File(targetBasePath.toPath().resolve(relative));
+    }
+
+    public static void flush(ColumnFamilyStore cfs)
+    {
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
     }
 
     public static void assertSSTableIds(SSTableId v1, SSTableId v2, IntFunction<Boolean> predicate)

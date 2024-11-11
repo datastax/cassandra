@@ -20,9 +20,9 @@ package org.apache.cassandra.index.sai.disk;
 import java.nio.ByteBuffer;
 import java.util.NoSuchElementException;
 
-import org.apache.cassandra.db.marshal.AbstractType;
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.ByteBlockPool;
 import org.apache.lucene.util.BytesRef;
@@ -35,29 +35,42 @@ import org.apache.lucene.util.Counter;
  */
 public class RAMStringIndexer
 {
-    private final AbstractType<?> termComparator;
+    @VisibleForTesting
+    public static int MAX_BLOCK_BYTE_POOL_SIZE = Integer.MAX_VALUE;
     private final BytesRefHash termsHash;
     private final RAMPostingSlices slices;
-    private final Counter bytesUsed;
-    
+    // counters need to be separate so that we can trigger flushes if either ByteBlockPool hits maximum size
+    private final Counter termsBytesUsed;
+    private final Counter slicesBytesUsed;
+
     private int rowCount = 0;
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
-    public RAMStringIndexer(AbstractType<?> termComparator)
+    public RAMStringIndexer()
     {
-        this.termComparator = termComparator;
-        bytesUsed = Counter.newCounter();
+        termsBytesUsed = Counter.newCounter();
+        slicesBytesUsed = Counter.newCounter();
 
-        ByteBlockPool termsPool = new ByteBlockPool(new ByteBlockPool.DirectTrackingAllocator(bytesUsed));
+        ByteBlockPool termsPool = new ByteBlockPool(new ByteBlockPool.DirectTrackingAllocator(termsBytesUsed));
 
         termsHash = new BytesRefHash(termsPool);
 
-        slices = new RAMPostingSlices(bytesUsed);
+        slices = new RAMPostingSlices(slicesBytesUsed);
     }
 
     public long estimatedBytesUsed()
     {
-        return bytesUsed.get();
+        return termsBytesUsed.get() + slicesBytesUsed.get();
+    }
+
+    public boolean requiresFlush()
+    {
+        // ByteBlockPool can't handle more than Integer.MAX_VALUE bytes. These are allocated in fixed-size chunks,
+        // and additions are guaranteed to be smaller than the chunks. This means that the last chunk allocation will
+        // be triggered by an addition, and the rest of the space in the final chunk will be wasted, as the bytesUsed
+        // counters track block allocation, not the size of additions. This means that we can't pass this check and then
+        // fail to add a term.
+        return termsBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE || slicesBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE;
     }
 
     public boolean isEmpty()
@@ -69,7 +82,7 @@ public class RAMStringIndexer
      * EXPENSIVE OPERATION due to sorting the terms, only call once.
      */
     // TODO: assert or throw and exception if getTermsWithPostings is called > 1
-    public TermsIterator getTermsWithPostings()
+    public TermsIterator getTermsWithPostings(ByteBuffer minTerm, ByteBuffer maxTerm, ByteComparable.Version byteComparableVersion)
     {
         final int[] sortedTermIDs = termsHash.sort();
 
@@ -84,19 +97,13 @@ public class RAMStringIndexer
             @Override
             public ByteBuffer getMinTerm()
             {
-                BytesRef term = new BytesRef();
-                int minTermID = sortedTermIDs[0];
-                termsHash.get(minTermID, term);
-                return ByteBuffer.wrap(term.bytes, term.offset, term.length);
+                return minTerm;
             }
 
             @Override
             public ByteBuffer getMaxTerm()
             {
-                BytesRef term = new BytesRef();
-                int maxTermID = sortedTermIDs[valueCount-1];
-                termsHash.get(maxTermID, term);
-                return ByteBuffer.wrap(term.bytes, term.offset, term.length);
+                return maxTerm;
             }
 
             public void close() {}
@@ -127,7 +134,8 @@ public class RAMStringIndexer
 
             private ByteComparable asByteComparable(byte[] bytes, int offset, int length)
             {
-                return v -> ByteSource.fixedLength(bytes, offset, length);
+                // The bytes were encoded when they were inserted into the termsHash.
+                return ByteComparable.preencoded(byteComparableVersion, bytes, offset, length);
             }
         };
     }

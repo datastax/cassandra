@@ -116,13 +116,13 @@ public class TriggerExecutorTest
 
         List<PartitionUpdate> mutatedCFs = new ArrayList<>(tmutations.get(0).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        Row row = mutatedCFs.get(0).iterator().next();
+        Row row = mutatedCFs.get(0).rowIterator().next();
         assertEquals(bytes("k1v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
         assertEquals(bytes("trigger"), row.getCell(metadata.getColumn(bytes("c2"))).value());
 
         mutatedCFs = new ArrayList<>(tmutations.get(1).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        row = mutatedCFs.get(0).iterator().next();
+        row = mutatedCFs.get(0).rowIterator().next();
         assertEquals(bytes("k2v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
         assertEquals(bytes("trigger"), row.getCell(metadata.getColumn(bytes("c2"))).value());
     }
@@ -142,13 +142,13 @@ public class TriggerExecutorTest
 
         List<PartitionUpdate> mutatedCFs = new ArrayList<>(tmutations.get(0).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        Row row = mutatedCFs.get(0).iterator().next();
+        Row row = mutatedCFs.get(0).rowIterator().next();
         assertEquals(bytes("k1v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
         assertNull(row.getCell(metadata.getColumn(bytes("c2"))));
 
         mutatedCFs = new ArrayList<>(tmutations.get(1).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        row = mutatedCFs.get(0).iterator().next();
+        row = mutatedCFs.get(0).rowIterator().next();
         assertEquals(bytes("k2v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
         assertEquals(bytes("trigger"), row.getCell(metadata.getColumn(bytes("c2"))).value());
     }
@@ -172,13 +172,13 @@ public class TriggerExecutorTest
         {
             if (update.metadata().name.equals("cf1"))
             {
-                Row row = update.iterator().next();
+                Row row = update.rowIterator().next();
                 assertEquals(bytes("k1v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
                 assertNull(row.getCell(metadata.getColumn(bytes("c2"))));
             }
             else
             {
-                Row row = update.iterator().next();
+                Row row = update.rowIterator().next();
                 assertNull(row.getCell(metadata.getColumn(bytes("c1"))));
                 assertEquals(bytes("trigger"), row.getCell(metadata.getColumn(bytes("c2"))).value());
             }
@@ -191,13 +191,13 @@ public class TriggerExecutorTest
         {
             if (update.metadata().name.equals("cf1"))
             {
-                Row row = update.iterator().next();
+                Row row = update.rowIterator().next();
                 assertEquals(bytes("k2v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
                 assertNull(row.getCell(metadata.getColumn(bytes("c2"))));
             }
             else
             {
-                Row row = update.iterator().next();
+                Row row = update.rowIterator().next();
                 assertNull(row.getCell(metadata.getColumn(bytes("c1"))));
                 assertEquals(bytes("trigger"), row.getCell(metadata.getColumn(bytes("c2"))).value());
             }
@@ -219,25 +219,25 @@ public class TriggerExecutorTest
 
         List<PartitionUpdate> mutatedCFs = new ArrayList<>(tmutations.get(0).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        Row row = mutatedCFs.get(0).iterator().next();
+        Row row = mutatedCFs.get(0).rowIterator().next();
         assertEquals(bytes("k1v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
         assertNull(row.getCell(metadata.getColumn(bytes("c2"))));
 
         mutatedCFs = new ArrayList<>(tmutations.get(1).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        row = mutatedCFs.get(0).iterator().next();
+        row = mutatedCFs.get(0).rowIterator().next();
         assertEquals(bytes("k2v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
         assertNull(row.getCell(metadata.getColumn(bytes("c2"))));
 
         mutatedCFs = new ArrayList<>(tmutations.get(2).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        row = mutatedCFs.get(0).iterator().next();
+        row = mutatedCFs.get(0).rowIterator().next();
         assertNull(row.getCell(metadata.getColumn(bytes("c1"))));
         assertEquals(bytes("trigger"), row.getCell(metadata.getColumn(bytes("c2"))).value());
 
         mutatedCFs = new ArrayList<>(tmutations.get(3).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        row = mutatedCFs.get(0).iterator().next();
+        row = mutatedCFs.get(0).rowIterator().next();
         assertNull(row.getCell(metadata.getColumn(bytes("c1"))));
         assertEquals(bytes("trigger"), row.getCell(metadata.getColumn(bytes("c2"))).value());
     }
@@ -259,13 +259,13 @@ public class TriggerExecutorTest
 
         List<PartitionUpdate> mutatedCFs = new ArrayList<>(tmutations.get(0).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        Row row = mutatedCFs.get(0).iterator().next();
+        Row row = mutatedCFs.get(0).rowIterator().next();
         assertEquals(bytes("v1"), row.getCell(metadata.getColumn(bytes("c1"))).value());
         assertNull(row.getCell(metadata.getColumn(bytes("c2"))));
 
         mutatedCFs = new ArrayList<>(tmutations.get(1).getPartitionUpdates());
         assertEquals(1, mutatedCFs.size());
-        row = mutatedCFs.get(0).iterator().next();
+        row = mutatedCFs.get(0).rowIterator().next();
         assertEquals(bytes("trigger"), row.getCell(metadata.getColumn(bytes("c2"))).value());
         assertNull(row.getCell(metadata.getColumn(bytes("c1"))));
     }

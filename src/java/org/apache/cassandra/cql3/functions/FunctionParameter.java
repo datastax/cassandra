@@ -160,7 +160,7 @@ public interface FunctionParameter
      * @return a function parameter definition that accepts values of any type, provided that it's the same type as all
      * the other parameters
      */
-    static FunctionParameter sameAs(int index, FunctionParameter parameter)
+    static FunctionParameter sameAs(int index, boolean preferOther, FunctionParameter parameter)
     {
         return new FunctionParameter()
         {
@@ -170,8 +170,14 @@ public interface FunctionParameter
                                              @Nullable AbstractType<?> receiverType,
                                              @Nullable List<AbstractType<?>> inferredTypes)
             {
-                AbstractType<?> type = inferredTypes == null ? null : inferredTypes.get(index);
-                return type != null ? type : parameter.inferType(keyspace, arg, receiverType, inferredTypes);
+                if (preferOther)
+                {
+                    AbstractType<?> other = inferredTypes == null ? null : inferredTypes.get(index);
+                    return other == null ? parameter.inferType(keyspace, arg, receiverType, inferredTypes) : other;
+                }
+
+                AbstractType<?> inferred = parameter.inferType(keyspace, arg, receiverType, inferredTypes);
+                return inferred == null && inferredTypes != null ? inferredTypes.get(index) : inferred;
             }
 
             @Override
@@ -202,9 +208,9 @@ public interface FunctionParameter
                                              List<AbstractType<?>> inferredTypes)
             {
                 AbstractType<?> inferred = arg.getCompatibleTypeIfKnown(keyspace);
-                if (inferred != null && arg instanceof Selectable.WithList)
+                if (inferred != null && arg instanceof Selectable.WithArrayLiteral)
                 {
-                    return VectorType.getInstance(type.getType(), ((Selectable.WithList) arg).getSize());
+                    return VectorType.getInstance(type.getType(), ((Selectable.WithArrayLiteral) arg).getSize());
                 }
 
                 return inferred == null ? receiverType : inferred;

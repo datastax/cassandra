@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -54,6 +56,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
 
@@ -278,7 +281,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         // TODO - we should perhaps consider executing this code less frequently than legacy strategies
         // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
 
-        return getNextBackgroundTasks(getNextCompactionAggregates(gcBefore), gcBefore);
+        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables. 
+        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction 
+        // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
+        Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
+                                                                     .instance
+                                                                     .consistent
+                                                                     .local
+                                                                     .getZombieRepairFinalizationTasks(realm, realm.getLiveSSTables());
+        if (!repairFinalizationTasks.isEmpty())
+            return repairFinalizationTasks;
+        else
+            return getNextBackgroundTasks(getNextCompactionAggregates(gcBefore), gcBefore);
     }
 
     /**
@@ -337,7 +351,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
         ShardManager currentShardManager = getShardManager();
-        double flushDensity = realm.metrics().flushSizeOnDisk().get() * shardManager.shardSetCoverage() / currentShardManager.localSpaceCoverage();
+        double flushDensity = realm.metrics().flushSizeOnDisk().get() * currentShardManager.shardSetCoverage() / currentShardManager.localSpaceCoverage();
         ShardTracker boundaries = currentShardManager.boundaries(controller.getFlushShards(flushDensity));
         return new ShardedMultiWriter(realm,
                                       descriptor,
@@ -385,7 +399,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 return; // another thread beat us to the update
 
             DiskBoundaries currentBoundaries = realm.getDiskBoundaries();
-            shardManager = ShardManager.create(currentBoundaries);
+            var maybeShardManager = realm.buildShardManager();
+            shardManager = maybeShardManager != null
+                           ? maybeShardManager
+                           : ShardManager.create(currentBoundaries, realm.getKeyspaceReplicationStrategy(), controller.isReplicaAware());
             arenaSelector = new ArenaSelector(controller, currentBoundaries);
             // Note: this can just as well be done without the synchronization (races would be benign, just doing some
             // redundant work). For the current usages of this blocking is fine and expected to perform no worse.
@@ -481,7 +498,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        spaceAvailable,
                                                        rateLimitLog,
                                                        remainingAdaptiveCompactions);
-        logger.debug("Selecting up to {} new compactions of up to {}, concurrency limit {}{}",
+        logger.trace("Selecting up to {} new compactions of up to {}, concurrency limit {}{}",
                      Math.max(0, limits.maxCompactions - limits.runningCompactions),
                      FBUtilities.prettyPrintMemory(limits.spaceAvailable),
                      limits.maxConcurrentCompactions,
@@ -848,21 +865,22 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
                                              BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
-        maybeUpdateSelector();
+        // Copy to avoid race condition
+        var currentShardManager = getShardManager();
         Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter);
         Map<Arena, List<Level>> ret = new LinkedHashMap<>(); // should preserve the order of arenas
 
         for (Arena arena : arenas)
         {
             List<Level> levels = new ArrayList<>(MAX_LEVELS);
-            arena.sstables.sort(shardManager::compareByDensity);
+            arena.sstables.sort(currentShardManager::compareByDensity);
 
-            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / shardManager.localSpaceCoverage());
+            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / currentShardManager.localSpaceCoverage());
             int index = 0;
             Level level = new Level(controller, index, 0, maxSize);
             for (CompactionSSTable candidate : arena.sstables)
             {
-                final double size = shardManager.density(candidate);
+                final double size = currentShardManager.density(candidate);
                 if (size < level.max)
                 {
                     level.add(candidate);
@@ -903,7 +921,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 logger.trace("Arena {} has {} levels", arena, levels.size());
         }
 
-        logger.debug("Found {} arenas with buckets for {}.{}", ret.size(), realm.getKeyspaceName(), realm.getTableName());
+        logger.trace("Found {} arenas with buckets for {}.{}", ret.size(), realm.getKeyspaceName(), realm.getTableName());
         return ret;
     }
 
@@ -1043,7 +1061,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         void add(CompactionSSTable sstable)
         {
             this.sstables.add(sstable);
-            this.avg += (sstable.onDiskLength() - avg) / sstables.size();
+            // consider size of all components to reduce chance of out-of-disk
+            long size = CassandraRelevantProperties.UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE.getBoolean()
+                        ? sstable.onDiskComponentsSize() : sstable.onDiskLength();
+            this.avg += (size - avg) / sstables.size();
         }
 
         void complete()
@@ -1066,6 +1087,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 logger.trace("Creating compaction aggregate with sstable set {}", sstables);
 
 
+            // Note that adjacent overlap sets may include deduplicated sstable
             List<Set<CompactionSSTable>> overlaps = Overlaps.constructOverlapSets(sstables,
                                                                                   UnifiedCompactionStrategy::startsAfter,
                                                                                   CompactionSSTable.firstKeyComparator,
@@ -1193,12 +1215,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             {
                 /**
                  * Happy path. We are not late or (for levelled) we are only so late that a compaction now will
-                 * have the  same effect as doing levelled compactions one by one. Compact all. We do not cap
+                 * have the same effect as doing levelled compactions one by one. Compact all. We do not cap
                  * this pick at maxSSTablesToCompact due to an assumption that maxSSTablesToCompact is much
                  * greater than F. See {@link Controller#MAX_SSTABLES_TO_COMPACT_OPTION} for more details.
                  */
                 return CompactionAggregate.createUnified(allSSTablesSorted,
-                                                         count,
+                                                         maxOverlap,
                                                          CompactionPick.create(index, allSSTablesSorted),
                                                          Collections.emptySet(),
                                                          arena,
@@ -1214,7 +1236,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // case to cap compaction pick at maxSSTablesToCompact.
                 if (count <= maxSSTablesToCompact)
                     return CompactionAggregate.createUnified(allSSTablesSorted,
-                                                             count,
+                                                             maxOverlap,
                                                              CompactionPick.create(index, allSSTablesSorted),
                                                              Collections.emptySet(),
                                                              arena,
@@ -1229,7 +1251,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                     count -= maxSSTablesToCompact;
                 }
 
-                return CompactionAggregate.createUnified(allSSTablesSorted, count, pick, pending, arena, level);
+                return CompactionAggregate.createUnified(allSSTablesSorted, maxOverlap, pick, pending, arena, level);
             }
             // We may, however, have accumulated a lot more than T if compaction is very late, or a set of small
             // tables was dumped on us (e.g. when converting from legacy LCS or for tests).
@@ -1247,7 +1269,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // dump.
                 assert !picks.isEmpty();  // we only enter this if count > F: layoutCompactions must have selected something to run
                 CompactionPick selected = picks.remove(controller.random().nextInt(picks.size()));
-                return CompactionAggregate.createUnified(allSSTablesSorted, count, selected, picks, arena, level);
+                return CompactionAggregate.createUnified(allSSTablesSorted, maxOverlap, selected, picks, arena, level);
             }
         }
 

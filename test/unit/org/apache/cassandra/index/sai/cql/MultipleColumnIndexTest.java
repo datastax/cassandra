@@ -62,8 +62,6 @@ public class MultipleColumnIndexTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(values(text_map)) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(text_map)) USING 'StorageAttachedIndex'");
 
-        waitForIndexQueryable();
-
         beforeAndAfterFlush(() -> {
             assertEquals(1, execute("SELECT * FROM %s WHERE text_map['k1'] = 'v1' AND text_map['k2'] = 'v2'").size());
             assertEquals(2, execute("SELECT * FROM %s WHERE text_map CONTAINS 'v1'").size());

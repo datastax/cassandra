@@ -55,6 +55,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -208,6 +209,13 @@ public class TableMetrics
     public final MovingAverage flushSegmentCount;
     /** The average duration per 1Kb of data flushed, in nanoseconds. */
     public final MovingAverage flushTimePerKb;
+    /** Time spent in flushing memtables */
+    public final Counter flushTime;
+    public final Counter storageAttachedIndexBuildTime;
+    public final Counter storageAttachedIndexWritingTimeForIndexBuild;
+    public final Counter storageAttachedIndexWritingTimeForCompaction;
+    public final Counter storageAttachedIndexWritingTimeForFlush;
+    public final Counter storageAttachedIndexWritingTimeForOther;
     /** Total number of bytes inserted into memtables since server [re]start. */
     public final Counter bytesInserted;
     /** Total number of bytes written by compaction since server [re]start */
@@ -216,6 +224,8 @@ public class TableMetrics
     public final Counter compactionBytesRead;
     /** The average duration per 1Kb of data compacted, in nanoseconds. */
     public final MovingAverage compactionTimePerKb;
+    /** Time spent in writing sstables during compaction  */
+    public final Counter compactionTime;
     /** Estimate of number of pending compactions for this table */
     public final Gauge<Integer> pendingCompactions;
     /** Number of SSTables on disk for this CF */
@@ -725,11 +735,18 @@ public class TableMetrics
         flushSizeOnDisk = ExpMovingAverage.decayBy1000();
         flushSegmentCount = ExpMovingAverage.decayBy1000();
         flushTimePerKb = ExpMovingAverage.decayBy100();
+        flushTime = createTableCounter("FlushTime");
+        storageAttachedIndexBuildTime = createTableCounter("StorageAttachedIndexBuildTime");
+        storageAttachedIndexWritingTimeForIndexBuild = createTableCounter("StorageAttachedIndexWritingTimeForIndexBuild");
+        storageAttachedIndexWritingTimeForCompaction = createTableCounter("StorageAttachedIndexWritingTimeForCompaction");
+        storageAttachedIndexWritingTimeForFlush = createTableCounter("StorageAttachedIndexWritingTimeForFlush");
+        storageAttachedIndexWritingTimeForOther= createTableCounter("StorageAttachedIndexWritingTimeForOther");
         bytesInserted = createTableCounter("BytesInserted");
 
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
         compactionBytesRead = createTableCounter("CompactionBytesRead");
         compactionTimePerKb = ExpMovingAverage.decayBy100();
+        compactionTime = createTableCounter("CompactionTime");
         pendingCompactions = createTableGauge("PendingCompactions", () -> cfs.getCompactionStrategy().getEstimatedRemainingTasks());
         liveSSTableCount = createTableGauge("LiveSSTableCount", () -> cfs.getLiveSSTables().size());
         oldVersionSSTableCount = createTableGauge("OldVersionSSTableCount", new Gauge<Integer>()
@@ -1100,10 +1117,39 @@ public class TableMetrics
         flushTimePerKb.update(elapsedNanos / (double) Math.max(1, inputSize / 1024L));
     }
 
+    public void updateStorageAttachedIndexBuildTime(long totalTimeSpentNanos)
+    {
+        storageAttachedIndexBuildTime.inc(TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos));
+    }
+
+    public void updateStorageAttachedIndexWritingTime(long totalTimeSpentNanos, OperationType opType)
+    {
+        long totalTimeSpentMicros = TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos);
+        switch (opType)
+        {
+            case INDEX_BUILD:
+                storageAttachedIndexWritingTimeForIndexBuild.inc(totalTimeSpentMicros);
+                break;
+            case COMPACTION:
+                storageAttachedIndexWritingTimeForCompaction.inc(totalTimeSpentMicros);
+                break;
+            case FLUSH:
+                storageAttachedIndexWritingTimeForFlush.inc(totalTimeSpentMicros);
+                break;
+            default:
+                storageAttachedIndexWritingTimeForOther.inc(totalTimeSpentMicros);
+        }
+    }
+
+    public void memTableFlushCompleted(long totalTimeSpentNanos) {
+        flushTime.inc(TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos));
+    }
+
     public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)
     {
         compactionBytesRead.inc(inputDiskSize);
         compactionBytesWritten.inc(outputDiskSize);
+        compactionTime.inc(TimeUnit.NANOSECONDS.toMicros(elapsedNanos));
         // only update compactionTimePerKb when there are non-expired sstables (inputDiskSize > 0)
         if (inputDiskSize > 0)
             compactionTimePerKb.update(1024.0 * elapsedNanos / inputDiskSize);

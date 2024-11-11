@@ -74,11 +74,10 @@ public class SSTablesSystemViewTest extends SAITester
     }
 
     @Test
-    public void testVirtualTableThroughIndexLifeCycle() throws Throwable
+    public void testVirtualTableThroughIndexLifeCycle()
     {
         createTable("CREATE TABLE %s (k int, c int, v1 int, v2 int, PRIMARY KEY (k, c))");
         String v1IndexName = createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         String insert = "INSERT INTO %s(k, c, v1, v2) VALUES (?, ?, ?, ?)";
 
@@ -106,7 +105,6 @@ public class SSTablesSystemViewTest extends SAITester
 
         // create a second index, this should create a new additional entry in the table for each sstable
         String v2IndexName = createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         Object[] row3 = readRow(v2IndexName, id1, "v2", 1L, 0L, 0L);
         Object[] row4 = readRow(v2IndexName, id2, "v2", 2L, 0L, 1L);
         assertRows(execute(SELECT), row1, row2, row3, row4);
@@ -160,7 +158,7 @@ public class SSTablesSystemViewTest extends SAITester
                              String columnName,
                              long cellCount,
                              long minSSTableRowId,
-                             long maxSSTableRowId) throws Exception
+                             long maxSSTableRowId)
     {
         for (SSTableId generation : generations)
         {
@@ -176,7 +174,7 @@ public class SSTablesSystemViewTest extends SAITester
                              String columnName,
                              long cellCount,
                              long minSSTableRowId,
-                             long maxSSTableRowId) throws Exception
+                             long maxSSTableRowId)
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         StorageAttachedIndex sai = (StorageAttachedIndex) cfs.indexManager.getIndexByName(indexName);

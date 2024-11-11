@@ -32,6 +32,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy.Arena;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.repair.consistent.LocalSession;
 import org.apache.cassandra.repair.consistent.LocalSessionAccessor;
@@ -202,6 +203,96 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
 
 
     /**
+     * Tests that finalized repairs racing with compactions on the same set of sstables don't leave unrepaired sstables behind
+     * 
+     * This test checks that when a repair has been finalized but there are still pending sstables a finalize repair
+     * compaction task is issued for that repair session.
+     */
+    @Test
+    public void testFinalizedAndCompactionRace() throws IOException
+    {
+        UUID repairID = registerSession(cfs, true, true);
+        LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
+
+        final boolean isOrphan = true;
+        int numberOfSStables = 4; // this has to be >= T
+        List<SSTableReader> sstables = new ArrayList<>(numberOfSStables);
+        for (int i = 0; i < numberOfSStables; i++)
+        {
+            SSTableReader sstable = makeSSTable(isOrphan);
+            sstables.add(sstable);
+            Assert.assertFalse(sstable.isRepaired());
+            Assert.assertFalse(sstable.isPendingRepair());
+            assertShardContainsSstable(sstable, false, false, false, null, true, true);
+        }
+
+        // change to pending repair
+        cfs.mutateRepaired(sstables, 0, repairID, false);
+
+        for (SSTableReader sstable : sstables)
+        {
+            Assert.assertFalse(sstable.isRepaired());
+            Assert.assertTrue(sstable.isPendingRepair());
+            assertEquals(repairID, sstable.getPendingRepair());
+            assertShardContainsSstable(sstable, false, true, false, repairID, true, true);
+        }
+
+        // Get a reference to compact the sstables that are pending repair in the same pending repair session ID
+        assertEquals(numberOfSStables, cfs.getPendingRepairSSTables(repairID).size());
+        compactionStrategyContainer.enable();
+        Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        assertEquals(1, compactionTasks.size());
+        AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
+        assertNotNull(compactionTask);
+        assertSame(UnifiedCompactionTask.class, compactionTask.getClass());
+
+        // Finalize & complete the repair session before the compaction executes
+        LocalSessionAccessor.finalizeUnsafe(repairID);
+        LocalSession session = ARS.consistent.local.getSession(repairID);
+        ARS.consistent.local.sessionCompleted(session);
+
+        // Complete the compaction
+        compactionTask.execute();
+
+        // The repair session is finalized but there is an sstable left behind pending repair!
+        SSTableReader compactedSSTable = cfs.getPendingRepairSSTables(repairID).iterator().next();
+
+        System.out.println("*********************************************************************************************");
+        System.out.println(compactedSSTable);
+        System.out.println("Pending repair UUID: " + compactedSSTable.getPendingRepair());
+        System.out.println("Repaired at: " + compactedSSTable.getRepairedAt());
+        System.out.println("Creation time: " + compactedSSTable.getCreationTimeFor(Component.DATA));
+        System.out.println("Live sstables: " + cfs.getLiveSSTables().size());
+        System.out.println("Pending repair sstables: " + cfs.getPendingRepairSSTables(repairID).size());
+        System.out.println("*********************************************************************************************");
+
+        // Run compaction again. It should pick up the pending repair sstables
+        compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        if (!compactionTasks.isEmpty())
+        {
+            assertEquals(1, compactionTasks.size());
+            compactionTask = compactionTasks.iterator().next();
+            assertNotNull(compactionTask);
+            Assert.assertSame(RepairFinishedCompactionTask.class, compactionTask.getClass());
+            compactionTask.execute();
+        }
+
+        System.out.println("*********************************************************************************************");
+        System.out.println(compactedSSTable);
+        System.out.println("Pending repair UUID: " + compactedSSTable.getPendingRepair());
+        System.out.println("Repaired at: " + compactedSSTable.getRepairedAt());
+        System.out.println("Creation time: " + compactedSSTable.getCreationTimeFor(Component.DATA));
+        System.out.println("Live sstables: " + cfs.getLiveSSTables().size());
+        System.out.println("Pending repair sstables: " + cfs.getPendingRepairSSTables(repairID).size());
+        System.out.println("*********************************************************************************************");
+
+        compactionStrategyContainer.disable();
+
+        assertEquals(0, cfs.getPendingRepairSSTables(repairID).size());
+        assertEquals(1, cfs.getLiveSSTables().size());
+    }
+
+    /**
      * Tests that finalized repairs result in {@link LocalSessions#sessionCompleted}
      * which reclassify the sstables as repaired
      */
@@ -221,13 +312,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             sstables.add(sstable);
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertFalse(sstable.isPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       false,
-                                       false,
-                                       null,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, false, false, null, true, true);
         }
 
         // change to pending repair
@@ -238,13 +323,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertTrue(sstable.isPendingRepair());
             assertEquals(repairID, sstable.getPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       false,
-                                       repairID,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, true, false, repairID, true, true);
         }
 
         // finalize
@@ -252,7 +331,6 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
 
         for (SSTableReader sstable : sstables)
         {
-
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertTrue(sstable.isPendingRepair());
             assertEquals(repairID, sstable.getPendingRepair());
@@ -261,48 +339,36 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         // enable compaction to fetch next background task
         compactionStrategyContainer.enable();
 
-        // pending repair sstables should be compacted
+        // Finish repair for any pending repair sstables for a finalized session
         Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
         assertEquals(1, compactionTasks.size());
-
         AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         assertNotNull(compactionTask);
-        assertSame(UnifiedCompactionTask.class, compactionTask.getClass());
+        assertSame(RepairFinishedCompactionTask.class, compactionTask.getClass());
+        compactionTask.execute();
 
-        // run the compaction
+        // Compact any remaining sstables
+        compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        assertEquals(1, compactionTasks.size());
+        compactionTask = compactionTasks.iterator().next();
+        assertNotNull(compactionTask);
+        assertSame(UnifiedCompactionTask.class, compactionTask.getClass());
         compactionTask.execute();
 
         // sstables should not be found in any shards after compacted
         for (SSTableReader sstable : sstables)
         {
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       false,
-                                       repairID,
-                                       false,
-                                       false);
+            assertShardContainsSstable(sstable, false, true, false, repairID, false, false);
             assertFalse(cfs.getLiveSSTables().contains(sstable));
             assertFalse(cfs.getPendingRepairSSTables(repairID).contains(sstable));
         }
-
-        // new sstable is created with the same repairID
-        assertEquals(1, cfs.getPendingRepairSSTables(repairID).size());
-        SSTableReader compactedSSTable = cfs.getPendingRepairSSTables(repairID).iterator().next();
-
-        Assert.assertFalse(compactedSSTable.isRepaired());
-        Assert.assertTrue(compactedSSTable.isPendingRepair());
-        assertEquals(repairID, compactedSSTable.getPendingRepair());
 
         // complete session
         LocalSession session = ARS.consistent.local.getSession(repairID);
         ARS.consistent.local.sessionCompleted(session);
 
-        Assert.assertTrue(compactedSSTable.isRepaired());
-        Assert.assertEquals(compactedSSTable.getRepairedAt(), session.repairedAt);
-        Assert.assertFalse(compactedSSTable.isPendingRepair());
-
         assertEquals(0, cfs.getPendingRepairSSTables(repairID).size());
+        assertEquals(1, cfs.getLiveSSTables().size());
     }
 
     @Override
@@ -321,13 +387,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             sstables.add(sstable);
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertFalse(sstable.isPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       false,
-                                       false,
-                                       null,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, false, false, null, true, true);
         }
 
         // change to pending repair
@@ -339,13 +399,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             Assert.assertTrue(sstable.isPendingRepair());
             Assert.assertTrue(sstable.isTransient());
             assertEquals(repairID, sstable.getPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       true,
-                                       repairID,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, true, true, repairID, true, true);
         }
 
         // finalize
@@ -368,7 +422,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
 
         AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         assertNotNull(compactionTask);
-        assertSame(UnifiedCompactionTask.class, compactionTask.getClass());
+        assertSame(RepairFinishedCompactionTask.class, compactionTask.getClass());
 
         // run the compaction
         compactionTask.execute();
@@ -376,24 +430,10 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         // sstables should not be found in any shards after compacted
         for (SSTableReader sstable : sstables)
         {
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       true,
-                                       repairID,
-                                       false,
-                                       false);
+            assertShardContainsSstable(sstable, false, true, true, repairID, false, false);
             assertFalse(cfs.getLiveSSTables().contains(sstable));
             assertFalse(cfs.getPendingRepairSSTables(repairID).contains(sstable));
         }
-
-        // new sstable is created with the same repairID
-        assertEquals(1, cfs.getPendingRepairSSTables(repairID).size());
-        SSTableReader compactedSSTable = cfs.getPendingRepairSSTables(repairID).iterator().next();
-
-        Assert.assertFalse(compactedSSTable.isRepaired());
-        Assert.assertTrue(compactedSSTable.isPendingRepair());
-        assertEquals(repairID, compactedSSTable.getPendingRepair());
 
         // complete session
         LocalSession session = ARS.consistent.local.getSession(repairID);
@@ -419,13 +459,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             sstables.add(sstable);
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertFalse(sstable.isPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       false,
-                                       false,
-                                       null,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, false, false, null, true, true);
         }
 
         // change to pending repair
@@ -436,13 +470,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertTrue(sstable.isPendingRepair());
             Assert.assertEquals(repairID, sstable.getPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       true,
-                                       repairID,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, true, true, repairID, true, true);
         }
         // fail
         LocalSessionAccessor.failUnsafe(repairID);
@@ -452,60 +480,42 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertTrue(sstable.isPendingRepair());
             Assert.assertEquals(repairID, sstable.getPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       true,
-                                       repairID,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, true, true, repairID, true, true);
         }
 
         // enable compaction to fetch next background task
         compactionStrategyContainer.enable();
 
-        // pending repair sstables should be compacted
+        // Finish repair for any pending repair sstables for a finalized session
         Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
         assertEquals(1, compactionTasks.size());
-
         AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         assertNotNull(compactionTask);
-        assertSame(UnifiedCompactionTask.class, compactionTask.getClass());
+        assertSame(RepairFinishedCompactionTask.class, compactionTask.getClass());
+        compactionTask.execute();
 
-        // run the compaction
+        // Compact any remaining sstables
+        compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        assertEquals(1, compactionTasks.size());
+        compactionTask = compactionTasks.iterator().next();
+        assertNotNull(compactionTask);
+        assertSame(UnifiedCompactionTask.class, compactionTask.getClass());
         compactionTask.execute();
 
         // sstables should not be found in any shards after compacted
         for (SSTableReader sstable : sstables)
         {
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       true,
-                                       repairID,
-                                       false,
-                                       false);
+            assertShardContainsSstable(sstable, false, true, true, repairID, false, false);
             assertFalse(cfs.getLiveSSTables().contains(sstable));
             assertFalse(cfs.getPendingRepairSSTables(repairID).contains(sstable));
         }
-
-        // new sstable is created with the same repairID
-        assertEquals(1, cfs.getPendingRepairSSTables(repairID).size());
-        SSTableReader compactedSSTable = cfs.getPendingRepairSSTables(repairID).iterator().next();
-        Assert.assertEquals(repairID, compactedSSTable.getPendingRepair());
-        Assert.assertFalse(compactedSSTable.isRepaired());
-        Assert.assertTrue(compactedSSTable.isPendingRepair());
-        Assert.assertTrue(compactedSSTable.isTransient());
 
         // complete session
         LocalSession session = ARS.consistent.local.getSession(repairID);
         ARS.consistent.local.sessionCompleted(session);
 
-        Assert.assertFalse(compactedSSTable.isRepaired());
-        Assert.assertFalse(compactedSSTable.isPendingRepair());
-        Assert.assertFalse(compactedSSTable.isTransient());
-
         assertEquals(0, cfs.getPendingRepairSSTables(repairID).size());
+        assertEquals(1, cfs.getLiveSSTables().size());
     }
 
     /**
@@ -528,13 +538,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             sstables.add(sstable);
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertFalse(sstable.isPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       false,
-                                       false,
-                                       null,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, false, false, null, true, true);
         }
 
         // change to pending repair
@@ -545,13 +549,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertTrue(sstable.isPendingRepair());
             Assert.assertEquals(repairID, sstable.getPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       false,
-                                       repairID,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, true, false, repairID, true, true);
         }
 
         // fail
@@ -562,58 +560,42 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
             Assert.assertFalse(sstable.isRepaired());
             Assert.assertTrue(sstable.isPendingRepair());
             Assert.assertEquals(repairID, sstable.getPendingRepair());
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       false,
-                                       repairID,
-                                       true,
-                                       true);
+            assertShardContainsSstable(sstable, false, true, false, repairID, true, true);
         }
 
         // enable compaction to fetch next background task
         compactionStrategyContainer.enable();
 
-        // pending repair sstables should be compacted
+        // Finish repair for any pending repair sstables for a finalized session
         Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
         assertEquals(1, compactionTasks.size());
-
         AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         assertNotNull(compactionTask);
-        assertSame(UnifiedCompactionTask.class, compactionTask.getClass());
+        assertSame(RepairFinishedCompactionTask.class, compactionTask.getClass());
+        compactionTask.execute();
 
-        // run the compaction
+        // Compact any remaining sstables
+        compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        assertEquals(1, compactionTasks.size());
+        compactionTask = compactionTasks.iterator().next();
+        assertNotNull(compactionTask);
+        assertSame(UnifiedCompactionTask.class, compactionTask.getClass());
         compactionTask.execute();
 
         // sstables should not be found in any shards after compacted
         for (SSTableReader sstable : sstables)
         {
-            assertShardContainsSstable(sstable,
-                                       false,
-                                       true,
-                                       false,
-                                       repairID,
-                                       false,
-                                       false);
+            assertShardContainsSstable(sstable, false, true, false, repairID, false, false);
             assertFalse(cfs.getLiveSSTables().contains(sstable));
             assertFalse(cfs.getPendingRepairSSTables(repairID).contains(sstable));
         }
-
-        // new sstable is created with the same repairID
-        assertEquals(1, cfs.getPendingRepairSSTables(repairID).size());
-        SSTableReader compactedSSTable = cfs.getPendingRepairSSTables(repairID).iterator().next();
-        Assert.assertEquals(repairID, compactedSSTable.getPendingRepair());
-        Assert.assertFalse(compactedSSTable.isRepaired());
-        Assert.assertTrue(compactedSSTable.isPendingRepair());
 
         // complete session
         LocalSession session = ARS.consistent.local.getSession(repairID);
         ARS.consistent.local.sessionCompleted(session);
 
-        Assert.assertFalse(compactedSSTable.isRepaired());
-        Assert.assertFalse(compactedSSTable.isPendingRepair());
-
         assertEquals(0, cfs.getPendingRepairSSTables(repairID).size());
+        assertEquals(1, cfs.getLiveSSTables().size());
     }
 
     @Override
@@ -628,35 +610,16 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         SSTableReader sstable1 = makeSSTable(isOrphan);
         Assert.assertFalse(sstable1.isRepaired());
         Assert.assertFalse(sstable1.isPendingRepair());
-        assertShardContainsSstable(sstable1,
-                                   false,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable1, false, false, false, null, true, true);
 
         SSTableReader sstable2 = makeSSTable(isOrphan);
         Assert.assertFalse(sstable2.isRepaired());
         Assert.assertFalse(sstable2.isPendingRepair());
-        assertShardContainsSstable(sstable2,
-                                   false,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
-
+        assertShardContainsSstable(sstable2, false, false, false, null, true, true);
         SSTableReader sstable3 = makeSSTable(isOrphan);
         Assert.assertFalse(sstable3.isRepaired());
         Assert.assertFalse(sstable3.isPendingRepair());
-        assertShardContainsSstable(sstable3,
-                                   false,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable3, false, false, false, null, true, true);
 
         // change to pending repair
         cfs.mutateRepaired(ImmutableList.of(sstable1, sstable2, sstable3), 0, repairID, false);
@@ -664,35 +627,16 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         Assert.assertFalse(sstable1.isRepaired());
         Assert.assertTrue(sstable1.isPendingRepair());
         Assert.assertEquals(repairID, sstable1.getPendingRepair());
-        assertShardContainsSstable(sstable1,
-                                   false,
-                                   true,
-                                   false,
-                                   repairID,
-                                   true,
-                                   true);
-
+        assertShardContainsSstable(sstable1, false, true, false, repairID, true, true);
         Assert.assertFalse(sstable2.isRepaired());
         Assert.assertTrue(sstable2.isPendingRepair());
         Assert.assertEquals(repairID, sstable2.getPendingRepair());
-        assertShardContainsSstable(sstable2,
-                                   false,
-                                   true,
-                                   false,
-                                   repairID,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable2, false, true, false, repairID, true, true);
 
         Assert.assertFalse(sstable3.isRepaired());
         Assert.assertTrue(sstable3.isPendingRepair());
         Assert.assertEquals(repairID, sstable3.getPendingRepair());
-        assertShardContainsSstable(sstable3,
-                                   false,
-                                   true,
-                                   false,
-                                   repairID,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable3, false, true, false, repairID, true, true);
 
         // finalize
         LocalSessionAccessor.finalizeUnsafe(repairID);
@@ -702,27 +646,9 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         ARS.consistent.local.sessionCompleted(session);
 
         // sstables are repaired
-        assertShardContainsSstable(sstable1,
-                                   true,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
-        assertShardContainsSstable(sstable2,
-                                   true,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
-        assertShardContainsSstable(sstable3,
-                                   true,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable1, true, false, false, null, true, true);
+        assertShardContainsSstable(sstable2, true, false, false, null, true, true);
+        assertShardContainsSstable(sstable3, true, false, false, null, true, true);
     }
 
     @Override
@@ -739,80 +665,39 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         SSTableReader sstable1 = makeSSTable(isOrphan);
         Assert.assertFalse(sstable1.isRepaired());
         Assert.assertFalse(sstable1.isPendingRepair());
-        assertShardContainsSstable(sstable1,
-                                   false,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
-
+        assertShardContainsSstable(sstable1, false, false, false, null, true, true);
         SSTableReader sstable2 = makeSSTable(isOrphan);
         Assert.assertFalse(sstable2.isRepaired());
         Assert.assertFalse(sstable2.isPendingRepair());
-        assertShardContainsSstable(sstable2,
-                                   false,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
-
+        assertShardContainsSstable(sstable2, false, false, false, null, true, true);
         SSTableReader sstable3 = makeSSTable(isOrphan);
         Assert.assertFalse(sstable3.isRepaired());
         Assert.assertFalse(sstable3.isPendingRepair());
-        assertShardContainsSstable(sstable3,
-                                   false,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable3, false, false, false, null, true, true);
 
         // change sstable1 to pending repair for session 1
         cfs.mutateRepaired(Collections.singletonList(sstable1), 0, repairID1, false);
-
         Assert.assertFalse(sstable1.isRepaired());
         Assert.assertTrue(sstable1.isPendingRepair());
         Assert.assertEquals(repairID1, sstable1.getPendingRepair());
-        assertShardContainsSstable(sstable1,
-                                   false,
-                                   true,
-                                   false,
-                                   repairID1,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable1, false, true, false, repairID1, true, true);
         assertNumberOfShards(2);
 
         // change sstable2 to pending repair for session 2
         cfs.mutateRepaired(Collections.singletonList(sstable2), 0, repairID2, false);
-
         Assert.assertFalse(sstable2.isRepaired());
         Assert.assertTrue(sstable2.isPendingRepair());
         Assert.assertEquals(repairID2, sstable2.getPendingRepair());
         assertNumberOfShards(3);
-        assertShardContainsSstable(sstable2,
-                                   false,
-                                   true,
-                                   false,
-                                   repairID2,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable2, false, true, false, repairID2, true, true);
 
         // change sstable3 to repaired
         long repairedAt3 = System.currentTimeMillis();
         cfs.mutateRepaired(Collections.singletonList(sstable3), repairedAt3, null, false);
-
         Assert.assertTrue(sstable3.isRepaired());
         Assert.assertFalse(sstable3.isPendingRepair());
         assertNumberOfShards(3);
-        assertShardContainsSstable(sstable3,
-                                   true,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
+        assertShardContainsSstable(sstable3, true, false, false, null, true, true);
 
         // finalize session 1
         LocalSessionAccessor.finalizeUnsafe(repairID1);
@@ -828,32 +713,11 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         ARS.consistent.local.sessionCompleted(session1);
 
         // expecting sstable1 not found in any shards
-        assertShardContainsSstable(sstable1,
-                                   false,
-                                   true,
-                                   false,
-                                   repairID1,
-                                   false,
-                                   true);
-
+        assertShardContainsSstable(sstable1, false, true, false, repairID1, false, true);
         // expecting sstable2 exists in pending repair shard
-        assertShardContainsSstable(sstable2,
-                                   false,
-                                   true,
-                                   false,
-                                   repairID2,
-                                   true,
-                                   true);
-
+        assertShardContainsSstable(sstable2, false, true, false, repairID2, true, true);
         // expecting sstable3 exists in repaired shards
-        assertShardContainsSstable(sstable3,
-                                   true,
-                                   false,
-                                   false,
-                                   null,
-                                   true,
-                                   true);
-    }
+        assertShardContainsSstable(sstable3, true, false, false, null, true, true);    }
 
     private void assertNumberOfShards(int expectedNumberOfShards)
     {

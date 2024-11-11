@@ -33,6 +33,8 @@ import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
@@ -51,6 +53,8 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  */
 public class StatementRestrictions
 {
+    public static final boolean ENABLE_SAI_GENERAL_ORDER_BY = Boolean.parseBoolean(System.getProperty("cassandra.sai.general_order_by", "true"));
+
     public static final String REQUIRES_ALLOW_FILTERING_MESSAGE =
     "Cannot execute this query as it might involve data filtering and " +
     "thus may have unpredictable performance. If you want to execute " +
@@ -75,9 +79,9 @@ public class StatementRestrictions
     "Restriction on partition key column %s must not be nested under OR operator";
 
     public static final String GEO_DISTANCE_REQUIRES_INDEX_MESSAGE = "GEO_DISTANCE requires the vector column to be indexed";
-    public static final String ANN_REQUIRES_INDEX_MESSAGE = "ANN ordering by vector requires the column to be indexed";
-    public static final String ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
-    "ANN ordering by vector requires each restricted column to be indexed except for fully-specified partition keys";
+    public static final String NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE = "Ordering on non-clustering column %s requires the column to be indexed";
+    public static final String NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
+    "Ordering on non-clustering column requires each restricted column to be indexed except for fully-specified partition keys";
 
     public static final String VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE =
     "Vector index present, but configuration does not support GEO_DISTANCE queries. GEO_DISTANCE requires similarity_function 'euclidean'";
@@ -147,7 +151,8 @@ public class StatementRestrictions
     private StatementRestrictions(TableMetadata table, boolean allowFiltering)
     {
         this.table = table;
-        this.partitionKeyRestrictions = PartitionKeySingleRestrictionSet.builder(table.partitionKeyAsClusteringComparator()).build();
+        this.partitionKeyRestrictions = PartitionKeySingleRestrictionSet.builder(table.partitionKeyAsClusteringComparator())
+                                                                        .build(IndexRegistry.obtain(table));
         this.clusteringColumnsRestrictions = ClusteringColumnRestrictions.builder(table, allowFiltering).build();
         this.nonPrimaryKeyRestrictions = RestrictionSet.builder().build();
         this.notNullColumns = ImmutableSet.of();
@@ -189,8 +194,7 @@ public class StatementRestrictions
      */
     public StatementRestrictions addExternalRestrictions(Iterable<ExternalRestriction> restrictions)
     {
-        IndexRestrictions.Builder newIndexRestrictions = IndexRestrictions.builder()
-                                                                          .add(filterRestrictions);
+        IndexRestrictions.Builder newIndexRestrictions = IndexRestrictions.builder().add(filterRestrictions);
 
         for (ExternalRestriction restriction : restrictions)
             newIndexRestrictions.add(restriction);
@@ -277,7 +281,7 @@ public class StatementRestrictions
     /**
      * Build a <code>StatementRestrictions</code> from a <code>WhereClause</code> for a given
      * <code>StatementType</code>, <code>TableMetadata</code> and <code>VariableSpecifications</code>
-     *
+     * </p>
      * The validation rules for whether the <code>StatementRestrictions</code> are valid depend on a
      * number of considerations, including whether indexes are being used and whether filtering is being
      * used.
@@ -325,7 +329,6 @@ public class StatementRestrictions
             if (allowUseOfSecondaryIndices && type.allowUseOfSecondaryIndices())
                 indexRegistry = IndexRegistry.obtain(table);
 
-
             WhereClause.AndElement root = whereClause.root().conjunctiveForm();
             return doBuild(root, indexRegistry, 0);
         }
@@ -348,6 +351,13 @@ public class StatementRestrictions
             RestrictionSet.Builder nonPrimaryKeyRestrictionSet = RestrictionSet.builder();
             ImmutableSet.Builder<ColumnMetadata> notNullColumnsBuilder = ImmutableSet.builder();
 
+
+            // ORDER BY clause. We add it first because orderings are not really restrictions
+            // and by adding first, we ensure that merging restrictions works as expected.
+            // The long term solution will break ordering out into its own abstraction.
+            if (nestingLevel == 0)
+                addOrderingRestrictions(orderings, indexRegistry, nonPrimaryKeyRestrictionSet);
+
             /*
              * WHERE clause. For a given entity, rules are:
              *   - EQ relation conflicts with anything else (including a 2nd EQ)
@@ -358,42 +368,58 @@ public class StatementRestrictions
              *     in CQL so far)
              *   - CONTAINS and CONTAINS_KEY cannot be used with UPDATE or DELETE
              */
-            for (Relation relation : element.relations()) {
+            for (Relation relation : element.relations())
+            {
                 if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
-                        && (type.isUpdate() || type.isDelete())) {
+                        && (type.isUpdate() || type.isDelete()))
+                {
                     throw invalidRequest("Cannot use %s with %s", type, relation.operator());
                 }
 
-                if (relation.operator() == Operator.IS_NOT) {
+                if (relation.operator() == Operator.IS_NOT)
+                {
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);
 
                     notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames).getColumnDefs());
-                } else {
+                }
+                else
+                {
                     Restriction restriction = relation.toRestriction(table, boundNames);
 
-                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry))) {
-                        if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty()) {
+                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry)))
+                    {
+                        if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                        {
                             throw invalidRequest("LIKE restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
-                        } else {
+                        }
+                        else
+                        {
                             throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, restriction.getFirstColumn());
                         }
                     }
-                    if (relation.operator() == Operator.ANALYZER_MATCHES) {
-                        if (!type.allowUseOfSecondaryIndices()) {
+                    if (relation.operator() == Operator.ANALYZER_MATCHES)
+                    {
+                        if (!type.allowUseOfSecondaryIndices())
+                        {
                             throw invalidRequest("Invalid query. %s does not support use of secondary indices, but %s restriction requires a secondary index.", type.name(), relation.toString());
                         }
-                        if (!restriction.hasSupportingIndex(indexRegistry)) {
-                            if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty()) {
+                        if (!restriction.hasSupportingIndex(indexRegistry))
+                        {
+                            if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                            {
                                 throw invalidRequest(": restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
-                            } else {
+                            }
+                            else
+                            {
                                 throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, restriction.getFirstColumn());
                             }
                         }
                     }
 
                     ColumnMetadata def = restriction.getFirstColumn();
-                    if (def.isPartitionKey()) {
+                    if (def.isPartitionKey())
+                    {
                         // All partition key restrictions must be a part of the top-level AND operation.
                         // The read path filtering logic is currently unable to filter rows based on
                         // partition key restriction that is a part of a complex expression involving disjunctions.
@@ -408,20 +434,18 @@ public class StatementRestrictions
                     // we can't treat it as a real clustering column,
                     // but instead we treat it as a regular column and use
                     // index (if we have one) or use row filtering on it; hence we require nestingLevel == 0 check here
-                    else if (def.isClusteringColumn() && nestingLevel == 0) {
+                    else if (def.isClusteringColumn() && nestingLevel == 0)
+                    {
                         clusteringColumnsRestrictionSet.addRestriction(restriction);
-                    } else {
-                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction());
+                    }
+                    else
+                    {
+                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction(), indexRegistry);
                     }
                 }
             }
 
-            // ORDER BY clause.
-            // Some indexes can be used for ordering.
-            if (nestingLevel == 0)
-                addOrderingRestrictions(orderings, nonPrimaryKeyRestrictionSet);
-
-            PartitionKeyRestrictions partitionKeyRestrictions = partitionKeyRestrictionSet.build();
+            PartitionKeyRestrictions partitionKeyRestrictions = partitionKeyRestrictionSet.build(indexRegistry);
             ClusteringColumnRestrictions clusteringColumnsRestrictions = clusteringColumnsRestrictionSet.build();
             RestrictionSet nonPrimaryKeyRestrictions = nonPrimaryKeyRestrictionSet.build();
             ImmutableSet<ColumnMetadata> notNullColumns = notNullColumnsBuilder.build();
@@ -429,8 +453,8 @@ public class StatementRestrictions
             boolean usesSecondaryIndexing = false;
             boolean isKeyRange = false;
 
-            boolean hasQueriableClusteringColumnIndex = false;
-            boolean hasQueriableIndex = false;
+            boolean hasQueryableClusteringColumnIndex = false;
+            boolean hasQueryableIndex = false;
 
             IndexRestrictions.Builder filterRestrictionsBuilder = IndexRestrictions.builder();
 
@@ -444,9 +468,9 @@ public class StatementRestrictions
                     filterRestrictionsBuilder.add(customExpression);
                 }
 
-                hasQueriableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry);
-                hasQueriableIndex = element.containsCustomExpressions()
-                                    || hasQueriableClusteringColumnIndex
+                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry);
+                hasQueryableIndex = element.containsCustomExpressions()
+                                    || hasQueryableClusteringColumnIndex
                                     || partitionKeyRestrictions.hasSupportingIndex(indexRegistry)
                                     || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry);
             }
@@ -475,23 +499,23 @@ public class StatementRestrictions
                 if (partitionKeyRestrictions.isEmpty() && partitionKeyRestrictions.hasUnrestrictedPartitionKeyComponents(table))
                 {
                     isKeyRange = true;
-                    usesSecondaryIndexing = hasQueriableIndex;
+                    usesSecondaryIndexing = hasQueryableIndex;
                 }
 
-                // If there is a queriable index, no special condition is required on the other restrictions.
+                // If there is a queryable index, no special condition is required on the other restrictions.
                 // But we still need to know 2 things:
-                // - If we don't have a queriable index, is the query ok
-                // - Is it queriable without 2ndary index, which is always more efficient
+                // - If we don't have a queryable index, is the query ok
+                // - Is it queryable without 2ndary index, which is always more efficient
                 // If a component of the partition key is restricted by a relation, all preceding
                 // components must have a EQ. Only the last partition key component can be in IN relation.
                 // If partition key restrictions exist and this is a disjunction then we may need filtering
                 if (partitionKeyRestrictions.needFiltering(table) || (!partitionKeyRestrictions.isEmpty() && element.isDisjunction()))
                 {
-                    if (!allowFiltering && !forView && !hasQueriableIndex)
+                    if (!allowFiltering && !forView && !hasQueryableIndex)
                         throw new InvalidRequestException(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
 
                     isKeyRange = true;
-                    usesSecondaryIndexing = hasQueriableIndex;
+                    usesSecondaryIndexing = hasQueryableIndex;
                 }
             }
 
@@ -530,12 +554,12 @@ public class StatementRestrictions
             }
             else
             {
-                checkFalse(clusteringColumnsRestrictions.hasContains() && !hasQueriableIndex && !allowFiltering,
+                checkFalse(clusteringColumnsRestrictions.hasContains() && !hasQueryableIndex && !allowFiltering,
                            "Clustering columns can only be restricted with CONTAINS with a secondary index or filtering");
 
                 if (!clusteringColumnsRestrictions.isEmpty() && clusteringColumnsRestrictions.needFiltering())
                 {
-                    if (hasQueriableIndex || forView)
+                    if (hasQueryableIndex || forView)
                     {
                         usesSecondaryIndexing = true;
                     }
@@ -561,12 +585,12 @@ public class StatementRestrictions
             }
 
             // Covers indexes on the first clustering column (among others).
-            if (isKeyRange && hasQueriableClusteringColumnIndex)
+            if (isKeyRange && hasQueryableClusteringColumnIndex)
                 usesSecondaryIndexing = true;
 
             // Because an ANN queries limit the result set based within the SAI, clustering column restrictions
             // must be added to the filter restrictions.
-            if (nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isAnn))
+            if (orderings.stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
                 usesSecondaryIndexing = true;
 
             if (usesSecondaryIndexing || clusteringColumnsRestrictions.needFiltering())
@@ -586,7 +610,7 @@ public class StatementRestrictions
                     throw invalidRequest("Non PRIMARY KEY columns found in where clause: %s ",
                                          Joiner.on(", ").join(nonPrimaryKeyColumns));
                 }
-                if (hasQueriableIndex)
+                if (hasQueryableIndex)
                     usesSecondaryIndexing = true;
                 else
                 {
@@ -602,10 +626,9 @@ public class StatementRestrictions
                             else
                                 throw invalidRequest(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE, vc);
                         else
+                            // We check if ANN vector column has index earlier, so we only need to for bounded ann here
                             if (isBoundedANN)
                                 throw invalidRequest(StatementRestrictions.GEO_DISTANCE_REQUIRES_INDEX_MESSAGE);
-                            else
-                                throw invalidRequest(StatementRestrictions.ANN_REQUIRES_INDEX_MESSAGE);
                     }
 
                     if (!allowFiltering)
@@ -643,70 +666,39 @@ public class StatementRestrictions
          * so they end up in the row filter.
          *
          * @param orderings orderings from the select statement
+         * @param indexRegistry used to check if the ordering is supported by an index
          * @param receiver target restriction builder to receive the additional restrictions
          */
-        private void addOrderingRestrictions(List<Ordering> orderings, RestrictionSet.Builder receiver)
+        private void addOrderingRestrictions(List<Ordering> orderings, IndexRegistry indexRegistry, RestrictionSet.Builder receiver)
         {
-            List<Ordering> annOrderings = orderings.stream().filter(o -> o.expression.hasNonClusteredOrdering()).collect(Collectors.toList());
+            List<Ordering> indexOrderings = orderings.stream().filter(o -> o.expression.hasNonClusteredOrdering()).collect(Collectors.toList());
 
-            if (annOrderings.size() > 1)
-                throw new InvalidRequestException("Cannot specify more than one ANN ordering");
-            else if (annOrderings.size() == 1)
+            if (indexOrderings.size() > 1)
+                throw new InvalidRequestException("Cannot specify more than one ordering column when using SAI indexes");
+            else if (indexOrderings.size() == 1)
             {
                 if (orderings.size() > 1)
-                    throw new InvalidRequestException("ANN ordering does not support secondary ordering");
-                Ordering annOrdering = annOrderings.get(0);
-                if (annOrdering.direction != Ordering.Direction.ASC)
+                    throw new InvalidRequestException("Cannot combine clustering column ordering with non-clustering column ordering");
+                Ordering ordering = indexOrderings.get(0);
+                if (ordering.direction != Ordering.Direction.ASC && ordering.expression instanceof Ordering.Ann)
                     throw new InvalidRequestException("Descending ANN ordering is not supported");
-                SingleRestriction restriction = annOrdering.expression.toRestriction();
-                receiver.addRestriction(restriction, false);
-            }
-        }
-
-        private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
-        {
-            IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-            if (indexRegistry.listIndexes().isEmpty())
-                return Collections.emptySet();
-
-            ImmutableSet.Builder<ColumnMetadata> builder = ImmutableSet.builder();
-
-            for (Restriction restriction : restrictions)
-            {
+                if (!ENABLE_SAI_GENERAL_ORDER_BY && ordering.expression instanceof Ordering.SingleColumn)
+                    throw new InvalidRequestException("SAI based ORDER BY on non-vector column is not supported");
+                SingleRestriction restriction = ordering.expression.toRestriction();
                 if (!restriction.hasSupportingIndex(indexRegistry))
                 {
-                    for (Index index : indexRegistry.listIndexes())
-                    {
-                        // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction
-                        for (ColumnMetadata column : restriction.getColumnDefs())
-                        {
-                            if (index.dependsOn(column))
-                                builder.add(column);
-                        }
-                    }
+                    var type = restriction.getFirstColumn().type.asCQL3Type().getType();
+                    // This is a slight hack, but once we support a way to order these types, we can remove it.
+                    if (type instanceof IntegerType || type instanceof DecimalType)
+                        throw new InvalidRequestException(String.format("SAI based ordering on column %s of type %s is not supported",
+                                                          restriction.getFirstColumn(),
+                                                          restriction.getFirstColumn().type.asCQL3Type()));
+                    throw new InvalidRequestException(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE,
+                                                                    restriction.getFirstColumn()));
                 }
-            }
-
-            return builder.build();
-        }
-
-        private void throwRequiresAllowFilteringError(TableMetadata table, Iterable<Restriction> columnRestrictions)
-        {
-            Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, columnRestrictions);
-            if (unsupported.isEmpty())
-            {
-                throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
-            }
-            else
-            {
-                // If there's an index on these columns but the restriction is not supported on this index, throw a more specific error message
-                if (unsupported.size() == 1)
-                    throw invalidRequest(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, unsupported.iterator().next()));
-                else
-                    throw invalidRequest(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_MULTI, unsupported));
+                receiver.addRestriction(restriction, false, indexRegistry);
             }
         }
-
 
         private CustomIndexExpression prepareCustomIndexExpression(List<CustomIndexExpression> expressions,
                                                                    VariableSpecifications boundNames,
@@ -725,7 +717,7 @@ public class StatementRestrictions
             if (!table.indexes.has(expression.targetIndex.getName()))
                 throw IndexRestrictions.indexNotFound(expression.targetIndex, table);
 
-            Index index = indexRegistry.getIndex(table.indexes.get(expression.targetIndex.getName()).get());
+            Index index = indexRegistry.getIndex(table.indexes.get(expression.targetIndex.getName()).orElseThrow());
             if (!index.getIndexMetadata().isCustom())
                 throw IndexRestrictions.nonCustomIndexInExpression(expression.targetIndex);
 
@@ -770,16 +762,22 @@ public class StatementRestrictions
         return children;
     }
 
-    public boolean hasAnnRestriction()
+    public boolean hasIndxBasedOrdering()
     {
-        return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isAnn);
+        return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isIndexBasedOrdering);
     }
 
     public void throwRequiresAllowFilteringError(TableMetadata table)
     {
-        if (hasAnnRestriction())
-            throw invalidRequest(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
-        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table);
+        if (hasIndxBasedOrdering())
+            throw invalidRequest(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+
+        throwRequiresAllowFilteringError(table, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions));
+    }
+
+    private static void throwRequiresAllowFilteringError(TableMetadata table, Iterable<Restriction> columnRestrictions)
+    {
+        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, columnRestrictions);
         if (unsupported.isEmpty())
         {
             throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
@@ -794,7 +792,7 @@ public class StatementRestrictions
         }
     }
 
-    public void throwsRequiresIndexSupportingDisjunctionError(TableMetadata table)
+    public void throwsRequiresIndexSupportingDisjunctionError()
     {
         throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION);
     }
@@ -1222,17 +1220,12 @@ public class StatementRestrictions
         return false;
     }
 
-    private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table)
-    {
-        return getColumnsWithUnsupportedIndexRestrictions(table, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions));
-    }
-
     private static Iterable<Restriction> allColumnRestrictions(ClusteringColumnRestrictions clusteringColumnsRestrictions, RestrictionSet nonPrimaryKeyRestrictions)
     {
         return Iterables.concat(clusteringColumnsRestrictions.restrictions(), nonPrimaryKeyRestrictions.restrictions());
     }
 
-    private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
+    private static Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         if (indexRegistry.listIndexes().isEmpty())

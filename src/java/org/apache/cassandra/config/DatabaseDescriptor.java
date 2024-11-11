@@ -892,7 +892,7 @@ public class DatabaseDescriptor
             logger.warn("Allowing java.lang.System.* access in UDFs is dangerous and not recommended. Set allow_extra_insecure_udfs: false to disable.");
 
         if(conf.enable_scripted_user_defined_functions)
-            logger.warn("JavaScript user-defined functions have been deprecated. You can still use them but the plan is to remove them in the next major version. For more information - CASSANDRA-17280");
+            throw new ConfigurationException("JavaScript user-defined functions were removed in CASSANDRA-18252.");
 
         if (conf.commitlog_segment_size_in_mb <= 0)
             throw new ConfigurationException("commitlog_segment_size_in_mb must be positive, but was "
@@ -2702,6 +2702,22 @@ public class DatabaseDescriptor
         conf.batchlog_replay_throttle_in_kb = throttleInKB;
     }
 
+    public static boolean isDynamicEndpointSnitch()
+    {
+        // not using config.dynamic_snitch because snitch can be changed via JMX
+        return snitch instanceof DynamicEndpointSnitch;
+    }
+
+    public static Config.BatchlogEndpointStrategy getBatchlogEndpointStrategy()
+    {
+        return conf.batchlog_endpoint_strategy;
+    }
+
+    public static void setBatchlogEndpointStrategy(Config.BatchlogEndpointStrategy batchlogEndpointStrategy)
+    {
+        conf.batchlog_endpoint_strategy = batchlogEndpointStrategy;
+    }
+
     public static int getMaxHintsDeliveryThreads()
     {
         return conf.max_hints_delivery_threads;
@@ -3118,16 +3134,6 @@ public class DatabaseDescriptor
     public static boolean enableUserDefinedFunctions()
     {
         return conf.enable_user_defined_functions;
-    }
-
-    public static boolean enableScriptedUserDefinedFunctions()
-    {
-        return conf.enable_scripted_user_defined_functions;
-    }
-
-    public static void enableScriptedUserDefinedFunctions(boolean enableScriptedUserDefinedFunctions)
-    {
-        conf.enable_scripted_user_defined_functions = enableScriptedUserDefinedFunctions;
     }
 
     public static boolean enableUserDefinedFunctionsThreads()
@@ -3638,7 +3644,7 @@ public class DatabaseDescriptor
 
     public static int getSAISegmentWriteBufferSpace()
     {
-        return conf.sai_options.segment_write_buffer_space_mb;
+        return conf == null ? StorageAttachedIndexOptions.DEFAULT_SEGMENT_BUFFER_MB : conf.sai_options.segment_write_buffer_space_mb;
     }
 
     public static void setSAISegmentWriteBufferSpace(int bufferSpace)
@@ -3687,5 +3693,17 @@ public class DatabaseDescriptor
     public static ParameterizedClass getDefaultCompaction()
     {
         return conf != null ? conf.default_compaction : null;
+    }
+
+    public static double getAnnBruteForceExpenseFactor()
+    {
+        return conf.sai_options.ann_brute_force_factor;
+    }
+
+    public static void setAnnBruteForceExpenseFactor(double factor)
+    {
+        Preconditions.checkArgument(factor > 0.0, "ANN brute force expense factor must be greater than zero");
+        Preconditions.checkArgument(factor <= StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR, "ANN brute force expense factor must be at most " + StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR);
+        conf.sai_options.ann_brute_force_factor = factor;
     }
 }

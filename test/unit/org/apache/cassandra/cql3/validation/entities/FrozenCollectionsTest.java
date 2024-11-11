@@ -36,6 +36,7 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static java.lang.String.format;
 import static org.junit.Assert.assertEquals;
 
 public class FrozenCollectionsTest extends CQLTester
@@ -1473,5 +1474,45 @@ public class FrozenCollectionsTest extends CQLTester
         flush();
 
         assertRows(execute("SELECT s FROM %s WHERE k = 0"), row(set(largeText, "v1", "v2")));
+    }
+
+    @Test
+    public void testInvalidSyntax() throws Throwable
+    {
+        // lists
+        assertInvalidThrowMessage("no viable alternative at input '>'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<list<>>)", KEYSPACE));
+        assertInvalidThrowMessage("mismatched input ',' expecting '>'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<list<int, int>>)", KEYSPACE));
+        assertInvalidThrowMessage("Unknown type cql_test_keyspace.list",
+                                  InvalidRequestException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<list>)", KEYSPACE));
+
+        // sets
+        assertInvalidThrowMessage("no viable alternative at input '>'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<set<>>)", KEYSPACE));
+        assertInvalidThrowMessage("mismatched input ',' expecting '>'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<set<int, int>>)", KEYSPACE));
+        assertInvalidThrowMessage("mismatched input '>' expecting '<'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<set>)", KEYSPACE));
+
+        // maps
+        assertInvalidThrowMessage("mismatched input '>' expecting ','",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<map<text>>)", KEYSPACE));
+        assertInvalidThrowMessage("no viable alternative at input '2'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<map<2>>)", KEYSPACE));
+        assertInvalidThrowMessage("no viable alternative at input '>'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<map<>>)", KEYSPACE));
+        assertInvalidThrowMessage("Unknown type cql_test_keyspace.map",
+                                  InvalidRequestException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<map>)", KEYSPACE));
     }
 }

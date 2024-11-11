@@ -29,10 +29,12 @@ import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.ReplicationFactor;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
@@ -40,6 +42,13 @@ import static org.mockito.Mockito.when;
 public class StaticControllerTest extends ControllerTest
 {
     static final int[] Ws = new int[] { 30, 2, 0, -6};
+    static final int[] VectorWs = new int[] {-8, -8, -8, -8};
+    static final int vectorBaseShardCount = 1;
+    static final double vectorSstableGrowthModifier = 1;
+    static final int vectorReservedThreads = Integer.MAX_VALUE;
+    static final int vectorScalingParameter = -8;
+    static final String vectorMinSSTableSize = "1024MiB";
+    static final String  vectorTargetSSTableSize = "5GiB";
 
     @Test
     public void testFromOptions()
@@ -63,6 +72,17 @@ public class StaticControllerTest extends ControllerTest
                             .collect(Collectors.joining(","));
         options.put(StaticController.SCALING_PARAMETERS_OPTION, wStr);
         options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
+    }
+
+    private static void addVectorOptions(Map<String, String> options)
+    {
+        options.put(Controller.VECTOR_BASE_SHARD_COUNT_OPTION, String.valueOf(vectorBaseShardCount));
+        options.put(Controller.VECTOR_SSTABLE_GROWTH_OPTION, String.valueOf(vectorSstableGrowthModifier));
+        options.put(Controller.VECTOR_RESERVED_THREADS_OPTION, String.valueOf(vectorReservedThreads));
+        options.put(Controller.VECTOR_SCALING_PARAMETERS_OPTION, String.valueOf(vectorScalingParameter));
+        options.put(Controller.VECTOR_MIN_SSTABLE_SIZE_OPTION, vectorMinSSTableSize);
+        options.put(Controller.VECTOR_TARGET_SSTABLE_SIZE_OPTION, vectorTargetSSTableSize);
+        options.put(Controller.OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION, String.valueOf(true));
     }
 
     @Test
@@ -100,12 +120,61 @@ public class StaticControllerTest extends ControllerTest
     }
 
     @Test
+    public void testFromOptionsVectorTable()
+    {
+        Map<String, String> options = new HashMap<>();
+        addOptions(false, options);
+        addVectorOptions(options);
+
+        Controller controller = testFromOptions(false, options);
+        assertTrue(controller instanceof StaticController);
+
+        for (int i = 0; i < Ws.length; i++)
+            assertEquals(Ws[i], controller.getScalingParameter(i));
+
+        assertEquals(Ws[Ws.length-1], controller.getScalingParameter(Ws.length));
+
+        controller = testFromOptionsVector(false, options);
+
+        assertEquals(vectorBaseShardCount, controller.baseShardCount);
+        assertEquals(vectorSstableGrowthModifier, controller.sstableGrowthModifier, 0.01);
+        assertEquals(FBUtilities.parseHumanReadableBytes(vectorMinSSTableSize), controller.minSSTableSize);
+        assertEquals(vectorReservedThreads, controller.getReservedThreads());
+        assertEquals(FBUtilities.parseHumanReadableBytes(vectorTargetSSTableSize), controller.getTargetSSTableSize());
+        for (int i = 0; i < Ws.length; i++)
+            assertEquals(vectorScalingParameter, controller.getScalingParameter(i));
+    }
+
+    @Test
     public void testValidateOptions()
     {
         Map<String, String> options = new HashMap<>();
         addOptions(false, options);
 
         super.testValidateOptions(options, false);
+    }
+
+    @Test
+    public void testValidateVectorOptions()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(Controller.VECTOR_BASE_SHARD_COUNT_OPTION, "-1");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.VECTOR_SSTABLE_GROWTH_OPTION, "-1");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.VECTOR_RESERVED_THREADS_OPTION, "-1");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.VECTOR_MIN_SSTABLE_SIZE_OPTION, "10GiB");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.VECTOR_TARGET_SSTABLE_SIZE_OPTION, "-1MiB");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        options.clear();
+        options.put(Controller.OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION, "not true");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
     }
 
     @Test
@@ -175,11 +244,13 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
                                                            Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
                                                            numShards,
+                                                           false,
                                                            sstableSizeMB << 20,
                                                            Controller.DEFAULT_SSTABLE_GROWTH,
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testStartShutdown(controller);
@@ -198,13 +269,15 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_MAX_SPACE_OVERHEAD,
                                                            0,
                                                            Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
-                                                           Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
+                                                           Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
                                                            numShards,
+                                                           false,
                                                            sstableSizeMB << 20,
                                                            Controller.DEFAULT_SSTABLE_GROWTH,
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testShutdownNotStarted(controller);
@@ -223,13 +296,15 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_MAX_SPACE_OVERHEAD,
                                                            0,
                                                            Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
-                                                           Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
+                                                           Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
                                                            numShards,
+                                                           false,
                                                            sstableSizeMB << 20,
                                                            Controller.DEFAULT_SSTABLE_GROWTH,
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testStartAlreadyStarted(controller);

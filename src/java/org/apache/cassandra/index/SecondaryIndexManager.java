@@ -89,7 +89,6 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -1481,8 +1480,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             toInsert.addPrimaryKeyLivenessInfo(updated.primaryKeyLivenessInfo());
             toInsert.addRowDeletion(updated.deletion());
             // diff listener collates the columns to be added & removed from the indexes
-            // VSTODO this seems inefficient since we're pulling it out of the merged row instead of
-            // from the update that got merged into it
             RowDiffListener diffListener = new RowDiffListener()
             {
                 public void onPrimaryKeyLivenessInfo(int i, Clustering clustering, LivenessInfo merged, LivenessInfo original)
@@ -1762,7 +1759,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             if (notice.memtable().isEmpty())
             {
                 IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableAdded(notice);
-                build(decision, notice.added, false);
+                build(decision, notice.added);
             }
         }
         else if (notification instanceof SSTableListChangedNotification)
@@ -1770,11 +1767,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             SSTableListChangedNotification notice = (SSTableListChangedNotification) notification;
 
             IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableListChanged(notice);
-            build(decision, notice.added, false);
+            build(decision, notice.added);
         }
     }
 
-    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables, boolean onlyIndexWithComponents)
+    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables)
     {
         if (decision == IndexBuildDecider.Decision.ASYNC)
         {
@@ -1782,7 +1779,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                               indexes.values()
                                      .stream()
                                      .filter(Index::shouldBuildBlocking)
-                                     .filter(i -> !onlyIndexWithComponents || !i.getComponents().isEmpty())
                                      .collect(Collectors.toSet()),
                               false);
         }
@@ -1792,7 +1788,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                  indexes.values()
                                         .stream()
                                         .filter(Index::shouldBuildBlocking)
-                                        .filter(i -> !onlyIndexWithComponents || !i.getComponents().isEmpty())
                                         .collect(Collectors.toSet()),
                                  false);
         }
@@ -1946,6 +1941,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     private synchronized static void propagateLocalIndexStatus(String keyspace, String index, Index.Status status)
     {
+        if (!Gossiper.instance.isEnabled())
+            return;
+
         try
         {
             Map<String, Index.Status> states = peerIndexStatus.computeIfAbsent(FBUtilities.getBroadcastAddressAndPort(),

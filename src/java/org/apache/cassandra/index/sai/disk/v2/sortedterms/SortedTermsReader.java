@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.IndexInput;
@@ -148,12 +149,21 @@ public class SortedTermsReader
 
         Cursor(FileHandle termsData, LongArray.Factory blockOffsetsFactory) throws IOException
         {
-            this.termsData = IndexInputReader.create(termsData);
-            SAICodecUtils.validate(this.termsData);
-            this.termsDataFp = this.termsData.getFilePointer();
-            this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
-            this.currentTerm = new BytesRef(Math.max(meta.maxTermLength, 0));  // maxTermLength can be negative if meta.count == 0
-            this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP);
+            try
+            {
+                this.termsData = IndexInputReader.create(termsData);
+                SAICodecUtils.validate(this.termsData);
+                this.termsDataFp = this.termsData.getFilePointer();
+                this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
+                this.currentTerm = new BytesRef(Math.max(meta.maxTermLength, 0));  // maxTermLength can be negative if meta.count == 0
+                this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP, TypeUtil.BYTE_COMPARABLE_VERSION);
+            }
+            catch (Throwable t)
+            {
+                if (termsData != null)
+                    termsData.close();
+                throw t;
+            }
         }
 
         /**
@@ -219,7 +229,7 @@ public class SortedTermsReader
          */
         public @Nonnull ByteComparable term()
         {
-            return ByteComparable.fixedLength(currentTerm.bytes, currentTerm.offset, currentTerm.length);
+            return ByteComparable.preencoded(reader.byteComparableVersion, currentTerm.bytes, currentTerm.offset, currentTerm.length);
         }
 
         /**
@@ -313,8 +323,9 @@ public class SortedTermsReader
         @Override
         public void close() throws IOException
         {
-            this.termsData.close();
-            this.reader.close();
+            blockOffsets.close();
+            termsData.close();
+            reader.close();
         }
     }
 }

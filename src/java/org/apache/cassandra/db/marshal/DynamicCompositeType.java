@@ -110,7 +110,8 @@ public class DynamicCompositeType extends AbstractCompositeType
 
     @VisibleForTesting
     public final Map<Byte, AbstractType<?>> aliases;
-    private final Map<AbstractType<?>, Byte> inverseMapping;
+    @VisibleForTesting
+    public final Map<AbstractType<?>, Byte> inverseMapping;
     private final Serializer serializer;
 
     // interning instances
@@ -340,8 +341,7 @@ public class DynamicCompositeType extends AbstractCompositeType
             srcs.add(ByteSource.oneByte(version == Version.LEGACY ? lastEoc : lastEoc & 0xFF ^ 0x80));
         }
 
-        return ByteSource.withTerminator(version == Version.LEGACY ? ByteSource.END_OF_STREAM : ByteSource.TERMINATOR,
-                                         srcs.toArray(EMPTY_BYTE_SOURCE_ARRAY));
+        return ByteSource.withTerminatorMaybeLegacy(version, ByteSource.END_OF_STREAM, srcs.toArray(EMPTY_BYTE_SOURCE_ARRAY));
     }
 
     @Override

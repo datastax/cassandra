@@ -24,7 +24,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
@@ -35,12 +34,10 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
@@ -106,9 +103,11 @@ public class Operation
                 switch (e.operator())
                 {
                     case EQ:
-                        // EQ operator will always be a multiple expression because it is being used by
-                        // map entries
+                        // EQ operator will always be a multiple expression because it is being used by map entries
                         isMultiExpression = indexContext.isNonFrozenCollection();
+
+                        // EQ wil behave like ANALYZER_MATCHES for analyzed columns if the analyzer supports EQ queries
+                        isMultiExpression |= indexContext.isAnalyzed() && analyzerFactory.supportsEquals();
                         break;
                     case CONTAINS:
                     case CONTAINS_KEY:
@@ -175,20 +174,24 @@ public class Operation
                     else if (e instanceof RowFilter.MapComparisonExpression)
                     {
                         var map = (RowFilter.MapComparisonExpression) e;
-                        switch (map.operator()) {
+                        var operator = map.operator();
+                        switch (operator) {
                             case EQ:
-                                range.add(Operator.EQ, map.getIndexValue().duplicate());
+                            case NEQ:
+                                range.add(operator, map.getIndexValue().duplicate());
                                 break;
                             case GT:
                             case GTE:
-                                range.add(map.operator(), map.getLowerBound().duplicate());
+                                range.add(operator, map.getLowerBound().duplicate());
                                 range.add(Operator.LTE, map.getUpperBound().duplicate());
                                 break;
                             case LT:
                             case LTE:
                                 range.add(Operator.GTE, map.getLowerBound().duplicate());
-                                range.add(map.operator(), map.getUpperBound().duplicate());
+                                range.add(operator, map.getUpperBound().duplicate());
                                 break;
+                            default:
+                                throw new InvalidRequestException("Unexpected operator: " + operator);
                         }
                     }
                     else
@@ -269,28 +272,31 @@ public class Operation
             throw new UnsupportedOperationException();
         }
 
-        abstract void analyze(List<RowFilter.Expression> expressionList, QueryController controller);
+        /**
+         * Analyze the tree, potentially flattening it and storing the result in expressionMap.
+         */
+        abstract void analyze(QueryController controller);
 
         abstract FilterTree filterTree();
 
-        abstract RangeIterator rangeIterator(QueryController controller);
+        abstract Plan.KeysIteration plan(QueryController controller);
 
-        static Node buildTree(List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
+        static Node buildTree(QueryController controller, List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
             OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
             for (RowFilter.Expression expression : expressions)
-                node.add(buildExpression(expression));
+                node.add(buildExpression(controller, expression, isDisjunction));
             for (RowFilter.FilterElement child : children)
-                node.add(buildTree(child));
+                node.add(buildTree(controller, child));
             return node;
         }
 
-        static Node buildTree(RowFilter.FilterElement filterOperation)
+        static Node buildTree(QueryController controller, RowFilter.FilterElement filterOperation)
         {
-            return buildTree(filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
+            return buildTree(controller, filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
         }
 
-        static Node buildExpression(RowFilter.Expression expression)
+        static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
             if (expression.operator() == Operator.IN)
             {
@@ -307,6 +313,20 @@ public class Operation
                                                                                                         ProtocolVersion.V3))));
                     offset += TypeSizes.INT_SIZE + ByteBufferAccessor.instance.getInt(expression.getIndexValue(), offset);
                 }
+                if (node.children().size() == 1)
+                    return node.children().get(0);
+                if (node.children().isEmpty())
+                    return new EmptyNode();
+                return node;
+            }
+            else if (isDisjunction && (expression.operator() == Operator.ANALYZER_MATCHES ||
+                                       expression.operator() == Operator.EQ && controller.getContext(expression).isAnalyzed()))
+            {
+                // In case of having a tokenizing query_analyzer (such as NGram) with OR, we need to split the
+                // expression into multiple expressions and intersect them.
+                // The additional node in case of no tokenization will be taken care of in Plan.Factory#intersection()
+                OperatorNode node = new AndNode();
+                node.add(new ExpressionNode(expression));
                 return node;
             }
             else
@@ -315,38 +335,28 @@ public class Operation
 
         Node analyzeTree(QueryController controller)
         {
-            List<RowFilter.Expression> expressionList = new ArrayList<>();
-            doTreeAnalysis(this, expressionList, controller);
-            if (!expressionList.isEmpty())
-                this.analyze(expressionList, controller);
+            analyze(controller);
             return this;
         }
 
-        void doTreeAnalysis(Node node, List<RowFilter.Expression> expressions, QueryController controller)
-        {
-            if (node.children().isEmpty())
-                expressions.add(node.expression());
-            else
-            {
-                List<RowFilter.Expression> expressionList = new ArrayList<>();
-                for (Node child : node.children())
-                    doTreeAnalysis(child, expressionList, controller);
-                node.analyze(expressionList, controller);
-            }
-        }
-
+        @VisibleForTesting
         FilterTree buildFilter(QueryController controller)
         {
-            analyzeTree(controller);
-            FilterTree tree = filterTree();
-            for (Node child : children())
-                if (child.canFilter())
-                    tree.addChild(child.buildFilter(controller));
-            return tree;
+            analyze(controller);
+            return filterTree();
+        }
+
+        /**
+         * Formats the whole operation tree as a pretty tree.
+         */
+        public final String toStringRecursive()
+        {
+            TreeFormatter<Node> formatter = new TreeFormatter<>(Node::toString, Node::children);
+            return formatter.format(this);
         }
     }
 
-    public static abstract class OperatorNode extends Node
+    static abstract class OperatorNode extends Node
     {
         List<Node> children = new ArrayList<>();
 
@@ -361,59 +371,89 @@ public class Operation
         {
             children.add(child);
         }
-    }
 
-    public static class AndNode extends OperatorNode
-    {
+        abstract protected OperationType operationType();
+        abstract protected Plan.Builder planBuilder(QueryController controller);
+
+        // expression list is the children that are leaf nodes... we could figure that out here...
         @Override
-        public void analyze(List<RowFilter.Expression> expressionList, QueryController controller)
+        public void analyze(QueryController controller)
         {
-            expressionMap = analyzeGroup(controller, OperationType.AND, expressionList);
+            // This operation flattens the tree where possible and stores the result in expressionMap
+            List<RowFilter.Expression> expressionList = new ArrayList<>();
+            for (Node child : children)
+            {
+                if (child instanceof ExpressionNode)
+                    expressionList.add(child.expression());
+                else
+                    child.analyze(controller);
+            }
+            expressionMap = analyzeGroup(controller, operationType(), expressionList);
         }
 
         @Override
         FilterTree filterTree()
         {
-            return new FilterTree(OperationType.AND, expressionMap);
+            assert expressionMap != null;
+            var tree = new FilterTree(operationType(), expressionMap);
+            for (Node child : children())
+                if (child.canFilter())
+                    tree.addChild(child.filterTree());
+            return tree;
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        Plan.KeysIteration plan(QueryController controller)
         {
-            var builder = RangeIntersectionIterator.sizedBuilder(1 + children.size());
+            var builder = planBuilder(controller);
             if (!expressionMap.isEmpty())
-                builder.add(controller.buildRangeIteratorForExpressions(OperationType.AND, expressionMap.values()));
+                controller.buildPlanForExpressions(builder, expressionMap.values());
             for (Node child : children)
                 if (child.canFilter())
-                    builder.add(child.rangeIterator(controller));
+                    builder.add(child.plan(controller));
             return builder.build();
+        }
+    }
+
+    public static class AndNode extends OperatorNode
+    {
+        @Override
+        protected OperationType operationType()
+        {
+            return OperationType.AND;
+        }
+
+        @Override
+        protected Plan.Builder planBuilder(QueryController controller)
+        {
+            return controller.planFactory.intersectionBuilder();
+        }
+
+        @Override
+        public String toString()
+        {
+            return "AndNode";
         }
     }
 
     public static class OrNode extends OperatorNode
     {
         @Override
-        public void analyze(List<RowFilter.Expression> expressionList, QueryController controller)
+        protected OperationType operationType()
         {
-            expressionMap = analyzeGroup(controller, OperationType.OR, expressionList);
+            return OperationType.OR;
         }
 
         @Override
-        FilterTree filterTree()
+        protected Plan.Builder planBuilder(QueryController controller)
         {
-            return new FilterTree(OperationType.OR, expressionMap);
+            return controller.planFactory.unionBuilder();
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        public String toString()
         {
-            var builder = RangeUnionIterator.<PrimaryKey>builder(1 + children.size());
-            if (!expressionMap.isEmpty())
-                builder.add(controller.buildRangeIteratorForExpressions(OperationType.OR, expressionMap.values()));
-            for (Node child : children)
-                if (child.canFilter())
-                    builder.add(child.rangeIterator(controller));
-            return builder.build();
+            return "OrNode";
         }
     }
 
@@ -422,14 +462,15 @@ public class Operation
         RowFilter.Expression expression;
 
         @Override
-        public void analyze(List<RowFilter.Expression> expressionList, QueryController controller)
+        public void analyze(QueryController controller)
         {
-            expressionMap = analyzeGroup(controller, OperationType.AND, expressionList);
+            expressionMap = analyzeGroup(controller, OperationType.AND, Collections.singletonList(expression));
         }
 
         @Override
         FilterTree filterTree()
         {
+            assert expressionMap != null;
             return new FilterTree(OperationType.AND, expressionMap);
         }
 
@@ -445,10 +486,54 @@ public class Operation
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        Plan.KeysIteration plan(QueryController controller)
         {
             assert canFilter() : "Cannot process query with no expressions";
-            return controller.buildRangeIteratorForExpressions(OperationType.AND, expressionMap.values());
+            Plan.Builder builder = controller.planFactory.intersectionBuilder();
+            controller.buildPlanForExpressions(builder, expressionMap.values());
+            return builder.build();
+        }
+
+        @Override
+        public String toString()
+        {
+            return "ExpressionNode{expression=" + expression + '}';
         }
     }
+
+    public static class EmptyNode extends Node
+    {
+        // A FilterTree that filters out all rows
+        private static final FilterTree EMPTY_TREE = new FilterTree(OperationType.OR, ArrayListMultimap.create());
+
+        @Override
+        boolean canFilter()
+        {
+            return true;
+        }
+
+        @Override
+        void analyze(QueryController controller)
+        {
+        }
+
+        @Override
+        FilterTree filterTree()
+        {
+            return EMPTY_TREE;
+        }
+
+        @Override
+        Plan.KeysIteration plan(QueryController controller)
+        {
+            return controller.planFactory.nothing;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "EmptyNode";
+        }
+    }
+
 }

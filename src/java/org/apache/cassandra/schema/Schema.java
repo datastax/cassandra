@@ -736,7 +736,7 @@ public class Schema implements SchemaProvider
         // we send mutations to the correct set of bootstrapping nodes. Refer CASSANDRA-15433.
         if (keyspace.params.replication.klass != LocalStrategy.class && instance != null)
         {
-            PendingRangeCalculatorService.calculatePendingRanges(instance.getReplicationStrategy(), keyspace.name);
+            PendingRangeCalculatorService.instance.calculatePendingRanges(instance.getReplicationStrategy(), keyspace.name);
         }
     }
 

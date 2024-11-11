@@ -32,6 +32,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.FSWriteError;
@@ -70,6 +71,7 @@ public class BigTableWriter extends SortedTableWriter
     private final ColumnIndex columnIndexWriter;
     private final IndexWriter iwriter;
     private final TransactionalProxy txnProxy;
+    private final OperationType operationType;
 
     private static final SequentialWriterOption WRITER_OPTION = SequentialWriterOption.newBuilder()
                                                                                       .trickleFsync(DatabaseDescriptor.getTrickleFsync())
@@ -94,6 +96,7 @@ public class BigTableWriter extends SortedTableWriter
         this.rowIndexEntrySerializer = new BigTableRowIndexEntry.Serializer(descriptor.version, header);
         columnIndexWriter = new ColumnIndex(this.header, dataFile, descriptor.version, this.observers, rowIndexEntrySerializer.indexInfoSerializer());
         txnProxy = new TransactionalProxy();
+        operationType = lifecycleNewTracker.opType();
     }
 
     private static Set<Component> components(TableMetadata metadata, Collection<Component> indexComponents)
@@ -202,7 +205,7 @@ public class BigTableWriter extends SortedTableWriter
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(boundary.dataLength);
         invalidateCacheAtBoundary(dfile);
         SSTableReader sstable = BigTableReader.internalOpen(descriptor,
-                                                           components, metadata,
+                                                           components(), metadata,
                                                            ifile, dfile,
                                                            indexSummary,
                                                            iwriter.bf.sharedCopy(),
@@ -245,7 +248,7 @@ public class BigTableWriter extends SortedTableWriter
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
         invalidateCacheAtBoundary(dfile);
         SSTableReader sstable = SSTableReader.internalOpen(descriptor,
-                                                           components,
+                                                           components(),
                                                            metadata,
                                                            ifile,
                                                            dfile,
@@ -308,7 +311,7 @@ public class BigTableWriter extends SortedTableWriter
         IndexWriter(long keyCount)
         {
             indexFile = new SequentialWriter(descriptor.fileFor(Component.PRIMARY_INDEX), WRITER_OPTION);
-            builder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX);
+            builder = SSTableReaderBuilder.primaryIndexWriteTimeBuilder(descriptor, Component.PRIMARY_INDEX, operationType);
             summary = new IndexSummaryBuilder(keyCount, metadata().params.minIndexInterval, Downsampling.BASE_SAMPLING_LEVEL);
             bf = FilterFactory.getFilter(keyCount, metadata().params.bloomFilterFpChance);
             // register listeners to be alerted when the data files are flushed
@@ -348,7 +351,7 @@ public class BigTableWriter extends SortedTableWriter
          */
         void flushBf()
         {
-            if (components.contains(Component.FILTER))
+            if (components().contains(Component.FILTER))
             {
                 File path = descriptor.fileFor(Component.FILTER);
                 try (FileOutputStreamPlus stream = new FileOutputStreamPlus(path))

@@ -21,6 +21,8 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -60,9 +62,6 @@ public class IndexWriterConfig
                                                                 .collect(Collectors.joining(", "));
 
     private static final VectorSourceModel DEFAULT_SOURCE_MODEL = VectorSourceModel.OTHER;
-    private static final String validSourceModels = Arrays.stream(VectorSourceModel.values())
-                                                          .map(Enum::name)
-                                                          .collect(Collectors.joining(", "));
 
     private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1, -1, -1, null, DEFAULT_SOURCE_MODEL);
 
@@ -134,6 +133,16 @@ public class IndexWriterConfig
         return bkdPostingsSkip;
     }
 
+    public int getAnnMaxDegree()
+    {
+        // For historical reasons (Lucene doubled the maximum node connections for its HNSW),
+        // maximumNodeConnections represents half of the graph degree, so double it
+        return 2 * maximumNodeConnections;
+    }
+
+    /** you should probably use getAnnMaxDegree instead */
+    @VisibleForTesting
+    @Deprecated
     public int getMaximumNodeConnections()
     {
         return maximumNodeConnections;
@@ -245,13 +254,16 @@ public class IndexWriterConfig
             }
             if (options.containsKey(SOURCE_MODEL))
             {
-                String option = options.get(SOURCE_MODEL).toUpperCase();
+                String option = options.get(SOURCE_MODEL).toUpperCase().replace("-", "_");
                 try
                 {
                     sourceModel = VectorSourceModel.valueOf(option);
                 }
                 catch (IllegalArgumentException e)
                 {
+                    var validSourceModels = Arrays.stream(VectorSourceModel.values())
+                                                  .map(Enum::name)
+                                                  .collect(Collectors.joining(", "));
                     throw new InvalidRequestException(String.format("source_model '%s' was not recognized for index %s. Valid values are: %s",
                                                                     option, indexName, validSourceModels));
                 }

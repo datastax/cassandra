@@ -113,12 +113,58 @@ public abstract class DataLimits
 
     public enum Kind
     {
-        CQL_LIMIT,
-        CQL_PAGING_LIMIT,
-        @Deprecated THRIFT_LIMIT, //Deprecated and unused in 4.0, stop publishing in 5.0, reclaim in 6.0
-        @Deprecated SUPER_COLUMN_COUNTING_LIMIT, //Deprecated and unused in 4.0, stop publishing in 5.0, reclaim in 6.0
-        CQL_GROUP_BY_LIMIT,
-        CQL_GROUP_BY_PAGING_LIMIT,
+        CQL_LIMIT(0),
+        CQL_PAGING_LIMIT(1),
+        @Deprecated THRIFT_LIMIT(), //Deprecated and unused in 4.0, stop publishing in 5.0, reclaim in 6.0
+        @Deprecated SUPER_COLUMN_COUNTING_LIMIT(), //Deprecated and unused in 4.0, stop publishing in 5.0, reclaim in 6.0
+        CQL_GROUP_BY_LIMIT(2),
+        CQL_GROUP_BY_PAGING_LIMIT(3);
+
+        /**
+         * DSE compatibility ordinal for Kind values unknown to DSE.
+         */
+        private static final int UNDEFINED = -1;
+        /**
+         * DSE compatibility values for Kind values. Some of the ordinals may be undefined, in which case the value is null.
+         */
+        private static final Kind[] DSE_COMPATIBILITY_VALUES;
+
+        static
+        {
+            Kind[] values = values();
+            DSE_COMPATIBILITY_VALUES = new Kind[values.length];
+            for (Kind kind : values)
+            {
+                if (kind.dseCompatibilityOrdinal != UNDEFINED)
+                {
+                    assert DSE_COMPATIBILITY_VALUES[kind.dseCompatibilityOrdinal] == null : "Duplicate DSE compatibility ordinal " + kind.dseCompatibilityOrdinal;
+                    DSE_COMPATIBILITY_VALUES[kind.dseCompatibilityOrdinal] = kind;
+                }
+            }
+        }
+
+        /**
+         * Used with DSE compatibility protocol {@link org.apache.cassandra.net.MessagingService.Version#VERSION_30}.
+         * DSE doesn't know {@link #THRIFT_LIMIT} and {@link #SUPER_COLUMN_COUNTING_LIMIT}, so the compatibility
+         * ordinals are shifted by 2.
+         */
+        private final int dseCompatibilityOrdinal;
+
+        Kind(int dseCompatibilityOrdinal)
+        {
+            this.dseCompatibilityOrdinal = dseCompatibilityOrdinal;
+        }
+
+        Kind()
+        {
+            this(UNDEFINED);
+        }
+
+        public int dseCompatibilityOrdinal()
+        {
+            assert dseCompatibilityOrdinal != UNDEFINED : "DSE compatibility ordinal not defined for kind " + this;
+            return dseCompatibilityOrdinal;
+        }
     }
 
     public static DataLimits cqlLimits(int cqlRowLimit)
@@ -1369,7 +1415,13 @@ public abstract class DataLimits
     {
         public void serialize(DataLimits limits, DataOutputPlus out, int version, ClusteringComparator comparator) throws IOException
         {
-            out.writeByte(limits.kind().ordinal());
+            // VERSION_30 is used for migration only (DSE <-> CC compatibility is required).
+            // DSE doesn't know THRIFT_LIMIT(2) and SUPER_COLUMN_COUNTING_LIMIT(3), so DSE ordinals must be used here.
+            if (version == MessagingService.VERSION_30)
+                out.writeByte(limits.kind().dseCompatibilityOrdinal());
+            else
+                out.writeByte(limits.kind().ordinal());
+
             switch (limits.kind())
             {
                 case CQL_LIMIT:
@@ -1413,7 +1465,13 @@ public abstract class DataLimits
 
         public DataLimits deserialize(DataInputPlus in, int version, ClusteringComparator comparator) throws IOException
         {
-            Kind kind = Kind.values()[in.readUnsignedByte()];
+            int ordinal = in.readUnsignedByte();
+            Kind kind = version == MessagingService.VERSION_30 ?
+                        Kind.DSE_COMPATIBILITY_VALUES[ordinal] :
+                        Kind.values()[ordinal];
+
+            assert kind != null : "Unknown DataLimits.Kind with ordinal " + ordinal + " and version " + version;
+
             switch (kind)
             {
                 case CQL_LIMIT:

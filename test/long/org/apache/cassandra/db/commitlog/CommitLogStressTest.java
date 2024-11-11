@@ -66,6 +66,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 
@@ -474,7 +475,7 @@ public abstract class CommitLogStressTest
             for (PartitionUpdate cf : mutation.getPartitionUpdates())
             {
 
-                Iterator<Row> rowIterator = cf.iterator();
+                Iterator<Row> rowIterator = cf.rowIterator();
 
                 while (rowIterator.hasNext())
                 {
@@ -499,5 +500,7 @@ public abstract class CommitLogStressTest
         public void handleUnrecoverableError(CommitLogReadException exception) throws IOException { }
 
         public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc) { }
+
+        public void handleInvalidMutation(TableId id) {}
     }
 }

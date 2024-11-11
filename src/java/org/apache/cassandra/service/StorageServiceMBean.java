@@ -354,8 +354,11 @@ public interface StorageServiceMBean extends NotificationEmitter
      *
      * The entire sstable will be read to ensure each cell validates if extendedVerify is true
      */
+    @Deprecated
     public int verify(boolean extendedVerify, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException;
+    @Deprecated
     public int verify(boolean extendedVerify, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException;
+    public int verify(boolean extendedVerify, boolean validateAllRows, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException;
 
     /**
      * Rewrite all sstables to the latest version.
@@ -534,6 +537,13 @@ public interface StorageServiceMBean extends NotificationEmitter
       Get dynamic_snitch_update_interval_in_ms
      */
     public int getDynamicUpdateInterval();
+
+    public String getBatchlogEndpointStrategy();
+
+    /**
+     * See {@link org.apache.cassandra.config.Config.BatchlogEndpointStrategy} for valid values.
+     */
+    public void setBatchlogEndpointStrategy(String batchlogEndpointStrategy);
 
     // allows a user to forcibly 'kill' a sick node
     public void stopGossiping();

@@ -24,6 +24,10 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.junit.BeforeClass;
@@ -31,16 +35,25 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.Keyspaces;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.StorageService;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
+import org.mockito.Mockito;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.mockito.Mockito.when;
 
 
 /**
@@ -129,5 +142,48 @@ public class PendingRangeCalculatorServiceTest
         Map<InetAddressAndPort, EndpointState> states = new HashMap<>();
         states.put(otherNodeAddr, state);
         return states;
+    }
+
+    @Test
+    public void testPendingRangesCalculatedForAllRequestedKeyspaces() throws InterruptedException, TimeoutException
+    {
+        DatabaseDescriptor.daemonInitialization();
+
+        // mock schema with 100 keyspaces ks0, ks1, ..., ks99
+        Schema schema = Mockito.mock(Schema.class);
+        Keyspaces.Builder keyspaces = Keyspaces.builder();
+        for (int i = 0; i < 100; i++)
+            keyspaces.add(KeyspaceMetadata.create("ks" + i, KeyspaceParams.simple(1)));
+        when(schema.getNonLocalStrategyKeyspaces()).thenReturn(keyspaces.build());
+
+        // a set of keyspaces for which pending ranges have been calculated - once the calculation is requested, we put a keyspace name into this set
+        Map<String, Boolean> processedKeyspaces = new ConcurrentHashMap<>();
+
+        // create a PendingRangeCalculatorService that will take 1 ms to calculate pending ranges for each keyspace
+        PendingRangeCalculatorService prcs = new PendingRangeCalculatorService("PendingRangeCalculator" + System.currentTimeMillis(), schema) {
+            @Override
+            public void calculatePendingRanges(String keyspace)
+            {
+                processedKeyspaces.put(keyspace, true);
+                LockSupport.parkNanos(1000000); // 1 ms processing time
+            }
+        };
+
+        // request pending range calculation for each keyspace with 100 µs interval
+        // Note that, those parkNanos are optional and are added to increse the visibility of the problem
+        for (int i = 0; i < 100; i++)
+        {
+            String name = "ks" + i;
+            prcs.update(ks -> ks.equals(name));
+            LockSupport.parkNanos(100000); // 100 µs schedule interval
+        }
+
+        // wait for all pending range calculations to finish
+        prcs.blockUntilFinished();
+        prcs.shutdownAndWait(10, TimeUnit.SECONDS);
+
+        // verify that pending ranges have been calculated for all keyspaces
+        assertThat(processedKeyspaces).withFailMessage("Test is broken or outdated. Expected at least 2 keyspaces to be calculated.").hasSizeGreaterThan(1);
+        assertThat(processedKeyspaces).hasSize(100);
     }
 }

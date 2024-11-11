@@ -38,20 +38,21 @@ public abstract class TrieEntriesWalker<T, V> extends TriePathReconstructor impl
     /**
      * Iterator representing the content of the trie a sequence of (path, content) pairs.
      */
-    static class WithConsumer<T>
-    extends TrieEntriesWalker<T, Void>
+    static class WithConsumer<T> extends TrieEntriesWalker<T, Void>
     {
         private final BiConsumer<ByteComparable, T> consumer;
+        private final ByteComparable.Version byteComparableVersion;
 
-        public WithConsumer(BiConsumer<ByteComparable, T> consumer)
+        public WithConsumer(BiConsumer<ByteComparable, T> consumer, ByteComparable.Version byteComparableVersion)
         {
             this.consumer = consumer;
+            this.byteComparableVersion = byteComparableVersion;
         }
 
         @Override
         protected void content(T content, byte[] bytes, int byteLength)
         {
-            consumer.accept(toByteComparable(bytes, byteLength), content);
+            consumer.accept(toByteComparable(byteComparableVersion, bytes, byteLength), content);
         }
 
         @Override

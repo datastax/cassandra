@@ -23,7 +23,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
-import org.apache.cassandra.index.sai.cql.DataModel;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;

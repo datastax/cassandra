@@ -31,6 +31,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.ClientState;
 
+/**
+ * A Tracing implementation that exposes its state (`traces` and `payloads`) for testing.
+ */
 public final class TracingTestImpl extends Tracing
 {
     private final List<String> traces;

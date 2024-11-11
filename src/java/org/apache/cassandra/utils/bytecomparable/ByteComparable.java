@@ -19,9 +19,22 @@
 package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+
+import com.google.common.primitives.UnsignedBytes;
+
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FastByteOperations;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 
 /**
  * Interface indicating a value can be represented/identified by a comparable {@link ByteSource}.
+ *
+ * All Cassandra types that can be used as part of a primary key have a corresponding byte-comparable translation,
+ * detailed in ByteComparable.md. Byte-comparable representations are used in some memtable as well as primary and
+ * secondary index implementations.
  */
 public interface ByteComparable
 {
@@ -39,6 +52,7 @@ public interface ByteComparable
     {
         LEGACY,
         OSS41,  // CASSANDRA 4.1 encoding, used in trie-based indices
+        OSS50,  // CASSANDRA 5.0 encoding, used by the trie memtable
     }
 
     ByteComparable EMPTY = (Version version) -> ByteSource.EMPTY;
@@ -57,10 +71,20 @@ public interface ByteComparable
         return builder.toString();
     }
 
+    /**
+     * Returns the full byte-comparable representation of the value as a byte array.
+     */
+    default byte[] asByteComparableArray(Version version)
+    {
+        return ByteSourceInverse.readBytes(asComparableBytes(version));
+    }
+
     // Simple factories used for testing
 
+    @VisibleForTesting
     static ByteComparable of(String s)
     {
+        // Note: This is not prefix-free
         return v -> ByteSource.of(s, v);
     }
 
@@ -74,19 +98,48 @@ public interface ByteComparable
         return v -> ByteSource.of(value);
     }
 
-    static ByteComparable fixedLength(ByteBuffer bytes)
+    private static void checkVersion(Version expected, Version actual)
     {
-        return v -> ByteSource.fixedLength(bytes);
+        Preconditions.checkState(actual == expected,
+                                 "Preprocessed byte-source at version %s queried at version %s",
+                                 actual,
+                                 expected);
     }
 
-    static ByteComparable fixedLength(byte[] bytes)
+    /**
+     * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
+     * version will result in an exception.
+     */
+    static ByteComparable preencoded(Version version, ByteBuffer bytes)
     {
-        return v -> ByteSource.fixedLength(bytes);
+        return v -> {
+            checkVersion(version, v);
+            return ByteSource.preencoded(bytes);
+        };
     }
 
-    static ByteComparable fixedLength(byte[] bytes, int offset, int len)
+    /**
+     * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
+     * version will result in an exception.
+     */
+    static ByteComparable preencoded(Version version, byte[] bytes)
     {
-        return v -> ByteSource.fixedLength(bytes, offset, len);
+        return v -> {
+            checkVersion(version, v);
+            return ByteSource.preencoded(bytes);
+        };
+    }
+
+    /**
+     * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
+     * version will result in an exception.
+     */
+    static ByteComparable preencoded(Version version, byte[] bytes, int offset, int len)
+    {
+        return v -> {
+            checkVersion(version, v);
+            return ByteSource.preencoded(bytes, offset, len);
+        };
     }
 
     /**
@@ -128,7 +181,7 @@ public interface ByteComparable
     }
 
     /**
-     * Compare two byte-comparable values by their byte-comparable representation. Used for tests.
+     * Compare two byte-comparable values by their byte-comparable representation.
      *
      * @return the result of the lexicographic unsigned byte comparison of the byte-comparable representations of the
      *         two arguments
@@ -151,6 +204,14 @@ public interface ByteComparable
             if (b1 == ByteSource.END_OF_STREAM)
                 return 0;
         }
+    }
+
+    /**
+     * Compares two bytecomparable encodings lexicographically
+     */
+    static int compare(ByteBuffer value1, ByteBuffer value2)
+    {
+        return FastByteOperations.compareUnsigned(value1, value2);
     }
 
     /**

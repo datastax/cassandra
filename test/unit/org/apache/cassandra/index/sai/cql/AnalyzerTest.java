@@ -18,19 +18,7 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-
 import org.junit.Test;
-
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.plan.QueryController;
-
-import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
 
 public class AnalyzerTest extends VectorTester
 {
@@ -40,7 +28,6 @@ public class AnalyzerTest extends VectorTester
         createTable("CREATE TABLE %s (pk1 int, pk2 text, val int, val2 int, PRIMARY KEY((pk1, pk2)))");
         createIndex("CREATE CUSTOM INDEX ON %s(pk1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(pk2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (-1, 'b', 1)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (0, 'b', 2)");
@@ -53,7 +40,6 @@ public class AnalyzerTest extends VectorTester
         flush();
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer': 'standard'};");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (-1, 'd', 1)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (0, 'd', 2)");

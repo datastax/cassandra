@@ -150,8 +150,6 @@ public class NativeTransportService
 
         // shutdown executors used by netty for native transport server
         workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
-
-        Dispatcher.shutdown();
     }
 
     /**

@@ -398,7 +398,17 @@ public class CompactionTask extends AbstractCompactionTask
             Throwable err = Throwables.close(errorsSoFar, obsCloseable, writer, sstableRefs);
 
             if (transaction.isOffline())
+            {
+                if (completed)
+                {
+                    // update basic metrics
+                    realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
+                                                      outputDiskSize(),
+                                                      System.nanoTime() - startNanos);
+                }
+                Throwables.maybeFail(err);
                 return;
+            }
 
             if (completed)
             {
@@ -856,7 +866,12 @@ public class CompactionTask extends AbstractCompactionTask
             ids.add(sstable.getSSTableMetadata().pendingRepair);
 
         if (ids.size() != 1)
-            throw new RuntimeException(String.format("Attempting to compact pending repair sstables with sstables from other repair, or sstables not pending repair: %s", ids));
+        {
+            if (!SKIP_REPAIR_STATE_CHECKING)
+                throw new RuntimeException(String.format("Attempting to compact pending repair sstables with sstables from other repair, or sstables not pending repair: %s", ids));
+            // otherwise we should continue but mark the result as unrepaired
+            return ActiveRepairService.NO_PENDING_REPAIR;
+        }
 
         return ids.iterator().next();
     }
@@ -915,9 +930,9 @@ public class CompactionTask extends AbstractCompactionTask
                 // but we can still compact expired SSTables
                 if(partialCompactionsAcceptable() && fullyExpiredSSTables.size() > 0 )
                 {
-                    // sanity check to make sure we compact only fully expired SSTables.
-                    assert transaction.originals().equals(fullyExpiredSSTables);
-                    break;
+                    // if all remaining sstables are fully expired, we can still start compaction; otherwise throw
+                    if (transaction.originals().equals(fullyExpiredSSTables))
+                        break;
                 }
 
                 String msg = String.format("Not enough space for compaction, estimated sstables = %d, expected write size = %d", estimatedSSTables, expectedWriteSize);

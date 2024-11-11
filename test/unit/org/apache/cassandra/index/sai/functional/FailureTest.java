@@ -68,7 +68,7 @@ public class FailureTest extends SAITester
         // Now verify that a restart actually repairs the index...
         simulateNodeRestart();
 
-        verifyIndexFiles(numericIndexContext, null, 2, 0);
+        verifyIndexComponentFiles(numericIndexContext, null);
         verifySSTableIndexes(numericIndexContext.getIndexName(), 2, 2);
 
         assertEquals(2, execute("SELECT id1 FROM %s WHERE v1 > 1").size());
@@ -116,12 +116,11 @@ public class FailureTest extends SAITester
         Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_creation", SSTableContext.class, "<init>", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
 
-        String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+        String v2IndexName = createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
         // Verify that the initial index build fails...
         verifyInitialIndexFailed(v2IndexName);
 
-        verifyNoIndexFiles();
         verifySSTableIndexes(v2IndexName, 0);
 
         // ...and then verify that, while the node is still operational, the index is not.

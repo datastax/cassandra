@@ -41,10 +41,10 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.AtomicBTreePartition;
 import org.apache.cassandra.db.partitions.BTreePartitionData;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -75,6 +75,14 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     private final ConcurrentNavigableMap<PartitionPosition, AtomicBTreePartition> partitions = new ConcurrentSkipListMap<>();
 
     private final AtomicLong liveDataSize = new AtomicLong(0);
+
+    /**
+     * Keeps an estimate of the average row size in this memtable, computed from a small sample of rows.
+     * Because computing this estimate is potentially costly, as it requires iterating the rows,
+     * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
+     * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
+     */
+    private volatile MemtableAverageRowSize estimatedAverageRowSize;
 
     SkipListMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
@@ -108,6 +116,11 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             public ShardBoundaries localRangeSplits(int shardCount)
             {
                 return null; // not implemented
+            }
+
+            public OpOrder readOrdering()
+            {
+                return null;
             }
         });
     }
@@ -157,7 +170,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             }
         }
 
-        BTreePartitionUpdater updater = previous.addAll(update, cloner, opGroup, indexer);
+        BTreePartitionUpdater updater = previous.addAll(BTreePartitionUpdate.asBTreeUpdate(update), cloner, opGroup, indexer);
         updateMin(minTimestamp, previous.stats().minTimestamp);
         liveDataSize.addAndGet(initialSize + updater.dataSize);
         columnsCollector.update(update.columns());
@@ -172,28 +185,13 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     }
 
     @Override
-    public long rowCount()
+    public long getEstimatedAverageRowSize()
     {
-        DataRange range = DataRange.allData(metadata().partitioner);
-        ColumnFilter columnFilter = ColumnFilter.allRegularColumnsBuilder(metadata(), true).build();
-        return rowCount(columnFilter, range);
+        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
+            estimatedAverageRowSize = new MemtableAverageRowSize(this);
+        return estimatedAverageRowSize.rowSize;
     }
 
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (var iter = makePartitionIterator(columnFilter, dataRange); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-
-        return total;
-    }
 
     public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter,
                                                                      final DataRange dataRange)

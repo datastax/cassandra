@@ -86,6 +86,8 @@ import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.Verifier;
+import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -149,6 +151,10 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
@@ -364,6 +370,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     // BloomFilterTracker is updated from corresponding {@link SSTableReader}s. Metrics are queried via CFS instance.
     private final BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createMeterTracker();
+
+    private final RequestTracker requestTracker = RequestTracker.instance;
 
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
@@ -658,6 +666,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return repairManager;
     }
 
+    @Override
+    public Environment makeUCSEnvironment()
+    {
+        return new RealEnvironment(this);
+    }
+
     public TableMetadata metadata()
     {
         return metadata.get();
@@ -800,7 +814,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             storageHandler.unload();
 
-            if (status.isInvalidAndShouldDropData())
+            // wait for sstable GlobalTidy to complete
+            if (!status.isValid())
             {
                 LifecycleTransaction.waitForDeletions(); // just in case an index had a reference on the sstable
             }
@@ -1342,7 +1357,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 reclaim(memtable);
                 return Collections.emptyList();
             }
-
+            long start = System.nanoTime();
             List<Future<SSTableMultiWriter>> futures = new ArrayList<>();
             long totalBytesOnDisk = 0;
             long maxBytesOnDisk = 0;
@@ -1430,7 +1445,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
                 Throwable accumulate = null;
                 for (SSTableMultiWriter writer : flushResults)
+                {
                     accumulate = writer.commit(accumulate);
+                    metric.flushSizeOnDisk().update(writer.getOnDiskBytesWritten());
+                }
 
                 maybeFail(txn.commit(accumulate));
 
@@ -1449,6 +1467,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         }
                     }
                 }
+                metric.memTableFlushCompleted(System.nanoTime() - start);
 
                 cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }
@@ -1553,9 +1572,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             DecoratedKey key = update.partitionKey();
             invalidateCachedPartition(key);
             metric.topWritePartitionFrequency.addSample(key.getKey(), 1);
+            int dataSize = update.dataSize();
             if (metric.topWritePartitionSize.isEnabled()) // dont compute datasize if not needed
-                metric.topWritePartitionSize.addSample(key.getKey(), update.dataSize());
-            metric.bytesInserted.inc(update.dataSize());
+                metric.topWritePartitionSize.addSample(key.getKey(), dataSize);
+            metric.bytesInserted.inc(dataSize);
             StorageHook.instance.reportWrite(metadata.id, update);
             metric.writeLatency.addNano(System.nanoTime() - start);
             // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
@@ -1565,6 +1585,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             // to update.
             if(timeDelta < Long.MAX_VALUE)
                 metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
+
+            if (!isIndex())
+            {
+                RequestSensors sensors = requestTracker.get();
+                if (sensors != null)
+                {
+                    Context puContext = Context.from(this.metadata.get());
+                    sensors.registerSensor(puContext, Type.WRITE_BYTES);
+                    sensors.incrementSensor(puContext, Type.WRITE_BYTES, dataSize);
+                }
+            }
         }
         catch (RuntimeException e)
         {
@@ -1589,7 +1620,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public ShardBoundaries localRangeSplits(int shardCount)
     {
-        if (shardCount == 1 || !getPartitioner().splitter().isPresent() || SchemaConstants.isLocalSystemKeyspace(keyspace.getName()))
+        if (shardCount == 1 ||
+            !getPartitioner().splitter().isPresent() ||
+            // shard PAXOS table like any other table
+            (SchemaConstants.isLocalSystemKeyspace(keyspace.getName()) && !name.equals(SystemKeyspace.PAXOS)))
             return ShardBoundaries.NONE;
 
         ShardBoundaries shardBoundaries = cachedShardBoundaries;
@@ -1886,6 +1920,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public Iterable<Memtable> getAllMemtables()
     {
         return data.getView().getAllMemtables();
+    }
+
+    @Override
+    public OpOrder readOrdering()
+    {
+        return readOrdering;
     }
 
     public Map<UUID, PendingStat> getPendingRepairStats()
@@ -2390,18 +2430,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         invalidateCachedPartition(new RowCacheKey(metadata(), key));
     }
 
-    public ClockAndCount getCachedCounter(ByteBuffer partitionKey, Clustering<?> clustering, ColumnMetadata column, CellPath path)
+    public ClockAndCount getCachedCounter(CounterCacheKey key)
     {
         if (CacheService.instance.counterCache.getCapacity() == 0L) // counter cache disabled.
             return null;
-        return CacheService.instance.counterCache.get(CounterCacheKey.create(metadata(), partitionKey, clustering, column, path));
+        return CacheService.instance.counterCache.get(key);
     }
 
-    public void putCachedCounter(ByteBuffer partitionKey, Clustering<?> clustering, ColumnMetadata column, CellPath path, ClockAndCount clockAndCount)
+    public void putCachedCounter(CounterCacheKey key, ClockAndCount clockAndCount)
     {
         if (CacheService.instance.counterCache.getCapacity() == 0L) // counter cache disabled.
             return;
-        CacheService.instance.counterCache.put(CounterCacheKey.create(metadata(), partitionKey, clustering, column, path), clockAndCount);
+        CacheService.instance.counterCache.put(key, clockAndCount);
     }
 
     public void forceMajorCompaction()
@@ -2562,6 +2602,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      * For testing.  No effort is made to clear historical or even the current memtables, nor for
      * thread safety.  All we do is wipe the sstable containers clean, while leaving the actual
      * data files present on disk.  (This allows tests to easily call loadNewSSTables on them.)
+     *
+     * This will release references to current SSTableReader instances. Test that wishes to keep
+     * references to these sstables must reference then prior to calling this method via
+     * {@link SSTableReader#selfRef().ref()}.
      */
     @VisibleForTesting
     public void clearUnsafe()
@@ -3050,7 +3094,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return count > 0 ? sum * 1.0 / count : 0;
     }
 
-    public int getMeanRowCount()
+    public int getMeanRowsPerPartition()
     {
         long totalRows = 0;
         long totalPartitions = 0;

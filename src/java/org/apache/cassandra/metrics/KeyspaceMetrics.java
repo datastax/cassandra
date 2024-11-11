@@ -81,6 +81,18 @@ public class KeyspaceMetrics
     public final Histogram sstablesPerReadHistogram;
     /** Tombstones scanned in queries on this Keyspace */
     public final Histogram tombstoneScannedHistogram;
+    /** Time spent flushing memtables */
+    public final Counter flushTime;
+    public final Counter storageAttachedIndexBuildTime;
+
+    /** Time spent writing SAI */
+    public final Counter storageAttachedIndexWritingTimeForIndexBuild;
+    public final Counter storageAttachedIndexWritingTimeForCompaction;
+    public final Counter storageAttachedIndexWritingTimeForFlush;
+    public final Counter storageAttachedIndexWritingTimeForOther;
+
+    /** Time spent writing  memtables during compaction */
+    public final Counter compactionTime;
 
     /** Shadowed keys scan metrics **/
     public final Histogram shadowedKeysScannedHistogram;
@@ -218,6 +230,13 @@ public class KeyspaceMetrics
         // create histograms for TableMetrics to replicate updates to
         sstablesPerReadHistogram = createKeyspaceHistogram("SSTablesPerReadHistogram", true);
         tombstoneScannedHistogram = createKeyspaceHistogram("TombstoneScannedHistogram", false);
+        flushTime = createKeyspaceCounter("FlushTime", v -> v.flushTime.getCount());
+        storageAttachedIndexBuildTime = createKeyspaceCounter("StorageAttachedIndexBuildTime", v -> v.storageAttachedIndexBuildTime.getCount());
+        storageAttachedIndexWritingTimeForIndexBuild = createKeyspaceCounter("StorageAttachedIndexWritingTimeForIndexBuild", v -> v.storageAttachedIndexWritingTimeForIndexBuild.getCount());
+        storageAttachedIndexWritingTimeForCompaction = createKeyspaceCounter("StorageAttachedIndexWritingTimeForCompaction", v -> v.storageAttachedIndexWritingTimeForCompaction.getCount());
+        storageAttachedIndexWritingTimeForFlush = createKeyspaceCounter("StorageAttachedIndexWritingTimeForFlush", v -> v.storageAttachedIndexWritingTimeForFlush.getCount());
+        storageAttachedIndexWritingTimeForOther = createKeyspaceCounter("StorageAttachedIndexWritingTimeForOther", v -> v.storageAttachedIndexWritingTimeForOther.getCount());
+        compactionTime = createKeyspaceCounter("CompactionTime", v -> v.compactionTime.getCount());
         shadowedKeysScannedHistogram = createKeyspaceHistogram("ShadowedKeysScannedHistogram", false);
         shadowedKeysLoopsHistogram = createKeyspaceHistogram("ShadowedKeysLoopsHistogram", false);
         liveScannedHistogram = createKeyspaceHistogram("LiveScannedHistogram", false);

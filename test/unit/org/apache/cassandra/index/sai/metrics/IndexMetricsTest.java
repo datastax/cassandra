@@ -38,7 +38,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
     private static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS " + INDEX + " ON %s." + TABLE + "(%s) USING 'StorageAttachedIndex'";
 
     @Test
-    public void testSameIndexNameAcrossKeyspaces() throws Throwable
+    public void testSameIndexNameAcrossKeyspaces()
     {
         String keyspace1 = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
         String keyspace2 = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
@@ -62,7 +62,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testMetricRelease() throws Throwable
+    public void testMetricRelease()
     {
         String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
 
@@ -80,7 +80,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testMetricsThroughWriteLifecycle() throws Throwable
+    public void testMetricsThroughWriteLifecycle()
     {
         String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
 
@@ -129,7 +129,8 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         waitForIndexCompaction(keyspace, TABLE, INDEX);
 
-        waitForIndexQueryable(keyspace, TABLE);
+        waitForTableIndexesQueryable(keyspace, TABLE);
+
         ResultSet rows = executeNet(String.format("SELECT id1 FROM %s.%s WHERE v1 >= 0", keyspace, TABLE));
         assertEquals(rowCount, rows.all().size());
 

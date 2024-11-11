@@ -40,11 +40,10 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMap() throws Throwable
+    public void indexMap()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value CONTAINS 'v1'").size());
 
         assertEmpty(execute("SELECT pk FROM %s WHERE value NOT CONTAINS 'v1'"));
@@ -67,7 +66,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int primary key, value map<int, text>)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Test memtable index:
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, new HashMap<Integer, String>() {{
@@ -101,43 +99,39 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexQueryEmpty() throws Throwable
+    public void indexQueryEmpty()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(0, execute("SELECT * FROM %s WHERE value CONTAINS ''").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE value CONTAINS '' AND value CONTAINS 'v1'").size());
     }
 
     @Test
-    public void indexMapKeys() throws Throwable
+    public void indexMapKeys()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value CONTAINS KEY 1").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE value NOT CONTAINS KEY 1").size());
         assertEquals(2, execute("SELECT * FROM %s WHERE value NOT CONTAINS KEY 5").size());
     }
 
     @Test
-    public void indexMapValues() throws Throwable
+    public void indexMapValues()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value CONTAINS 'v1'").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE value NOT CONTAINS 'v1'").size());
         assertEquals(2, execute("SELECT * FROM %s WHERE value NOT CONTAINS 'v5'").size());
     }
 
     @Test
-    public void indexMapEntries() throws Throwable
+    public void indexMapEntries()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value[1] = 'v1'").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE value[1] = 'v1' AND value[2] = 'v2'").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE value[1] != 'v1'").size());
@@ -146,20 +140,18 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexFrozenList() throws Throwable
+    public void indexFrozenList()
     {
         createPopulatedFrozenList();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value = ?", Arrays.asList(1, 2, 3)).size());
     }
 
     @Test
-    public void indexFrozenMap() throws Throwable
+    public void indexFrozenMap()
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(1, execute("SELECT * FROM %s WHERE value = ?", new HashMap<Integer, String>() {{
             put(1, "v1");
             put(2, "v2");
@@ -168,22 +160,20 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexFrozenMapQueryKeys() throws Throwable
+    public void indexFrozenMapQueryKeys()
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains key 1");
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value not contains key 1");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains key 1 ALLOW FILTERING").size());
     }
 
     @Test
-    public void indexFrozenMapQueryValues() throws Throwable
+    public void indexFrozenMapQueryValues()
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains 'v1'");
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value not contains 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains 'v1' ALLOW FILTERING").size());
@@ -191,31 +181,28 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexFrozenMapQueryEntries() throws Throwable
+    public void indexFrozenMapQueryEntries()
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertInvalidMessage("Map-entry equality predicates on frozen map column value are not supported",
                 "SELECT * FROM %s WHERE value[1] = 'v1'");
     }
 
     @Test
-    public void indexMapEntriesQueryEq() throws Throwable
+    public void indexMapEntriesQueryEq()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertInvalidMessage("Collection column 'value' (map<int, text>) cannot be restricted by a '=' relation",
                 "SELECT * FROM %s WHERE value = ?", Arrays.asList(1, 2));
     }
 
     @Test
-    public void indexMapEntriesQueryKeys() throws Throwable
+    public void indexMapEntriesQueryKeys()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains key 1");
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value not contains key 1");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains key 1 ALLOW FILTERING").size());
@@ -223,11 +210,10 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapEntriesQueryValues() throws Throwable
+    public void indexMapEntriesQueryValues()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains 'v1'");
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value not contains 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains 'v1' ALLOW FILTERING").size());
@@ -235,51 +221,46 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapKeysQueryEq() throws Throwable
+    public void indexMapKeysQueryEq()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertInvalidMessage("Collection column 'value' (map<int, text>) cannot be restricted by a '=' relation",
                 "SELECT * FROM %s WHERE value = ?", Arrays.asList(1, 2));
     }
 
     @Test
-    public void indexMapKeysQueryValues() throws Throwable
+    public void indexMapKeysQueryValues()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains 'v1' ALLOW FILTERING").size());
     }
 
     @Test
-    public void indexMapKeysQueryEntries() throws Throwable
+    public void indexMapKeysQueryEntries()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value[1] = 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value[1] = 'v1' ALLOW FILTERING").size());
     }
 
     @Test
-    public void indexMapValuesQueryEq() throws Throwable
+    public void indexMapValuesQueryEq()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertInvalidMessage("Collection column 'value' (map<int, text>) cannot be restricted by a '=' relation",
                 "SELECT * FROM %s WHERE value = ?", Arrays.asList(1, 2));
     }
 
     @Test
-    public void indexMapValuesQueryKeys() throws Throwable
+    public void indexMapValuesQueryKeys()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains key 1");
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value not contains key 1");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains key 1 ALLOW FILTERING").size());
@@ -287,11 +268,10 @@ public class CollectionIndexingTest extends SAITester
     }
 
     @Test
-    public void indexMapValuesQueryEntries() throws Throwable
+    public void indexMapValuesQueryEntries()
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value[1] = 'v1'");
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value[1] != 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value[1] = 'v1' ALLOW FILTERING").size());
@@ -303,7 +283,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createTable("CREATE TABLE %s(id int PRIMARY KEY, text_map map<text, text>)");
         createIndex("CREATE CUSTOM INDEX ON %s(values(text_map)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         execute("INSERT INTO %s(id, text_map) values (1, {'k1':'v1'})");
         flush();
         // This update overwrites 'v1', so now the map does not contain 'v1' and the row should be returned
@@ -316,7 +295,7 @@ public class CollectionIndexingTest extends SAITester
         });
     }
 
-    private void createPopulatedMap() throws Throwable
+    private void createPopulatedMap()
     {
         createTable("CREATE TABLE %s (pk int primary key, value map<int, text>)");
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, new HashMap<Integer, String>() {{
@@ -329,7 +308,7 @@ public class CollectionIndexingTest extends SAITester
         }});
     }
 
-    private void createPopulatedFrozenMap() throws Throwable
+    private void createPopulatedFrozenMap()
     {
         createTable("CREATE TABLE %s (pk int primary key, value frozen<map<int, text>>)");
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, new HashMap<Integer, String>() {{
@@ -342,7 +321,7 @@ public class CollectionIndexingTest extends SAITester
         }});
     }
 
-    private void createPopulatedFrozenList() throws Throwable
+    private void createPopulatedFrozenList()
     {
         createTable("CREATE TABLE %s (pk int primary key, value frozen<list<int>>)");
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, Arrays.asList(1, 2, 3));
@@ -351,7 +330,7 @@ public class CollectionIndexingTest extends SAITester
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 4, Arrays.asList(1, 2, 7));
     }
 
-    private void assertUnsupportedIndexOperator(String query, Object... values) throws Throwable
+    private void assertUnsupportedIndexOperator(String query, Object... values)
     {
 //        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "value"),
 //                query, values);

@@ -33,7 +33,7 @@ public class TrieBuilderTest extends AbstractTrieTestBase
     public void testPartialBuild_Apollo1148() throws IOException
     {
         DataOutputBuffer buf = new DataOutputBufferPaged();
-        IncrementalTrieWriter<Integer> builder = IncrementalTrieWriter.open(serializer, buf);
+        IncrementalTrieWriter<Integer> builder = IncrementalTrieWriter.open(serializer, buf, version);
         long count = 0;
 
         count += addUntilBytesWritten(buf, builder, "a", 1);            // Make a node whose children are written
@@ -67,7 +67,7 @@ public class TrieBuilderTest extends AbstractTrieTestBase
 
     public void verifyContent(long count, Rebufferer source, long root, long... resets)
     {
-        ValueIterator<?> iter = new ValueIterator<>(source, root);
+        ValueIterator<?> iter = new ValueIterator<>(source, root, version);
         long found = 0;
         long ofs = 0;
         int rpos = 0;

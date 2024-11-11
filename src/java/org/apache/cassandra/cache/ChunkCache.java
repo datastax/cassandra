@@ -21,9 +21,16 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -35,11 +42,18 @@ import org.cliffc.high_scale_lib.NonBlockingIdentityHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.benmanes.caffeine.cache.AsyncCache;
+import com.github.benmanes.caffeine.cache.AsyncLoadingCache;
+import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.ParkedExecutor;
+import org.apache.cassandra.concurrent.ShutdownableExecutor;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
@@ -50,12 +64,33 @@ import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS;
+
 public class ChunkCache
-        implements CacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
+        implements RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
+    private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 16);
+    private static final boolean ASYNC_CLEANUP = Boolean.parseBoolean(System.getProperty("cassandra.chunkcache.async_cleanup", "true"));
+    private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads",1);
+
+    private static final Class PERFORM_CLEANUP_TASK_CLASS;
+
+    static
+    {
+        try
+        {
+            logger.info("-Dcassandra.chunkcache.async_cleanup={} dse.chunk.cache.cleaner.threads={}", ASYNC_CLEANUP, CLEANER_THREADS);
+            PERFORM_CLEANUP_TASK_CLASS = Class.forName("com.github.benmanes.caffeine.cache.BoundedLocalCache$PerformCleanupTask");
+        }
+        catch (ClassNotFoundException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
     public static final ChunkCache instance = DatabaseDescriptor.getFileCacheEnabled()
@@ -68,9 +103,12 @@ public class ChunkCache
     // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
     // safe for concurrent access.
     private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
-    private final LoadingCache<Key, Buffer> cache;
+    private final AsyncCache<Key, Buffer> cache;
+    private final Cache<Key, Buffer> synchronousCache;
+    private final ConcurrentMap<Key, CompletableFuture<Buffer>> cacheAsMap;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
+    private final ShutdownableExecutor cleanupExecutor;
 
     private boolean enabled;
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
@@ -160,6 +198,12 @@ public class ChunkCache
         }
 
         @Override
+        public ByteOrder order()
+        {
+            return buffer.order();
+        }
+
+        @Override
         public FloatBuffer floatBuffer()
         {
             assert references.get() > 0;
@@ -201,25 +245,42 @@ public class ChunkCache
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
         cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
+        cleanupExecutor = ParkedExecutor.createParkedExecutor("ChunkCacheCleanup", CLEANER_THREADS);
         enabled = cacheSize > 0;
         bufferPool = pool;
         metrics = createMetrics.apply(this);
         keysByFile = new NonBlockingIdentityHashMap<>();
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
-                        .executor(MoreExecutors.directExecutor())
+                        .initialCapacity(INITIAL_CAPACITY)
+                        .executor(r -> {
+                            if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS)
+                                cleanupExecutor.execute(r);
+                            else
+                                r.run();
+                        })
                         .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
                         .removalListener(this)
                         .recordStats(() -> metrics)
-                        .build(this);
+                        .buildAsync();
+        synchronousCache = cache.synchronous();
+        cacheAsMap = cache.asMap();
     }
 
-    @Override
-    public Buffer load(Key key)
+
+    private Buffer load(Key key)
     {
         ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
         assert buffer != null;
-        key.file.readChunk(key.position, buffer);
+        try
+        {
+            key.file.readChunk(key.position, buffer);
+        }
+        catch (RuntimeException t)
+        {
+            bufferPool.put(buffer);
+            throw t;
+        }
         // Complete addition within compute remapping function to ensure there is no race condition with removal.
         keysByFile.compute(key.internedPath, (k, v) -> {
             if (v == null)
@@ -243,11 +304,26 @@ public class ChunkCache
         });
     }
 
-    public void close()
-    {
+    /**
+     * Clears the cache, used in the CNDB Writer for testing purposes.
+     */
+    public void clear() {
         // Clear keysByFile first to prevent unnecessary computation in onRemoval method.
         keysByFile.clear();
-        cache.invalidateAll();
+        synchronousCache.invalidateAll();
+    }
+
+    public void close()
+    {
+        clear();
+        try
+        {
+            cleanupExecutor.shutdown();
+        }
+        catch (InterruptedException e)
+        {
+            logger.debug("Interrupted during shutdown: ", e);
+        }
     }
 
     private RebuffererFactory wrap(ChunkReader file)
@@ -269,7 +345,7 @@ public class ChunkCache
         var keys = keysByFile.remove(internedPath);
         if (keys == null)
             return;
-        keys.forEach(cache::invalidate);
+        keys.forEach(synchronousCache::invalidate);
     }
 
     @VisibleForTesting
@@ -277,7 +353,7 @@ public class ChunkCache
     {
         this.enabled = enabled;
         wrapper = this::wrap;
-        cache.invalidateAll();
+        synchronousCache.invalidateAll();
         metrics.reset();
     }
 
@@ -310,30 +386,67 @@ public class ChunkCache
         }
 
         @Override
-        public Buffer rebuffer(long position)
+        public BufferHolder rebuffer(long position)
         {
-            int spin = 0;
             try
             {
                 long pageAlignedPos = position & alignmentMask;
-                Buffer buf;
-                Key key = new Key(source, internedPath, pageAlignedPos);
-                while (true)
-                {
-                    buf = cache.get(key).reference();
-                    if (buf != null)
-                        return buf;
+                BufferHolder buf = null;
+                Key chunkKey = new Key(source, internedPath, pageAlignedPos);
 
-                    if (++spin == 1000)
+                int spin = 0;
+                //There is a small window when a released buffer/invalidated chunk
+                //is still in the cache. In this case it will return null
+                //so we spin loop while waiting for the cache to re-populate
+                while (buf == null)
+                {
+                    Buffer chunk;
+                    // Using cache.get(k, compute) results in lots of allocation, rather risk the unlikely race...
+                    CompletableFuture<Buffer> cachedValue = cache.getIfPresent(chunkKey);
+                    if (cachedValue == null)
+                    {
+                        CompletableFuture<Buffer> entry = new CompletableFuture<>();
+                        CompletableFuture<Buffer> existing = cacheAsMap.putIfAbsent(chunkKey, entry);
+                        if (existing == null)
+                        {
+                            try
+                            {
+                                chunk = load(chunkKey);
+                            }
+                            catch (Throwable t)
+                            {
+                                // please note that we don't need to remove the entry from the cache here
+                                // because Caffeine automatically removes entries that complete exceptionally
+
+                                // also signal other waiting readers
+                                entry.completeExceptionally(t);
+                                throw t;
+                            }
+                            entry.complete(chunk);
+                        }
+                        else
+                        {
+                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+                        }
+                    }
+                    else
+                    {
+                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+                    }
+
+                    buf = chunk.reference();
+
+                    if (buf == null && ++spin == 1000)
                     {
                         String msg = String.format("Could not acquire a reference to for %s after 1000 attempts. " +
                                                    "This is likely due to the chunk cache being too small for the " +
-                                                   "number of concurrently running requests.", key);
+                                                   "number of concurrently running requests.", chunkKey);
                         throw new RuntimeException(msg);
                         // Note: this might also be caused by reference counting errors, especially double release of
                         // chunks.
                     }
                 }
+                return buf;
             }
             catch (Throwable t)
             {
@@ -352,7 +465,7 @@ public class ChunkCache
         public void invalidateIfCached(long position)
         {
             long pageAlignedPos = position & alignmentMask;
-            cache.invalidate(new Key(source, internedPath, pageAlignedPos));
+            synchronousCache.invalidate(new Key(source, internedPath, pageAlignedPos));
         }
 
         @Override
@@ -413,9 +526,9 @@ public class ChunkCache
     @Override
     public long weightedSize()
     {
-        return cache.policy().eviction()
-                .map(policy -> policy.weightedSize().orElseGet(cache::estimatedSize))
-                .orElseGet(cache::estimatedSize);
+        return synchronousCache.policy().eviction()
+                .map(policy -> policy.weightedSize().orElseGet(synchronousCache::estimatedSize))
+                .orElseGet(synchronousCache::estimatedSize);
     }
 
     /**
@@ -424,6 +537,6 @@ public class ChunkCache
     @VisibleForTesting
     public int sizeOfFile(String filePath) {
         var internedPath = filePath.intern();
-        return (int) cache.asMap().keySet().stream().filter(x -> x.internedPath == internedPath).count();
+        return (int) cacheAsMap.keySet().stream().filter(x -> x.internedPath == internedPath).count();
     }
 }

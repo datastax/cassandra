@@ -21,17 +21,32 @@ import java.util.Random;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.compaction.ShardManager;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageService;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
+@RunWith(Parameterized.class)
 public class ShardedMultiWriterTest extends CQLTester
 {
     private static final int ROW_PER_PARTITION = 10;
+
+    @Parameterized.Parameter
+    public boolean isReplicaAware;
+
+    @Parameterized.Parameters(name = "isReplicaAware={0}")
+    public static Object[] parameters()
+    {
+        return new Object[] { true, false };
+    }
 
     @BeforeClass
     public static void beforeClass()
@@ -77,7 +92,8 @@ public class ShardedMultiWriterTest extends CQLTester
     private void testShardedCompactionWriter(int numShards, long totSizeBytes, int numOutputSSTables) throws Throwable
     {
         createTable(String.format("CREATE TABLE %%s (k int, t int, v blob, PRIMARY KEY (k, t)) with compaction = " +
-                                  "{'class':'UnifiedCompactionStrategy', 'base_shard_count' : '%d', 'min_sstable_size' : '0B'} ", numShards));
+                                  "{'class':'UnifiedCompactionStrategy', 'base_shard_count' : '%d', " +
+                                  "'min_sstable_size' : '0B', 'is_replica_aware': '%s'} ", numShards, isReplicaAware));
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();
@@ -86,9 +102,46 @@ public class ShardedMultiWriterTest extends CQLTester
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         assertEquals(numOutputSSTables, cfs.getLiveSSTables().size());
-        for (SSTableReader rdr : cfs.getLiveSSTables())
+
+        if (isReplicaAware)
         {
-            assertEquals(1.0 / numOutputSSTables, rdr.tokenSpaceCoverage(), 0.05);
+            // Assert that the space does not cross token boundaries
+            var tokenMetadata = StorageService.instance.getTokenMetadataForKeyspace(keyspace());
+            var tokenSpaceCoverage = 0d;
+            var spannedTokens = 0;
+            for (SSTableReader rdr : cfs.getLiveSSTables())
+            {
+                final double coverage = rdr.first.getToken().size(rdr.last.getToken());
+                // the coverage reported by rdr.tokenSpaceCoverage() may be adjusted upwards if the sstable spans too
+                // few partitions
+                if (rdr.estimatedKeys() >= ShardManager.PER_PARTITION_SPAN_THRESHOLD
+                    && coverage >= ShardManager.MINIMUM_TOKEN_COVERAGE)
+                    assertEquals(coverage, rdr.tokenSpaceCoverage(), 0.01);
+
+                tokenSpaceCoverage += coverage;
+                for (var token : tokenMetadata.sortedTokens())
+                    if (rdr.getBounds().contains(token))
+                        spannedTokens++;
+            }
+            // We don't have an even distribution because the first token is selected at random and we split along
+            // token boundaries, so we don't assert even distribution. We do however konw that the coverage should
+            // add up to about 1 without crossing that boundary. The coverage is measured by measuring the distance
+            // between the min and the max token in each shard, so we have a large delta in the assertion.
+            assertTrue(tokenSpaceCoverage <= 1.0);
+            assertEquals(1.0, tokenSpaceCoverage, 0.1);
+            // If we have more split points than tokens, the sstables must be split along token boundaries
+            var numSplitPoints = numShards - 1;
+            var expectedSpannedTokens = Math.max(0, tokenMetadata.sortedTokens().size() - numSplitPoints);
+            // There is a chance that the sstable bounds don't contain a token boundary due to the random selection
+            // of the first token, so we can only assert that we don't have more spanned tokens than expected.
+            assertTrue(expectedSpannedTokens >= spannedTokens);
+        }
+        else
+        {
+            for (SSTableReader rdr : cfs.getLiveSSTables())
+            {
+                assertEquals(1.0 / numOutputSSTables, rdr.tokenSpaceCoverage(), 0.05);
+            }
         }
 
         validateData(rowCount);

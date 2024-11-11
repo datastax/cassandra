@@ -41,9 +41,9 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
 {
     public static final long NOT_FOUND = -1;
 
-    public TrieTermsDictionaryReader(Rebufferer rebufferer, long root)
+    public TrieTermsDictionaryReader(Rebufferer rebufferer, long root, ByteComparable.Version version)
     {
-        super(rebufferer, root, true);
+        super(rebufferer, root, true, version);
     }
 
     /**
@@ -53,9 +53,11 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
                                      long root,
                                      ByteComparable start,
                                      ByteComparable end,
-                                     boolean inclStart)
+                                     boolean inclStart,
+                                     boolean collecting,
+                                     ByteComparable.Version version)
     {
-        super(source, root, start, end, inclStart ? LeftBoundTreatment.ADMIT_EXACT : LeftBoundTreatment.GREATER, true);
+        super(source, root, start, end, inclStart ? LeftBoundTreatment.ADMIT_EXACT : LeftBoundTreatment.GREATER, collecting, version);
     }
 
     public static final TrieSerializer<Long, DataOutputPlus> trieSerializer = new TrieSerializer<>()
@@ -159,7 +161,7 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
 
     public ByteComparable getMaxTerm()
     {
-        final TransitionBytesCollector collector = new TransitionBytesCollector();
+        final TransitionBytesCollector collector = new TransitionBytesCollector(byteComparableVersion);
         go(root);
         while (true)
         {
@@ -176,7 +178,7 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
 
     public ByteComparable getMinTerm()
     {
-        final TransitionBytesCollector collector = new TransitionBytesCollector();
+        final TransitionBytesCollector collector = new TransitionBytesCollector(byteComparableVersion);
         go(root);
         while (true)
         {

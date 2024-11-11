@@ -27,6 +27,8 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 
+import static java.lang.Math.max;
+
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
  */
@@ -58,18 +60,13 @@ public class QueryContext
     private final LongAdder queryTimeouts = new LongAdder();
 
     private final LongAdder annNodesVisited = new LongAdder();
+    private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
-
-    // Total count of rows in all sstables and memtables.
-    private Long totalAvailableRows = null;
 
     // Determines the order of using indexes for filtering and sorting.
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
-
-    // Estimates the probability of a row picked by the index to be accepted by the post filter.
-    private float postFilterSelectivityEstimate = 1.0f;
 
     @VisibleForTesting
     public QueryContext()
@@ -145,16 +142,6 @@ public class QueryContext
         annNodesVisited.add(val);
     }
 
-    public void setTotalAvailableRows(long totalAvailableRows)
-    {
-        this.totalAvailableRows = totalAvailableRows;
-    }
-
-    public void setPostFilterSelectivityEstimate(float postFilterSelectivityEstimate)
-    {
-        this.postFilterSelectivityEstimate = postFilterSelectivityEstimate;
-    }
-
     public void setFilterSortOrder(FilterSortOrder filterSortOrder)
     {
         this.filterSortOrder = filterSortOrder;
@@ -218,19 +205,9 @@ public class QueryContext
         return annNodesVisited.longValue();
     }
 
-    public Long totalAvailableRows()
-    {
-        return totalAvailableRows;
-    }
-
     public FilterSortOrder filterSortOrder()
     {
         return filterSortOrder;
-    }
-
-    public Float postFilterSelectivityEstimate()
-    {
-        return postFilterSelectivityEstimate;
     }
 
     public void checkpoint()
@@ -255,16 +232,27 @@ public class QueryContext
         return shadowedPrimaryKeyCount.longValue();
     }
 
+    public float getAnnRerankFloor()
+    {
+        return annRerankFloor;
+    }
+
+    public void updateAnnRerankFloor(float observedFloor)
+    {
+        if (observedFloor < Float.POSITIVE_INFINITY)
+            annRerankFloor = max(annRerankFloor, observedFloor);
+    }
+
     /**
      * Determines the order of filtering and sorting operations.
      * Currently used only by vector search.
      */
     public enum FilterSortOrder
     {
-        /** First get the matching keys from the non-vector indexes, then use vector index to sort them */
-        FILTER_THEN_SORT,
+        /** First get the matching keys from the non-vector indexes, then use vector index to return the top K by similarity order */
+        SEARCH_THEN_ORDER,
 
-        /** First get the candidates in ANN order from the vector index, then fetch the rows and post-filter them */
-        SORT_THEN_FILTER
+        /** First get the candidates in ANN order from the vector index, then fetch the rows and filter them until we find K matching the predicates */
+        SCAN_THEN_FILTER
     }
 }

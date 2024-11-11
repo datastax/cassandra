@@ -52,6 +52,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.CRC32;
@@ -1431,6 +1432,21 @@ public class FBUtilities
                 sb.append("\n");
             }
             return sb.toString();
+        }
+    }
+
+    public static void busyWaitWhile(Supplier<Boolean> condition)
+    {
+        while (condition.get())
+        {
+            try
+            {
+                Thread.sleep(1);
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
         }
     }
 }

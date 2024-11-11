@@ -30,11 +30,13 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 
@@ -60,16 +62,17 @@ public class PostingsTest extends SaiRandomizedTest
     public void testSingleBlockPostingList() throws Exception
     {
         final int blockSize = 1 << between(3, 8);
-        final ArrayPostingList expectedPostingList = new ArrayPostingList(new int[]{ 10, 20, 30, 40, 50, 60 });
+        final IntArrayPostingList expectedPostingList = new IntArrayPostingList(new int[]{ 10, 20, 30, 40, 50, 60 });
 
         long postingPointer;
-        try (PostingsWriter writer = new PostingsWriter(indexDescriptor, indexContext, blockSize))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (PostingsWriter writer = new PostingsWriter(components, blockSize))
         {
             postingPointer = writer.write(expectedPostingList);
             writer.complete();
         }
 
-        IndexInput input = indexDescriptor.openPerIndexInput(IndexComponent.POSTING_LISTS, indexContext);
+        IndexInput input = components.get(IndexComponentType.POSTING_LISTS).openInput();
         SAICodecUtils.validate(input);
         input.seek(postingPointer);
 
@@ -94,7 +97,7 @@ public class PostingsTest extends SaiRandomizedTest
         reader.close();
         assertEquals(reader.size(), listener.decodes);
 
-        input = indexDescriptor.openPerIndexInput(IndexComponent.POSTING_LISTS, indexContext);
+        input = components.get(IndexComponentType.POSTING_LISTS).openInput();
         listener = new CountingPostingListEventListener();
         reader = new PostingsReader(input, postingPointer, listener);
 
@@ -113,31 +116,33 @@ public class PostingsTest extends SaiRandomizedTest
         final int numPostingLists = 1 << between(1, 5);
         final int blockSize = 1 << between(5, 10);
         final int numPostings = between(1 << 11, 1 << 15);
-        final ArrayPostingList[] expected = new ArrayPostingList[numPostingLists];
+        final IntArrayPostingList[] expected = new IntArrayPostingList[numPostingLists];
         final long[] postingPointers = new long[numPostingLists];
 
-        try (PostingsWriter writer = new PostingsWriter(indexDescriptor, indexContext, blockSize))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (PostingsWriter writer = new PostingsWriter(components, blockSize))
         {
             for (int i = 0; i < numPostingLists; ++i)
             {
                 final int[] postings = randomPostings(numPostings);
-                final ArrayPostingList postingList = new ArrayPostingList(postings);
+                final IntArrayPostingList postingList = new IntArrayPostingList(postings);
                 expected[i] = postingList;
                 postingPointers[i] = writer.write(postingList);
             }
             writer.complete();
         }
 
-        try (IndexInput input = indexDescriptor.openPerIndexInput(IndexComponent.POSTING_LISTS, indexContext))
+        IndexComponent.ForRead postingLists = components.get(IndexComponentType.POSTING_LISTS);
+        try (IndexInput input = postingLists.openInput())
         {
             SAICodecUtils.validate(input);
         }
 
         for (int i = 0; i < numPostingLists; ++i)
         {
-            IndexInput input = indexDescriptor.openPerIndexInput(IndexComponent.POSTING_LISTS, indexContext);
+            IndexInput input = postingLists.openInput();
             input.seek(postingPointers[i]);
-            final ArrayPostingList expectedPostingList = expected[i];
+            final IntArrayPostingList expectedPostingList = expected[i];
             final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expectedPostingList, input);
             assertTrue(summary.offsets.length() > 1);
 
@@ -153,10 +158,10 @@ public class PostingsTest extends SaiRandomizedTest
             }
 
             // test skipping to the last block
-            input = indexDescriptor.openPerIndexInput(IndexComponent.POSTING_LISTS, indexContext);
+            input = postingLists.openInput();
             try (PostingsReader reader = new PostingsReader(input, postingPointers[i], listener))
             {
-                long tokenToAdvance = -1;
+                int tokenToAdvance = -1;
                 expectedPostingList.reset();
                 for (int p = 0; p < numPostings - 7; ++p)
                 {
@@ -179,16 +184,18 @@ public class PostingsTest extends SaiRandomizedTest
         final int blockSize = 4; // 4 postings per FoR block
         final int maxSegmentRowID = 30;
         final int[] postings = IntStream.range(0, maxSegmentRowID).toArray(); // 30 postings = 7 FoR blocks + 1 VLong block
-        final ArrayPostingList expected = new ArrayPostingList(postings);
+        final IntArrayPostingList expected = new IntArrayPostingList(postings);
 
         long fp;
-        try (PostingsWriter writer = new PostingsWriter(indexDescriptor, indexContext, blockSize))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (PostingsWriter writer = new PostingsWriter(components, blockSize))
         {
             fp = writer.write(expected);
             writer.complete();
         }
 
-        try (IndexInput input = indexDescriptor.openPerIndexInput(IndexComponent.POSTING_LISTS, indexContext))
+        IndexComponent.ForRead postingLists = components.get(IndexComponentType.POSTING_LISTS);
+        try (IndexInput input = postingLists.openInput())
         {
             SAICodecUtils.validate(input);
             input.seek(fp);
@@ -203,14 +210,14 @@ public class PostingsTest extends SaiRandomizedTest
         }
 
         // exact advance
-        testAdvance(fp, expected, new int[]{ 3, 7, 11, 15, 19 });
+        testAdvance(postingLists, fp, expected, new int[]{ 3, 7, 11, 15, 19 });
         // non-exact advance
-        testAdvance(fp, expected, new int[]{ 2, 6, 12, 17, 25 });
+        testAdvance(postingLists, fp, expected, new int[]{ 2, 6, 12, 17, 25 });
 
         // exact advance
-        testAdvance(fp, expected, new int[]{ 3, 5, 7, 12 });
+        testAdvance(postingLists, fp, expected, new int[]{ 3, 5, 7, 12 });
         // non-exact advance
-        testAdvance(fp, expected, new int[]{ 2, 7, 9, 11 });
+        testAdvance(postingLists, fp, expected, new int[]{ 2, 7, 9, 11 });
     }
 
     @Test
@@ -220,16 +227,18 @@ public class PostingsTest extends SaiRandomizedTest
         final int numPostings = nextInt(64, 64_000);
         final int[] postings = randomPostings(numPostings);
 
-        final ArrayPostingList expected = new ArrayPostingList(postings);
+        final IntArrayPostingList expected = new IntArrayPostingList(postings);
 
         long fp;
-        try (PostingsWriter writer = new PostingsWriter(indexDescriptor, indexContext, blockSize))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (PostingsWriter writer = new PostingsWriter(components, blockSize))
         {
             fp = writer.write(expected);
             writer.complete();
         }
 
-        try (IndexInput input = indexDescriptor.openPerIndexInput(IndexComponent.POSTING_LISTS, indexContext))
+        IndexComponent.ForRead postingLists = components.get(IndexComponentType.POSTING_LISTS);
+        try (IndexInput input = postingLists.openInput())
         {
             SAICodecUtils.validate(input);
             input.seek(fp);
@@ -243,13 +252,14 @@ public class PostingsTest extends SaiRandomizedTest
             }
         }
 
-        testAdvance(fp, expected, postings);
+        testAdvance(postingLists, fp, expected, postings);
     }
 
     @Test
     public void testNullPostingList() throws IOException
     {
-        try (PostingsWriter writer = new PostingsWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (PostingsWriter writer = new PostingsWriter(components))
         {
             expectedException.expect(IllegalArgumentException.class);
             writer.write(null);
@@ -260,28 +270,30 @@ public class PostingsTest extends SaiRandomizedTest
     @Test
     public void testEmptyPostingList() throws IOException
     {
-        try (PostingsWriter writer = new PostingsWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (PostingsWriter writer = new PostingsWriter(components))
         {
             expectedException.expect(IllegalArgumentException.class);
-            writer.write(new ArrayPostingList(new int[0]));
+            writer.write(new IntArrayPostingList(new int[0]));
         }
     }
 
     @Test
     public void testNonAscendingPostingList() throws IOException
     {
-        try (PostingsWriter writer = new PostingsWriter(indexDescriptor, indexContext))
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (PostingsWriter writer = new PostingsWriter(components))
         {
             expectedException.expect(IllegalArgumentException.class);
-            writer.write(new ArrayPostingList(new int[]{ 1, 0 }));
+            writer.write(new IntArrayPostingList(new int[]{ 1, 0 }));
         }
     }
 
-    private void testAdvance(long fp, ArrayPostingList expected, int[] targetIDs) throws IOException
+    private void testAdvance(IndexComponent.ForRead postingLists, long fp, IntArrayPostingList expected, int[] targetIDs) throws IOException
     {
         expected.reset();
         final CountingPostingListEventListener listener = new CountingPostingListEventListener();
-        PostingsReader reader = openReader(fp, listener);
+        PostingsReader reader = openReader(postingLists, fp, listener);
         for (int i = 0; i < 2; ++i)
         {
             assertEquals(expected.nextPosting(), reader.nextPosting());
@@ -306,9 +318,9 @@ public class PostingsTest extends SaiRandomizedTest
         reader.close();
     }
 
-    private PostingsReader openReader(long fp, QueryEventListener.PostingListEventListener listener) throws IOException
+    private PostingsReader openReader(IndexComponent.ForRead postingLists, long fp, QueryEventListener.PostingListEventListener listener) throws IOException
     {
-        IndexInput input = indexDescriptor.openPerIndexInput(IndexComponent.POSTING_LISTS, indexContext);
+        IndexInput input = postingLists.openInput();
         input.seek(fp);
         return new PostingsReader(input, fp, listener);
     }

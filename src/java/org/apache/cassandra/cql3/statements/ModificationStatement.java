@@ -637,7 +637,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         }
 
         Selectors selectors = selection.newSelectors(options);
-        ResultSetBuilder builder = new ResultSetBuilder(selection.getResultMetadata(), selectors);
+        ResultSetBuilder builder = new ResultSetBuilder(options.getProtocolVersion(), selection.getResultMetadata(), selectors);
         SelectStatement.forSelection(metadata, selection)
                        .processPartition(partition, options, builder, nowInSeconds);
 
@@ -678,9 +678,11 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         SinglePartitionReadQuery readCommand = request.readCommand(nowInSeconds);
         FilteredPartition current;
         try (ReadExecutionController executionController = readCommand.executionController();
-             PartitionIterator iter = readCommand.executeInternal(executionController))
+             PartitionIterator iter = readCommand.executeInternal(executionController);
+             RowIterator row = PartitionIterators.getOnlyElement(iter, readCommand);)
         {
-            current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand));
+            // FilteredPartition consumes the row but does not close the iterator
+            current = FilteredPartition.create(row);
         }
 
         if (!request.appliesTo(current))

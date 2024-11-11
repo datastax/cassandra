@@ -32,8 +32,8 @@ import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
@@ -41,12 +41,12 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsMeta;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsReader;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
@@ -56,10 +56,10 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
  * This uses the following on-disk structures:
  * <ul>
  *     <li>Block-packed structure for rowId to token lookups using {@link BlockPackedReader}.
- *     Uses component {@link IndexComponent#TOKEN_VALUES} </li>
+ *     Uses component {@link IndexComponentType#TOKEN_VALUES} </li>
  *     <li>A sorted-terms structure for rowId to {@link PrimaryKey} and {@link PrimaryKey} to rowId lookups using
- *     {@link SortedTermsReader}. Uses components {@link IndexComponent#PRIMARY_KEY_TRIE}, {@link IndexComponent#PRIMARY_KEY_BLOCKS},
- *     {@link IndexComponent#PRIMARY_KEY_BLOCK_OFFSETS}</li>
+ *     {@link SortedTermsReader}. Uses components {@link IndexComponentType#PRIMARY_KEY_TRIE}, {@link IndexComponentType#PRIMARY_KEY_BLOCKS},
+ *     {@link IndexComponentType#PRIMARY_KEY_BLOCK_OFFSETS}</li>
  * </ul>
  *
  * While the {@link RowAwarePrimaryKeyMapFactory} is threadsafe, individual instances of the {@link RowAwarePrimaryKeyMap}
@@ -71,8 +71,10 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class RowAwarePrimaryKeyMapFactory implements Factory
     {
+        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final SortedTermsReader sortedTermsReader;
+        private final long count;
         private FileHandle token = null;
         private FileHandle termsDataBlockOffsets = null;
         private FileHandle termsData = null;
@@ -82,24 +84,26 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final PrimaryKey.Factory primaryKeyFactory;
         private final SSTableId<?> sstableId;
 
-        public RowAwarePrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable)
+        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
         {
             try
             {
-                MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
-                SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS)));
-                NumericValuesMeta blockOffsetsMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
+                this.perSSTableComponents = perSSTableComponents;
+                MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
+                count = tokensMeta.valueCount;
+                SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS)));
+                NumericValuesMeta blockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)));
 
-                token = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
+                token = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES).createFileHandle();
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
-                this.termsDataBlockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS);
-                this.termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
-                this.termsTrie = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
+                this.termsDataBlockOffsets = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS).createFileHandle();
+                this.termsData = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS).createFileHandle();
+                this.termsTrie = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
                 this.sortedTermsReader = new SortedTermsReader(termsData, termsDataBlockOffsets, termsTrie, sortedTermsMeta, blockOffsetsMeta);
                 this.partitioner = sstable.metadata().partitioner;
-                this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
-                this.clusteringComparator = indexDescriptor.clusteringComparator;
+                this.primaryKeyFactory = primaryKeyFactory;
+                this.clusteringComparator = sstable.metadata().comparator;
                 this.sstableId = sstable.getId();
             }
             catch (Throwable t)
@@ -126,6 +130,12 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             {
                 throw new UncheckedIOException(e);
             }
+        }
+
+        @Override
+        public long count()
+        {
+            return count;
         }
 
         @Override
@@ -251,10 +261,10 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         try
         {
             cursor.seekToPointId(sstableRowId);
-            ByteSource.Peekable peekable = cursor.term().asPeekableBytes(ByteComparable.Version.OSS41);
+            ByteSource.Peekable peekable = cursor.term().asPeekableBytes(TypeUtil.BYTE_COMPARABLE_VERSION);
 
             Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable),
-                                                                            ByteComparable.Version.OSS41);
+                                                                            TypeUtil.BYTE_COMPARABLE_VERSION);
             byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
 
             if (keyBytes == null)

@@ -30,7 +30,7 @@ import java.util.stream.Stream;
 
 import org.junit.Assert;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -45,19 +45,21 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.KDTreeIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadataBuilder;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -118,14 +120,14 @@ public class KDTreeIndexBuilder
 
     private final IndexDescriptor indexDescriptor;
     private final AbstractType<?> type;
-    private final AbstractIterator<Pair<ByteComparable, LongArrayList>> terms;
+    private final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> terms;
     private final int size;
     private final int minSegmentRowId;
     private final int maxSegmentRowId;
 
     public KDTreeIndexBuilder(IndexDescriptor indexDescriptor,
                               AbstractType<?> type,
-                              AbstractIterator<Pair<ByteComparable, LongArrayList>> terms,
+                              AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> terms,
                               int size,
                               int minSegmentRowId,
                               int maxSegmentRowId)
@@ -146,33 +148,31 @@ public class KDTreeIndexBuilder
         final SegmentMetadata metadata;
 
         IndexContext indexContext = SAITester.createIndexContext("test", Int32Type.instance);
-        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 TypeUtil.fixedSizeOf(type),
                                                                 maxSegmentRowId,
                                                                 size,
                                                                 IndexWriterConfig.defaultConfig("test")))
         {
-            final SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(pointValues);
-            metadata = new SegmentMetadata(0,
-                                           size,
-                                           minSegmentRowId,
-                                           maxSegmentRowId,
-                                           // min/max is unused for now
-                                           SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
-                                           SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()),
-                                           UTF8Type.instance.fromString("c"),
-                                           UTF8Type.instance.fromString("d"),
-                                           indexMetas);
+            SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, components);
+            final SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(pointValues));
+            metadataBuilder.setComponentsMetadata(indexMetas);
+            metadataBuilder.setRowIdRange(minSegmentRowId, maxSegmentRowId);
+            metadataBuilder.setTermRange(UTF8Type.instance.fromString("c"),
+                                         UTF8Type.instance.fromString("d"));
+            metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
+                                        SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()));
+            metadata = metadataBuilder.build();
         }
 
-        try (PerIndexFiles indexFiles = new PerIndexFiles(indexDescriptor, SAITester.createIndexContext("test", Int32Type.instance)))
+        try (PerIndexFiles indexFiles = new PerIndexFiles(components))
         {
             SSTableContext sstableContext = mock(SSTableContext.class);
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
-            when(sstableContext.indexDescriptor()).thenReturn(indexDescriptor);
+            when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
 
-            IndexSearcher searcher = Version.LATEST.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+            IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
             assertThat(searcher, is(instanceOf(KDTreeIndexSearcher.class)));
             return (KDTreeIndexSearcher) searcher;
         }
@@ -272,26 +272,26 @@ public class KDTreeIndexBuilder
      * Returns inverted index where each posting list contains exactly one element equal to the terms ordinal number +
      * given offset.
      */
-    public static AbstractIterator<Pair<ByteComparable, LongArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
+    public static AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
     {
-        return new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
+        return new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private long currentTerm = 0;
             private int currentSegmentRowId = segmentRowIdOffset;
 
             @Override
-            protected Pair<ByteComparable, LongArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 if (currentTerm++ >= size)
                 {
                     return endOfData();
                 }
 
-                LongArrayList postings = new LongArrayList();
+                IntArrayList postings = new IntArrayList();
                 postings.add(currentSegmentRowId++);
                 assertTrue(terms.hasNext());
 
-                final ByteSource encoded = TypeUtil.asComparableBytes(terms.next(), type, ByteComparable.Version.OSS41);
+                final ByteSource encoded = TypeUtil.asComparableBytes(terms.next(), type, TypeUtil.BYTE_COMPARABLE_VERSION);
                 return Pair.create(v -> encoded, postings);
             }
         };

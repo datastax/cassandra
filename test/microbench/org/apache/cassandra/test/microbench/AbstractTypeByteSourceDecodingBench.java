@@ -60,42 +60,6 @@ import org.openjdk.jmh.annotations.Warmup;
 @State(Scope.Benchmark)
 public class AbstractTypeByteSourceDecodingBench
 {
-
-    private static final ByteComparable.Version LATEST = ByteComparable.Version.OSS41;
-
-    private static final Map<AbstractType, BiFunction<Random, Integer, ByteSource.Peekable>> PEEKABLE_GENERATOR_BY_TYPE = new HashMap<>();
-    static
-    {
-        PEEKABLE_GENERATOR_BY_TYPE.put(UTF8Type.instance, (prng, length) ->
-        {
-            byte[] randomBytes = new byte[length];
-            prng.nextBytes(randomBytes);
-            return ByteSource.peekable(ByteSource.of(new String(randomBytes, StandardCharsets.UTF_8), LATEST));
-        });
-        PEEKABLE_GENERATOR_BY_TYPE.put(BytesType.instance, (prng, length) ->
-        {
-            byte[] randomBytes = new byte[length];
-            prng.nextBytes(randomBytes);
-            return ByteSource.peekable(ByteSource.of(randomBytes, LATEST));
-        });
-        PEEKABLE_GENERATOR_BY_TYPE.put(IntegerType.instance, (prng, length) ->
-        {
-            BigInteger randomVarint = BigInteger.valueOf(prng.nextLong());
-            for (int i = 1; i < length / 8; ++i)
-                randomVarint = randomVarint.multiply(BigInteger.valueOf(prng.nextLong()));
-            return ByteSource.peekable(IntegerType.instance.asComparableBytes(IntegerType.instance.decompose(randomVarint), LATEST));
-        });
-        PEEKABLE_GENERATOR_BY_TYPE.put(DecimalType.instance, (prng, length) ->
-        {
-            BigInteger randomMantissa = BigInteger.valueOf(prng.nextLong());
-            for (int i = 1; i < length / 8; ++i)
-                randomMantissa = randomMantissa.multiply(BigInteger.valueOf(prng.nextLong()));
-            int randomScale = prng.nextInt(Integer.MAX_VALUE >> 1) + Integer.MAX_VALUE >> 1;
-            BigDecimal randomDecimal = new BigDecimal(randomMantissa, randomScale);
-            return ByteSource.peekable(DecimalType.instance.asComparableBytes(DecimalType.instance.decompose(randomDecimal), LATEST));
-        });
-    }
-
     private Random prng = new Random();
 
     @Param({"32", "128", "512"})
@@ -104,8 +68,44 @@ public class AbstractTypeByteSourceDecodingBench
     @Param({"UTF8Type", "BytesType", "IntegerType", "DecimalType"})
     private String abstractTypeName;
 
+    @Param({"LEGACY", "OSS41", "OSS50"})
+    private static ByteComparable.Version version = ByteComparable.Version.OSS50;
+
     private AbstractType abstractType;
     private BiFunction<Random, Integer, ByteSource.Peekable> peekableGenerator;
+
+    private static final Map<AbstractType, BiFunction<Random, Integer, ByteSource.Peekable>> PEEKABLE_GENERATOR_BY_TYPE = new HashMap<>();
+    static
+    {
+        PEEKABLE_GENERATOR_BY_TYPE.put(UTF8Type.instance, (prng, length) ->
+        {
+            byte[] randomBytes = new byte[length];
+            prng.nextBytes(randomBytes);
+            return ByteSource.peekable(ByteSource.of(new String(randomBytes, StandardCharsets.UTF_8), version));
+        });
+        PEEKABLE_GENERATOR_BY_TYPE.put(BytesType.instance, (prng, length) ->
+        {
+            byte[] randomBytes = new byte[length];
+            prng.nextBytes(randomBytes);
+            return ByteSource.peekable(ByteSource.of(randomBytes, version));
+        });
+        PEEKABLE_GENERATOR_BY_TYPE.put(IntegerType.instance, (prng, length) ->
+        {
+            BigInteger randomVarint = BigInteger.valueOf(prng.nextLong());
+            for (int i = 1; i < length / 8; ++i)
+                randomVarint = randomVarint.multiply(BigInteger.valueOf(prng.nextLong()));
+            return ByteSource.peekable(IntegerType.instance.asComparableBytes(IntegerType.instance.decompose(randomVarint), version));
+        });
+        PEEKABLE_GENERATOR_BY_TYPE.put(DecimalType.instance, (prng, length) ->
+        {
+            BigInteger randomMantissa = BigInteger.valueOf(prng.nextLong());
+            for (int i = 1; i < length / 8; ++i)
+                randomMantissa = randomMantissa.multiply(BigInteger.valueOf(prng.nextLong()));
+            int randomScale = prng.nextInt(Integer.MAX_VALUE >> 1) + Integer.MAX_VALUE >> 1;
+            BigDecimal randomDecimal = new BigDecimal(randomMantissa, randomScale);
+            return ByteSource.peekable(DecimalType.instance.asComparableBytes(DecimalType.instance.decompose(randomDecimal), version));
+        });
+    }
 
     @Setup(Level.Trial)
     public void setup()
@@ -135,6 +135,6 @@ public class AbstractTypeByteSourceDecodingBench
     public ByteBuffer fromComparableBytes()
     {
         ByteSource.Peekable peekableBytes = randomPeekableBytes();
-        return abstractType.fromComparableBytes(peekableBytes, ByteComparable.Version.OSS41);
+        return abstractType.fromComparableBytes(peekableBytes, version);
     }
 }

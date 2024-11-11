@@ -24,14 +24,16 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import com.carrotsearch.hppc.LongArrayList;
+import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.junit.Assert.assertEquals;
 
@@ -83,12 +85,12 @@ public class ImmutableOneDimPointValuesTest
             int postingCounter = 0;
 
             @Override
-            public void visit(long docID, byte[] packedValue)
+            public void visit(int docID, byte[] packedValue)
             {
-                final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
+                final ByteComparable actualTerm = ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, packedValue);
                 final ByteComparable expectedTerm = ByteComparable.of(term);
 
-                assertEquals(0, ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+                assertEquals(0, ByteComparable.compare(actualTerm, expectedTerm, TypeUtil.BYTE_COMPARABLE_VERSION));
                 assertEquals(postingCounter, docID);
 
                 if (postingCounter >= 2)
@@ -109,21 +111,21 @@ public class ImmutableOneDimPointValuesTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(from);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(to);
 
-        final AbstractIterator<Pair<ByteComparable, LongArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
+        final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private int currentTerm = from;
 
             @Override
-            protected Pair<ByteComparable, LongArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 if (currentTerm <= to)
                 {
                     return endOfData();
                 }
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
-                LongArrayList postings = new LongArrayList();
+                IntArrayList postings = new IntArrayList();
                 postings.add(0, 1, 2);
-                return Pair.create(ByteComparable.fixedLength(term), postings);
+                return Pair.create(v -> ByteSource.preencoded(term), postings);
             }
         };
 

@@ -64,7 +64,10 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import javax.annotation.Nullable;
+import javax.management.ListenerNotFoundException;
 import javax.management.NotificationBroadcasterSupport;
+import javax.management.NotificationFilter;
+import javax.management.NotificationListener;
 import javax.management.openmbean.CompositeData;
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
@@ -310,6 +313,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 Keyspace.open(keyspace).snapshot(snapshotName, null, false, null);
         }
     }
+
+    // Newer versions of mockito contain mockito-inline which creates an issue in our test environment. Without this
+    // change, mocking of static methods is a problem with our DTest framework
+    @VisibleForTesting // this is used for dtests only, see CASSANDRA-18152
+    public volatile boolean skipNotificationListeners = false;
 
     @Deprecated
     public boolean isInShutdownHook()
@@ -3909,11 +3917,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return verify(extendedVerify, false, false, false, false, false, keyspaceName, tableNames);
     }
 
+    @Deprecated
     public int verify(boolean extendedVerify, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    {
+        return verify(extendedVerify, false, checkVersion, diskFailurePolicy, mutateRepairStatus, checkOwnsTokens, quick, keyspaceName, tableNames);
+    }
+
+    public int verify(boolean extendedVerify, boolean validateAllRows, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
         Verifier.Options options = Verifier.options().invokeDiskFailurePolicy(diskFailurePolicy)
                                                      .extendedVerification(extendedVerify)
+                                                     .validateAllRows(validateAllRows)
                                                      .checkVersion(checkVersion)
                                                      .mutateRepairStatus(mutateRepairStatus)
                                                      .checkOwnsTokens(checkOwnsTokens)
@@ -5700,6 +5715,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         updateTopology();
     }
 
+    public String getBatchlogEndpointStrategy()
+    {
+        return DatabaseDescriptor.getBatchlogEndpointStrategy().name();
+    }
+
+    public void setBatchlogEndpointStrategy(String batchlogEndpointStrategy)
+    {
+        DatabaseDescriptor.setBatchlogEndpointStrategy(Config.BatchlogEndpointStrategy.valueOf(batchlogEndpointStrategy));
+    }
+
     /**
      * Send data to the endpoints that will be responsible for it in the future
      *
@@ -6316,4 +6341,26 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info("RepairRpcTimeout set to {}ms via JMX", timeoutInMillis);
     }
 
+    @Override
+    public void removeNotificationListener(NotificationListener listener) throws ListenerNotFoundException
+    {
+        if (!skipNotificationListeners)
+            super.removeNotificationListener(listener);
+    }
+
+    @Override
+    public void removeNotificationListener(NotificationListener listener, NotificationFilter filter, Object handback) throws ListenerNotFoundException
+    {
+        if (!skipNotificationListeners)
+            super.removeNotificationListener(listener, filter, handback);
+    }
+
+    @Override
+    public void addNotificationListener(NotificationListener listener,
+                                        NotificationFilter filter,
+                                        Object handback) throws java.lang.IllegalArgumentException
+    {
+        if (!skipNotificationListeners)
+            super.addNotificationListener(listener, filter, handback);
+    }
 }

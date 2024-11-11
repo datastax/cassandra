@@ -26,11 +26,13 @@ import javax.annotation.concurrent.NotThreadSafe;
 import com.google.common.base.Preconditions;
 
 import io.micrometer.core.lang.NonNull;
+import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.io.tries.IncrementalDeepTrieWriterPageAware;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.tries.IncrementalTrieWriter;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -73,8 +75,8 @@ public class SortedTermsWriter implements Closeable
 
     static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
 
-    private final IncrementalDeepTrieWriterPageAware<Long> trieWriter;
-    private final IndexOutput trieOutput;
+    private final IncrementalTrieWriter<Long> trieWriter;
+    private final IndexOutputWriter trieOutput;
     private final IndexOutput termsOutput;
     private final NumericValuesWriter offsetsWriter;
     private final String componentName;
@@ -94,26 +96,24 @@ public class SortedTermsWriter implements Closeable
      * It does not own the components, so you must close the components by yourself
      * after you're done with the writer.
      *
-     * @param componentName the component name for the SortedTermsMeta
+     * @param termsDataComponent component builder for the prefix-compressed terms data
      * @param metadataWriter the MetadataWriter for storing the SortedTermsMeta
-     * @param termsData where to write the prefix-compressed terms data
      * @param termsDataBlockOffsets  where to write the offsets of each block of terms data
-     * @param trieWriter where to write the trie that maps the terms to point ids
+     * @param trieComponent component where to write the trie that maps the terms to point ids
      */
-    public SortedTermsWriter(@NonNull String componentName,
+    public SortedTermsWriter(@NonNull IndexComponent.ForWrite termsDataComponent,
                              @NonNull MetadataWriter metadataWriter,
-                             @Nonnull IndexOutput termsData,
                              @Nonnull NumericValuesWriter termsDataBlockOffsets,
-                             @Nonnull IndexOutputWriter trieWriter) throws IOException
+                             @Nonnull IndexComponent.ForWrite trieComponent) throws IOException
     {
-        this.componentName = componentName;
+        this.componentName = termsDataComponent.fileNamePart();
         this.metadataWriter = metadataWriter;
-        this.trieOutput = trieWriter;
+        this.trieOutput = trieComponent.openOutput();
         SAICodecUtils.writeHeader(this.trieOutput);
-        this.trieWriter = new IncrementalDeepTrieWriterPageAware<>(trieSerializer, trieWriter.asSequentialWriter());
-        SAICodecUtils.writeHeader(termsData);
-        this.termsOutput = termsData;
-        this.bytesStartFP = termsData.getFilePointer();
+        this.trieWriter = IncrementalTrieWriter.open(trieSerializer, trieOutput.asSequentialWriter(), TypeUtil.BYTE_COMPARABLE_VERSION);
+        this.termsOutput = termsDataComponent.openOutput();
+        SAICodecUtils.writeHeader(termsOutput);
+        this.bytesStartFP = termsOutput.getFilePointer();
         this.offsetsWriter = termsDataBlockOffsets;
     }
 
@@ -199,7 +199,7 @@ public class SortedTermsWriter implements Closeable
      */
     private void copyBytes(ByteComparable source, BytesRefBuilder dest)
     {
-        ByteSource byteSource = source.asComparableBytes(ByteComparable.Version.OSS41);
+        ByteSource byteSource = source.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION);
         int val;
         while ((val = byteSource.next()) != ByteSource.END_OF_STREAM)
             dest.append((byte) val);

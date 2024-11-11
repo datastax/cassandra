@@ -49,7 +49,7 @@ class PartitionWriter extends SortedTablePartitionWriter
                     Collection<SSTableFlushObserver> observers)
     {
         super(header, writer, version, observers);
-        this.rowTrie = new RowIndexWriter(comparator, indexWriter);
+        this.rowTrie = new RowIndexWriter(comparator, indexWriter, version.getByteComparableVersion());
     }
 
     @Override

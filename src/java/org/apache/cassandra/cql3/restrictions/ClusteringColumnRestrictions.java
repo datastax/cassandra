@@ -42,7 +42,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
     /**
      * The composite type.
      */
-    protected final ClusteringComparator comparator;
+    private final ClusteringComparator comparator;
 
     private ClusteringColumnRestrictions(ClusteringComparator comparator,
                                          RestrictionSet restrictionSet)
@@ -189,7 +189,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
                 SingleRestriction lastRestriction = restrictions.lastRestriction();
                 ColumnMetadata lastRestrictionStart = lastRestriction.getFirstColumn();
                 ColumnMetadata newRestrictionStart = newRestriction.getFirstColumn();
-                restrictions.addRestriction(newRestriction, isDisjunction);
+                restrictions.addRestriction(newRestriction, isDisjunction, indexRegistry);
 
                 checkFalse(lastRestriction.isSlice() && newRestrictionStart.position() > lastRestrictionStart.position(),
                            "Clustering column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ relation)",
@@ -203,7 +203,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             }
             else
             {
-                restrictions.addRestriction(newRestriction, isDisjunction);
+                restrictions.addRestriction(newRestriction, isDisjunction, indexRegistry);
             }
 
             return this;

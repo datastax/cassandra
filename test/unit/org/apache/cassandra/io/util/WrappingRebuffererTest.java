@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 import org.junit.Test;
 
@@ -105,6 +106,12 @@ public class WrappingRebuffererTest
         public ByteBuffer buffer()
         {
             return buffer;
+        }
+
+        @Override
+        public ByteOrder order()
+        {
+            return buffer.order();
         }
 
         public long fileLength()

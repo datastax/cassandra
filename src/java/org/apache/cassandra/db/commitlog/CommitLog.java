@@ -20,7 +20,6 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileStore;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -28,6 +27,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -49,7 +49,6 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.CDCWriteException;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.ICompressor;
-import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
@@ -92,6 +91,7 @@ public class CommitLog implements CommitLogMBean
     public final CommitLogArchiver archiver;
     public final CommitLogMetrics metrics;
     final AbstractCommitLogService executor;
+    private Set<String> segmentsWithInvalidOrFailedMutations;
 
     volatile Configuration configuration;
     private boolean started = false;
@@ -234,7 +234,10 @@ public class CommitLog implements CommitLogMBean
             logger.info("Log replay complete, {} replayed mutations", replayedKeyspaces.values().stream().reduce(Integer::sum).orElse(0));
 
             for (File f : files)
-                segmentManager.handleReplayedSegment(f);
+            {
+                boolean hasInvalidOrFailedMutations = segmentsWithInvalidOrFailedMutations.contains(f.name());
+                segmentManager.handleReplayedSegment(f, hasInvalidOrFailedMutations);
+            }
         }
 
         return replayedKeyspaces;
@@ -253,7 +256,10 @@ public class CommitLog implements CommitLogMBean
     {
         CommitLogReplayer replayer = CommitLogReplayer.construct(this, getLocalHostId());
         replayer.replayFiles(clogs);
-        return replayer.blockForWrites(flushReason);
+
+        Map<Keyspace, Integer> res = replayer.blockForWrites(flushReason);
+        segmentsWithInvalidOrFailedMutations = replayer.getSegmentWithInvalidOrFailedMutations();
+        return res;
     }
 
     public void recoverPath(String path, boolean tolerateTruncation) throws IOException

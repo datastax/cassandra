@@ -45,6 +45,12 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
         super(ComparisonType.CUSTOM, false, subTypes);
     }
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
     {
         if (accessorL.isEmpty(left) || accessorR.isEmpty(right))
@@ -61,7 +67,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
         int offsetL = startingOffset(isStaticL);
         int offsetR = startingOffset(isStaticR);
 
-        while (!accessorL.isEmptyFromOffset(left, offsetL) && !accessorR.isEmptyFromOffset(right, offsetL))
+        while (!accessorL.isEmptyFromOffset(left, offsetL) && !accessorR.isEmptyFromOffset(right, offsetR))
         {
             AbstractType<?> comparator = getComparator(i, left, accessorL, right, accessorR, offsetL, offsetR);
             offsetL += getComparatorSize(left, accessorL, offsetL);

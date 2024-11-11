@@ -21,23 +21,32 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 
 import com.google.common.base.Preconditions;
 
 import io.github.jbellis.jvector.util.RamUsageEstimator;
+import net.openhft.chronicle.bytes.Bytes;
+import net.openhft.chronicle.hash.serialization.BytesReader;
+import net.openhft.chronicle.hash.serialization.BytesWriter;
 import org.agrona.collections.IntArrayList;
 
 public class VectorPostings<T>
 {
     // we expect that the overwhelmingly most common cardinality will be 1, so optimize for reads using COWAL
-    private final CopyOnWriteArrayList<T> postings;
-    private volatile int ordinal = -1;
+    final CopyOnWriteArrayList<T> postings;
+    volatile int ordinal = -1;
 
     private volatile IntArrayList rowIds; // initially null; gets filled in on flush by computeRowIds
 
     public VectorPostings(T firstKey)
     {
         postings = new CopyOnWriteArrayList<>(List.of(firstKey));
+    }
+
+    public VectorPostings(List<T> raw)
+    {
+        postings = new CopyOnWriteArrayList<>(raw);
     }
 
     /**
@@ -71,14 +80,14 @@ public class VectorPostings<T>
     /**
      * Compute the rowIds corresponding to the <T> keys in this postings list.
      */
-    public void computeRowIds(Function<T, Integer> postingTransformer)
+    public void computeRowIds(ToIntFunction<T> postingTransformer)
     {
         Preconditions.checkState(rowIds == null);
 
         IntArrayList ids = new IntArrayList(postings.size(), -1);
         for (T key : postings)
         {
-            int rowId = postingTransformer.apply(key);
+            int rowId = postingTransformer.applyAsInt(key);
             // partition deletion and range deletion won't trigger index update. There is no row id for given key during flush
             if (rowId >= 0)
                 ids.add(rowId);
@@ -117,7 +126,7 @@ public class VectorPostings<T>
     // we can't do this exactly without reflection, because keys could be Integer or PrimaryKey.
     // PK is larger, so we'll take that and return an upper bound.
     // we already count the float[] vector in vectorValues, so leave it out here
-    public static long bytesPerPosting()
+    public long bytesPerPosting()
     {
         long REF_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_REF;
         return REF_BYTES
@@ -142,7 +151,82 @@ public class VectorPostings<T>
 
     public int getOrdinal()
     {
-        assert ordinal >= 0 : "ordinal not set";
+        return getOrdinal(true);
+    }
+
+    public int getOrdinal(boolean assertSet)
+    {
+        assert !assertSet || ordinal >= 0 : "ordinal not set";
         return ordinal;
+    }
+
+    public static class CompactionVectorPostings extends VectorPostings<Integer> {
+        public CompactionVectorPostings(int ordinal, List<Integer> raw)
+        {
+            super(raw);
+            this.ordinal = ordinal;
+        }
+
+        public CompactionVectorPostings(int ordinal, int firstKey)
+        {
+            super(firstKey);
+            this.ordinal = ordinal;
+        }
+
+        @Override
+        public void setOrdinal(int ordinal)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public IntArrayList getRowIds()
+        {
+            var L = new IntArrayList(size(), -1);
+            for (var i : postings)
+                L.addInt(i);
+            return L;
+        }
+
+        // CVP always contains int keys, so we don't have to be pessimistic on size like super does
+        @Override
+        public long bytesPerPosting()
+        {
+            long REF_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_REF;
+            return REF_BYTES + Integer.BYTES;
+        }
+    }
+
+    static class Marshaller implements BytesReader<CompactionVectorPostings>, BytesWriter<CompactionVectorPostings>
+    {
+        @Override
+        public void write(Bytes out, CompactionVectorPostings postings) {
+            out.writeInt(postings.ordinal);
+            out.writeInt(postings.size());
+            for (Integer posting : postings.getPostings()) {
+                out.writeInt(posting);
+            }
+        }
+
+        @Override
+        public CompactionVectorPostings read(Bytes in, CompactionVectorPostings using) {
+            int ordinal = in.readInt();
+            int size = in.readInt();
+            assert size >= 0 : size;
+            CompactionVectorPostings cvp;
+            if (size == 1) {
+                cvp = new CompactionVectorPostings(ordinal, in.readInt());
+            }
+            else
+            {
+                var postingsList = new IntArrayList(size, -1);
+                for (int i = 0; i < size; i++)
+                {
+                    postingsList.add(in.readInt());
+                }
+                cvp = new CompactionVectorPostings(ordinal, postingsList);
+            }
+            return cvp;
+        }
     }
 }

@@ -23,14 +23,15 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.Duration;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.SimpleDateType;
+import org.apache.cassandra.db.marshal.TemporalType;
+import org.apache.cassandra.db.marshal.TimeType;
+import org.apache.cassandra.db.marshal.TimeUUIDType;
+import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
-
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
-import static org.assertj.core.internal.bytebuddy.pool.TypePool.CacheProvider.UNRESOLVED;
 
 public abstract class TimeFcts
 {
@@ -96,6 +97,7 @@ public abstract class TimeFcts
      * Function that convert a value of <code>TIMEUUID</code> into a value of type <code>TIMESTAMP</code>.
      * @deprecated Replaced by the {@link #timeUuidToTimestamp} function
      */
+    @Deprecated
     public static final NativeScalarFunction dateOfFct = new NativeScalarFunction("dateof", TimestampType.instance, TimeUUIDType.instance)
     {
         private volatile boolean hasLoggedDeprecationWarning;
@@ -122,6 +124,7 @@ public abstract class TimeFcts
      * Function that convert a value of type <code>TIMEUUID</code> into an UNIX timestamp.
      * @deprecated Replaced by the {@link #timeUuidToUnixTimestamp} function
      */
+    @Deprecated
     public static final NativeScalarFunction unixTimestampOfFct = new NativeScalarFunction("unixtimestampof", LongType.instance, TimeUUIDType.instance)
     {
         private volatile boolean hasLoggedDeprecationWarning;

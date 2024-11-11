@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -64,7 +63,6 @@ public class LongVectorTest extends SAITester
     {
         createTable(String.format("CREATE TABLE %%s (key int primary key, value vector<float, %s>)", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function': 'dot_product' }");
-        waitForIndexQueryable();
 
         AtomicInteger counter = new AtomicInteger();
         long start = System.currentTimeMillis();
@@ -103,7 +101,7 @@ public class LongVectorTest extends SAITester
     {
         testConcurrentOps(i -> {
             var R = ThreadLocalRandom.current();
-            var v = randomVector(dimension);
+            var v = randomVectorBoxed(dimension);
             if (R.nextDouble() < 0.2 || keysInserted.isEmpty())
             {
                 execute("INSERT INTO %s (key, value) VALUES (?, ?)", i, v);
@@ -149,7 +147,7 @@ public class LongVectorTest extends SAITester
     {
         testConcurrentOps(i -> {
             var R = ThreadLocalRandom.current();
-            var v = randomVector(dimension);
+            var v = randomVectorBoxed(dimension);
             if (R.nextDouble() < 0.1 || keysInserted.isEmpty())
             {
                 execute("INSERT INTO %s (key, value) VALUES (?, ?)", i, v);
@@ -169,7 +167,7 @@ public class LongVectorTest extends SAITester
     public void testConcurrentWrites() throws ExecutionException, InterruptedException
     {
         testConcurrentOps(i -> {
-            var v = randomVector(dimension);
+            var v = randomVectorBoxed(dimension);
             execute("INSERT INTO %s (key, value) VALUES (?, ?)", i, v);
         });
     }
@@ -181,8 +179,7 @@ public class LongVectorTest extends SAITester
     private static Vector<Float> sequentiallyDuplicateVector(int i, int dimension)
     {
         int j = 1 + i / Runtime.getRuntime().availableProcessors();
-        var vector = new Float[dimension];
-        Arrays.fill(vector, 0.0f);
+        var vector = new float[dimension];
         outer:
         while (true)
         {
@@ -194,7 +191,7 @@ public class LongVectorTest extends SAITester
             }
         }
         normalize(vector);
-        return new Vector<>(vector);
+        return vector(vector);
     }
 
     private static class KeySet

@@ -31,7 +31,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArraySet;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -60,6 +59,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.memory.HeapCloner;
 
 import static org.apache.cassandra.io.util.File.WriteMode.APPEND;
+import static org.apache.cassandra.io.util.File.WriteMode.OVERWRITE;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 
@@ -84,7 +84,7 @@ public abstract class SSTable
     public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = Integer.valueOf(System.getProperty("cassandra.streaminghistogram.roundseconds", "60"));
 
     public final Descriptor descriptor;
-    public final Set<Component> components;
+    private volatile ImmutableSet<Component> components;
     public final boolean compression;
 
     public DecoratedKey first;
@@ -103,17 +103,15 @@ public abstract class SSTable
         assert components != null;
 
         this.descriptor = descriptor;
-        Set<Component> dataComponents = new HashSet<>(components);
-        this.compression = dataComponents.contains(Component.COMPRESSION_INFO);
-        this.components = new CopyOnWriteArraySet<>(dataComponents);
+        this.compression = components.contains(Component.COMPRESSION_INFO);
+        this.components = ImmutableSet.copyOf(components);
         this.metadata = metadata;
         this.optimizationStrategy = Objects.requireNonNull(optimizationStrategy);
     }
 
-    @VisibleForTesting
-    public Set<Component> getComponents()
+    public ImmutableSet<Component> components()
     {
-        return ImmutableSet.copyOf(components);
+        return components;
     }
 
     /**
@@ -347,7 +345,7 @@ public abstract class SSTable
      * @param skipMissing, skip adding the component to the returned set if the corresponding file is missing.
      * @return set of components found in the TOC
      */
-    protected static Set<Component> readTOC(Descriptor descriptor, boolean skipMissing) throws IOException
+    public static Set<Component> readTOC(Descriptor descriptor, boolean skipMissing) throws IOException
     {
         File tocFile = descriptor.fileFor(Component.TOC);
         List<String> componentNames = Files.readAllLines(tocFile.toPath());
@@ -369,20 +367,28 @@ public abstract class SSTable
     private static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Component.TOC);
-        if (!tocFile.tryDelete())
-            logger.error("Failed to delete TOC component for " + descriptor);
-        appendTOC(descriptor, components);
+        // As this method *re*-write the TOC (and is currently only called by "unregisterComponents"), it should only
+        // be called in contexts where the TOC is expected to exist. If it doesn't, there is probably something
+        // unexpected happening, so we log relevant information to help diagnose a potential earlier problem.
+        // But in principle, this isn't a big deal for this method, and we still end up with the TOC in the state we
+        // expect.
+        if (!tocFile.exists())
+        {
+            // Note: we pass a dummy runtime exception as a simple way to get a stack-trace. Knowing from where this
+            // is called in this case is likely useful information.
+            logger.warn("Was asked to 'rewrite' TOC file {} for sstable {}, but it does not exists. The file will be created but this is unexpected. The components to 'overwrite' are: {}", tocFile, descriptor, components, new RuntimeException());
+        }
+
+        writeTOC(tocFile, components, OVERWRITE);
     }
 
     /**
-     * Appends new component names to the TOC component.
+     * Write TOC file with given components and write mode
      */
-    @SuppressWarnings("resource")
-    protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
+    public static void writeTOC(File tocFile, Collection<Component> components, File.WriteMode writeMode)
     {
-        File tocFile = descriptor.fileFor(Component.TOC);
         FileOutputStreamPlus fos = null;
-        try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(APPEND))))
+        try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(writeMode))))
         {
             for (Component component : components)
                 w.println(component.name);
@@ -393,6 +399,16 @@ public abstract class SSTable
         {
             throw new FSWriteError(e, tocFile);
         }
+    }
+
+    /**
+     * Appends new component names to the TOC component.
+     */
+    @SuppressWarnings("resource")
+    protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
+    {
+        File tocFile = descriptor.fileFor(Component.TOC);
+        writeTOC(tocFile, components, APPEND);
     }
 
     /**
@@ -414,18 +430,13 @@ public abstract class SSTable
     public synchronized void registerComponents(Collection<Component> newComponents, Tracker tracker)
     {
         Collection<Component> componentsToAdd = new HashSet<>(Collections2.filter(newComponents, x -> !components.contains(x)));
-        appendTOC(descriptor, componentsToAdd);
-        components.addAll(componentsToAdd);
-
-        if (tracker == null)
+        if (componentsToAdd.isEmpty())
             return;
 
-        for (Component component : componentsToAdd)
-        {
-            File file = descriptor.fileFor(component);
-            if (file.exists())
-                tracker.updateSizeTracking(file.length());
-        }
+        appendTOC(descriptor, componentsToAdd);
+        components = ImmutableSet.<Component>builder().addAll(components).addAll(componentsToAdd).build();
+
+        updateComponentsTracking(componentsToAdd, tracker, 1);
     }
 
     /**
@@ -435,15 +446,62 @@ public abstract class SSTable
      */
     public synchronized void unregisterComponents(Collection<Component> removeComponents, Tracker tracker)
     {
-        Collection<Component> componentsToRemove = new HashSet<>(Collections2.filter(removeComponents, components::contains));
-        components.removeAll(componentsToRemove);
+        Set<Component> componentsToRemove = new HashSet<>(Collections2.filter(removeComponents, components::contains));
+        components = Sets.difference(components, componentsToRemove).immutableCopy();
         rewriteTOC(descriptor, components);
 
-        for (Component component : componentsToRemove)
+        updateComponentsTracking(componentsToRemove, tracker, -1);
+    }
+
+    private void updateComponentsTracking(Collection<Component> toUpdate, Tracker tracker, long multiplier)
+    {
+        if (tracker == null)
+            return;
+
+        for (Component component : toUpdate)
         {
             File file = descriptor.fileFor(component);
             if (file.exists())
-                tracker.updateSizeTracking(-file.length());
+                tracker.updateSizeTracking(multiplier * file.length());
+        }
+    }
+
+    /**
+     * Reads components from the TOC file and update the `components` set of this object accordindly.
+     * <p>
+     * Usually, components are added/removed through {@link #addComponents}, {@link #registerComponents} or
+     * {@link #unregisterComponents}, which both update this object component and update the TOC file accordingly, and
+     * this method should not be used. But some implementation of tiered storage may add components/rewrite the TOC
+     * "externally" (one reason can be offloading index rebuild) and need those change to be reflected to this object
+     * and this is where this method comes in.
+     * <p>
+     * If the TOC file does not exist, cannot be read, or does not at least contains the minimal components that all
+     * sstables should have when this is called, this method is a no-op.
+     */
+    public synchronized void reloadComponentsFromTOC(Tracker tracker)
+    {
+        try
+        {
+            Set<Component> tocComponents = readTOC(descriptor);
+            Set<Component> requiredComponents = descriptor.formatType.info.requiredComponents();
+            if (!tocComponents.containsAll(requiredComponents))
+            {
+                logger.error("Cannot reload components from read TOC file for {}; the TOC does not contain all the required components for the sstable type and is like corrupted (components in TOC: {}, required by sstable format: {})",
+                             descriptor, tocComponents, requiredComponents);
+                return;
+            }
+
+            Set<Component> toAdd = Sets.difference(tocComponents, components);
+            Set<Component> toRemove = Sets.difference(components, tocComponents);
+            components = ImmutableSet.copyOf(tocComponents);
+
+            updateComponentsTracking(toAdd, tracker, 1);
+            updateComponentsTracking(toRemove, tracker, -1);
+
+        }
+        catch (IOException e)
+        {
+            logger.error("Failed to read TOC file for {}; ignoring component reload", descriptor, e);
         }
     }
 

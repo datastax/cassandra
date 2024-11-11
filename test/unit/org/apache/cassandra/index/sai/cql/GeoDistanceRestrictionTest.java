@@ -27,7 +27,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // Distances computed using GeoDistanceAccuracyTest#strictHaversineDistance
         execute("INSERT INTO %s (pk, v) VALUES (0, [1, 2])"); // distance is 555661 m from [5,5]
@@ -52,7 +51,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // Points chosen to be close to the boundary of the search radius. The assertion failed based on earlier
         // versions of the math used to determine whether the square distance was sufficient to short circuit
@@ -79,7 +77,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, v) VALUES (0, [0.10999, 0])"); // distance is 12230.3 m from [0,0]
         execute("INSERT INTO %s (pk, v) VALUES (1, [0.11000, 0])"); // distance is 12231.4 m from [0,0]
@@ -95,7 +92,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, v) VALUES (0, [0.00009, 0])"); // distance is 10.007 m from [0,0]
         execute("INSERT INTO %s (pk, v) VALUES (1, [0.00010, 0])"); // distance is 11.120 m from [0,0]
@@ -112,7 +108,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, num, v) VALUES (0, 0, [1, 2])"); // distance is 555661 m from [5,5]
         execute("INSERT INTO %s (pk, num, v) VALUES (1, 1, [4, 4])"); // distance is 157010 m from [5,5]
@@ -134,7 +129,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, point vector<float, 2>, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(point) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, point, v) VALUES (0, [1, 2], [1, 2, 1])"); // distance is 555661 m from [5,5]
         execute("INSERT INTO %s (pk, point, v) VALUES (1, [4, 4], [4, 4, 1])"); // distance is 157010 m from [5,5]
@@ -154,7 +148,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, num, v) VALUES (0, 0, [1, 2])"); // distance is 555661 m from [5,5]
         execute("INSERT INTO %s (pk, num, v) VALUES (1, 1, [4, 4])"); // distance is 157010 m from [5,5]
@@ -178,7 +171,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, v) VALUES (0, [1, 2])"); // distance is 555661 m from [5,5]
         execute("INSERT INTO %s (pk, v) VALUES (1, [4, 4])"); // distance is 157010 m from [5,5]
@@ -198,7 +190,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (city text primary key, coordinates vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(coordinates) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
-        waitForIndexQueryable();
 
         // coordinates are [latitude, longitude]
         execute("INSERT INTO %s (city, coordinates) VALUES ('Washington DC', [38.8951, -77.0364])");
@@ -208,21 +199,27 @@ public class GeoDistanceRestrictionTest extends VectorTester
         execute("INSERT INTO %s (city, coordinates) VALUES ('Chicago', [41.8781, -87.6298])");
         execute("INSERT INTO %s (city, coordinates) VALUES ('Boston', [42.3601, -71.0589])");
 
-        // Cities within 5 meters of Boston
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [42.3601, -71.0589]) < 5"),
-                   row("Boston"));
+        beforeAndAfterFlush(() -> {
+            // Cities within 5 meters of Boston
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [42.3601, -71.0589]) < 5"),
+                                    row("Boston"));
 
-        // Cities within 328.4 km of Washington DC
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [38.8951, -77.0364]) < 328400"),
-                                row("New York City"), row("Washington DC"));
 
-        // Cities within 500 km of New York City
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
-                   row("Boston"), row("New York City"), row("Washington DC"));
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [42.3601, -71.0589]) < 5 LIMIT 1"),
+                                    row("Boston"));
 
-        // Cities within 1000 km of New York City
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
-                                row("Boston"), row("New York City"), row("Washington DC"));
+            // Cities within 328.4 km of Washington DC
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [38.8951, -77.0364]) < 328400"),
+                                    row("New York City"), row("Washington DC"));
+
+            // Cities within 500 km of New York City
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
+                                    row("Boston"), row("New York City"), row("Washington DC"));
+
+            // Cities within 1000 km of New York City
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
+                                    row("Boston"), row("New York City"), row("Washington DC"));
+        });
     }
 
     @Test
@@ -230,7 +227,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (city text primary key, coordinates vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(coordinates) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
-        waitForIndexQueryable();
 
         // coordinates are [latitude, longitude]
         // These are from NYC's Central Park
@@ -240,17 +236,19 @@ public class GeoDistanceRestrictionTest extends VectorTester
         execute("INSERT INTO %s (city, coordinates) VALUES ('Baseball Field 6', [40.793018,-73.957565])");
         execute("INSERT INTO %s (city, coordinates) VALUES ('Baseball Field 5', [40.793193,-73.958644])");
 
-        // Point within 40 meters of field 6
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 40"),
-                                row("Baseball Field 6"));
+        beforeAndAfterFlush(() -> {
+            // Point within 40 meters of field 6
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 40"),
+                                    row("Baseball Field 6"));
 
-        // Point within 43 meters of field 6 (field 7 is 43.14 meters away)
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 43.5"),
-                                row("Baseball Field 6"), row("Baseball Field 7"));
+            // Point within 43 meters of field 6 (field 7 is 43.14 meters away)
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 43.5"),
+                                    row("Baseball Field 6"), row("Baseball Field 7"));
 
-        // Point within 95 meters of field 6 (field 5 is 93 meters away)
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 95"),
-                                row("Baseball Field 6"), row("Baseball Field 7"), row("Baseball Field 5"));
+            // Point within 95 meters of field 6 (field 5 is 93 meters away)
+            assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 95"),
+                                    row("Baseball Field 6"), row("Baseball Field 7"), row("Baseball Field 5"));
+        });
     }
 
     @Test
@@ -258,7 +256,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // Distances computed using https://www.nhc.noaa.gov/gccalc.shtml
         execute("INSERT INTO %s (pk, v) VALUES (0, [1, 2])"); // distance is 555 km from [5,5]
@@ -294,7 +291,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, num, v) VALUES (0, 1, [0, -179])");
         execute("INSERT INTO %s (pk, num, v) VALUES (1, 1, [0, 179])");
@@ -325,7 +321,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (location text PRIMARY KEY, coords vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(coords) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         // Here are the distances (these distances a not transitive, but do provide general motivation for the
         // results observed in the test)
@@ -363,7 +358,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, coords vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(coords) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, coords) VALUES (0, [90,0])");
         execute("INSERT INTO %s (pk, coords) VALUES (1, [89.99999, 0])");

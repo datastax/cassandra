@@ -24,7 +24,9 @@ import java.nio.ByteOrder;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 
-import com.google.common.primitives.*;
+import com.google.common.primitives.Longs;
+import com.google.common.primitives.UnsignedBytes;
+import com.google.common.primitives.UnsignedLongs;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
 import sun.misc.Unsafe;
@@ -68,6 +70,11 @@ public class FastByteOperations
     public static int compareUnsigned(ByteBuffer b1, ByteBuffer b2)
     {
         return BestHolder.BEST.compare(b1, b2);
+    }
+
+    public static int compareUnsigned(byte[] b1, byte[] b2)
+    {
+        return compareUnsigned(b1, 0, b1.length, b2, 0, b2.length);
     }
 
     public static void copy(byte[] src, int srcPosition, byte[] trg, int trgPosition, int length)

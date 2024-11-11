@@ -36,6 +36,7 @@ import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.SchemaElement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -421,7 +422,22 @@ public class TableMetadata implements SchemaElement
         return !staticColumns().isEmpty();
     }
 
-    public void validate()
+    public boolean hasVectorType()
+    {
+        for (ColumnMetadata column : columns.values())
+        {
+            if (column.type.isVector())
+                return true;
+        }
+        return false;
+    }
+
+    public final void validate()
+    {
+        validate(false);
+    }
+
+    public void validate(boolean durationLegacyMode)
     {
         if (!isNameValid(keyspace))
             except("Keyspace name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, keyspace);
@@ -431,7 +447,7 @@ public class TableMetadata implements SchemaElement
 
         params.validate();
 
-        columns().forEach(c -> c.validate(isCounter()));
+        columns().forEach(c -> c.validate(isCounter(), durationLegacyMode));
 
         // All tables should have a partition key
         if (partitionKeyColumns.isEmpty())
@@ -713,6 +729,11 @@ public class TableMetadata implements SchemaElement
     protected void except(String format, Object... args)
     {
         throw new ConfigurationException(keyspace + "." + name + ": " + format(format, args));
+    }
+
+    public PartitionUpdate.Factory partitionUpdateFactory()
+    {
+        return params.memtable.factory.partitionUpdateFactory();
     }
 
     @Override
@@ -1597,9 +1618,10 @@ public class TableMetadata implements SchemaElement
             return compactValueColumn.type instanceof EmptyType;
         }
 
-        public void validate()
+        @Override
+        public void validate(boolean durationLegacyMode)
         {
-            super.validate();
+            super.validate(durationLegacyMode);
 
             // A compact table should always have a clustering
             if (!Flag.isCQLTable(flags) && clusteringColumns.isEmpty())

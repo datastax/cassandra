@@ -18,27 +18,37 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-
+import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
 
-public class VectorUpdateDeleteTest extends VectorTester
+public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
 {
+    @Before
+    public void setup() throws Throwable
+    {
+        super.setup();
+
+        // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
+        QueryController.QUERY_OPT_LEVEL = 1;
+    }
 
     // partition delete won't trigger UpdateTransaction#onUpdated
     @Test
-    public void partitionDeleteVectorInMemoryTest() throws Throwable
+    public void partitionDeleteVectorInMemoryTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -67,11 +77,10 @@ public class VectorUpdateDeleteTest extends VectorTester
 
     // row delete will trigger UpdateTransaction#onUpdated
     @Test
-    public void rowDeleteVectorInMemoryAndFlushTest() throws Throwable
+    public void rowDeleteVectorInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, ck int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, ck, str_val, val) VALUES (0, 0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, ck, str_val, val) VALUES (1, 1, 'B', [2.0, 3.0, 4.0])");
@@ -88,13 +97,27 @@ public class VectorUpdateDeleteTest extends VectorTester
         assertContainsInt(result, "pk", 0);
     }
 
+    @Test
+    public void testFlushWithDeletedVectors()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (pk, v) VALUES (0, [1.0, 2.0])");
+        execute("INSERT INTO %s (pk, v) VALUES (0, null)");
+
+        flush();
+
+        var result = execute("SELECT * FROM %s ORDER BY v ann of [2.5, 3.5] LIMIT 1");
+        assertThat(result).hasSize(0);
+    }
+
     // range delete won't trigger UpdateTransaction#onUpdated
     @Test
-    public void rangeDeleteVectorInMemoryAndFlushTest() throws Throwable
+    public void rangeDeleteVectorInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, ck int, ck2 int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, ck, ck2))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, ck, ck2, str_val, val) VALUES (0, 0, 0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, ck, ck2, str_val, val) VALUES (1, 1, 1, 'B', [2.0, 3.0, 4.0])");
@@ -112,11 +135,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void updateVectorInMemoryAndFlushTest() throws Throwable
+    public void updateVectorInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -134,11 +156,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void deleteVectorPostFlushTest() throws Throwable
+    public void deleteVectorPostFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -162,11 +183,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void deletedInOtherSSTablesTest() throws Throwable
+    public void deletedInOtherSSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -185,12 +205,11 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void deletedInOtherSSTablesMultiIndexTest() throws Throwable
+    public void deletedInOtherSSTablesMultiIndexTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', [2.0, 3.0, 4.0])");
@@ -209,11 +228,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void rangeDeletedInOtherSSTablesTest() throws Throwable
+    public void rangeDeletedInOtherSSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, ck1 int, ck2 int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, ck1, ck2))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 1, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 2, 'B', [2.0, 3.0, 4.0])");
@@ -237,11 +255,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void partitionDeletedInOtherSSTablesTest() throws Throwable
+    public void partitionDeletedInOtherSSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, ck1 int, ck2 int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, ck1, ck2))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 1, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 2, 'B', [2.0, 3.0, 4.0])");
@@ -265,11 +282,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void upsertTest() throws Throwable
+    public void upsertTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // insert row A redundantly, and row B once
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
@@ -280,10 +296,8 @@ public class VectorUpdateDeleteTest extends VectorTester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
 
         // should only see two results
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-        assertContainsInt(result, "pk", 0);
-        assertContainsInt(result, "pk", 1);
+        UntypedResultSet result = execute("SELECT pk FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        assertRows(result, row(0), row(1));
 
         // flush, then insert A redundantly some more
         flush();
@@ -294,25 +308,20 @@ public class VectorUpdateDeleteTest extends VectorTester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
 
         // should still only see two results
-        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-        assertContainsInt(result, "pk", 0);
-        assertContainsInt(result, "pk", 1);
+        result = execute("SELECT pk FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        assertRows(result, row(0), row(1));
 
         // and again after flushing
         flush();
-        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-        assertContainsInt(result, "pk", 0);
-        assertContainsInt(result, "pk", 1);
+        result = execute("SELECT pk FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        assertRows(result, row(0), row(1));
     }
 
     @Test
-    public void updateTest() throws Throwable
+    public void updateTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // overwrite row A a bunch of times; also write row B with the same vector as a deleted A value
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
@@ -365,13 +374,12 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void updateTestWithPredicate() throws Throwable
+    public void updateTestWithPredicate()
     {
         // contrived example to make sure we exercise VectorIndexSearcher.limitToTopResults
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // overwrite row A a bunch of times
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
@@ -399,11 +407,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void updateOtherColumnsTest() throws Throwable
+    public void updateOtherColumnsTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -414,11 +421,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void updateManySSTablesTest() throws Throwable
+    public void updateManySSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         flush();
@@ -453,11 +459,10 @@ public class VectorUpdateDeleteTest extends VectorTester
 
 
     @Test
-    public void shadowedPrimaryKeyInDifferentSSTable() throws Throwable
+    public void shadowedPrimaryKeyInDifferentSSTable()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector
@@ -482,7 +487,6 @@ public class VectorUpdateDeleteTest extends VectorTester
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector that is shared by two rows
@@ -504,13 +508,12 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void shadowedPrimaryKeyWithSharedVectorAndOtherPredicates() throws Throwable
+    public void shadowedPrimaryKeyWithSharedVectorAndOtherPredicates()
     {
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector that is shared by two rows
@@ -538,7 +541,6 @@ public class VectorUpdateDeleteTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, num int, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction(KEYSPACE);
 
         // Same PK, different num, different vectors
@@ -557,12 +559,11 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void rangeRestrictedTestWithDuplicateVectorsAndADelete() throws Throwable
+    public void rangeRestrictedTestWithDuplicateVectorsAndADelete()
     {
         setMaxBruteForceRows(0);
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", 2));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])"); // -3485513579396041028
         execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 2.0])"); // -4069959284402364209
@@ -589,7 +590,6 @@ public class VectorUpdateDeleteTest extends VectorTester
         setMaxBruteForceRows(0);
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", 2));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
@@ -623,7 +623,6 @@ public class VectorUpdateDeleteTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Split the row across 1 sstable and the memtable.
         execute("INSERT INTO %s (pk, vec) VALUES (1, [1,1])");
@@ -659,7 +658,6 @@ public class VectorUpdateDeleteTest extends VectorTester
         // Use euclidean distance to more easily verify correctness of caching
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // We will search for [11,11]
         execute("INSERT INTO %s (pk, val, vec) VALUES (1, 'match me', [1,1])");
@@ -683,7 +681,6 @@ public class VectorUpdateDeleteTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, val1, vec) VALUES (1, 'match me', [1,1])");
         execute("INSERT INTO %s (pk, val2, vec) VALUES (2, 'match me', [1,2])");
@@ -701,11 +698,10 @@ public class VectorUpdateDeleteTest extends VectorTester
     // This test intentionally has extra rows with primary keys that are above and below the
     // deleted primary key so that we do not short circuit certain parts of the shadowed key logic.
     @Test
-    public void shadowedPrimaryKeyInDifferentSSTableEachWithMultipleRows() throws Throwable
+    public void shadowedPrimaryKeyInDifferentSSTableEachWithMultipleRows()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector
@@ -726,58 +722,8 @@ public class VectorUpdateDeleteTest extends VectorTester
         flush();
 
         // the shadow vector has the highest score
-        var result = execute("SELECT * FROM %s ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 4");
-        assertThat(result).hasSize(4);
-    }
-
-    @Test
-    public void ensureVariableChunkSizeDoesNotLeadToIncorrectResults() throws Exception
-    {
-        // When adding the chunk size feature, there were issues related to leaked files.
-        // This setting only matters for hybrid queries
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, vec vector<float, 2>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
-        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-
-        // Create many sstables to ensure chunk size matters
-        // Start at 1 to prevent indexing zero vector.
-        // Index every vector with A to match everything and because this test only makes sense for hybrid queries
-        for (int i = 1; i <= 100; i++)
-        {
-            execute("INSERT INTO %s (pk, str_val, vec) VALUES (?, ?, ?)", i, "A", vector(i, i));
-            if (i % 10 == 0)
-                flush();
-            // Add some deletes in the next segment
-            if (i % 3 == 0)
-                execute("DELETE FROM %s WHERE pk = ?", i);
-        }
-
-        try
-        {
-            // We use a chunk size that is as low as possible (1) and goes up to the whole dataset (100).
-            // We also query for different LIMITs
-            for (int i = 1; i <= 100; i++)
-            {
-                setChunkSize(i);
-                var results = execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1");
-                assertRows(results, row(1));
-                results = execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 3");
-                // Note that we delete row 3
-                assertRows(results, row(1), row(2), row(4));
-                results = execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 10");
-                // Note that we delete row 3, 6, 9, 12
-                assertRows(results, row(1), row(2), row(4), row(5),
-                           row(7), row(8), row(10), row(11), row(13), row(14));
-            }
-        }
-        finally
-        {
-            // Revert to prevent interference with other tests. Note that a decreased chunk size can impact
-            // wether we compute the topk with brute force because it determines how many vectors get sent to the
-            // vector index.
-            setChunkSize(100000);
-        }
+        var result = execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 4");
+        assertRows(result, row(1), row(3), row(0), row(4));
     }
 
     @Test
@@ -786,7 +732,6 @@ public class VectorUpdateDeleteTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction(KEYSPACE);
 
         // Choose a row count that will essentially force us to re-query the index that still has more rows to search.
@@ -823,7 +768,6 @@ public class VectorUpdateDeleteTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
         execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 3.0])");
@@ -857,6 +801,38 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
+    public void updatedPrimaryKeysRequireResumeSearch() throws Throwable
+    {
+        setMaxBruteForceRows(0);
+
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        disableCompaction(KEYSPACE);
+
+        // This test is fairly contrived, but it covers a bug we hit due to prematurely closed iterators.
+        // The general design for this test is to shadow the close vectors on a memtable/sstable index forcing the
+        // index to resume search. We do that by overwriting the first 50 vectors in the initial sstable.
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
+
+        // Add more rows to make sure we filter then sort
+        for (int i = 100; i < 1000; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'C', ?)", i, vector(1, i));
+
+        flush();
+
+        // Overwrite the most similar 50 rows
+        for (int i = 0; i < 50; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'B', ?)", i, vector(1, i));
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 1"),
+                       row(50));
+        });
+    }
+
+    @Test
     public void testBruteForceRangeQueryWithUpdatedVectors1536D() throws Throwable
     {
         testBruteForceRangeQueryWithUpdatedVectors(1536);
@@ -873,15 +849,14 @@ public class VectorUpdateDeleteTest extends VectorTester
         setMaxBruteForceRows(0);
         createTable("CREATE TABLE %s (pk int, val vector<float, " + vectorDimension + ">, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Insert 100 vectors
         for (int i = 0; i < 100; i++)
-            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVector(vectorDimension));
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVectorBoxed(vectorDimension));
 
         // Update those vectors so some ordinals are changed
         for (int i = 0; i < 100; i++)
-            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVector(vectorDimension));
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVectorBoxed(vectorDimension));
 
         // Delete the first 50 PKs.
         for (int i = 0; i < 50; i++)
@@ -893,20 +868,104 @@ public class VectorUpdateDeleteTest extends VectorTester
             // Query for the first 10 vectors, we don't care which.
             // Use a range query to hit the right brute force code path
             var results = execute("SELECT pk FROM %s WHERE token(pk) < 0 ORDER BY val ann of ? LIMIT 10",
-                                  randomVector(vectorDimension));
+                                  randomVectorBoxed(vectorDimension));
             assertThat(results).hasSize(10);
             // Make sure we don't get any of the deleted PKs
             assertThat(results).allSatisfy(row -> assertThat(row.getInt("pk")).isGreaterThanOrEqualTo(50));
         });
     }
 
-    private static void setChunkSize(final int selectivityLimit) throws Exception
+    @Test
+    public void testVectorIndexWithAllOrdinalsDeletedViaRangeDeletion()
     {
-        Field selectivity = QueryController.class.getDeclaredField("ORDER_CHUNK_SIZE");
-        selectivity.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(selectivity, selectivity.getModifiers() & ~Modifier.FINAL);
-        selectivity.set(null, selectivityLimit);
+        QueryController.QUERY_OPT_LEVEL = 0;
+        setMaxBruteForceRows(0);
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, a))");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        disableCompaction(KEYSPACE);
+
+        // Insert a row with a vector
+        execute("INSERT INTO %s (pk, a, str_val, val) VALUES (1, 1, 'A', [1.0, 2.0, 3.0])");
+
+        // Range delete that row
+        execute("DELETE FROM %s WHERE pk = 1");
+
+        // Insert another row without a vector
+        execute("INSERT INTO %s (pk, a, str_val) VALUES (2, 1, 'A')");
+        flush();
+
+        assertRows(execute("SELECT PK FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 1"));
+    }
+
+    @Test
+    public void testVectorIndexWithAllOrdinalsDeletedAndSomeViaRangeDeletion()
+    {
+        QueryController.QUERY_OPT_LEVEL = 0;
+        setMaxBruteForceRows(0);
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, a))");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        disableCompaction(KEYSPACE);
+
+        // Insert two rows with different vectors to get different ordinals
+        execute("INSERT INTO %s (pk, a, str_val, val) VALUES (1, 1, 'A', [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, a, str_val, val) VALUES (2, 1, 'A', [1.0, 2.0, 4.0])");
+
+        // Range delete the first row
+        execute("DELETE FROM %s WHERE pk = 1");
+        // Specifically delete the vector column second to hit a different code path.
+        execute("DELETE FROM %s WHERE pk = 2 AND a = 1");
+
+        // Insert another row without a vector
+        execute("INSERT INTO %s (pk, a, str_val) VALUES (2, 1, 'A')");
+        flush();
+
+        assertRows(execute("SELECT PK FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 1"));
+        getCurrentColumnFamilyStore().getLiveSSTables();
+    }
+
+    @Test
+    public void ensureCompressedVectorsCanFlush()
+    {
+        createTable("CREATE TABLE %s (pk int, val vector<float, 4>, PRIMARY KEY(pk))");
+        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+
+        // insert enough vectors for pq plus 1 because we need quantization and we're deleting a row
+        for (int i = 0; i < MIN_PQ_ROWS + 1; i++)
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vector(randomVector(4)));
+
+        // Delete a single vector to trigger the regression
+        execute("DELETE from %s WHERE pk = 0");
+
+        flush();
+
+        verifySSTableIndexes(indexName, 1);
+    }
+
+    @Test
+    public void testTTLOverwriteHasCorrectOnDiskRowCount() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int primary key, val vector<float, 3>)");
+        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0, 3.0]) USING TTL 1");
+
+        // Let the ttl expire
+        Thread.sleep(1000);
+
+        execute("INSERT INTO %s (pk, val) VALUES (0, [2, 3, 4])");
+
+        var sai = (StorageAttachedIndex) Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).getIndexManager().getIndexByName(indexName);
+        var indexes = sai.getIndexContext().getLiveMemtables().values();
+        assertEquals("Expect just one memtable index", 1, indexes.size());
+        var vectorIndex = (VectorMemtableIndex) indexes.iterator().next();
+        assertEquals("We dont' remove vectors, so we're still stuck with it", 2, vectorIndex.size());
+
+        // Flush to build the on disk graph (before the fix, flush failed due to a row having two vectors)
+        flush();
+
+        // Ensure that we only have one vector
+        assertEquals("The TTL'd row is overwritten and removed during flush.", 1, sai.getIndexContext().getCellCount());
     }
 }

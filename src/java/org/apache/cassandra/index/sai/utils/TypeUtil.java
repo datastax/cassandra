@@ -45,6 +45,7 @@ import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.MarshalException;
@@ -65,6 +66,12 @@ public class TypeUtil
      * (full) values.
      */
     public static final int DECIMAL_APPROXIMATION_BYTES = 24;
+
+    /**
+     * Byte comparable version currently used for all SAI files and structures, with the exception of terms data in
+     * the early AA on-disk format.
+     */
+    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
 
     private TypeUtil() {}
 
@@ -99,20 +106,20 @@ public class TypeUtil
 
     /**
      * Returns the smaller of two {@code ByteBuffer} values, based on the result of {@link
-     * #compare(ByteBuffer, ByteBuffer, AbstractType)} comparision.
+     * #compare(ByteBuffer, ByteBuffer, AbstractType, Version)} comparision.
      */
-    public static ByteBuffer min(ByteBuffer a, ByteBuffer b, AbstractType<?> type)
+    public static ByteBuffer min(ByteBuffer a, ByteBuffer b, AbstractType<?> type, Version version)
     {
-        return a == null ?  b : (b == null || compare(b, a, type) > 0) ? a : b;
+        return a == null ?  b : (b == null || compare(b, a, type, version) > 0) ? a : b;
     }
 
     /**
      * Returns the greater of two {@code ByteBuffer} values, based on the result of {@link
-     * #compare(ByteBuffer, ByteBuffer, AbstractType)} comparision.
+     * #compare(ByteBuffer, ByteBuffer, AbstractType, Version)} comparision.
      */
-    public static ByteBuffer max(ByteBuffer a, ByteBuffer b, AbstractType<?> type)
+    public static ByteBuffer max(ByteBuffer a, ByteBuffer b, AbstractType<?> type, Version version)
     {
-        return a == null ?  b : (b == null || compare(b, a, type) < 0) ? a : b;
+        return a == null ?  b : (b == null || compare(b, a, type, version) < 0) ? a : b;
     }
 
     /**
@@ -121,7 +128,7 @@ public class TypeUtil
      */
     public static ByteComparable min(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) > 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a, BYTE_COMPARABLE_VERSION) > 0) ? a : b;
     }
 
     /**
@@ -130,7 +137,7 @@ public class TypeUtil
      */
     public static ByteComparable max(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) < 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a, BYTE_COMPARABLE_VERSION) < 0) ? a : b;
     }
 
     /**
@@ -202,12 +209,35 @@ public class TypeUtil
         return type.fromString(value);
     }
 
+    public static ByteBuffer fromComparableBytes(ByteComparable value, AbstractType<?> type, ByteComparable.Version version)
+    {
+        if (type instanceof InetAddressType || type instanceof IntegerType || type instanceof DecimalType)
+            return ByteBuffer.wrap(ByteSourceInverse.readBytes(value.asComparableBytes(version)));
+
+        return type.fromComparableBytes(ByteSource.peekable(value.asComparableBytes(version)), version);
+    }
+
+    public static ByteComparable asComparableBytes(ByteBuffer value, AbstractType<?> type)
+    {
+        return version -> asComparableBytes(value, type, version);
+    }
+
     public static ByteSource asComparableBytes(ByteBuffer value, AbstractType<?> type, ByteComparable.Version version)
     {
         if (type instanceof InetAddressType || type instanceof IntegerType || type instanceof DecimalType)
             return ByteSource.optionalFixedLength(ByteBufferAccessor.instance, value);
         return type.asComparableBytes(value, version);
     }
+
+    /**
+     * Convenience method to create a {@link ByteComparable} from a {@link ByteBuffer} value for a given {@link CompositeType}
+     * with a terminator. This method is in this class to keep references to the {@link ByteBufferAccessor#instance} here.
+     */
+    public static ByteComparable asComparableBytes(ByteBuffer value, int terminator, CompositeType type)
+    {
+        return v -> type.asComparableBytes(ByteBufferAccessor.instance, value, v, terminator);
+    }
+
 
     /**
      * Fills a byte array with the comparable bytes for a type.
@@ -230,7 +260,7 @@ public class TypeUtil
         else if (type instanceof DecimalType)
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, DECIMAL_APPROXIMATION_BYTES);
         else
-            ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
+            ByteSourceInverse.readBytesMustFit(type.asComparableBytes(value, BYTE_COMPARABLE_VERSION), bytes);
     }
 
     /**
@@ -253,21 +283,38 @@ public class TypeUtil
     }
 
     /**
+     * Tries its best to return the inverse of {@link #encode}.
+     * For most of the types it returns the exact inverse.
+     * For big integers and decimals, which could be truncated by encode, some precision loss is possible.
+     */
+    public static ByteBuffer decode(ByteBuffer value, AbstractType<?> type)
+    {
+        if (value == null)
+            return null;
+
+        if (isInetAddress(type))
+            return decodeInetAddress(value);
+        else if (isBigInteger(type))
+            return decodeBigInteger(value);
+        else if (type instanceof DecimalType)
+            return decodeDecimal(value);
+        return value;
+    }
+
+    /**
      * Compare two terms based on their type. This is used in place of {@link AbstractType#compare(ByteBuffer, ByteBuffer)}
      * so that the default comparison can be overridden for specific types.
      *
      * Note: This should be used for all term comparison
      */
-    public static int compare(ByteBuffer b1, ByteBuffer b2, AbstractType<?> type)
+    public static int compare(ByteBuffer b1, ByteBuffer b2, AbstractType<?> type, Version version)
     {
         if (isInetAddress(type))
             return compareInet(b1, b2);
-        // BigInteger values, frozen types and composite types (map entries) use compareUnsigned to maintain
-        // a consistent order between the in-memory index and the on-disk index.
-        else if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozen(type))
+        else if (useFastByteOperations(type, version))
             return FastByteOperations.compareUnsigned(b1, b2);
 
-        return type.compare(b1, b2 );
+        return type.compare(b1, b2);
     }
 
     /**
@@ -281,8 +328,8 @@ public class TypeUtil
     {
         if (isInetAddress(type))
             return compareInet(requestedValue.encoded, columnValue.encoded);
-        // Override comparisons for frozen collections and composite types (map entries)
-        else if (isCompositeOrFrozen(type))
+        // Override comparisons for frozen collections
+        else if (isFrozen(type))
             return FastByteOperations.compareUnsigned(requestedValue.raw, columnValue.raw);
 
         return type.compare(requestedValue.raw, columnValue.raw);
@@ -306,13 +353,25 @@ public class TypeUtil
         return stream.iterator();
     }
 
-    public static Comparator<ByteBuffer> comparator(AbstractType<?> type)
+    public static Comparator<ByteBuffer> comparator(AbstractType<?> type, Version version)
     {
-        // Override the comparator for BigInteger, frozen collections and composite types
-        if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozen(type))
+        // Override the comparator for BigInteger, frozen collections (not including composite types) and
+        // composite types before DB version to maintain a consistent order between the in-memory index and the on-disk index.
+        if (useFastByteOperations(type, version))
             return FastByteOperations::compareUnsigned;
 
         return type;
+    }
+
+    private static boolean useFastByteOperations(AbstractType<?> type, Version version)
+    {
+        // BigInteger types, BigDecimal types, frozen types and composite types (map entries) use compareUnsigned to
+        // maintain a consistent order between the in-memory index and the on-disk index. Starting with Version.DB,
+        // composite types are compared using their AbstractType.
+        return isBigInteger(type)
+               || isBigDecimal(type)
+               || (!isComposite(type) && isFrozen(type))
+               || (isComposite(type) && !version.onOrAfter(Version.DB));
     }
 
     public static float[] decomposeVector(AbstractType<?> type, ByteBuffer byteBuffer)
@@ -387,6 +446,12 @@ public class TypeUtil
         return value;
     }
 
+    private static ByteBuffer decodeInetAddress(ByteBuffer value)
+    {
+        throw new UnsupportedOperationException("Decoding InetAddress not implemented yet");
+    }
+
+
     /**
      * Encode a {@link BigInteger} into a fixed width 20 byte encoded value.
      *
@@ -431,6 +496,41 @@ public class TypeUtil
         bytes[0] ^= 0x80;
         return ByteBuffer.wrap(bytes);
     }
+
+
+    public static ByteBuffer decodeBigInteger(ByteBuffer encoded)
+    {
+        byte[] bytes = new byte[20];
+        encoded.get(bytes);
+        encoded.rewind();
+
+        // Undo the XOR operation on the first byte
+        bytes[0] ^= 0x80;
+
+        // Extract the size (the first 4 bytes)
+        int size = ((bytes[0] & 0xff) << 24) | ((bytes[1] & 0xff) << 16) | ((bytes[2] & 0xff) << 8) | (bytes[3] & 0xff);
+
+        boolean isNegative = size < 0;
+        if (isNegative)
+            size = -size;
+
+        ByteBuffer result;
+        if (size < 16)
+        {
+            int offset = 20 - size;
+            result = ByteBuffer.wrap(Arrays.copyOfRange(bytes, offset, 20));
+        }
+        else
+        {
+            // Size >= 16 means we extract 16 bytes starting from index 4
+            var resultBytes = new byte[size];
+            System.arraycopy(bytes, 4, resultBytes, 0, 16);
+            result = ByteBuffer.wrap(resultBytes);
+        }
+
+        return result;
+    }
+
 
     /* Type comparison to get rid of ReversedType */
 
@@ -542,8 +642,15 @@ public class TypeUtil
 
     public static ByteBuffer encodeDecimal(ByteBuffer value)
     {
-        ByteSource bs = DecimalType.instance.asComparableBytes(value, ByteComparable.Version.OSS41);
-        bs = ByteSource.cutOrRightPad(bs, DECIMAL_APPROXIMATION_BYTES, 0);
-        return ByteBuffer.wrap(ByteSourceInverse.readBytes(bs, DECIMAL_APPROXIMATION_BYTES));
+        ByteSource bs = DecimalType.instance.asComparableBytes(value, BYTE_COMPARABLE_VERSION);
+        byte[] data = new byte[DECIMAL_APPROXIMATION_BYTES];    // initialized with 0s
+        bs.nextBytes(data); // reads up to the number of bytes in the array, leaving 0s in the remaining bytes
+        return ByteBuffer.wrap(data);
+    }
+
+    public static ByteBuffer decodeDecimal(ByteBuffer value)
+    {
+        var peekableValue = ByteSource.peekable(ByteSource.preencoded(value));
+        return DecimalType.instance.fromComparableBytes(peekableValue, BYTE_COMPARABLE_VERSION);
     }
 }

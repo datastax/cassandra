@@ -77,7 +77,7 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
             }
             else
             {
-                logger.info("Moving {} from pending to repaired with repaired at = {} and session id = {}", transaction.originals(), repairedAt, sessionID);
+                logger.info("Moving {} from pending to repaired with repaired at = {} for session id = {}", transaction.originals(), repairedAt, sessionID);
                 realm.mutateRepairedWithLock(transaction.originals(),
                                              repairedAt,
                                              ActiveRepairService.NO_PENDING_REPAIR,

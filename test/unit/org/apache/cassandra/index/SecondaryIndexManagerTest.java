@@ -41,6 +41,7 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -81,37 +82,52 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void creatingIndexMarksTheIndexAsBuilt() throws Throwable
+    public void creatingIndexMarksTheIndexAsBuilt()
     {
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
 
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
     }
 
     @Test
-    public void testIndexStatusPropagationThread() throws Throwable
+    public void testIndexStatusPropagation()
     {
-        // create index to submit index status propagation task
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
-        String indexName = createIndex("CREATE INDEX ON %s(c)");
-        waitForIndex(KEYSPACE, tableName, indexName);
+        assertFalse(Gossiper.instance.isEnabled());
 
-        Thread statusPropagationThread  = Thread.getAllStackTraces().keySet()
-                                                .stream()
-                                                .filter(t -> t.getName().contains("IndexStatusPropagationExecutor"))
-                                                .findFirst().get();
-        assertTrue(statusPropagationThread.isDaemon());
+        // create index with Gossiper not enabled: no index status propagation threads
+        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createIndex("CREATE INDEX ON %s(b)");
+
+        assertTrue(Thread.getAllStackTraces().keySet()
+                         .stream()
+                         .filter(t -> t.getName().contains("IndexStatusPropagationExecutor"))
+                         .findFirst().isEmpty());
+
+        Gossiper.instance.start(0);
+        try
+        {
+            // create index again with Gossiper started to submit index status propagation task
+            createIndex("CREATE INDEX ON %s(c)");
+
+            Thread statusPropagationThread = Thread.getAllStackTraces().keySet()
+                                                   .stream()
+                                                   .filter(t -> t.getName().contains("IndexStatusPropagationExecutor"))
+                                                   .findFirst().get();
+            assertTrue(statusPropagationThread.isDaemon());
+        }
+        finally
+        {
+            Gossiper.instance.stop();
+        }
     }
 
     @Test
     public void rebuilOrRecoveringIndexMarksTheIndexAsBuilt() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
 
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
         
         assertTrue(tryRebuild(indexName, false));
@@ -119,12 +135,11 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void recreatingIndexMarksTheIndexAsBuilt() throws Throwable
+    public void recreatingIndexMarksTheIndexAsBuilt()
     {
         String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
 
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
 
         // drop the index and verify that it has been removed from the built indexes table
@@ -133,17 +148,15 @@ public class SecondaryIndexManagerTest extends CQLTester
 
         // create the index again and verify that it's added to the built indexes table
         createIndex(String.format("CREATE INDEX %s ON %%s(c)", indexName));
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
     }
 
     @Test
-    public void addingSSTablesMarksTheIndexAsBuilt() throws Throwable
+    public void addingSSTablesMarksTheIndexAsBuilt()
     {
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
 
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
@@ -158,12 +171,11 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void testIndexRebuildWhenAddingSStableViaRemoteReload() throws Throwable
+    public void testIndexRebuildWhenAddingSStableViaRemoteReload()
     {
         String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
 
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
 
         execute("Insert into %s(a,b,c) VALUES(1,1,1)");
@@ -176,7 +188,7 @@ public class SecondaryIndexManagerTest extends CQLTester
         // unlink sstable and index context: expect no rows to be read by base and index
         cfs.clearUnsafe();
         IndexMetadata indexMetadata = cfs.metadata().indexes.iterator().next();
-        ((StorageAttachedIndex) cfs.getIndexManager().getIndex(indexMetadata)).getIndexContext().drop(sstables);
+        ((StorageAttachedIndex) cfs.getIndexManager().getIndex(indexMetadata)).getIndexContext().prepareSSTablesForRebuild(sstables);
         assertEmpty(execute("SELECT * FROM %s WHERE a=1"));
         assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
 
@@ -187,19 +199,17 @@ public class SecondaryIndexManagerTest extends CQLTester
 
         // remote reload should trigger index rebuild
         cfs.getTracker().notifySSTablesChanged(Collections.emptySet(), sstables, OperationType.REMOTE_RELOAD, Optional.empty(), null);
-        waitForIndex(KEYSPACE, tableName, indexName); // this is needed because index build on remote reload is async
+        waitForIndexBuilds(KEYSPACE, indexName); // this is needed because index build on remote reload is async
         assertRows(execute("SELECT * FROM %s WHERE a=1"), row(1, 1, 1));
         assertRows(execute("SELECT * FROM %s WHERE c=1"), row(1, 1, 1));
     }
 
-
     @Test
-    public void remoteReloadOnSSTableAddMarksTheIndexAsBuilt() throws Throwable
+    public void remoteReloadOnSSTableAddMarksTheIndexAsBuilt()
     {
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
 
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
@@ -209,18 +219,17 @@ public class SecondaryIndexManagerTest extends CQLTester
         try (Refs<SSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
         {
             cfs.indexManager.handleNotification(new SSTableAddedNotification(sstables, null, OperationType.REMOTE_RELOAD, Optional.empty()), cfs.getTracker());
-            waitForIndex(KEYSPACE, tableName, indexName); // this is needed because index build on remote reload is async
+            waitForIndexBuilds(KEYSPACE, indexName); // this is needed because index build on remote reload is async
             assertMarkedAsBuilt(indexName);
         }
     }
 
     @Test
-    public void flushedSSTableDoesntBuildIndex() throws Throwable
+    public void flushedSSTableDoesntBuildIndex()
     {
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
 
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
 
         // Mark index removed to later chack the sstable added notification for a flushed sstable
@@ -232,18 +241,17 @@ public class SecondaryIndexManagerTest extends CQLTester
         try (Refs<SSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
         {
             cfs.indexManager.handleNotification(new SSTableAddedNotification(sstables, Mockito.mock(Memtable.class), OperationType.FLUSH, Optional.empty()), cfs.getTracker());
-            assertEquals(false, waitForIndex(KEYSPACE, tableName, indexName)); // this is needed because index build on remote reload is async
+            waitForIndexBuilds(KEYSPACE, indexName); // this is needed because index build on remote reload is async
             assertNotMarkedAsBuilt(indexName);
         }
     }
 
     @Test
-    public void remoteReloadOnSSTableListChangeMarksTheIndexAsBuilt() throws Throwable
+    public void remoteReloadOnSSTableListChangeMarksTheIndexAsBuilt()
     {
         String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
 
-        waitForIndex(KEYSPACE, tableName, indexName);
         assertMarkedAsBuilt(indexName);
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
@@ -253,7 +261,7 @@ public class SecondaryIndexManagerTest extends CQLTester
         try (Refs<SSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
         {
             cfs.indexManager.handleNotification(new SSTableListChangedNotification(sstables, null, OperationType.REMOTE_RELOAD, Optional.empty()), cfs.getTracker());
-            waitForIndex(KEYSPACE, tableName, indexName); // this is needed because index build on remote reload is async
+            waitForIndexBuilds(KEYSPACE, indexName); // this is needed because index build on remote reload is async
             assertMarkedAsBuilt(indexName);
         }
     }
@@ -264,9 +272,9 @@ public class SecondaryIndexManagerTest extends CQLTester
         // create an index which blocks on creation
         TestingIndex.blockCreate();
         String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
-        String defaultIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
-        String readOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
-        String writeOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
+        String defaultIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
+        String readOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
+        String writeOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
 
         // try to rebuild/recover the index before the index creation task has finished
         assertFalse(tryRebuild(defaultIndexName, false));
@@ -278,9 +286,9 @@ public class SecondaryIndexManagerTest extends CQLTester
 
         // check that the index is marked as built when the creation finishes
         TestingIndex.unblockCreate();
-        waitForIndex(KEYSPACE, tableName, defaultIndexName);
-        waitForIndex(KEYSPACE, tableName, readOnlyIndexName);
-        waitForIndex(KEYSPACE, tableName, writeOnlyIndexName);
+        waitForIndexQueryable(defaultIndexName);
+        waitForIndexQueryable(readOnlyIndexName);
+        waitForIndexQueryable(writeOnlyIndexName);
         assertMarkedAsBuilt(defaultIndexName);
         assertMarkedAsBuilt(readOnlyIndexName);
         assertMarkedAsBuilt(writeOnlyIndexName);
@@ -297,16 +305,13 @@ public class SecondaryIndexManagerTest extends CQLTester
     @Test
     public void cannotRebuildOrRecoverWhileAnotherRebuildIsInProgress() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String defaultIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
         String readOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
         String writeOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
         final AtomicBoolean error = new AtomicBoolean();
 
-        // wait for index initialization and verify it's built:
-        waitForIndex(KEYSPACE, tableName, defaultIndexName);
-        waitForIndex(KEYSPACE, tableName, readOnlyIndexName);
-        waitForIndex(KEYSPACE, tableName, writeOnlyIndexName);
+        // verify it's built after initialization:
         assertMarkedAsBuilt(defaultIndexName);
         assertMarkedAsBuilt(readOnlyIndexName);
         assertMarkedAsBuilt(writeOnlyIndexName);
@@ -354,12 +359,11 @@ public class SecondaryIndexManagerTest extends CQLTester
     @Test
     public void cannotRebuildWhileAnSSTableBuildIsInProgress() throws Throwable
     {
-        final String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         final String indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
         final AtomicBoolean error = new AtomicBoolean();
 
-        // wait for index initialization and verify it's built:
-        waitForIndex(KEYSPACE, tableName, indexName);
+        // verify it's built after initialization:
         assertMarkedAsBuilt(indexName);
 
         // add sstables in another thread, but make it block:
@@ -400,12 +404,11 @@ public class SecondaryIndexManagerTest extends CQLTester
     @Test
     public void addingSSTableWhileRebuildIsInProgress() throws Throwable
     {
-        final String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         final String indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
         final AtomicBoolean error = new AtomicBoolean();
 
-        // wait for index initialization and verify it's built:
-        waitForIndex(KEYSPACE, tableName, indexName);
+        // verify it's built after initialization:
         assertMarkedAsBuilt(indexName);
 
         // rebuild the index in another thread, but make it block:
@@ -448,12 +451,11 @@ public class SecondaryIndexManagerTest extends CQLTester
     @Test
     public void addingSSTableWithBuildFailureWhileRebuildIsInProgress() throws Throwable
     {
-        final String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         final String indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
         final AtomicBoolean error = new AtomicBoolean();
 
-        // wait for index initialization and verify it's built:
-        waitForIndex(KEYSPACE, tableName, indexName);
+        // verify it's built:
         assertMarkedAsBuilt(indexName);
 
         // rebuild the index in another thread, but make it block:
@@ -502,11 +504,10 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void rebuildWithFailure() throws Throwable
+    public void rebuildWithFailure()
     {
-        final String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         final String indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
-        waitForIndex(KEYSPACE, tableName, indexName);
 
         // Rebuild the index with failure and verify it is not marked as built
         TestingIndex.shouldFailBuild = true;
@@ -524,13 +525,13 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void initializingIndexNotQueryableButMaybeWritable() throws Throwable
+    public void initializingIndexNotQueryableButMaybeWritable()
     {
         TestingIndex.blockCreate();
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
-        String defaultIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
-        String readOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
-        String writeOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        String defaultIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
+        String readOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
+        String writeOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
 
         // the index shouldn't be queryable while the initialization hasn't finished
         assertFalse(isQueryable(defaultIndexName));
@@ -542,9 +543,9 @@ public class SecondaryIndexManagerTest extends CQLTester
 
         // the index should be queryable once the initialization has finished
         TestingIndex.unblockCreate();
-        waitForIndex(KEYSPACE, tableName, defaultIndexName);
-        waitForIndex(KEYSPACE, tableName, readOnlyIndexName);
-        waitForIndex(KEYSPACE, tableName, writeOnlyIndexName);
+        waitForIndexQueryable(defaultIndexName);
+        waitForIndexQueryable(readOnlyIndexName);
+        waitForIndexQueryable(writeOnlyIndexName);
         assertTrue(isQueryable(defaultIndexName));
         assertTrue(isQueryable(readOnlyIndexName));
         assertTrue(isQueryable(writeOnlyIndexName));
@@ -554,13 +555,13 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void initializingIndexNotQueryableButMaybeNotWritableAfterPartialRebuild() throws Throwable
+    public void initializingIndexNotQueryableButMaybeNotWritableAfterPartialRebuild()
     {
         TestingIndex.blockCreate();
         String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
-        String defaultIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
-        String readOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
-        String writeOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
+        String defaultIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
+        String readOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
+        String writeOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
 
         // the index should never be queryable while the initialization hasn't finished
         assertFalse(isQueryable(defaultIndexName));
@@ -604,7 +605,7 @@ public class SecondaryIndexManagerTest extends CQLTester
 
         // the index should be queryable once the initialization has finished
         TestingIndex.unblockCreate();
-        waitForIndex(KEYSPACE, tableName, defaultIndexName);
+        waitForIndexQueryable(defaultIndexName);
         assertTrue(isQueryable(defaultIndexName));
         assertTrue(isQueryable(readOnlyIndexName));
         assertTrue(isQueryable(writeOnlyIndexName));
@@ -618,12 +619,12 @@ public class SecondaryIndexManagerTest extends CQLTester
     {
         TestingIndex.shouldFailCreate = true;
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
-        String defaultIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
-        String readOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
-        String writeOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
-        assertTrue(waitForIndexBuilds(KEYSPACE, defaultIndexName));
-        assertTrue(waitForIndexBuilds(KEYSPACE, readOnlyIndexName));
-        assertTrue(waitForIndexBuilds(KEYSPACE, writeOnlyIndexName));
+        String defaultIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
+        String readOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
+        String writeOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
+        waitForIndexBuilds(defaultIndexName);
+        waitForIndexBuilds(readOnlyIndexName);
+        waitForIndexBuilds(writeOnlyIndexName);
 
         tryRebuild(defaultIndexName, true);
         tryRebuild(readOnlyIndexName, true);
@@ -642,16 +643,16 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void indexWithFailedInitializationDoesNotChangeQueryabilityNorWritabilityAfterPartialRebuild() throws Throwable
+    public void indexWithFailedInitializationDoesNotChangeQueryabilityNorWritabilityAfterPartialRebuild()
     {
         TestingIndex.shouldFailCreate = true;
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
-        String defaultIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
-        String readOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
-        String writeOnlyIndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
-        assertTrue(waitForIndexBuilds(KEYSPACE, defaultIndexName));
-        assertTrue(waitForIndexBuilds(KEYSPACE, readOnlyIndexName));
-        assertTrue(waitForIndexBuilds(KEYSPACE, writeOnlyIndexName));
+        String defaultIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
+        String readOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", ReadOnlyOnFailureIndex.class.getName()));
+        String writeOnlyIndexName = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", WriteOnlyOnFailureIndex.class.getName()));
+        waitForIndexBuilds(defaultIndexName);
+        waitForIndexBuilds(readOnlyIndexName);
+        waitForIndexBuilds(writeOnlyIndexName);
         TestingIndex.shouldFailCreate = false;
 
         // the index should never be queryable, but it could be writable after the failed initialization
@@ -665,9 +666,9 @@ public class SecondaryIndexManagerTest extends CQLTester
         // a successful partial build doesn't set the index as queryable nor writable
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.indexManager.handleNotification(new SSTableAddedNotification(cfs.getLiveSSTables(), null), this);
-        assertTrue(waitForIndexBuilds(KEYSPACE, defaultIndexName));
-        assertTrue(waitForIndexBuilds(KEYSPACE, readOnlyIndexName));
-        assertTrue(waitForIndexBuilds(KEYSPACE, writeOnlyIndexName));
+        waitForIndexBuilds(defaultIndexName);
+        waitForIndexBuilds(readOnlyIndexName);
+        waitForIndexBuilds(writeOnlyIndexName);
         assertFalse(isQueryable(defaultIndexName));
         assertFalse(isQueryable(readOnlyIndexName));
         assertFalse(isQueryable(writeOnlyIndexName));
@@ -714,7 +715,7 @@ public class SecondaryIndexManagerTest extends CQLTester
     }
 
     @Test
-    public void handleJVMStablityOnFailedRebuild() throws Throwable
+    public void handleJVMStablityOnFailedRebuild()
     {
         handleJVMStablityOnFailedRebuild(new SocketException("Should not fail"), false);
         handleJVMStablityOnFailedRebuild(new FileNotFoundException("Should not fail"), false);
@@ -723,11 +724,10 @@ public class SecondaryIndexManagerTest extends CQLTester
         handleJVMStablityOnFailedRebuild(new RuntimeException("Should not fail"), false);
     }
 
-    private void handleJVMStablityOnFailedRebuild(Throwable throwable, boolean shouldKillJVM) throws Throwable
+    private void handleJVMStablityOnFailedRebuild(Throwable throwable, boolean shouldKillJVM)
     {
         String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         String indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", TestingIndex.class.getName()));
-        waitForIndex(KEYSPACE, tableName, indexName);
 
         KillerForTests killerForTests = new KillerForTests();
         JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);

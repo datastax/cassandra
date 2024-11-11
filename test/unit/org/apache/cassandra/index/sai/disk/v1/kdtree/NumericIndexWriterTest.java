@@ -23,7 +23,6 @@ import org.junit.Before;
 import org.junit.Test;
 
 import com.carrotsearch.hppc.IntArrayList;
-import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -31,16 +30,17 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -87,8 +87,8 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
 
-        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 Integer.BYTES,
                                                                 docCount, docCount,
                                                                 IndexWriterConfig.defaultConfig("test")))
@@ -96,14 +96,14 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
             indexMetas = writer.writeAll(pointValues);
         }
 
-        final FileHandle kdtreeHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
-        final FileHandle kdtreePostingsHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
+        final FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
+        final FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
 
         try (BKDReader reader = new BKDReader(indexContext,
                                               kdtreeHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE).root,
+                                              indexMetas.get(IndexComponentType.KD_TREE).root,
                                               kdtreePostingsHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE_POSTING_LISTS).root
+                                              indexMetas.get(IndexComponentType.KD_TREE_POSTING_LISTS).root
         ))
         {
             final Counter visited = Counter.newCounter();
@@ -139,8 +139,8 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                                                        .fromTermEnum(termEnum, Int32Type.instance);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
-        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 TypeUtil.fixedSizeOf(Int32Type.instance),
                                                                 maxSegmentRowId, maxSegmentRowId,
                                                                 IndexWriterConfig.defaultConfig("test")))
@@ -148,14 +148,14 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
             indexMetas = writer.writeAll(pointValues);
         }
 
-        final FileHandle kdtreeHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
-        final FileHandle kdtreePostingsHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
+        final FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
+        final FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
 
         try (BKDReader reader = new BKDReader(indexContext,
                                               kdtreeHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE).root,
+                                              indexMetas.get(IndexComponentType.KD_TREE).root,
                                               kdtreePostingsHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE_POSTING_LISTS).root
+                                              indexMetas.get(IndexComponentType.KD_TREE_POSTING_LISTS).root
         ))
         {
             final Counter visited = Counter.newCounter();
@@ -164,10 +164,10 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                 @Override
                 public boolean visit(byte[] packedValue)
                 {
-                    final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
+                    final ByteComparable actualTerm = ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, packedValue);
                     final ByteComparable expectedTerm = ByteComparable.of(Math.toIntExact(visited.get()));
                     assertEquals("Point value mismatch after visiting " + visited.get() + " entries.", 0,
-                                 ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+                                 ByteComparable.compare(actualTerm, expectedTerm, TypeUtil.BYTE_COMPARABLE_VERSION));
 
                     visited.addAndGet(1);
                     return true;
@@ -190,22 +190,22 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(startTermInclusive);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(endTermExclusive);
 
-        final AbstractIterator<Pair<ByteComparable, LongArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
+        final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private int currentTerm = startTermInclusive;
             private int currentRowId = 0;
 
             @Override
-            protected Pair<ByteComparable, LongArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 if (currentTerm >= endTermExclusive)
                 {
                     return endOfData();
                 }
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
-                final LongArrayList postings = new LongArrayList();
+                final IntArrayList postings = new IntArrayList();
                 postings.add(currentRowId++);
-                final ByteSource encoded = Int32Type.instance.asComparableBytes(term, ByteComparable.Version.OSS41);
+                final ByteSource encoded = Int32Type.instance.asComparableBytes(term, TypeUtil.BYTE_COMPARABLE_VERSION);
                 return Pair.create(v -> encoded, postings);
             }
         };
