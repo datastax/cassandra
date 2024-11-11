@@ -91,7 +91,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
     private long findBlockRowId(long targetValue)
     {
         // We keep track previous returned value in lastIndex, so searching backward will not return correct result.
-        // Also it's logically wrong to search backward during token iteration in PostingListRangeIterator.
+        // Also it's logically wrong to search backward during token iteration in PostingListKeyRangeIterator.
         if (targetValue < prevTokenValue)
             throw new IllegalArgumentException(String.format("%d is smaller than prev token value %d", targetValue, prevTokenValue));
         prevTokenValue = targetValue;
