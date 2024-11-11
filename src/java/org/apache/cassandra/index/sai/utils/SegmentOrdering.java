@@ -24,6 +24,7 @@ import java.util.List;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -39,7 +40,7 @@ import org.apache.cassandra.utils.CloseableIterator;
  * build the list of Primary Keys to be ordered:
  *
  * 1. Find all primary keys that match each non-ordering query predicate.
- * 2. Union and intersect the results of step 1 to build a single {@link RangeIterator}
+ * 2. Union and intersect the results of step 1 to build a single {@link KeyRangeIterator}
  *    ordered by {@link PrimaryKey}.
  * 3. Fan the primary keys from step 2 out to each sstable segment to order the list of primary keys.
  *

@@ -76,15 +76,15 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeTermIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
@@ -137,12 +137,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Longer explanation why this is needed:
      * In order to construct a Plan for a query, we need predicate selectivity estimates. But at the moment
      * of writing this code, the only way to estimate an index predicate selectivity is to look at the posting
-     * list(s) in the index, by obtaining a {@link RangeIterator} and callling {@link RangeIterator#getMaxKeys()} on it.
+     * list(s) in the index, by obtaining a {@link KeyRangeIterator} and callling {@link KeyRangeIterator#getMaxKeys()} on it.
      * Hence, we need to create the iterators before creating the Plan.
      * But later when we assemble the final key iterator according to the optimized Plan, we need those iterators
      * again. In order to avoid recreating them, which would be costly, we just keep them here in this map.
      */
-    private final Multimap<Expression, RangeIterator> keyIterators = ArrayListMultimap.create();
+    private final Multimap<Expression, KeyRangeIterator> keyIterators = ArrayListMultimap.create();
 
     static
     {
@@ -355,8 +355,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         optimizedPlan = QUERY_OPT_LEVEL > 0
                         ? rowsIteration.optimize()
                         : rowsIteration;
-        optimizedPlan = RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT > 0 && QUERY_OPT_LEVEL <= 1
-                        ? optimizedPlan.limitIntersectedClauses(RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT)
+        optimizedPlan = KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT > 0 && QUERY_OPT_LEVEL <= 1
+                        ? optimizedPlan.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT)
                         : optimizedPlan;
 
         if (optimizedPlan.contains(node -> node instanceof Plan.AnnIndexScan))
@@ -466,7 +466,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return;
         }
 
-        boolean defer = builder.type == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
+        boolean defer = builder.type == Operation.OperationType.OR || KeyRangeIntersectionIterator.shouldDefer(exp.size());
 
         Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, expressions).entrySet();
         try
@@ -476,7 +476,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             {
                 var e = viewIterator.next();
                 Expression predicate = e.getKey();
-                RangeIterator iterator = TermIterator.build(predicate, e.getValue(), mergeRange, queryContext, defer, Integer.MAX_VALUE);
+                KeyRangeIterator iterator = KeyRangeTermIterator.build(predicate, e.getValue(), mergeRange, queryContext, defer, Integer.MAX_VALUE);
 
                 // The returned iterator owns the set of indexes now and will release them on close,
                 // so let's remove it from the view to avoid double-release.
@@ -501,11 +501,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     @Override
     public Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate)
     {
-        Collection<RangeIterator> rangeIterators = keyIterators.get(predicate);
+        Collection<KeyRangeIterator> rangeIterators = keyIterators.get(predicate);
         // This should be never empty, because we put iterators in this map when we create the IndexScan nodes of the Plan
         assert !rangeIterators.isEmpty() : "No iterator found for predicate: " + predicate;
 
-        RangeIterator iterator = rangeIterators.iterator().next();
+        KeyRangeIterator iterator = rangeIterators.iterator().next();
         keyIterators.remove(predicate, iterator);  // remove so we never accidentally reuse the same iterator
         return iterator;
     }
@@ -538,7 +538,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Use the configured {@link Orderer} to sort the rows from the given source iterator.
      */
-    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(RangeIterator source, int softLimit)
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source, int softLimit)
     {
         try
         {
@@ -692,7 +692,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private void closeUnusedIterators()
     {
-        Iterator<Map.Entry<Expression, RangeIterator>> entries = keyIterators.entries().iterator();
+        Iterator<Map.Entry<Expression, KeyRangeIterator>> entries = keyIterators.entries().iterator();
         while (entries.hasNext())
         {
             FileUtils.closeQuietly(entries.next().getValue());
@@ -703,7 +703,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Try to reference all SSTableIndexes before querying on disk indexes.
      *
-     * If we attempt to proceed into {@link TermIterator#build(Expression, Set, AbstractBounds, QueryContext, boolean, int)}
+     * If we attempt to proceed into {@link KeyRangeTermIterator#build(Expression, Set, AbstractBounds, QueryContext, boolean, int)}
      * without first referencing all indexes, a concurrent compaction may decrement one or more of their backing
      * SSTable {@link Ref} instances. This will allow the {@link SSTableIndex} itself to be released and will fail the query.
      */

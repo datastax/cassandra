@@ -35,12 +35,12 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
@@ -100,7 +100,7 @@ public class InvertedIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @SuppressWarnings("resource")
-    public RangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
     {
         PostingList postingList = searchPosting(exp, context);
         return toPrimaryKeyIterator(postingList, context);
