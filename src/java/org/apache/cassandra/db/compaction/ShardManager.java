@@ -20,8 +20,8 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.BiFunction;
 
@@ -43,7 +43,7 @@ public interface ShardManager
      * When the number of partitions in an sstable is smaller than this threshold, we will use a per-partition minimum
      * span, calculated from the total number of partitions in this table.
      */
-    static final long PER_PARTITION_SPAN_THRESHOLD = 100;
+    long PER_PARTITION_SPAN_THRESHOLD = 100;
 
     /**
      * Additionally, sstables that have completely fallen outside the local token ranges will end up with a zero
@@ -51,7 +51,7 @@ public interface ShardManager
      * To avoid problems with this we check if coverage is below the minimum, and replace it using the per-partition
      * calculation.
      */
-    static final double MINIMUM_TOKEN_COVERAGE = Math.scalb(1.0, -48);
+    double MINIMUM_TOKEN_COVERAGE = Math.scalb(1.0, -48);
 
     static ShardManager create(DiskBoundaries diskBoundaries, AbstractReplicationStrategy rs, boolean isReplicaAware)
     {
@@ -64,9 +64,9 @@ public interface ShardManager
         if (localRanges.getRanges().isEmpty() || !localRanges.getRanges()
                                                              .get(0)
                                                              .range()
-                                                             .left
-                                                             .getPartitioner()
-                                                             .equals(localRanges.getRealm().getPartitioner()))
+                                                  .left
+                                                  .getPartitioner()
+                                                  .equals(localRanges.getRealm().getPartitioner()))
             localRanges = new SortedLocalRanges(localRanges.getRealm(),
                                                 localRanges.getRingVersion(),
                                                 null);
@@ -108,7 +108,7 @@ public interface ShardManager
 
     /**
      * Construct a boundary/shard iterator for the given number of shards.
-     *
+     * <p>
      * Note: This does not offer a method of listing the shard boundaries it generates, just to advance to the
      * corresponding one for a given token.  The only usage for listing is currently in tests. Should a need for this
      * arise, see {@link CompactionSimulationTest} for a possible implementation.
@@ -179,25 +179,6 @@ public interface ShardManager
         return Double.compare(density(a), density(b));
     }
 
-    /**
-     * Estimate the density of the sstable that will be the result of compacting the given sources.
-     */
-    default double calculateCombinedDensity(Collection<? extends CompactionSSTable> sstables, long approximatePartitionCount)
-    {
-        if (sstables.isEmpty())
-            return 0;
-        long onDiskLength = 0;
-        PartitionPosition min = null;
-        PartitionPosition max = null;
-        for (CompactionSSTable sstable : sstables)
-        {
-            onDiskLength += sstable.onDiskLength();
-            min = min == null || min.compareTo(sstable.getFirst()) > 0 ? sstable.getFirst() : min;
-            max = max == null || max.compareTo(sstable.getLast()) < 0 ? sstable.getLast() : max;
-        }
-        return density(onDiskLength, min, max, approximatePartitionCount);
-    }
-
     default double density(long onDiskLength, PartitionPosition min, PartitionPosition max, long approximatePartitionCount)
     {
         double span = rangeSpanned(min, max);
@@ -212,29 +193,28 @@ public interface ShardManager
     {
         var boundaries = boundaries(numShardsForDensity);
         List<T> tasks = new ArrayList<>();
-        SortingIterator<R> firsts = SortingIterator.create(CompactionSSTable.firstKeyComparator, sstables);
-        SortingIterator<R> lasts = SortingIterator.create(CompactionSSTable.lastKeyComparator, sstables);
-        Set<R> current = new HashSet<>(sstables.size());
-        while (lasts.hasNext())
+        SortingIterator<R> items = SortingIterator.create(CompactionSSTable.firstKeyComparator, sstables);
+        PriorityQueue<R> active = new PriorityQueue<>(CompactionSSTable.lastKeyComparator);
+        while (items.hasNext() || !active.isEmpty())
         {
-            if (current.isEmpty())
+            if (active.isEmpty())
             {
-                boundaries.advanceTo(firsts.peek().getFirst().getToken());
-                current.add(firsts.next());
+                boundaries.advanceTo(items.peek().getFirst().getToken());
+                active.add(items.next());
             }
             Token shardEnd = boundaries.shardEnd();
 
-            while (firsts.hasNext() && (shardEnd == null || firsts.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
-                current.add(firsts.next());
+            while (items.hasNext() && (shardEnd == null || items.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
+                active.add(items.next());
 
-            final T result = maker.apply(current, boundaries.shardSpan());
+            final T result = maker.apply(active, boundaries.shardSpan());
             if (result != null)
                 tasks.add(result);
 
-            while (lasts.hasNext() && (shardEnd == null || lasts.peek().getLast().getToken().compareTo(shardEnd) <= 0))
-                current.remove(lasts.next());
+            while (!active.isEmpty() && (shardEnd == null || active.peek().getLast().getToken().compareTo(shardEnd) <= 0))
+                active.poll();
 
-            if (!current.isEmpty()) // shardEnd must be non-null (otherwise the line above exhausts all)
+            if (!active.isEmpty()) // shardEnd must be non-null (otherwise the line above exhausts all)
                 boundaries.advanceTo(shardEnd.nextValidToken());
         }
         return tasks;
