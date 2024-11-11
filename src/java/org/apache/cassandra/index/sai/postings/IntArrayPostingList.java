@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.postings;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
@@ -23,12 +23,12 @@ import com.google.common.base.MoreObjects;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.OrdinalPostingList;
 
-public class ArrayPostingList implements OrdinalPostingList
+public class IntArrayPostingList implements OrdinalPostingList
 {
     private final int[] postings;
     private int idx = 0;
 
-    public ArrayPostingList(int[] postings)
+    public IntArrayPostingList(int[] postings)
     {
         this.postings = postings;
     }
