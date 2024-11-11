@@ -32,32 +32,30 @@ import java.util.stream.IntStream;
 
 public class Overlaps
 {
-    /**
-     * Construct a minimal list of overlap sets, i.e. the sections of the range span when we have overlapping items,
-     * where we ensure:
-     * - non-overlapping items are never put in the same set
-     * - no item is present in non-consecutive sets
-     * - for any point where items overlap, the result includes a set listing all overlapping items
-     * <p>
-     * For example, for inputs A[0, 4), B[2, 8), C[6, 10), D[1, 9) the result would be the sets ABD and BCD. We are not
-     * interested in the spans where A, B, or C are present on their own or in combination with D, only that there
-     * exists a set in the list that is a superset of any such combination, and that the non-overlapping A and C are
-     * never together in a set.
-     * <p>
-     * Note that the full list of overlap sets A, AD, ABD, BD, BCD, CD, C is also an answer that satisfies the three
-     * conditions above, but it contains redundant sets (e.g. AD is already contained in ABD).
-     *
-     * @param items            A list of items to distribute in overlap sets. This is assumed to be a transient list and the method
-     *                         may modify or consume it. It is assumed that the start and end positions of an item are ordered,
-     *                         and the items are non-empty.
-     * @param startsAfter      Predicate determining if its left argument's start if fully after the right argument's end.
-     *                         This will only be used with arguments where left's start is known to be after right's start.
-     *                         It is up to the caller if this is a strict comparison -- strict (>) for end-inclusive spans
-     *                         and non-strict (>=) for end-exclusive.
-     * @param startsComparator Comparator of items' starting positions.
-     * @param endsComparator   Comparator of items' ending positions.
-     * @return List of overlap sets.
-     */
+    /// Construct a minimal list of overlap sets, i.e. the sections of the range span when we have overlapping items,
+    /// where we ensure:
+    /// - non-overlapping items are never put in the same set
+    /// - no item is present in non-consecutive sets
+    /// - for any point where items overlap, the result includes a set listing all overlapping items
+    ///
+    /// For example, for inputs A[0, 4), B[2, 8), C[6, 10), D[1, 9) the result would be the sets ABD and BCD. We are not
+    /// interested in the spans where A, B, or C are present on their own or in combination with D, only that there
+    /// exists a set in the list that is a superset of any such combination, and that the non-overlapping A and C are
+    /// never together in a set.
+    ///
+    /// Note that the full list of overlap sets A, AD, ABD, BD, BCD, CD, C is also an answer that satisfies the three
+    /// conditions above, but it contains redundant sets (e.g. AD is already contained in ABD).
+    ///
+    /// @param items            A list of items to distribute in overlap sets. This is assumed to be a transient list and the method
+    ///                         may modify or consume it. It is assumed that the start and end positions of an item are ordered,
+    ///                         and the items are non-empty.
+    /// @param startsAfter      Predicate determining if its left argument's start if fully after the right argument's end.
+    ///                         This will only be used with arguments where left's start is known to be after right's start.
+    ///                         It is up to the caller if this is a strict comparison -- strict (>) for end-inclusive spans
+    ///                         and non-strict (>=) for end-exclusive.
+    /// @param startsComparator Comparator of items' starting positions.
+    /// @param endsComparator   Comparator of items' ending positions.
+    /// @return List of overlap sets.
     public static <E> List<Set<E>> constructOverlapSets(List<E> items,
                                                         BiPredicate<E, E> startsAfter,
                                                         Comparator<E> startsComparator,
@@ -105,26 +103,23 @@ public class Overlaps
         B makeBucket(List<Set<E>> sets, int startIndexInclusive, int endIndexExclusive);
     }
 
-    /**
-     * Assign overlap sections into buckets Identify sections that have at least threshold-many overlapping
-     * items and apply the overlap inclusion method to combine with any neighbouring sections that contain
-     * selected sstables to make sure we make full use of any sstables selected for compaction (i.e. avoid
-     * recompacting, see {@link org.apache.cassandra.db.compaction.unified.Controller#overlapInclusionMethod()}).
-     *
-     * For non-transitive inclusionMethod the order in which we select the buckets matters because an sstables that
-     * spans overlap sets could be chosen for only one of the candidate buckets
-     *      * containing it. To make the most efficient selection we thus perform it by descending size, starting with the
-     *      * sets with most overlap.
-     *
-     * @param threshold       Threshold for selecting a bucket. Sets below this size will be ignored, unless they need
-     *                        to be grouped with a neighboring set due to overlap.
-     * @param inclusionMethod NONE to only form buckets of the overlapping sets, SINGLE to include all
-     *                        sets that share an sstable with a selected bucket, or TRANSITIVE to include
-     *                        all sets that have an overlap chain to a selected bucket.
-     * @param overlaps        An ordered list of overlap sets as returned by {@link #constructOverlapSets}.
-     * @param bucketer        Method used to create a bucket out of the supplied set indexes.
-     * @param unselectedHandler Action to take on sets that are below the threshold and not included in any bucket.
-     */
+    /// Assign overlap sections into buckets Identify sections that have at least threshold-many overlapping
+    /// items and apply the overlap inclusion method to combine with any neighbouring sections that contain
+    /// selected sstables to make sure we make full use of any sstables selected for compaction (i.e. avoid
+    /// recompacting, see [#overlapInclusionMethod()]).
+    /// For non-transitive inclusionMethod the order in which we select the buckets matters because an sstables that
+    /// spans overlap sets could be chosen for only one of the candidate buckets
+    ///      * containing it. To make the most efficient selection we thus perform it by descending size, starting with the
+    ///      * sets with most overlap.
+    ///
+    /// @param threshold       Threshold for selecting a bucket. Sets below this size will be ignored, unless they need
+    ///                        to be grouped with a neighboring set due to overlap.
+    /// @param inclusionMethod NONE to only form buckets of the overlapping sets, SINGLE to include all
+    ///                        sets that share an sstable with a selected bucket, or TRANSITIVE to include
+    ///                        all sets that have an overlap chain to a selected bucket.
+    /// @param overlaps        An ordered list of overlap sets as returned by [#constructOverlapSets].
+    /// @param bucketer        Method used to create a bucket out of the supplied set indexes.
+    /// @param unselectedHandler Action to take on sets that are below the threshold and not included in any bucket.
     public static <E, B> List<B> assignOverlapsIntoBuckets(int threshold,
                                                            InclusionMethod inclusionMethod,
                                                            List<Set<E>> overlaps,
@@ -281,9 +276,7 @@ public class Overlaps
         return false;
     }
 
-    /**
-     * Pull the last elements from the given list, up to the given limit.
-     */
+    /// Pull the last elements from the given list, up to the given limit.
     public static <T> List<T> pullLast(List<T> source, int limit)
     {
         List<T> result = new ArrayList<>(limit);
@@ -292,11 +285,9 @@ public class Overlaps
         return result;
     }
 
-    /**
-     * Select up to `limit` sstables from each overlapping set (more than `limit` in total) by taking the last entries
-     * from `allObjectsSorted`. To achieve this, keep selecting the last sstable until the next one we would add would
-     * bring the number selected in some overlap section over `limit`.
-     */
+    /// Select up to `limit` sstables from each overlapping set (more than `limit` in total) by taking the last entries
+    /// from `allObjectsSorted`. To achieve this, keep selecting the last sstable until the next one we would add would
+    /// bring the number selected in some overlap section over `limit`.
     public static <T> Collection<T> pullLastWithOverlapLimit(List<T> allObjectsSorted, List<Set<T>> overlapSets, int limit)
     {
         int setsCount = overlapSets.size();
