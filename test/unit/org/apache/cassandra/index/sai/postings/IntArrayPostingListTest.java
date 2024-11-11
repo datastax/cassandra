@@ -15,25 +15,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.postings;
 
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 
-public class ArrayPostingListTest extends SaiRandomizedTest
+public class IntArrayPostingListTest extends SaiRandomizedTest
 {
     @Test
     public void testArrayPostingList() throws Exception
     {
-        ArrayPostingList postingList = new ArrayPostingList(new int[]{ 1, 2, 3 });
+        IntArrayPostingList postingList = new IntArrayPostingList(new int[]{ 1, 2, 3 });
         assertEquals(3, postingList.size());
         assertEquals(1, postingList.nextPosting());
         assertEquals(2, postingList.nextPosting());
         assertEquals(3, postingList.nextPosting());
         assertEquals(PostingList.END_OF_STREAM, postingList.nextPosting());
 
-        postingList = new ArrayPostingList(new int[]{ 10, 20, 30, 40, 50, 60 });
+        postingList = new IntArrayPostingList(new int[]{ 10, 20, 30, 40, 50, 60 });
         assertEquals(50, postingList.advance(45));
         assertEquals(60, postingList.advance(60));
         assertEquals(PostingList.END_OF_STREAM, postingList.nextPosting());
