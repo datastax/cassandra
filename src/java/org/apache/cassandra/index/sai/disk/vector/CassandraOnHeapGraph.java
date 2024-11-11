@@ -57,6 +57,7 @@ import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.pq.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.DenseIntMap;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -114,7 +115,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
     private final ConcurrentMap<VectorFloat<?>, VectorPostings<T>> postingsMap;
-    private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
+    private final DenseIntMap<VectorPostings<T>> postingsByOrdinal;
     private final NonBlockingHashMap<T, VectorFloat<?>> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private final VectorSourceModel sourceModel;
@@ -144,7 +145,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         postingsMap = new ConcurrentSkipListMap<>((a, b) -> {
             return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
         });
-        postingsByOrdinal = new NonBlockingHashMapLong<>();
+        postingsByOrdinal = new DenseIntMap<>(1024);
         deletedOrdinals = new IntHashSet();
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
@@ -251,7 +252,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 bytesUsed += RamEstimation.concurrentHashMapRamUsed(1); // the new posting Map entry
                 bytesUsed += vectorValues.add(ordinal, vector);
                 bytesUsed += postings.ramBytesUsed();
-                postingsByOrdinal.put(ordinal, postings);
+                var success = postingsByOrdinal.compareAndPut(ordinal, null, postings);
+                assert success : "postingsByOrdinal already contains an entry for ordinal " + ordinal;
                 bytesUsed += builder.addGraphNode(ordinal, vector);
                 return bytesUsed;
             }
@@ -633,7 +635,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
     private long postingsBytesUsed()
     {
-        return RamEstimation.concurrentHashMapRamUsed(postingsByOrdinal.size()) // NBHM is close to CHM
+        return RamEstimation.denseIntMapRamUsed(postingsByOrdinal.size())
                + 3 * RamEstimation.concurrentHashMapRamUsed(postingsMap.size()) // CSLM is much less efficient than CHM
                + postingsMap.values().stream().mapToLong(VectorPostings::ramBytesUsed).sum();
     }
