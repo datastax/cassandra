@@ -67,7 +67,7 @@ public class ConcurrentVectorValues implements RamAwareVectorValues
     {
         if (!values.compareAndPut(ordinal, null, vector))
             throw new IllegalStateException("Vector already exists for ordinal " + ordinal);
-        return RamUsageEstimator.NUM_BYTES_OBJECT_REF;
+        return RamUsageEstimator.NUM_BYTES_OBJECT_REF + oneVectorBytesUsed();
     }
 
     @Override
