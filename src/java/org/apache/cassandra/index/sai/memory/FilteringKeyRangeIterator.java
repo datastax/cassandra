@@ -21,18 +21,18 @@ import java.io.IOException;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 
 /**
- * A {@link RangeIterator} that filters the returned {@link PrimaryKey}s based on the provided keyRange
+ * A {@link KeyRangeIterator} that filters the returned {@link PrimaryKey}s based on the provided keyRange
  */
-public class FilteringKeyRangeIterator extends RangeIterator
+public class FilteringKeyRangeIterator extends KeyRangeIterator
 {
     private final AbstractBounds<PartitionPosition> keyRange;
-    private final RangeIterator source;
+    private final KeyRangeIterator source;
 
-    public FilteringKeyRangeIterator(RangeIterator source, AbstractBounds<PartitionPosition> keyRange)
+    public FilteringKeyRangeIterator(KeyRangeIterator source, AbstractBounds<PartitionPosition> keyRange)
     {
         super(source.getMinimum(), source.getMaximum(), source.getMaxKeys());
         this.keyRange = keyRange;
