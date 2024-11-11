@@ -36,7 +36,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 
@@ -62,7 +62,7 @@ public class PostingsTest extends SaiRandomizedTest
     public void testSingleBlockPostingList() throws Exception
     {
         final int blockSize = 1 << between(3, 8);
-        final ArrayPostingList expectedPostingList = new ArrayPostingList(new int[]{ 10, 20, 30, 40, 50, 60 });
+        final IntArrayPostingList expectedPostingList = new IntArrayPostingList(new int[]{ 10, 20, 30, 40, 50, 60 });
 
         long postingPointer;
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
@@ -116,7 +116,7 @@ public class PostingsTest extends SaiRandomizedTest
         final int numPostingLists = 1 << between(1, 5);
         final int blockSize = 1 << between(5, 10);
         final int numPostings = between(1 << 11, 1 << 15);
-        final ArrayPostingList[] expected = new ArrayPostingList[numPostingLists];
+        final IntArrayPostingList[] expected = new IntArrayPostingList[numPostingLists];
         final long[] postingPointers = new long[numPostingLists];
 
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
@@ -125,7 +125,7 @@ public class PostingsTest extends SaiRandomizedTest
             for (int i = 0; i < numPostingLists; ++i)
             {
                 final int[] postings = randomPostings(numPostings);
-                final ArrayPostingList postingList = new ArrayPostingList(postings);
+                final IntArrayPostingList postingList = new IntArrayPostingList(postings);
                 expected[i] = postingList;
                 postingPointers[i] = writer.write(postingList);
             }
@@ -142,7 +142,7 @@ public class PostingsTest extends SaiRandomizedTest
         {
             IndexInput input = postingLists.openInput();
             input.seek(postingPointers[i]);
-            final ArrayPostingList expectedPostingList = expected[i];
+            final IntArrayPostingList expectedPostingList = expected[i];
             final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expectedPostingList, input);
             assertTrue(summary.offsets.length() > 1);
 
@@ -184,7 +184,7 @@ public class PostingsTest extends SaiRandomizedTest
         final int blockSize = 4; // 4 postings per FoR block
         final int maxSegmentRowID = 30;
         final int[] postings = IntStream.range(0, maxSegmentRowID).toArray(); // 30 postings = 7 FoR blocks + 1 VLong block
-        final ArrayPostingList expected = new ArrayPostingList(postings);
+        final IntArrayPostingList expected = new IntArrayPostingList(postings);
 
         long fp;
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
@@ -227,7 +227,7 @@ public class PostingsTest extends SaiRandomizedTest
         final int numPostings = nextInt(64, 64_000);
         final int[] postings = randomPostings(numPostings);
 
-        final ArrayPostingList expected = new ArrayPostingList(postings);
+        final IntArrayPostingList expected = new IntArrayPostingList(postings);
 
         long fp;
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
@@ -274,7 +274,7 @@ public class PostingsTest extends SaiRandomizedTest
         try (PostingsWriter writer = new PostingsWriter(components))
         {
             expectedException.expect(IllegalArgumentException.class);
-            writer.write(new ArrayPostingList(new int[0]));
+            writer.write(new IntArrayPostingList(new int[0]));
         }
     }
 
@@ -285,11 +285,11 @@ public class PostingsTest extends SaiRandomizedTest
         try (PostingsWriter writer = new PostingsWriter(components))
         {
             expectedException.expect(IllegalArgumentException.class);
-            writer.write(new ArrayPostingList(new int[]{ 1, 0 }));
+            writer.write(new IntArrayPostingList(new int[]{ 1, 0 }));
         }
     }
 
-    private void testAdvance(IndexComponent.ForRead postingLists, long fp, ArrayPostingList expected, int[] targetIDs) throws IOException
+    private void testAdvance(IndexComponent.ForRead postingLists, long fp, IntArrayPostingList expected, int[] targetIDs) throws IOException
     {
         expected.reset();
         final CountingPostingListEventListener listener = new CountingPostingListEventListener();

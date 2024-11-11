@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,8 +23,9 @@ import java.util.function.LongFunction;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
-public class LongIterator extends RangeIterator
+public class LongIterator extends KeyRangeIterator
 {
     private final List<PrimaryKey> keys;
     private int currentIdx = 0;
@@ -69,7 +70,7 @@ public class LongIterator extends RangeIterator
     }
 
 
-    public static List<Long> convert(RangeIterator tokens)
+    public static List<Long> convert(KeyRangeIterator tokens)
     {
         List<Long> results = new ArrayList<>();
         while (tokens.hasNext())
