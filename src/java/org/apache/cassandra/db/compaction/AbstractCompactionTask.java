@@ -179,6 +179,14 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         return this;
     }
 
+    /**
+     * @return The type of compaction this task is performing. Used by CNDB.
+     */
+    public OperationType getCompactionType()
+    {
+        return compactionType;
+    }
+
     public AbstractCompactionTask setCompactionType(OperationType compactionType)
     {
         this.compactionType = compactionType;
@@ -199,8 +207,10 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         compObservers.add(compObserver);
     }
 
-    @VisibleForTesting
-    List<CompactionObserver> getCompObservers()
+    /**
+     * @return The compaction observers for this task. Used by CNDB.
+     */
+    public List<CompactionObserver> getCompObservers()
     {
         return compObservers;
     }
