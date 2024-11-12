@@ -122,11 +122,16 @@ jvmver=`echo "$java_ver_output" | grep '[openjdk|java] version' | awk -F'"' 'NR=
 JVM_VERSION=${jvmver%_*}
 short=$(echo "${jvmver}" | cut -c1-2)
 
-JAVA_VERSION=17
+JAVA_VERSION=22
 if [ "$short" = "11" ]  ; then
      JAVA_VERSION=11
 elif [ "$JVM_VERSION" \< "17" ] ; then
-    echo "DSE DB 5.0 requires Java 11 or Java 17."
+    echo "DSE DB 5.0 requires Java 11 or higher."
+    exit 1;
+elif [ "$short" = "17" ]  ; then
+     JAVA_VERSION=17
+elif [ "$JVM_VERSION" \< "22" ] ; then
+    echo "DSE DB 5.0 requires Java 11 or higher."
     exit 1;
 fi
 
