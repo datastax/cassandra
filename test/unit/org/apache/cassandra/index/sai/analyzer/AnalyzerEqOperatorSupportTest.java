@@ -415,7 +415,7 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
 
     private void assertRowsWithLWTWarning(String query, Object[]... rows)
     {
-        assertRows(query, rows).hasSize(1).contains(format(LWT_CONDITION_ON_ANALYZED_WARNING, 'v', currentIndex()));
+        assertRows(query, rows).hasSize(1).contains(format(LWT_CONDITION_ON_ANALYZED_WARNING, 'v'));
     }
 
     private ListAssert<String> assertRows(String query, Object[]... rows)

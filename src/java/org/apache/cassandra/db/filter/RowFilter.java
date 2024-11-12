@@ -104,7 +104,6 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      * Checks if some of the expressions apply to clustering or regular columns.
      * @return {@code true} if some of the expressions apply to clustering or regular columns, {@code false} otherwise.
      */
-    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
         warnIfFilterIsATree();

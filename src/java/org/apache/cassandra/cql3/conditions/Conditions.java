@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.cql3.conditions;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 

@@ -415,10 +415,12 @@ public enum Operator
 
             Iterator<ByteBuffer> it = rightTokens.iterator();
 
-            do {
+            do
+            {
                 if (!it.hasNext())
                     return true;
-            } while (hasToken(type, leftTokens, it.next()));
+            }
+            while (hasToken(type, leftTokens, it.next()));
 
             return false;
         }

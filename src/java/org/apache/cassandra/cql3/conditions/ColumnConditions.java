@@ -20,10 +20,12 @@ package org.apache.cassandra.cql3.conditions;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+
+import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
@@ -38,7 +40,7 @@ import org.apache.commons.lang3.builder.ToStringStyle;
  * A set of <code>ColumnCondition</code>s.
  *
  */
-public final class ColumnConditions extends AbstractConditions
+public final class ColumnConditions extends AbstractConditions implements Iterable<ColumnCondition>
 {
     /**
      * The conditions on regular columns.
@@ -74,24 +76,47 @@ public final class ColumnConditions extends AbstractConditions
     @Override
     public Collection<ColumnMetadata> getColumns()
     {
-        return Stream.concat(columnConditions.stream(), staticConditions.stream())
-                     .map(e -> e.column)
-                     .collect(Collectors.toList());
+        List<ColumnMetadata> columns = new ArrayList<>(size());
+
+        for (ColumnCondition condition : this)
+        {
+            columns.add(condition.column);
+        }
+
+        return columns;
     }
 
     @Override
     public Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry)
     {
-        return Stream.concat(columnConditions.stream(), staticConditions.stream())
-                     .filter(c -> indexRegistry.getAnalyzerFor(c.column, c.operator).isPresent())
-                     .map(c -> c.column)
-                     .collect(Collectors.toSet());
+        Set<ColumnMetadata> analyzedColumns = new HashSet<>();
+
+        for (ColumnCondition condition : this)
+        {
+            if (indexRegistry.getAnalyzerFor(condition.column, condition.operator).isPresent())
+            {
+                analyzedColumns.add(condition.column);
+            }
+        }
+
+        return analyzedColumns;
     }
 
     @Override
     public boolean isEmpty()
     {
         return columnConditions.isEmpty() && staticConditions.isEmpty();
+    }
+
+    @Override
+    public Iterator<ColumnCondition> iterator()
+    {
+        return Iterators.concat(columnConditions.iterator(), staticConditions.iterator());
+    }
+
+    public int size()
+    {
+        return columnConditions.size() + staticConditions.size();
     }
 
     /**
@@ -114,8 +139,7 @@ public final class ColumnConditions extends AbstractConditions
     @Override
     public void addFunctionsTo(List<Function> functions)
     {
-        columnConditions.forEach(p -> p.addFunctionsTo(functions));
-        staticConditions.forEach(p -> p.addFunctionsTo(functions));
+        iterator().forEachRemaining(p -> p.addFunctionsTo(functions));
     }
 
     /**
