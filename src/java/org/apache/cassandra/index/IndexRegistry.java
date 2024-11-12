@@ -106,6 +106,7 @@ public interface IndexRegistry
         @Override
         public void validate(RowFilter filter)
         {
+            // no-op since it's an empty registry
         }
     };
 
@@ -298,6 +299,7 @@ public interface IndexRegistry
         @Override
         public void validate(RowFilter filter)
         {
+            // no-op since it's an empty registry
         }
     };
 

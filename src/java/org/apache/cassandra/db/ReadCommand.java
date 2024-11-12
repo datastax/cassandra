@@ -379,6 +379,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      * validation method to check that nothing in this command's parameters
      * violates the implementation specific validation rules.
      */
+    @Override
     public void maybeValidateIndexes()
     {
         IndexRegistry.obtain(metadata()).validate(rowFilter());

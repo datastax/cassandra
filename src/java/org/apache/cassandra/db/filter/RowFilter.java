@@ -127,6 +127,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         {
             DecoratedKey pk;
 
+            @Override
             protected BaseRowIterator<?> applyToPartition(BaseRowIterator<?> partition)
             {
                 pk = partition.partitionKey();
