@@ -150,8 +150,12 @@ auditlogviewer <path1> [<path2>...<pathN>] [options]
     waiting for more records
 `-r,--roll_cycle`::
   How often to roll the log file was rolled. May be;;
-    necessary for Chronicle to correctly parse file names. (MINUTELY,
-    HOURLY, DAILY). Default HOURLY.
+    necessary for Chronicle to correctly parse file names. Some available options are:
+FIVE_MINUTELY, FAST_HOURLY, FAST_DAILY, LargeRollCycles.LARGE_DAILY, LargeRollCycles.XLARGE_DAILY,
+LargeRollCycles.HUGE_DAILY. Deprecated ones still availble but not recommended for new deployments:
+MINUTELY, HOURLY, DAILY
+For more options, refer: net.openhft.chronicle.queue.RollCycles.
+Default is set to FAST_HOURLY
 `-h,--help`::
   display this help message
 
