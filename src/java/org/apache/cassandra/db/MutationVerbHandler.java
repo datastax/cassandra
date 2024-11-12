@@ -26,6 +26,9 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.tracing.Tracing;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+
 public class MutationVerbHandler implements IVerbHandler<Mutation>
 {
     public static final MutationVerbHandler instance = new MutationVerbHandler();
@@ -43,6 +46,13 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
     public void doVerb(Message<Mutation> message)
     {
+        if (approxTime.now() > message.expiresAtNanos())
+        {
+            Tracing.trace("Discarding mutation from {} (timed out)", message.from());
+            MessagingService.instance().metrics.recordDroppedMessage(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
+            return;
+        }
+
         // Check if there were any forwarding headers in this message
         InetAddressAndPort from = message.respondTo();
         InetAddressAndPort respondToAddress;
