@@ -1968,6 +1968,7 @@ public class StorageProxy implements StorageProxyMBean
         // CASSANDRA-13043: filter out those endpoints not accepting clients yet, maybe because still bootstrapping
         // We have a keyspace, so filter by affinity too
         replicas = replicas.filter(IFailureDetector.isReplicaAlive)
+                           .filter(r -> StorageService.instance.isRpcReady(r.endpoint()))
                            .filter(snitch.filterByAffinity(keyspace.getName()));
 
         // CASSANDRA-17411: filter out endpoints that are not alive
