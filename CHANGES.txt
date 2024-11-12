@@ -5,6 +5,8 @@
 Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 
+Merged from 5.0:
+ * Disable chronicle analytics (CASSANDRA-19656)
 
 5.0-beta2
  * Align buffer with commitlog segment size (CASSANDRA-19471)

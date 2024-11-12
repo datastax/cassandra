@@ -141,6 +141,7 @@ public enum CassandraRelevantProperties
     CDC_STREAMING_ENABLED("cassandra.cdc.enable_streaming", "true"),
     /** default heartbeating period is 1 minute */
     CHECK_DATA_RESURRECTION_HEARTBEAT_PERIOD("check_data_resurrection_heartbeat_period_milli", "60000"),
+    CHRONICLE_ANALYTICS_DISABLE("chronicle.analytics.disable"),
     CHRONICLE_ANNOUNCER_DISABLE("chronicle.announcer.disable"),
     CHUNKCACHE_ASYNC_CLEANUP("cassandra.chunkcache.async_cleanup", "true"),
     CHUNKCACHE_CLEANER_THREADS("dse.chunk.cache.cleaner.threads","1"),
