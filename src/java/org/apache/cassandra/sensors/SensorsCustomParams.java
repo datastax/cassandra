@@ -25,6 +25,7 @@ import java.util.Optional;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 
@@ -132,6 +133,11 @@ public final class SensorsCustomParams
                                               Context context,
                                               Type type)
     {
+        if (!CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean())
+        {
+            return;
+        }
+
         // Custom payload is not supported for protocol versions < 4
         if (protocolVersion.isSmallerThan(ProtocolVersion.V4))
         {

@@ -41,7 +41,7 @@ public class ActiveSensorsFactory implements SensorsFactory
     };
 
     @Override
-    public RequestSensors createRequestSensors(String keyspace)
+    public RequestSensors createRequestSensors(String... keyspaces)
     {
         return new ActiveRequestSensors();
     }

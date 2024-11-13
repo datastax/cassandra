@@ -38,6 +38,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
@@ -126,6 +127,7 @@ import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.NoOpRequestSensors;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
@@ -210,8 +212,7 @@ public class StorageProxy implements StorageProxyMBean
             QueryInfoTracker.WriteTracker writeTracker = StorageProxy.queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
 
             // Request sensors are utilized to track usages from replicas serving atomic batch request
-            RequestSensors sensors = CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
-                                     new ActiveRequestSensors() : NoOpRequestSensors.instance;
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
             ExecutorLocals locals = ExecutorLocals.create(sensors);
             ExecutorLocals.set(locals);
 
@@ -486,8 +487,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 consistencyForPaxos,
                                                                                 consistencyForCommit);
         // Request sensors are utilized to track usages from replicas serving a cas request
-        RequestSensors sensors = CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
-                                        new ActiveRequestSensors() : NoOpRequestSensors.instance;
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(keyspaceName);;
         Context context = Context.from(metadata);
         sensors.registerSensor(context, Type.WRITE_BYTES); // track user table + paxos table write bytes
         sensors.registerSensor(context, Type.READ_BYTES); // track user table + paxos table read bytes
@@ -1090,8 +1090,7 @@ public class StorageProxy implements StorageProxyMBean
         QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(state, false, mutations, consistencyLevel);
 
         // Request sensors are utilized to track usages from replicas serving a write request
-        RequestSensors sensors = CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
-                                        new ActiveRequestSensors() : NoOpRequestSensors.instance;
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
@@ -1977,8 +1976,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       group.queries,
                                                                                       consistencyLevel);
         // Request sensors are utilized to track usages from replicas serving a read request
-        RequestSensors requestSensors = CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
-                                        new ActiveRequestSensors() : NoOpRequestSensors.instance;
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
@@ -2352,8 +2350,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                               command,
                                                                               consistencyLevel);
         // Request sensors are utilized to track usages from replicas serving a range request
-        RequestSensors sensors = CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean() ?
-                                 new ActiveRequestSensors() : NoOpRequestSensors.instance;
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(sensors);

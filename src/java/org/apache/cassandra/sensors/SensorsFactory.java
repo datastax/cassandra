@@ -54,10 +54,10 @@ public interface SensorsFactory
     /**
      * Creates a {@link RequestSensors} for the given keyspace. Implementations should be very efficient because this method is potentially invoked on each verb handler serving a user request.
      *
-     * @param keyspace the keyspace of the request
+     * @param keyspaces the keyspaces associated with the request.
      * @return a {@link RequestSensors} instance. The default implementation returns a singleton no-op instance.
      */
-    default RequestSensors createRequestSensors(String keyspace)
+    default RequestSensors createRequestSensors(String... keyspaces)
     {
         return NoOpRequestSensors.instance;
     }

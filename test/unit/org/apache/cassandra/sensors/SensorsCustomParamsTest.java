@@ -52,6 +52,7 @@ public class SensorsCustomParamsTest
     public static void setUpClass() throws Exception
     {
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
 
         // enables constructing Messages with custom parameters
         DatabaseDescriptor.daemonInitialization();
@@ -169,6 +170,8 @@ public class SensorsCustomParamsTest
         SensorsCustomParams.addSensorToCQLResponse(null, ProtocolVersion.V4, sensors, context, type);
         SensorsCustomParams.addSensorToCQLResponse(message, ProtocolVersion.V4, null, context, type);
         SensorsCustomParams.addSensorToCQLResponse(message, ProtocolVersion.V3, null, context, type);
+        CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(false);
+        SensorsCustomParams.addSensorToCQLResponse(message, ProtocolVersion.V4, sensors, context, type);
 
         assertNull(message.getCustomPayload());
     }
