@@ -20,10 +20,14 @@ package org.apache.cassandra.sensors;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.base.Predicates;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
@@ -66,6 +70,8 @@ import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
+import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.locator.ReplicaUtils.full;
@@ -75,13 +81,25 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
  * Tests to verify that sensors reported from replicas in {@link Message.Header#customParams()} are tracked correctly
  * in the {@link RequestSensors} of the request.
  */
-public class ReplicaSensorsTrackedTest
+@RunWith(BMUnitRunner.class)
+public class ReplicaSensorsTrackingTest
 {
     static Keyspace ks;
     static ColumnFamilyStore cfs;
     static EndpointsForToken targets;
     static EndpointsForToken pending;
     static Token dummy;
+    /**
+     * Used by byteman to signal that onResponse is about to be called for one of the replica responses. This enables
+     * unit tests to start asserting that replica sensors are already tracked at this point
+     */
+    static CountDownLatch[] onResponseAboutToStartSignal;
+    /**
+     * Signalled by units tests once after sensor tracking assertions are done to make sure onResponse is not returned
+     * before assertions are completed
+     */
+    static CountDownLatch[] onResponseStartSignal;
+    static AtomicInteger responses = new AtomicInteger(0);
 
     @BeforeClass
     public static void beforeClass() throws Exception
@@ -104,8 +122,26 @@ public class ReplicaSensorsTrackedTest
         cfs.sampleReadLatencyNanos = 0;
     }
 
+    @Before
+    public void before()
+    {
+        onResponseAboutToStartSignal = new CountDownLatch[targets.size()];
+        onResponseStartSignal = new CountDownLatch[targets.size()];
+        for (int i = 0; i < targets.size(); i++)
+        {
+            onResponseAboutToStartSignal[i] = new CountDownLatch(1);
+            onResponseStartSignal[i] = new CountDownLatch(1);
+        }
+        responses.set(0);
+    }
+
     @Test
-    public void testReadSensors()
+    @BMRule(name = "signals onResponse about to start latches",
+    targetClass = "org.apache.cassandra.service.reads.ReadCallback",
+    targetMethod = "onResponse",
+    targetLocation = "AT ENTRY",
+    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
+    public void testReadCallbackSensorsTracking() throws InterruptedException
     {
         DecoratedKey key = cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("4"));
         ReadCommand command = Util.cmd(cfs, key).build();
@@ -133,7 +169,12 @@ public class ReplicaSensorsTrackedTest
     }
 
     @Test
-    public void testWriteSensors()
+    @BMRule(name = "signals onResponse about to start latches",
+    targetClass = "org.apache.cassandra.service.WriteResponseHandler",
+    targetMethod = "onResponse",
+    targetLocation = "AT ENTRY",
+    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
+    public void testWriteCallbackSensorsTracking() throws InterruptedException
     {
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> writeRequest = Message.builder(Verb.MUTATION_REQ, mutation).build();
@@ -147,7 +188,7 @@ public class ReplicaSensorsTrackedTest
         ExecutorLocals.set(locals);
 
         // init callback
-        AbstractWriteResponseHandler<?> callback = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM);
+        AbstractWriteResponseHandler<?> callback = createWriteResponseHandler(ConsistencyLevel.ALL, ConsistencyLevel.ALL);
 
         // mimic a sensor to be used in replica response
         Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
@@ -157,12 +198,15 @@ public class ReplicaSensorsTrackedTest
     }
 
     @Test
-    public void testCASSensors()
+    @BMRule(name = "signals onResponse about to start latches",
+    targetClass = "org.apache.cassandra.service.paxos.PrepareCallback",
+    targetMethod = "onResponse",
+    targetLocation = "AT ENTRY",
+    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
+    public void testPrepareCallbackSensorsTracking() throws InterruptedException
     {
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> prepare = Message.builder(Verb.PAXOS_PREPARE_REQ, mutation).build();
-        Message<Mutation> propose = Message.builder(Verb.PAXOS_PROPOSE_REQ, mutation).build();
-        Message<Mutation> commit = Message.builder(Verb.PAXOS_COMMIT_REQ, mutation).build();
 
         // init request sensors, must happen before the callback is created
         RequestSensors requestSensors = new ActiveRequestSensors();
@@ -174,14 +218,10 @@ public class ReplicaSensorsTrackedTest
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
-        // init callbacks
+        // init prepare callback
         DecoratedKey key = cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("0"));
-        AbstractPaxosCallback<?> prepareCallback = new PrepareCallback(key, cfs.metadata(), targets.size(), ConsistencyLevel.LOCAL_QUORUM, 0);
-        AbstractPaxosCallback<?> proposeCallback = new ProposeCallback(cfs.metadata(), targets.size(), targets.size(), false, ConsistencyLevel.LOCAL_QUORUM, 0);
-        AbstractWriteResponseHandler<?> commitCallback = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM);
+        AbstractPaxosCallback<?> callback = new PrepareCallback(key, cfs.metadata(), targets.size(), ConsistencyLevel.ALL, 0);
 
-        // mimic CAS sensors to be used in replica responses
-        // Prepare
         Sensor mockingPrepareWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingPrepareWriteSensor.increment(13.0);
         Sensor mockingPrepareReadSensor = new mockingSensor(context, Type.READ_BYTES);
@@ -189,7 +229,33 @@ public class ReplicaSensorsTrackedTest
         Pair<Sensor, Sensor> prepareWriterSensors = Pair.create(acutalWriteSensor, mockingPrepareWriteSensor);
         Pair<Sensor, Sensor> prepareReadSensors = Pair.create(acutalReadSensor, mockingPrepareReadSensor);
 
-        // Propose
+        assertReplicaSensorsTracked(prepare, callback, prepareWriterSensors, prepareReadSensors);
+    }
+
+    @Test
+    @BMRule(name = "signals onResponse about to start latches",
+    targetClass = "org.apache.cassandra.service.paxos.ProposeCallback",
+    targetMethod = "onResponse",
+    targetLocation = "AT ENTRY",
+    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
+    public void testProposeCallbackSensorsTracking() throws InterruptedException
+    {
+        Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
+        Message<Mutation> propose = Message.builder(Verb.PAXOS_PROPOSE_REQ, mutation).build();
+
+        // init request sensors, must happen before the callback is created
+        RequestSensors requestSensors = new ActiveRequestSensors();
+        Context context = Context.from(cfs.metadata());
+        requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.READ_BYTES);
+        Sensor acutalWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor acutalReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
+        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
+        ExecutorLocals.set(locals);
+
+        // init propose callback
+        AbstractPaxosCallback<?> callback = new ProposeCallback(cfs.metadata(), targets.size(), targets.size(), false, ConsistencyLevel.ALL, 0);
+
         Sensor mockingProposeWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingProposeWriteSensor.increment(15.0);
         Sensor mockingProposeReadSensor = new mockingSensor(context, Type.READ_BYTES);
@@ -197,19 +263,22 @@ public class ReplicaSensorsTrackedTest
         Pair<Sensor, Sensor> proposeWriterSensors = Pair.create(acutalWriteSensor, mockingProposeWriteSensor);
         Pair<Sensor, Sensor> proposeReadSensors = Pair.create(acutalReadSensor, mockingProposeReadSensor);
 
-        // Commit
-        Sensor mockingCommitWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
-        mockingCommitWriteSensor.increment(17.0);
-        acutalWriteSensor.reset();
-        Pair<Sensor, Sensor> commitWriterSensors = Pair.create(acutalWriteSensor, mockingCommitWriteSensor);
+        assertReplicaSensorsTracked(propose, callback, proposeWriterSensors, proposeReadSensors);
+    }
 
-        assertReplicaSensorsTracked(prepare, prepareCallback, prepareWriterSensors, prepareReadSensors);
-        assertReplicaSensorsTracked(propose, proposeCallback, proposeWriterSensors, proposeReadSensors);
-        assertReplicaSensorsTracked(commit, commitCallback, commitWriterSensors);
+    /**
+     * Used by Byteman to count down the onResponseAboutToStartSignal latch and await the onResponseStartSignal latch
+     * for the current replica response.
+     */
+    public static void countDownAndAwaitOnResponseLatches() throws InterruptedException
+    {
+        int replica = responses.getAndIncrement();
+        onResponseAboutToStartSignal[replica].countDown();
+        onResponseStartSignal[replica].await();
     }
 
     @SafeVarargs
-    private void assertReplicaSensorsTracked(Message<?> request, RequestCallback<?> callback, Pair<Sensor, Sensor>... trackingToReplicaSensors)
+    private void assertReplicaSensorsTracked(Message<?> request, RequestCallback<?> callback, Pair<Sensor, Sensor>... trackingToReplicaSensors) throws InterruptedException
     {
         for (Pair<Sensor, Sensor> pair : trackingToReplicaSensors)
         {
@@ -223,12 +292,14 @@ public class ReplicaSensorsTrackedTest
         for (int responses = 1; responses <= targets.size(); responses++)
         {
             simulateResponseFromReplica(targets.get(responses - 1), request, callback, Arrays.stream(trackingToReplicaSensors).map(Pair::right).toArray(Sensor[]::new));
+            onResponseAboutToStartSignal[responses - 1].await();
             for (Pair<Sensor, Sensor> pair : trackingToReplicaSensors)
             {
                 Sensor trackingSensor = pair.left;
                 Sensor replicaSensor = pair.right;
                 assertThat(trackingSensor.getValue()).isEqualTo(replicaSensor.getValue() * responses);
             }
+            onResponseStartSignal[responses - 1].countDown();
         }
 
         // reset tracking sensors for next assertions, if any
@@ -241,13 +312,15 @@ public class ReplicaSensorsTrackedTest
 
     private void simulateResponseFromReplica(Replica replica, Message<?> request, RequestCallback<?> callback, Sensor... sensor)
     {
-        // AbstractWriteResponseHandler has a special handling for the callback
-        if (callback instanceof AbstractWriteResponseHandler)
-            MessagingService.instance().callbacks.addWithExpiration((AbstractWriteResponseHandler<?>) callback, request, replica, ConsistencyLevel.ALL, true);
-        else
-            MessagingService.instance().callbacks.addWithExpiration(callback, request, replica.endpoint());
-        Message<?> response = createResponseMessageWithSensor(request.verb(), replica.endpoint(), request.id(), sensor);
-        ResponseVerbHandler.instance.doVerb(response);
+        new Thread(() -> {
+            // AbstractWriteResponseHandler has a special handling for the callback
+            if (callback instanceof AbstractWriteResponseHandler)
+                MessagingService.instance().callbacks.addWithExpiration((AbstractWriteResponseHandler<?>) callback, request, replica, ConsistencyLevel.ALL, true);
+            else
+                MessagingService.instance().callbacks.addWithExpiration(callback, request, replica.endpoint());
+            Message<?> response = createResponseMessageWithSensor(request.verb(), replica.endpoint(), request.id(), sensor);
+            ResponseVerbHandler.instance.doVerb(response);
+        }).start();
     }
 
     private ReplicaPlan.SharedForTokenRead plan(ConsistencyLevel consistencyLevel, EndpointsForToken replicas)
