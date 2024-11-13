@@ -43,6 +43,7 @@ public class CQLSSTableWriterClientTest
     {
         this.testDirectory = new File(Files.createTempDir());
         DatabaseDescriptor.daemonInitialization();
+        Keyspace.setInitialized();
         CommitLog.instance.start();
     }
 
