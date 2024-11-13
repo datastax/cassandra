@@ -22,7 +22,7 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.sensors.Context;
@@ -80,7 +80,7 @@ public class ResponseVerbHandler implements IVerbHandler
         if (callbackInfo instanceof RequestCallbacks.WriteCallbackInfo)
         {
             RequestCallbacks.WriteCallbackInfo writerInfo = (RequestCallbacks.WriteCallbackInfo) callbackInfo;
-            Mutation mutation = writerInfo.mutation();
+            IMutation mutation = writerInfo.getIMutation();
             if (mutation == null)
                 return;
 

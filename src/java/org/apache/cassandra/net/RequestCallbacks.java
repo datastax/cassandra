@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
@@ -316,6 +317,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     //        AbstractWriteResponseHandler implementation.
     static class WriteCallbackInfo extends CallbackInfo
     {
+        private final boolean shouldHint;
         // either a Mutation, or a Paxos Commit (MessageOut)
         private final Object mutation;
         private final Replica replica;
@@ -324,7 +326,8 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         WriteCallbackInfo(Message message, Replica replica, RequestCallback<?> callback, ConsistencyLevel consistencyLevel, boolean allowHints)
         {
             super(message, replica.endpoint(), callback);
-            this.mutation = shouldHint(allowHints, message, consistencyLevel) ? message.payload : null;
+            this.shouldHint = shouldHint(allowHints, message, consistencyLevel);
+            this.mutation = message.payload;
             //Local writes shouldn't go through messaging service (https://issues.apache.org/jira/browse/CASSANDRA-10477)
             //noinspection AssertWithSideEffects
             assert !peer.equals(FBUtilities.getBroadcastAddressAndPort());
@@ -333,7 +336,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
         public boolean shouldHint()
         {
-            return mutation != null && StorageProxy.shouldHint(replica);
+            return shouldHint && StorageProxy.shouldHint(replica);
         }
 
         public Replica getReplica()
@@ -346,11 +349,27 @@ public class RequestCallbacks implements OutboundMessageCallbacks
             return getMutation(mutation);
         }
 
+        /**
+         * Used for sensors tracking. A safe alternative to {@link #mutation()} to access counter mutations without
+         * changing existing assert behavior.
+         */
+        public IMutation getIMutation()
+        {
+            return getIMutation(mutation);
+        }
+
         private static Mutation getMutation(Object object)
         {
             assert object instanceof Commit || object instanceof Mutation : object;
             return object instanceof Commit ? ((Commit) object).makeMutation()
                                             : (Mutation) object;
+        }
+
+        private static IMutation getIMutation(Object object)
+        {
+            assert object instanceof Commit || object instanceof IMutation : object;
+            return object instanceof Commit ? ((Commit) object).makeMutation()
+                                            : (IMutation) object;
         }
 
         private static boolean shouldHint(boolean allowHints, Message sentMessage, ConsistencyLevel consistencyLevel)
