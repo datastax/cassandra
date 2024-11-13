@@ -22,9 +22,11 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -69,6 +71,36 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
      * necessary when an index allows one row to have multiple values associated with it.
      */
     abstract protected boolean isIndexDataEqualToLiveData(ByteBuffer value);
+
+    /**
+     * Tie-breaker for comparing two PrimaryKeyWithSortKey objects. We want newer elements sorted first in cases of a
+     * tied score, so we compare the {@link #sourceTable}. If both are memtables, we don't care about the order. If one
+     * is a memtable and the other is an SSTable, the memtable should be sorted first. If both are SSTables, we compare
+     * the SSTableId.
+     *
+     * @param o the object to compare to
+     * @return a negative integer, zero, or a positive integer as this object is less than, equal to, or greater than the
+     *        specified object.
+     */
+    protected int compareSourceTables(PrimaryKeyWithSortKey o)
+    {
+        var sourceTableIsMemtable = sourceTable instanceof Memtable;
+        var oSourceTableIsMemtable = o.sourceTable instanceof Memtable;
+        if (sourceTableIsMemtable && oSourceTableIsMemtable)
+            return 0;
+        if (sourceTableIsMemtable)
+            return -1;
+        if (oSourceTableIsMemtable)
+            return 1;
+
+        // Not enough information to compare the SSTableId objects, so we don't break the tie.
+        if (sourceTable.getClass() != o.sourceTable.getClass())
+            return 0;
+
+        var cmp = ((SSTableId) sourceTable).compareTo(o.sourceTable);
+        // Descending order
+        return -cmp;
+    }
 
     @Override
     public final int hashCode()
