@@ -269,6 +269,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      * @param indexRestrictions the index restrictions to add
      * @return a new {@code SelectStatement} instance with the added index restrictions
      */
+    @SuppressWarnings("unused") // this is used by DSE and CNDB to add authorization restrictions
     public SelectStatement addIndexRestrictions(Restrictions indexRestrictions)
     {
         return new SelectStatement(rawCQLStatement,
