@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.UnaryOperator;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Iterables;
@@ -285,8 +284,9 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry);
         if (!analyzedColumns.isEmpty())
         {
-            ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.LWT_CONDITION_ON_ANALYZED_WARNING,
-                                                   analyzedColumns.stream().map(c -> c.name.toString()).collect(Collectors.joining(", "))));
+            StringJoiner joiner = new StringJoiner(", ");
+            analyzedColumns.forEach(c -> joiner.add(c.name.toString()));
+            ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.LWT_CONDITION_ON_ANALYZED_WARNING, joiner));
         }
     }
 
