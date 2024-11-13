@@ -18,10 +18,14 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Queue;
+import java.util.TreeMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -131,7 +135,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 assert !(keysIterator instanceof KeyRangeIterator);
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
                 var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
-                                                             executionController, queryContext);
+                                                             executionController, queryContext, command.limits().count());
                 return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
             }
             else
@@ -458,14 +462,18 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
 
-        private HashSet<PrimaryKey> keysSeen;
-        private HashSet<PrimaryKey> updatedKeys;
+        private final HashSet<PrimaryKey> processedKeys;
+        private final Queue<UnfilteredRowIterator> pendingRows;
+
+        private final int limit;
+        private int returnedRowCount = 0;
 
         private ScoreOrderedResultRetriever(CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
                                             QueryController controller,
                                             ReadExecutionController executionController,
-                                            QueryContext queryContext)
+                                            QueryContext queryContext,
+                                            int limit)
         {
             IndexContext context = controller.getOrderer().context;
             this.view = controller.getQueryView(context).view;
@@ -478,38 +486,63 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.executionController = executionController;
             this.queryContext = queryContext;
 
-            this.keysSeen = new HashSet<>();
-            this.updatedKeys = new HashSet<>();
+            this.processedKeys = new HashSet<>(limit);
+            this.pendingRows = new ArrayDeque<>(limit);
+            this.limit = limit;
         }
 
         @Override
         public UnfilteredRowIterator computeNext()
         {
-            @SuppressWarnings("resource")
-            UnfilteredRowIterator iterator = nextRowIterator(this::nextSelectedKeyInRange);
+            if (pendingRows.isEmpty())
+                fillPendingRows();
+            returnedRowCount++;
             // Because we know ordered keys are fully qualified, we do not iterate partitions
-            return iterator != null ? iterator : endOfData();
+            return !pendingRows.isEmpty() ? pendingRows.poll() : endOfData();
         }
 
         /**
-         * Tries to obtain a row iterator for one of the supplied keys by repeatedly calling
-         * {@link ResultRetriever#apply} until it gives a non-null result.
-         * The keySupplier should return the next key with every call to get() and
-         * null when there are no more keys to try.
-         *
-         * @return an iterator or null if all keys were tried with no success
+         * Fills the pendingRows queue to generate a queue of row iterators for the supplied keys by repeatedly calling
+         * {@link #readAndValidatePartition} until it gives enough non-null results.
          */
-        private @Nullable UnfilteredRowIterator nextRowIterator(@Nonnull Supplier<PrimaryKeyWithSortKey> keySupplier)
+        private void fillPendingRows()
         {
-            UnfilteredRowIterator iterator = null;
-            while (iterator == null)
+            int count = Math.max(1, limit - returnedRowCount);
+            // Sort the primary keys by PrK order, just in case that helps with cache and disk efficiency
+            var keys = new TreeMap<PrimaryKey, List<PrimaryKeyWithSortKey>>();
+            // We want to get the first unique `count` keys to materialize
+            fillKeys(keys, count);
+
+            while (!keys.isEmpty())
             {
-                var key = keySupplier.get();
-                if (key == null)
-                    return null;
-                iterator = apply(key);
+                var entry = keys.pollFirstEntry();
+                var partitionIterator = readAndValidatePartition(entry.getKey(), entry.getValue());
+                if (partitionIterator != null)
+                    pendingRows.add(partitionIterator);
+                else
+                    // Fill the keys becuase we know we'll need count rows, and it is more efficient
+                    // to do it now than to do it later
+                    fillKeys(keys, count - pendingRows.size());
             }
-            return iterator;
+        }
+
+        /**
+         * Fills the keys map with the next `count` unique primary keys that are in the keys produced by calling
+         * {@link #nextSelectedKeyInRange()}.
+         */
+        private void fillKeys(TreeMap<PrimaryKey, List<PrimaryKeyWithSortKey>> keys, int count)
+        {
+            while (keys.size() < count)
+            {
+                var primaryKeyWithSortKey = nextSelectedKeyInRange();
+                if (primaryKeyWithSortKey == null)
+                    return;
+                // Becuase tree maps use the object's comparator to determine equality, and PrimaryKeyWithSortKey's
+                // implementations have a comparator that does not agree with equals, we need to use the actual primary
+                // key as the key in the map.
+                keys.computeIfAbsent(primaryKeyWithSortKey.primaryKey(), k -> new ArrayList<>())
+                    .add(primaryKeyWithSortKey);
+            }
         }
 
         /**
@@ -545,12 +578,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return null;
         }
 
-        public UnfilteredRowIterator apply(PrimaryKeyWithSortKey key)
+        public UnfilteredRowIterator readAndValidatePartition(PrimaryKey key, List<PrimaryKeyWithSortKey> primaryKeys)
         {
-            // If we've seen the key already, we can skip it. However, we cannot skip keys that were updated to a
-            // worse score because the key's updated value could still be in the topk--we just didn't know when we
-            // saw it last time.
-            if (!keysSeen.add(key) && !updatedKeys.contains(key))
+            // If we've already processed the key, we can skip it. Because the score ordered iterator does not
+            // deduplicate rows, we could see dupes if a row is in the ordering index multiple times. This happens
+            // in the case of dupes and of overwrites.
+            if (processedKeys.contains(key))
                 return null;
 
             try (UnfilteredRowIterator partition = controller.getPartition(key, view, executionController))
@@ -559,39 +592,43 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 queryContext.checkpoint();
                 var staticRow = partition.staticRow();
                 UnfilteredRowIterator clusters = applyIndexFilter(partition, filterTree, queryContext);
-                if (clusters == null)
+
+                if (clusters == null || !clusters.hasNext())
+                {
+                    processedKeys.add(key);
                     return null;
-                return new PrimaryKeyIterator(key, partition, staticRow, clusters.next());
-            }
-        }
+                }
 
-        /**
-         * Returns true if the key should be included in the global top k. Otherwise, skip the key for now.
-         */
-        public boolean shouldInclude(PrimaryKeyWithSortKey key, Row row)
-        {
-            // Accept the Primary Key only if the index's view of the column and the real view column are
-            // consistent.
-            if (!key.isIndexDataValid(row, FBUtilities.nowInSeconds()))
-            {
-                updatedKeys.add(key);
-                return false;
+                var now = FBUtilities.nowInSeconds();
+                boolean isRowValid = false;
+                var row = clusters.next();
+                assert !clusters.hasNext() : "Expected only one row per partition";
+                if (!row.isRangeTombstoneMarker())
+                {
+                    for (PrimaryKeyWithSortKey primaryKeyWithSortKey : primaryKeys)
+                    {
+                        // Each of these primary keys are equal, but they have different source tables. Therefore,
+                        // we check to see if the row is valid for any of them, and if it is, we return the row.
+                        if (primaryKeyWithSortKey.isIndexDataValid((Row) row, now))
+                        {
+                            isRowValid = true;
+                            // We can only count the key as processed once we know it was valid for one of the
+                            // primary keys.
+                            processedKeys.add(key);
+                            break;
+                        }
+                    }
+                }
+                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row) : null;
             }
-
-            // The score is accepted, so the Primary Key no longer needs special treatment and can be removed
-            // from the updatedKeys set.
-            if (!updatedKeys.isEmpty())
-                updatedKeys.remove(key);
-            return true;
         }
 
         public static class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
         {
             private boolean consumed = false;
             private final Unfiltered row;
-            public final PrimaryKeyWithSortKey primaryKeyWithSortKey;
 
-            public PrimaryKeyIterator(PrimaryKeyWithSortKey key, UnfilteredRowIterator partition, Row staticRow, Unfiltered content)
+            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -602,7 +639,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                       partition.stats());
 
                 row = content;
-                primaryKeyWithSortKey = key;
             }
 
             @Override
