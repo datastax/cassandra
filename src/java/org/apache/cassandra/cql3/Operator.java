@@ -29,7 +29,6 @@ import java.util.Set;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -407,8 +406,7 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand, @Nullable Index.Analyzer analyzer)
         {
-            if (analyzer == null)
-                throw new InvalidRequestException(": operation can only be computed by an indexed column with a configured analyzer");
+            assert analyzer != null : ": operation can only be computed by an indexed column with a configured analyzer";
 
             List<ByteBuffer> leftTokens = analyzer.analyze(leftOperand);
             List<ByteBuffer> rightTokens = analyzer.analyze(rightOperand);
