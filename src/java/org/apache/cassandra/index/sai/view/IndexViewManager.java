@@ -131,7 +131,7 @@ public class IndexViewManager
         {
             // If the new index use the same files that the exiting one (and the previous one is still complete, meaning
             // that the files weren't corrupted), then keep the old one (no point in changing for the same thing).
-            if (previous.usedPerIndexComponents().isComplete() && ssTableIndex.usedPerIndexComponents().hasSameVersionAndGenerationThan(previous.usedPerIndexComponents()))
+            if (previous.usedPerIndexComponents().isComplete() && ssTableIndex.usedPerIndexComponents().buildId().equals(previous.usedPerIndexComponents().buildId()))
             {
                 toRelease.add(ssTableIndex);
                 return;

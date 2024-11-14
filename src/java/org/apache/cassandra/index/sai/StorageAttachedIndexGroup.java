@@ -144,7 +144,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             contextManager.clear();
 
             contexts.forEach(context -> {
-                SSTableWatcher.instance.onIndexDropped(context.usedPerSSTableComponents().forWrite());
+                SSTableWatcher.instance.onIndexDropped(baseCfs.metadata(), context.usedPerSSTableComponents().forWrite());
             });
         }
     }
