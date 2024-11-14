@@ -20,6 +20,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.service.ClientWarn;
@@ -28,6 +29,7 @@ import org.assertj.core.api.ListAssert;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_RESTRICTION_ON_ANALYZED_WARNING;
+import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.LWT_CONDITION_ON_ANALYZED_WARNING;
 
 /**
  * Tests for {@link AnalyzerEqOperatorSupport}.
@@ -37,7 +39,7 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
     @Before
     public void createTable()
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, f text)");
     }
 
     private void populateTable()
@@ -64,6 +66,11 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         // matches (:)
         assertInvalidMessage(": restriction is only supported on properly indexed columns. v : 'Quick fox' is not valid.",
                              "SELECT k FROM %s WHERE v : 'Quick fox' ALLOW FILTERING");
+
+        // LWT
+        assertRowsWithoutWarning("UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'Quick fox'", row(true));
+        assertRowsWithoutWarning("UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'fox'", row(false, "Quick fox"));
+        assertInvalidMessage(ColumnCondition.ANALYZER_MATCHES_ERROR, "UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v : 'Quick fox'");
     }
 
     @Test
@@ -85,6 +92,11 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         // matches (:)
         assertInvalidMessage(format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'v'),
                              "SELECT k FROM %s WHERE v : 'Quick fox'");
+
+        // LWT
+        assertRowsWithoutWarning("UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'Quick fox'", row(true));
+        assertRowsWithoutWarning("UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'fox'", row(false, "Quick fox"));
+        assertInvalidMessage(ColumnCondition.ANALYZER_MATCHES_ERROR, "UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v : 'Quick fox'");
     }
 
     @Test
@@ -105,6 +117,11 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
 
             // matches (:)
             assertIndexDoesNotSupportMatches();
+
+            // LWT
+            assertRowsWithoutWarning("UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'Quick fox'", row(true));
+            assertRowsWithoutWarning("UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'fox'", row(false, "Quick fox"));
+            assertInvalidMessage(ColumnCondition.ANALYZER_MATCHES_ERROR, "UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v : 'Quick fox'");
         });
     }
 
@@ -163,19 +180,23 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
 
     private void assertNonTokenizedIndexSupportsEquality()
     {
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'fox'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick fox' OR v = 'Lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick fox' OR v = 'lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' OR v = 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' OR v = 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' AND v = 'fox'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' AND v = 'fox'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' AND v = 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' AND v = 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v = 'quick' AND v = 'fox') OR v = 'dog'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v = 'quick' AND v = 'fox') OR v = 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'fox'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick fox' OR v = 'Lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick fox' OR v = 'lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' OR v = 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' OR v = 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' AND v = 'fox'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' AND v = 'fox'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' AND v = 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' AND v = 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v = 'quick' AND v = 'fox') OR v = 'dog'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v = 'quick' AND v = 'fox') OR v = 'Lazy'");
+
+        // LWT
+        assertRowsWithLWTWarning("UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'Quick fox'", row(true));
+        assertRowsWithLWTWarning("UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'fox'", row(false, "Quick fox"));
     }
 
     private void assertNonTokenizedIndexSupportsMatches()
@@ -193,31 +214,38 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         assertRowsWithoutWarning("SELECT k FROM %s WHERE v : 'quick' AND v : 'lazy'");
         assertRowsWithoutWarning("SELECT k FROM %s WHERE (v : 'quick' AND v : 'fox') OR v : 'dog'");
         assertRowsWithoutWarning("SELECT k FROM %s WHERE (v : 'quick' AND v : 'fox') OR v : 'Lazy'");
+
+        // LWT
+        assertInvalidMessage(ColumnCondition.ANALYZER_MATCHES_ERROR, "UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v : 'Quick fox'");
     }
 
     private void assertNonTokenizedIndexSupportsMixedEqualityAndMatches()
     {
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick fox' OR v : 'Lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick fox' OR v : 'lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' OR v : 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' OR v : 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' AND v : 'fox'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' AND v : 'fox'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' AND v : 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' AND v : 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v = 'quick' AND v : 'fox') OR v = 'dog'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v = 'quick' AND v : 'fox') OR v = 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick fox' OR v : 'Lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick fox' OR v : 'lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' OR v : 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' OR v : 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' AND v : 'fox'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' AND v : 'fox'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' AND v : 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' AND v : 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v = 'quick' AND v : 'fox') OR v = 'dog'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v = 'quick' AND v : 'fox') OR v = 'Lazy'");
 
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'Quick fox' OR v = 'Lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick fox' OR v = 'lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'Quick' OR v = 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick' OR v = 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'Quick' AND v = 'fox'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'fox'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'Quick' AND v = 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'dog'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'Quick fox' OR v = 'Lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'quick fox' OR v = 'lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'Quick' OR v = 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'quick' OR v = 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'Quick' AND v = 'fox'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'fox'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'Quick' AND v = 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'dog'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'Lazy'");
+
+        // LWT
+        assertInvalidMessage(ColumnCondition.ANALYZER_MATCHES_ERROR,
+                             "UPDATE %s SET v = 'Quick fox' WHERE k = 1 IF v = 'Quick fox' AND v : 'Quick fox'");
     }
 
     @Test
@@ -246,6 +274,14 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         assertIndexQueries("{'index_analyzer': 'standard', 'equals_behaviour_when_analyzed': 'UNSUPPORTED'}", () -> {
             assertIndexDoesNotSupportEquals();
             assertTokenizedIndexSupportsMatches();
+
+            // test mixed with another non-indexed column
+            assertInvalidMessage(": restriction is only supported on properly indexed columns",
+                                 "SELECT k FROM %s WHERE v : 'Quick' OR f : 'Lazy' ALLOW FILTERING");
+            assertRowsWithoutWarning("SELECT k FROM %s WHERE v : 'Quick' OR f = 'Lazy' ALLOW FILTERING", row(1));
+            assertInvalidMessage(": restriction is only supported on properly indexed columns",
+                                 "SELECT k FROM %s WHERE v = 'Quick' OR f : 'Lazy' ALLOW FILTERING");
+            assertRowsWithoutWarning("SELECT k FROM %s WHERE v = 'Quick' OR f = 'Lazy' ALLOW FILTERING");
         });
     }
 
@@ -257,20 +293,20 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
 
     private void assertTokenizedIndexSupportsEquality()
     {
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick fox' OR v = 'Lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick fox' OR v = 'lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' OR v = 'Lazy'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' OR v = 'lazy'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' AND v = 'fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' AND v = 'fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' AND v = 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' AND v = 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v = 'quick' AND v = 'fox') OR v = 'dog'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v = 'quick' AND v = 'fox') OR v = 'Lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick fox' OR v = 'Lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick fox' OR v = 'lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' OR v = 'Lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' OR v = 'lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' AND v = 'fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' AND v = 'fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' AND v = 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' AND v = 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v = 'quick' AND v = 'fox') OR v = 'dog'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v = 'quick' AND v = 'fox') OR v = 'Lazy'", row(1), row(2));
     }
 
     private void assertTokenizedIndexSupportsMatches()
@@ -293,27 +329,34 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
 
     private void assertTokenizedIndexSupportsMixedEqualityAndMatches()
     {
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick fox' OR v : 'Lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick fox' OR v : 'lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' OR v : 'Lazy'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' OR v : 'lazy'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' AND v : 'fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' AND v : 'fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'Quick' AND v : 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v = 'quick' AND v : 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v = 'quick' AND v : 'fox') OR v = 'dog'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v = 'quick' AND v : 'fox') OR v = 'Lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick fox' OR v : 'Lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick fox' OR v : 'lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' OR v : 'Lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' OR v : 'lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' AND v : 'fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' AND v : 'fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' AND v : 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'quick' AND v : 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v = 'quick' AND v : 'fox') OR v = 'dog'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v = 'quick' AND v : 'fox') OR v = 'Lazy'", row(1), row(2));
 
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'Quick fox' OR v = 'Lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick fox' OR v = 'lazy fox'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'Quick' OR v = 'Lazy'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick' OR v = 'lazy'", row(1), row(2));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'Quick' AND v = 'fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'fox'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'Quick' AND v = 'Lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'lazy'");
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'dog'", row(1));
-        assertRowsWithWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'Lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'Quick fox' OR v = 'Lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'quick fox' OR v = 'lazy fox'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'Quick' OR v = 'Lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'quick' OR v = 'lazy'", row(1), row(2));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'Quick' AND v = 'fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'fox'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'Quick' AND v = 'Lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v : 'quick' AND v = 'lazy'");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'dog'", row(1));
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE (v : 'quick' AND v = 'fox') OR v : 'Lazy'", row(1), row(2));
+
+        // test mixed with another non-indexed column
+        String errorMsg = ": restriction is only supported on properly indexed columns";
+        assertInvalidMessage(errorMsg, "SELECT k FROM %s WHERE v : 'Quick' OR f : 'Lazy' ALLOW FILTERING");
+        assertRowsWithoutWarning("SELECT k FROM %s WHERE v : 'Quick' OR f = 'Lazy' ALLOW FILTERING", row(1));
+        assertInvalidMessage(errorMsg, "SELECT k FROM %s WHERE v = 'Quick' OR f : 'Lazy' ALLOW FILTERING");
+        assertRowsWithSelectWarning("SELECT k FROM %s WHERE v = 'Quick' OR f = 'Lazy' ALLOW FILTERING", row(1));
     }
 
     private void assertIndexDoesNotSupportEquals()
@@ -365,9 +408,14 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         assertRows(query, rows).isNullOrEmpty();
     }
 
-    private void assertRowsWithWarning(String query, Object[]... rows)
+    private void assertRowsWithSelectWarning(String query, Object[]... rows)
     {
         assertRows(query, rows).hasSize(1).contains(format(EQ_RESTRICTION_ON_ANALYZED_WARNING, 'v', currentIndex()));
+    }
+
+    private void assertRowsWithLWTWarning(String query, Object[]... rows)
+    {
+        assertRows(query, rows).hasSize(1).contains(format(LWT_CONDITION_ON_ANALYZED_WARNING, 'v'));
     }
 
     private ListAssert<String> assertRows(String query, Object[]... rows)
