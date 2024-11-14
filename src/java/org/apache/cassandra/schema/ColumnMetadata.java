@@ -53,8 +53,14 @@ import static java.lang.String.format;
 @Unmetered
 public final class ColumnMetadata extends ColumnSpecification implements Selectable, Comparable<ColumnMetadata>
 {
-    public static final Comparator<Object> asymmetricColumnDataComparator =
-        (a, b) -> ((ColumnData) a).column().compareTo((ColumnMetadata) b);
+    public static final Comparator<Object> asymmetricColumnDataComparator = new Comparator<Object>()
+    {
+        @Override
+        public int compare(Object a, Object b)
+        {
+            return ((ColumnData) a).column().compareTo((ColumnMetadata) b);
+        }
+    };
 
     public static final int NO_POSITION = -1;
 
@@ -219,8 +225,22 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         this.kind = kind;
         this.position = position;
         this.cellPathComparator = makeCellPathComparator(kind, type);
-        this.cellComparator = cellPathComparator == null ? ColumnData.comparator : (a, b) -> cellPathComparator.compare(a.path(), b.path());
-        this.asymmetricCellPathComparator = cellPathComparator == null ? null : (a, b) -> cellPathComparator.compare(((Cell<?>)a).path(), (CellPath) b);
+        this.cellComparator = cellPathComparator == null ? ColumnData.comparator : new Comparator<Cell<?>>()
+        {
+            @Override
+            public int compare(Cell<?> a, Cell<?> b)
+            {
+                return cellPathComparator.compare(a.path(), b.path());
+            }
+        };
+        this.asymmetricCellPathComparator = cellPathComparator == null ? null : new Comparator<Object>()
+        {
+            @Override
+            public int compare(Object a, Object b)
+            {
+                return cellPathComparator.compare(((Cell<?>) a).path(), (CellPath) b);
+            }
+        };
         this.comparisonOrder = comparisonOrder(kind, isComplex(), Math.max(0, position), name);
         this.isDropped = isDropped;
     }
@@ -233,20 +253,24 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         AbstractType<?> nameComparator = ((MultiCellCapableType<?>) type).nameComparator();
 
 
-        return (path1, path2) ->
+        return new Comparator<CellPath>()
         {
-            if (path1.size() == 0 || path2.size() == 0)
+            @Override
+            public int compare(CellPath path1, CellPath path2)
             {
-                if (path1 == CellPath.BOTTOM)
-                    return path2 == CellPath.BOTTOM ? 0 : -1;
-                if (path1 == CellPath.TOP)
-                    return path2 == CellPath.TOP ? 0 : 1;
-                return path2 == CellPath.BOTTOM ? 1 : -1;
-            }
+                if (path1.size() == 0 || path2.size() == 0)
+                {
+                    if (path1 == CellPath.BOTTOM)
+                        return path2 == CellPath.BOTTOM ? 0 : -1;
+                    if (path1 == CellPath.TOP)
+                        return path2 == CellPath.TOP ? 0 : 1;
+                    return path2 == CellPath.BOTTOM ? 1 : -1;
+                }
 
-            // This will get more complicated once we have non-frozen UDT and nested collections
-            assert path1.size() == 1 && path2.size() == 1;
-            return nameComparator.compare(path1.get(0), path2.get(0));
+                // This will get more complicated once we have non-frozen UDT and nested collections
+                assert path1.size() == 1 && path2.size() == 1;
+                return nameComparator.compare(path1.get(0), path2.get(0));
+            }
         };
     }
 

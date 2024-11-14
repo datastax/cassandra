@@ -73,7 +73,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
-import org.apache.cassandra.index.sai.memory.MemtableRangeIterator;
+import org.apache.cassandra.index.sai.memory.MemtableKeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -503,7 +503,7 @@ public class IndexContext
         {
             for (Memtable memtable : memtables)
             {
-                KeyRangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+                KeyRangeIterator memtableIterator = new MemtableKeyRangeIterator(memtable, primaryKeyFactory, keyRange);
                 builder.add(memtableIterator);
             }
 

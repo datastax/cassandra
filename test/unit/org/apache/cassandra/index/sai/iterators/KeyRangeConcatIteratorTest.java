@@ -338,7 +338,7 @@ public class KeyRangeConcatIteratorTest extends AbstractKeyRangeIteratorTest
     @Test
     public void testDuplicatedElementsInTheSameFlow()
     {
-        // In real case, we should not have duplicated elements from the same PostingListRangeIterator
+        // In real case, we should not have duplicated elements from the same PostingListKeyRangeIterator
         KeyRangeIterator rangeA = build(1L, 2L, 3L, 3L, 4L, 4L);
         KeyRangeIterator rangeB = build(6L, 6L, 7L, 7L);
         KeyRangeIterator rangeC = build(8L, 8L);

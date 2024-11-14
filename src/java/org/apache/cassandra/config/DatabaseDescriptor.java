@@ -87,6 +87,7 @@ public class DatabaseDescriptor
 {
     static
     {
+        System.setProperty("chronicle.analytics.disable", "true");
         // This static block covers most usages
         FBUtilities.preventIllegalAccessWarnings();
         System.setProperty("io.netty.transport.estimateSizeOnSubmit", "false");

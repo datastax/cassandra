@@ -1361,6 +1361,11 @@ replica_filtering_protection:
 
 # Audit logging - Logs every incoming CQL command request, authentication to a node. See the docs
 # on audit_logging for full details about the various configuration options.
+# NOTE: Chronicle Queue has changed the enums used for log rolling roll_cycle).
+# Older legacy options will still work for the foreseeable future, but you will see warnings in logs and future dependency
+# upgrades may break your log rolling param. The default log rolling param will be changed with the next major release
+# from HOURLY to FAST_HOURLY, primarily different on how frequently indexes are built. For more info refer to:
+# net.openhft.chronicle.queue.RollCycles
 audit_logging_options:
     enabled: false
     logger:

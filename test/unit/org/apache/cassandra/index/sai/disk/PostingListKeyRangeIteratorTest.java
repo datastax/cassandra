@@ -35,7 +35,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 
-public class PostingListRangeIteratorTest
+public class PostingListKeyRangeIteratorTest
 {
     private static final PrimaryKeyMap pkm = KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP;
 
@@ -52,7 +52,7 @@ public class PostingListRangeIteratorTest
                                                     0,
                                                     new QueryContext(10000),
                                                     postingList);
-        try (var iterator = new PostingListRangeIterator(mockIndexContext, pkm, indexContext))
+        try (var iterator = new PostingListKeyRangeIterator(mockIndexContext, pkm, indexContext))
         {
             assertEquals(pkm.primaryKeyFromRowId(1), iterator.next());
             assertEquals(pkm.primaryKeyFromRowId(2), iterator.next());
@@ -72,8 +72,8 @@ public class PostingListRangeIteratorTest
         var mpl = MergePostingList.merge(Lists.newArrayList(postingList1, postingList2));
         var indexContext1 = buildIndexContext(1, 3, mpl);
         var indexContext2 = buildIndexContext(3, 3, postingList3);
-        var plri1 = new PostingListRangeIterator(mockIndexContext, pkm, indexContext1);
-        var plri2 = new PostingListRangeIterator(mockIndexContext, pkm, indexContext2);
+        var plri1 = new PostingListKeyRangeIterator(mockIndexContext, pkm, indexContext1);
+        var plri2 = new PostingListKeyRangeIterator(mockIndexContext, pkm, indexContext2);
         try (var union = KeyRangeUnionIterator.builder().add(plri1).add(plri2).build();)
         {
             union.skipTo(pkm.primaryKeyFromRowId(2));
