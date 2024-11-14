@@ -22,10 +22,13 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
 
+@RunWith(Parameterized.class)
 public class SensorsTest extends AbstractSensorsTest
 {
     @Test

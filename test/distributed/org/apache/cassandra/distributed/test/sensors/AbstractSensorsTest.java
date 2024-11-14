@@ -26,7 +26,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.BeforeClass;
-import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -46,7 +45,6 @@ import org.apache.cassandra.transport.messages.ResultMessage;
  * Test to verify that the sensors are propagated via the native protocol in the custom payload respecting
  * the configuration set in {@link CassandraRelevantProperties#REQUEST_SENSORS_VIA_NATIVE_PROTOCOL}
  */
-@RunWith(Parameterized.class)
 public abstract class AbstractSensorsTest extends TestBaseImpl
 {
     private static final String EXPECTED_WRITE_BYTES_HEADER = "WRITE_BYTES_REQUEST.tbl";
