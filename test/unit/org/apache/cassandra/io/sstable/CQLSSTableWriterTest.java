@@ -1511,7 +1511,7 @@ public abstract class CQLSSTableWriterTest
         IndexContext idx1 = createIndexContext("idx1", UTF8Type.instance);
         IndexContext idx2 = createIndexContext("idx2", UTF8Type.instance);
         HashSet<IndexContext> indices = new HashSet<>(Arrays.asList(idx1, idx2));
-        indexDescriptor.reload(indices);
+        indexDescriptor.reload(null, indices);
 
         assertTrue(indexDescriptor.perIndexComponents(idx1).isComplete());
         assertTrue(indexDescriptor.perIndexComponents(idx2).isComplete());
