@@ -57,6 +57,7 @@ import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -429,8 +430,10 @@ public abstract class ReadCommand extends AbstractReadQuery
      * violates the implementation specific validation rules.
      */
     @Override
-    public void maybeValidateIndex()
+    public void maybeValidateIndexes()
     {
+        IndexRegistry.obtain(metadata()).validate(rowFilter());
+
         if (null != indexQueryPlan)
         {
             indexQueryPlan.validate(this);
