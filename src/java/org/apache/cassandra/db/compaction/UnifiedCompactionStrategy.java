@@ -491,7 +491,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    ShardingStats getShardingStats(CompactionAggregate.UnifiedAggregate aggregate)
+    // used by CNDB
+    public ShardingStats getShardingStats(CompactionAggregate.UnifiedAggregate aggregate)
     {
         var shardingStats = aggregate.getShardingStats();
         if (shardingStats == null)
@@ -642,7 +643,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     }
 
     @VisibleForTesting
-    ShardManager getShardManager()
+    // used by CNDB
+    public ShardManager getShardManager()
     {
         maybeUpdateSelector();
         return currentShardManager;
