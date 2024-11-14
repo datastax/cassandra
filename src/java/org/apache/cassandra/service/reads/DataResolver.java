@@ -300,13 +300,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         if (!command.rowFilter().hasNonKeyExpression())
             return results -> results;
 
-        return results -> {
-            Index.Searcher searcher = command.indexSearcher();
-            // in case of "ALLOW FILTERING" without index
-            if (searcher == null)
-                return command.rowFilter().filter(results, command.metadata(), command.nowInSec());
-            return searcher.filterReplicaFilteringProtection(results);
-        };
+        return results -> command.rowFilter().filter(results, command.metadata(), command.nowInSec());
     }
 
     /**
