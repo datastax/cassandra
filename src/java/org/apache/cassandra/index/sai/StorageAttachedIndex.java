@@ -412,6 +412,12 @@ public class StorageAttachedIndex implements Index
             if (!baseCfs.getTracker().getView().liveMemtables.isEmpty())
                 baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_BUILD_STARTED);
 
+            // even though we're skipping the index build, we still want to add any initial sstables that have indexes into SAI.
+            // Index will be queryable if all existing sstables have index files; otherwise non-queryable
+            Set<SSTableReader> sstables = baseCfs.getLiveSSTables();
+            StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
+            indexGroup.onSSTableChanged(Collections.emptyList(), sstables, Collections.singleton(this), validate);
+
             // From now on, all memtable will have attached memtable index. It is now safe to flush indexes directly from flushing Memtables.
             canFlushFromMemtableIndex = true;
             return CompletableFuture.completedFuture(null);
