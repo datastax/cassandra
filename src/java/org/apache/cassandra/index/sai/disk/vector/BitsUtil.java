@@ -20,8 +20,6 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.Set;
 
-import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
-
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.DenseIntMap;
 

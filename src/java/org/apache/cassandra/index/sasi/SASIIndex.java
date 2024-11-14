@@ -112,7 +112,7 @@ public class SASIIndex implements Index, INotificationConsumer
                                         });
                    });
 
-            return new SASIIndexBuilder(cfs, sstables);
+            return new SASIIndexBuilder(cfs, sstables, indexes);
         }
     }
 
@@ -144,7 +144,7 @@ public class SASIIndex implements Index, INotificationConsumer
             perSSTable.put(index.getDefinition(), index);
         }
 
-        CompactionManager.instance.submitIndexBuild(new SASIIndexBuilder(baseCfs, toRebuild));
+        CompactionManager.instance.submitIndexBuild(new SASIIndexBuilder(baseCfs, toRebuild, Collections.singleton(this)));
     }
 
     /**

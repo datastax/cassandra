@@ -30,7 +30,6 @@ import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.SequentialWriter;
-import org.jctools.maps.NonBlockingHashMapLong;
 
 public class ConcurrentVectorValues implements RamAwareVectorValues
 {
