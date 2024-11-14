@@ -654,14 +654,12 @@ public class LuceneAnalyzerTest extends SAITester
         Assertions.assertThatThrownBy(() -> execute(disjunctionQueryMatchEq))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
-        // TODO: this last test is affected by CNDB-10731. We should enable it once that is fixed.
-        // assertRows(execute(disjunctionQueryMatchEq + "ALLOW FILTERING"), row("1"));
+         assertRows(execute(disjunctionQueryMatchEq + "ALLOW FILTERING"), row("1"));
 
         Assertions.assertThatThrownBy(() -> execute(disjunctionQueryEqMatch))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
-        // TODO: this last test is affected by CNDB-10731. We should enable it once that is fixed.
-        // assertRows(execute(disjunctionQueryEqMatch + "ALLOW FILTERING"), row("1"));
+         assertRows(execute(disjunctionQueryEqMatch + "ALLOW FILTERING"));
     }
 
     @Test

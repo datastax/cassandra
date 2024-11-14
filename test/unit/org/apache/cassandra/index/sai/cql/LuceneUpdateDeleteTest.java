@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
@@ -58,7 +59,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         // UPDATE with LWT fails (different error message because it fails at a different point)
         assertThatThrownBy(() -> execute("UPDATE %s SET val = 'something new' WHERE id = 0 IF val : 'dog'"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("LWT Conditions do not support the : operator");
+        .hasMessageContaining(ColumnCondition.ANALYZER_MATCHES_ERROR);
     }
 
     // No flushes

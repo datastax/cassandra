@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Set;
 import java.util.SortedSet;
+import java.util.StringJoiner;
 import java.util.function.UnaryOperator;
 
 import com.google.common.collect.HashMultiset;
@@ -53,6 +54,11 @@ import org.apache.cassandra.cql3.UpdateParameters;
 import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
+import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.conditions.ColumnConditions;
 import org.apache.cassandra.cql3.conditions.Conditions;
@@ -97,11 +103,9 @@ import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
@@ -331,6 +335,16 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         // there are system queries with USING TIMESTAMP, e.g. SchemaKeyspace#saveSystemKeyspacesSchema
         if (SchemaConstants.isUserKeyspace(metadata.keyspace) && attrs.isTimestampSet())
             Guardrails.userTimestampsEnabled.ensureEnabled(state);
+
+        // Warn but otherwise accept conditions on analyzed columns. The analyzers won't be used (see CNDB-11658).
+        IndexRegistry indexRegistry = IndexRegistry.obtain(metadata);
+        Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry);
+        if (!analyzedColumns.isEmpty())
+        {
+            StringJoiner joiner = new StringJoiner(", ");
+            analyzedColumns.forEach(c -> joiner.add(c.name.toString()));
+            ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.LWT_CONDITION_ON_ANALYZED_WARNING, joiner));
+        }
     }
 
     public void validateDiskUsage(QueryOptions options, ClientState state)
