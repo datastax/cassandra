@@ -50,4 +50,28 @@ public class RamEstimation
         + chmCounters
         + REF_BYTES; // the Map reference itself
     }
+
+    /**
+     * @param elementCount the size() of the DenseIntMap
+     * @return an estimate of the number of bytes used by a DenseIntMap
+     */
+    public static long denseIntMapRamUsed(int elementCount) {
+        long REF_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_REF;
+        long AH_BYTES = RamUsageEstimator.NUM_BYTES_ARRAY_HEADER;
+        long RWLOCK_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 3 * REF_BYTES; // Approx. size for ReadWriteLock
+        long ATOMIC_INT_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + Integer.BYTES + REF_BYTES; // AtomicInteger overhead
+
+        // Find power of 2 greater than or equal to elementCount
+        int capacity = 1;
+        while (capacity < elementCount) {
+            capacity <<= 1;
+        }
+
+        // Calculate size for AtomicReferenceArray with for capacity elements
+        long atomicRefArrayBytes = AH_BYTES + capacity * REF_BYTES;
+
+        return RWLOCK_BYTES // Size of the ReadWriteLock object
+               + ATOMIC_INT_BYTES // Size of the AtomicInteger
+               + atomicRefArrayBytes; // Size of the AtomicReferenceArray structure
+    }
 }
