@@ -177,10 +177,10 @@ public interface SinglePartitionReadQuery extends ReadQuery
         }
 
         @Override
-        public void maybeValidateIndex()
+        public void maybeValidateIndexes()
         {
             for (ReadQuery query : queries)
-                query.maybeValidateIndex();
+                query.maybeValidateIndexes();
         }
 
         public long nowInSec()
