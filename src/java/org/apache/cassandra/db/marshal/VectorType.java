@@ -28,6 +28,7 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -123,6 +124,19 @@ public final class VectorType<T> extends AbstractType<List<T>>
     {
         TypeParser.Vector v = parser.getVectorParameters();
         return getInstance(v.type.freeze(), v.dimension);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public VectorType<T> with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        Preconditions.checkArgument(subTypes.size() == 1, "Invalid number of subTypes for VectorType (got %s)", subTypes.size());
+        Preconditions.checkArgument(!isMultiCell, "Cannot create a multi-cell VectorType");
+
+        if (subTypes.equals(this.subTypes()))
+            return this;
+
+        return getInstance((AbstractType<T>) subTypes.get(0), dimension);
     }
 
     @Override
