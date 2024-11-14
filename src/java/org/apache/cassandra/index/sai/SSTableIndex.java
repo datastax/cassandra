@@ -96,7 +96,7 @@ public class SSTableIndex
             return new EmptyIndex();
         }
 
-        return perIndexComponents.version().onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
+        return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
     }
 
     public IndexContext getIndexContext()
@@ -306,7 +306,7 @@ public class SSTableIndex
              * components are not in use.
              */
             if (indexWasDropped.get())
-                SSTableWatcher.instance.onIndexDropped(perIndexComponents.forWrite());
+                SSTableWatcher.instance.onIndexDropped(sstable.metadata(), perIndexComponents.forWrite());
         }
     }
 
