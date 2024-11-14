@@ -183,17 +183,15 @@ public class Version
 
     public static class ParsedFileName
     {
-        public final Version version;
+        public final ComponentsBuildId buildId;
         public final IndexComponentType component;
         public final @Nullable String indexName;
-        public final int generation;
 
-        private ParsedFileName(Version version, IndexComponentType component, @Nullable String indexName, int generation)
+        private ParsedFileName(ComponentsBuildId buildId, IndexComponentType component, @Nullable String indexName)
         {
-            this.version = version;
+            this.buildId = buildId;
             this.component = component;
             this.indexName = indexName;
-            this.generation = generation;
         }
     }
 
@@ -218,7 +216,6 @@ public class Version
 
     private static Optional<ParsedFileName> tryParseAAFileName(String componentStr)
     {
-        int generation = 0;
         int lastSepIdx = componentStr.lastIndexOf('_');
         if (lastSepIdx == -1)
             return Optional.empty();
@@ -231,7 +228,7 @@ public class Version
         if (firstSepIdx != -1 && firstSepIdx != lastSepIdx)
             indexName = componentStr.substring(firstSepIdx + 1, lastSepIdx);
 
-        return Optional.of(new ParsedFileName(AA, indexComponentType, indexName, generation));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(AA, 0), indexComponentType, indexName));
     }
 
     //
@@ -291,6 +288,6 @@ public class Version
                 indexName = splits[splits.length - 2];
         }
 
-        return Optional.of(new ParsedFileName(version, indexComponentType, indexName, generation));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(version, generation), indexComponentType, indexName));
     }
 }
