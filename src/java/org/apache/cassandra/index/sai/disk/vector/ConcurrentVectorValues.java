@@ -25,6 +25,7 @@ import java.util.function.IntUnaryOperator;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import io.github.jbellis.jvector.util.DenseIntMap;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
@@ -34,7 +35,7 @@ import org.jctools.maps.NonBlockingHashMapLong;
 public class ConcurrentVectorValues implements RamAwareVectorValues
 {
     private final int dimensions;
-    private final NonBlockingHashMapLong<VectorFloat<?>> values = new NonBlockingHashMapLong<>();
+    private final DenseIntMap<VectorFloat<?>> values = new DenseIntMap<>(1024);
 
     public ConcurrentVectorValues(int dimensions)
     {
@@ -62,8 +63,9 @@ public class ConcurrentVectorValues implements RamAwareVectorValues
     /** return approximate bytes used by the new vector */
     public long add(int ordinal, VectorFloat<?> vector)
     {
-        values.put(ordinal, vector);
-        return RamEstimation.concurrentHashMapRamUsed(1) + oneVectorBytesUsed();
+        if (!values.compareAndPut(ordinal, null, vector))
+            throw new IllegalStateException("Vector already exists for ordinal " + ordinal);
+        return RamUsageEstimator.NUM_BYTES_OBJECT_REF + oneVectorBytesUsed();
     }
 
     @Override
@@ -83,7 +85,7 @@ public class ConcurrentVectorValues implements RamAwareVectorValues
     {
         long REF_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_REF;
         return 2 * REF_BYTES
-               + RamEstimation.concurrentHashMapRamUsed(values.size())
+               + RamEstimation.denseIntMapRamUsed(values.size())
                + values.size() * oneVectorBytesUsed();
     }
 
