@@ -23,7 +23,6 @@ import java.util.Set;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.IndexContext;
