@@ -18,11 +18,15 @@
 package org.apache.cassandra.cql3.conditions;
 
 import java.util.List;
+import java.util.Set;
+
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.CQL3CasRequest;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 
 /**
@@ -56,7 +60,13 @@ public interface Conditions
      * Returns the column definitions to which apply the conditions.
      * @return the column definitions to which apply the conditions.
      */
+    @Nullable
     Iterable<ColumnMetadata> getColumns();
+
+    /**
+     * @return the column definitions of the conditions supported by a {@link org.apache.cassandra.index.Index.Analyzer}.
+     */
+    Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry);
 
     /**
      * Checks if this <code>Conditions</code> is empty.

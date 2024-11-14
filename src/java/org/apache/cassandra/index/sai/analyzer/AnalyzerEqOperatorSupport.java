@@ -17,19 +17,11 @@
 package org.apache.cassandra.index.sai.analyzer;
 
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
-import java.util.StringJoiner;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.Index;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.service.ClientWarn;
 
 /**
  * Index config property for defining the behaviour of the equals operator (=) when the index is analyzed.
@@ -66,6 +58,9 @@ public class AnalyzerEqOperatorSupport
                   "please use '%s':'%s' in the index options.",
                   OPTION, Value.UNSUPPORTED.toString().toLowerCase());
 
+    public static final String LWT_CONDITION_ON_ANALYZED_WARNING =
+    "Index analyzers not applied to LWT conditions on columns [%s].";
+
     public enum Value
     {
         /**
@@ -99,80 +94,6 @@ public class AnalyzerEqOperatorSupport
         catch (IllegalArgumentException e)
         {
             throw new InvalidRequestException(WRONG_OPTION_ERROR + option);
-        }
-    }
-
-    /**
-     * Emits a client warning if the filter contains EQ restrictions on columns having an analyzed index.
-     *
-     * @param filter the filter to check
-     * @param indexes the existing indexes
-     */
-    public static void maybeWarn(RowFilter filter, Set<Index> indexes)
-    {
-        Warner warner = new Warner(indexes);
-        maybeWarn(filter.root(), warner);
-        warner.maybeWarn();
-    }
-
-    private static void maybeWarn(RowFilter.FilterElement element, Warner warner)
-    {
-        for (RowFilter.Expression expression : element.expressions())
-        {
-            if (expression.operator() == Operator.EQ)
-                warner.addEqRestriction(expression.column());
-        }
-
-        for (RowFilter.FilterElement child : element.children())
-        {
-            maybeWarn(child, warner);
-        }
-    }
-
-    /**
-     * Class for emitting a client warning when a query has EQ restrictions on columns having an analyzed index.
-     */
-    private static class Warner
-    {
-        private final Set<Index> allIndexes;
-
-        private Set<ColumnMetadata> columns;
-        private Set<Index> indexes;
-
-        private Warner(Set<Index> allIndexes)
-        {
-            this.allIndexes = allIndexes;
-        }
-
-        private void addEqRestriction(ColumnMetadata column)
-        {
-            for (Index index : allIndexes)
-            {
-                if (index.supportsExpression(column, Operator.EQ) &&
-                    index.supportsExpression(column, Operator.ANALYZER_MATCHES))
-                {
-                    if (columns == null)
-                        columns = new HashSet<>();
-                    columns.add(column);
-
-                    if (indexes == null)
-                        indexes = new HashSet<>();
-                    indexes.add(index);
-                }
-            }
-        }
-
-        private void maybeWarn()
-        {
-            if (columns == null || indexes == null)
-                return;
-
-            StringJoiner columnNames = new StringJoiner(", ");
-            StringJoiner indexNames = new StringJoiner(", ");
-            columns.forEach(column -> columnNames.add(column.name.toString()));
-            indexes.forEach(index -> indexNames.add(index.getIndexMetadata().name));
-
-            ClientWarn.instance.warn(String.format(EQ_RESTRICTION_ON_ANALYZED_WARNING, columnNames, indexNames));
         }
     }
 }

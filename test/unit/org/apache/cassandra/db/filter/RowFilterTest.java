@@ -52,9 +52,8 @@ import static org.junit.Assert.assertTrue;
 
 public class RowFilterTest
 {
-
     @Test
-    public void testCQLFilterClose()
+    public void testRowFilterClose()
     {
         // CASSANDRA-15126
         TableMetadata metadata = TableMetadata.builder("testks", "testcf")
