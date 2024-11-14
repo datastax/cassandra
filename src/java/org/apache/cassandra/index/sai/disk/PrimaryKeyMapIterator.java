@@ -71,7 +71,7 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
         TableMetadata metadata = ctx.sstable().metadata();
         // if not row-aware, we don't have clustering
         var perSSTableComponents = ctx.usedPerSSTableComponents();
-        if (perSSTableComponents.version().onDiskFormat().indexFeatureSet().isRowAware() && metadata.hasStaticColumns())
+        if (perSSTableComponents.onDiskFormat().indexFeatureSet().isRowAware() && metadata.hasStaticColumns())
             filter = KeyFilter.KEYS_WITH_CLUSTERING;
         else // the table doesn't consist anything we want to filter out, so let's use the cheap option
             filter = KeyFilter.ALL;

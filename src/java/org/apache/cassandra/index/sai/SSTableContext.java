@@ -67,7 +67,7 @@ public class SSTableContext extends SharedCloseableImpl
     @SuppressWarnings("resource")
     public static SSTableContext create(SSTableReader sstable, IndexComponents.ForRead perSSTableComponents)
     {
-        var onDiskFormat = perSSTableComponents.version().onDiskFormat();
+        var onDiskFormat = perSSTableComponents.onDiskFormat();
         PrimaryKey.Factory primaryKeyFactory = onDiskFormat.newPrimaryKeyFactory(sstable.metadata().comparator);
 
         Ref<? extends SSTableReader> sstableRef = null;
@@ -141,7 +141,7 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public int openFilesPerSSTable()
     {
-        return perSSTableComponents.version().onDiskFormat().openFilesPerSSTable();
+        return perSSTableComponents.onDiskFormat().openFilesPerSSTable();
     }
 
     @Override
