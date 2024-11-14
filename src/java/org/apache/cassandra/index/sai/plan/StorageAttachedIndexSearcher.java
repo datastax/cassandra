@@ -451,6 +451,13 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
     }
 
+    /**
+     * A result retriever that consumes an iterator primary keys sorted by some score, materializes the row for each
+     * primary key (currently, each primary key is required to be fully qualified and should only point to one row),
+     * apply the filter tree to the row to test that the real row satisfies the WHERE clause, and finally tests
+     * that the row is valid for the ORDER BY clause. The class performs some optimizations to avoid materializing
+     * rows unnecessarily. See the class for more details.
+     */
     public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final ColumnFamilyStore.RefViewFragment view;
