@@ -56,23 +56,29 @@ public abstract class AbstractSensorsTest extends TestBaseImpl
      */
     private static final int NODES_COUNT = 2;
     private static final ConsistencyLevel CONSISTENCY_LEVEL = ConsistencyLevel.ALL;
+
+    /**
+     * Schema to be used for the test
+     */
+    @Parameterized.Parameter(0)
+    public String schema;
     /**
      * Queries to be executed to prepare the table, for example insert some data before read to populate read sensors.
      * Will be run before the {@link #testQuery}
      */
-    @Parameterized.Parameter(0)
+    @Parameterized.Parameter(1)
     public String[] prepQueries;
 
     /**
      * Query to be executed to test the sensors, will be run after the {@link #prepQueries}
      */
-    @Parameterized.Parameter(1)
+    @Parameterized.Parameter(2)
     public String testQuery;
 
     /**
      * Expected headers in the custom payload for the test queries
      */
-    @Parameterized.Parameter(2)
+    @Parameterized.Parameter(3)
     public String[] expectedHeaders;
 
     @BeforeClass
@@ -81,10 +87,14 @@ public abstract class AbstractSensorsTest extends TestBaseImpl
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
     }
 
-    @Parameterized.Parameters(name = "prepQueries={0}, testQuery={1}, expectedHeaders={2}")
+    @Parameterized.Parameters(name = "schema={0}, prepQueries={1}, testQuery={2}, expectedHeaders={3}")
     public static Collection<Object[]> data()
     {
+        String tableSchema = withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)");
+        String counterTableSchema = withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, total counter)");
+
         String write = withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')");
+        String counter = withKeyspace("UPDATE %s.tbl SET total = total + 1 WHERE pk = 1");
         String read = withKeyspace("SELECT * FROM %s.tbl WHERE pk=1");
         String cas = withKeyspace("UPDATE %s.tbl SET v1 = 'cas update' WHERE pk = 1 IF v1 = 'read me'");
         String loggedBatch = String.format("BEGIN BATCH\n" +
@@ -99,13 +109,14 @@ public abstract class AbstractSensorsTest extends TestBaseImpl
 
         List<Object[]> result = new ArrayList<>();
         String[] noPrep = new String[0];
-        result.add(new Object[]{ noPrep, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ new String[]{ write }, read, new String[]{ EXPECTED_READ_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, noPrep, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ counterTableSchema, noPrep, counter, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ write }, read, new String[]{ EXPECTED_READ_BYTES_HEADER } });
         // CAS requests incorporate read (and write) bytes from the paxos (and user) tables
-        result.add(new Object[]{ noPrep, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER } });
-        result.add(new Object[]{ noPrep, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ noPrep, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ new String[]{ write }, range, new String[]{ EXPECTED_READ_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, noPrep, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, noPrep, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, noPrep, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ write }, range, new String[]{ EXPECTED_READ_BYTES_HEADER } });
         return result;
     }
 
@@ -118,9 +129,9 @@ public abstract class AbstractSensorsTest extends TestBaseImpl
         AtomicReference<Map<String, ByteBuffer>> customPayload = new AtomicReference<>();
         try (Cluster cluster = init(Cluster.build(NODES_COUNT).start()))
         {
-            cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)"));
+            cluster.schemaChange(schema);
             for (String prepQuery : this.prepQueries)
-                cluster.coordinator(1).execute(withKeyspace(prepQuery), ConsistencyLevel.ALL);
+                cluster.coordinator(1).execute(prepQuery, ConsistencyLevel.ALL);
             // work around serializability of @Parameterized.Parameter by providing a locally scoped variable
             String query = this.testQuery;
             // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
