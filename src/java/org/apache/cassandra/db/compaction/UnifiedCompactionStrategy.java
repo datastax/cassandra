@@ -1280,7 +1280,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return realm.metadata();
     }
 
-    private static boolean startsAfter(CompactionSSTable a, CompactionSSTable b)
+    // used by CNDB
+    public static boolean startsAfter(CompactionSSTable a, CompactionSSTable b)
     {
         // Strict comparison because the span is end-inclusive.
         return a.getFirst().compareTo(b.getLast()) > 0;

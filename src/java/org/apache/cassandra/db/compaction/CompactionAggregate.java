@@ -855,6 +855,19 @@ public abstract class CompactionAggregate
         return new UnifiedAggregate(sstables, maxOverlap, selected, pending, arena, level);
     }
 
+    // used by CNDB
+    public static UnifiedAggregate createUnifiedWithRange(Collection<? extends CompactionSSTable> sstables,
+                                                 int maxOverlap,
+                                                 CompactionPick selected,
+                                                 Iterable<CompactionPick> pending,
+                                                 UnifiedCompactionStrategy.Arena arena,
+                                                 UnifiedCompactionStrategy.Level level,
+                                                 int permisttedParallelism,
+                                                 Range<Token> operationRange)
+    {
+        return new UnifiedWithRange(sstables, maxOverlap, selected, pending, arena, level, permisttedParallelism, operationRange);
+    }
+
 
 
     /** An aggregate that is created for a compaction issued only to drop tombstones */
