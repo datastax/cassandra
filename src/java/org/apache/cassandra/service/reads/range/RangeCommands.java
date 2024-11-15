@@ -27,6 +27,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.service.QueryInfoTracker;
@@ -56,11 +57,15 @@ public class RangeCommands
                                                QueryInfoTracker.ReadTracker readTracker)
     {
         // Note that in general, a RangeCommandIterator will honor the command limit for each range, but will not enforce it globally.
+        // If the consistency level requires reconciliation, we need to apply the limits so the data resolver can apply RFP and SRP,
+        // otherwise we can skip the data limits here and let the CQL layer apply them.
         RangeCommandIterator rangeCommands = rangeCommandIterator(command, consistencyLevel, queryStartNanoTime, readTracker);
-        return command.limits().filter(command.postReconciliationProcessing(rangeCommands),
-                                       command.nowInSec(),
-                                       command.selectsFullPartition(),
-                                       command.metadata().enforceStrictLiveness());
+        return consistencyLevel.needsReconciliation()
+                ? command.limits().filter(command.postReconciliationProcessing(rangeCommands),
+                                          command.nowInSec(),
+                                          command.selectsFullPartition(),
+                                          command.metadata().enforceStrictLiveness())
+                : rangeCommands;
     }
 
     @VisibleForTesting
