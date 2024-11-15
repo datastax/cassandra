@@ -36,6 +36,8 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -816,6 +818,30 @@ public abstract class CompactionAggregate
         public int getPermittedParallelism()
         {
             return permittedParallelism;
+        }
+    }
+
+    public static class UnifiedWithRange extends UnifiedAggregate
+    {
+        private final Range<Token> operationRange;
+
+        UnifiedWithRange(Iterable<? extends CompactionSSTable> sstables,
+                         int maxOverlap,
+                         CompactionPick selected,
+                         Iterable<CompactionPick> pending,
+                         UnifiedCompactionStrategy.Arena arena,
+                         UnifiedCompactionStrategy.Level level,
+                         int permittedParallelism,
+                         Range<Token> operationRange)
+        {
+            super(sstables, maxOverlap, selected, pending, arena, level);
+            this.operationRange = operationRange;
+            setPermittedParallelism(permittedParallelism);
+        }
+
+        public Range<Token> operationRange()
+        {
+            return operationRange;
         }
     }
 
