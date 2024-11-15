@@ -21,6 +21,7 @@ package org.apache.cassandra.utils;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -106,9 +107,8 @@ public class Overlaps
     /// Note that the full list of overlap sets A, AD, ABD, BD, BCD, CD, C is also an answer that satisfies the three
     /// conditions above, but it contains redundant sets (e.g. AD is already contained in ABD).
     ///
-    /// @param items            A list of items to distribute in overlap sets. This is assumed to be a transient list and the method
-    ///                         may modify or consume it. It is assumed that the start and end positions of an item are ordered,
-    ///                         and the items are non-empty.
+    /// @param items            A list of items to distribute in overlap sets. It is assumed that the start and end
+    ///                         positions of an item are ordered, and the items are non-empty.
     /// @param startsAfter      Predicate determining if its left argument's start if fully after the right argument's end.
     ///                         This will only be used with arguments where left's start is known to be after right's start.
     ///                         It is up to the caller if this is a strict comparison -- strict (>) for end-inclusive spans
@@ -157,6 +157,52 @@ public class Overlaps
 
         return overlaps;
     }
+
+    /// Transform a list to transitively combine adjacent sets that have a common element, resulting in disjoint sets.
+    public static <T> List<Set<T>> combineSetsWithCommonElement(List<? extends Set<T>> overlapSets)
+    {
+        Set<T> group = overlapSets.get(0);
+        List<Set<T>> groups = new ArrayList<>();
+        for (int i = 1; i < overlapSets.size(); ++i)
+        {
+            Set<T> current = overlapSets.get(i);
+            if (Collections.disjoint(current, group))
+            {
+                groups.add(group);
+                group = current;
+            }
+            else
+            {
+                group.addAll(current);
+            }
+        }
+        groups.add(group);
+        return groups;
+    }
+
+    /// Split a list of items into disjoint non-overlapping sets.
+    ///
+    /// @param items            A list of items to distribute in overlap sets. It is assumed that the start and end
+    ///                         positions of an item are ordered, and the items are non-empty.
+    /// @param startsAfter      Predicate determining if its left argument's start if fully after the right argument's end.
+    ///                         This will only be used with arguments where left's start is known to be after right's start.
+    ///                         It is up to the caller if this is a strict comparison -- strict (>) for end-inclusive spans
+    ///                         and non-strict (>=) for end-exclusive.
+    /// @param startsComparator Comparator of items' starting positions.
+    /// @param endsComparator   Comparator of items' ending positions.
+    /// @return list of non-overlapping sets of items
+    public static <T> List<Set<T>> splitInNonOverlappingSets(List<T> items,
+                                                             BiPredicate<T, T> startsAfter,
+                                                             Comparator<T> startsComparator,
+                                                             Comparator<T> endsComparator)
+    {
+        if (items.isEmpty())
+            return List.of();
+
+        List<Set<T>> overlapSets = Overlaps.constructOverlapSets(items, startsAfter, startsComparator, endsComparator);
+        return combineSetsWithCommonElement(overlapSets);
+    }
+
 
     public enum InclusionMethod
     {
