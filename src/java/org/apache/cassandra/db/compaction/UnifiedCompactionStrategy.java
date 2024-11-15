@@ -228,7 +228,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                             (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
 
                 // Now combine all of these groups that share an sstable so that we have valid independent transactions.
-                groups = combineSetsWithCommonElement(groups);
+                groups = Overlaps.combineSetsWithCommonElement(groups);
 
                 for (Collection<CompactionSSTable> set : groups)
                 {
@@ -249,28 +249,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             throw rejectTasks(tasks, t);
         }
-    }
-
-    /// Transform a list to transitively combine adjacent sets that have a common element, resulting in disjoint sets.
-    private static <T> List<Set<T>> combineSetsWithCommonElement(List<? extends Set<T>> overlapSets)
-    {
-        Set<T> group = overlapSets.get(0);
-        List<Set<T>> groups = new ArrayList<>();
-        for (int i = 1; i < overlapSets.size(); ++i)
-        {
-            Set<T> current = overlapSets.get(i);
-            if (Collections.disjoint(current, group))
-            {
-                groups.add(group);
-                group = current;
-            }
-            else
-            {
-                group.addAll(current);
-            }
-        }
-        groups.add(group);
-        return groups;
     }
 
     @Override
