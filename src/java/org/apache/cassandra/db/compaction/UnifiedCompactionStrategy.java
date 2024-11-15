@@ -55,6 +55,8 @@ import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -62,6 +64,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.utils.Comparables;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Throwables;
@@ -379,32 +382,62 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         try
         {
             for (CompactionAggregate aggregate : aggregates)
-            {
-                CompactionPick selected = aggregate.getSelected();
-                int parallelism = ((CompactionAggregate.UnifiedAggregate) aggregate).getPermittedParallelism();
-                Preconditions.checkNotNull(selected);
-                Preconditions.checkArgument(!selected.isEmpty());
-
-                LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
-                                                                   OperationType.COMPACTION,
-                                                                   selected.id());
-                if (transaction != null)
-                {
-                    backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-                    createAndAddTasks(gcBefore, transaction, getShardingStats((CompactionAggregate.UnifiedAggregate) aggregate), parallelism, tasks);
-                }
+                if (aggregate instanceof CompactionAggregate.UnifiedWithRange)
+                    createAndAddTasks(gcBefore, (CompactionAggregate.UnifiedWithRange) aggregate, tasks);
                 else
-                {
-                    // This can happen e.g. due to a race with upgrade tasks
-                    logger.error("Failed to submit compaction {} because a transaction could not be created. If this happens frequently, it should be reported", aggregate);
-                }
-            }
+                    createAndAddTasks(gcBefore, (CompactionAggregate.UnifiedAggregate) aggregate, tasks);
 
             return tasks;
         }
         catch (Throwable t)
         {
             throw rejectTasks(tasks, t);
+        }
+    }
+
+    public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedAggregate aggregate, Collection<AbstractCompactionTask> tasks)
+    {
+        CompactionPick selected = aggregate.getSelected();
+        int parallelism = aggregate.getPermittedParallelism();
+        Preconditions.checkNotNull(selected);
+        Preconditions.checkArgument(!selected.isEmpty());
+
+        LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
+                                                           OperationType.COMPACTION,
+                                                           selected.id());
+        if (transaction != null)
+        {
+            backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
+            createAndAddTasks(gcBefore, transaction, getShardingStats(aggregate), parallelism, tasks);
+        }
+        else
+        {
+            // This can happen e.g. due to a race with upgrade tasks
+            logger.error("Failed to submit compaction {} because a transaction could not be created. If this happens frequently, it should be reported", aggregate);
+        }
+    }
+
+    /// Used by CNDB where compaction aggregates can already be split into subranges of the operation.
+    public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedWithRange aggregate, Collection<AbstractCompactionTask> tasks)
+    {
+        CompactionPick selected = aggregate.getSelected();
+        int parallelism = aggregate.getPermittedParallelism();
+        Preconditions.checkNotNull(selected);
+        Preconditions.checkArgument(!selected.isEmpty());
+
+        LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
+                                                           OperationType.COMPACTION,
+                                                           selected.id());
+        if (transaction != null)
+        {
+            // This will ignore the range of the operation, which is fine.
+            backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
+            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), getShardingStats(aggregate, aggregate.operationRange()), parallelism, tasks);
+        }
+        else
+        {
+            // This can happen e.g. due to a race with upgrade tasks
+            logger.error("Failed to submit compaction {} because a transaction could not be created. If this happens frequently, it should be reported", aggregate);
         }
     }
 
@@ -426,6 +459,11 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         public final int coveredShardCount;
 
         public ShardingStats(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, Controller controller)
+        {
+            this(sstables, null, shardManager, controller);
+        }
+
+        public ShardingStats(Collection<? extends CompactionSSTable> sstables, Range<Token> operationRange, ShardManager shardManager, Controller controller)
         {
             assert !sstables.isEmpty();
             // the partition count aggregation is costly, so we only perform this once when the aggregate is selected for execution.
@@ -451,14 +489,21 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 estimatedPartitionCount = partitionCountSum;
 
             this.totalOnDiskSize = onDiskLength;
-            this.min = min;
-            this.max = max;
             this.uniqueKeyRatio = 1.0 * estimatedPartitionCount / partitionCountSum;
             this.density = shardManager.density(onDiskLength, min, max, estimatedPartitionCount);
             this.shardCountForDensity = controller.getNumShards(this.density * shardManager.shardSetCoverage());
+            if (operationRange == null)
+            {
+                this.min = min;
+                this.max = max;
+            }
+            else
+            {
+                this.min = Comparables.max(min, operationRange.left.maxKeyBound());
+                this.max = Comparables.min(max, operationRange.right.maxKeyBound());
+            }
             this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
         }
-
 
         /// Testing only, use specified values.
         @VisibleForTesting
@@ -487,6 +532,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return shardingStats;
     }
 
+    ShardingStats getShardingStats(CompactionAggregate.UnifiedWithRange aggregate, Range<Token> operationRange)
+    {
+        var shardingStats = aggregate.getShardingStats();
+        if (shardingStats == null)
+        {
+            shardingStats =  new ShardingStats(aggregate.getSelected().sstables(), operationRange, getShardManager(), controller);
+            aggregate.setShardingStats(shardingStats);
+        }
+        return shardingStats;
+    }
+
     ShardingStats makeShardingStats(ILifecycleTransaction txn)
     {
         return makeShardingStats(txn.originals());
@@ -498,12 +554,30 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     }
 
     @VisibleForTesting
-    void createAndAddTasks(int gcBefore, LifecycleTransaction transaction, ShardingStats shardingStats, int parallelism, Collection<? super CompactionTask> tasks)
+    void createAndAddTasks(int gcBefore,
+                           LifecycleTransaction transaction,
+                           ShardingStats shardingStats,
+                           int parallelism,
+                           Collection<? super CompactionTask> tasks)
     {
         if (controller.parallelizeOutputShards() && parallelism > 1)
             tasks.addAll(createParallelCompactionTasks(transaction, shardingStats, gcBefore, parallelism));
         else
             tasks.add(createCompactionTask(transaction, shardingStats, gcBefore));
+    }
+
+    @VisibleForTesting
+    void createAndAddTasks(int gcBefore,
+                           LifecycleTransaction transaction,
+                           Range<Token> operationRange,
+                           ShardingStats shardingStats,
+                           int parallelism,
+                           Collection<? super CompactionTask> tasks)
+    {
+        if (controller.parallelizeOutputShards() && parallelism > 1)
+            tasks.addAll(createParallelCompactionTasks(transaction, operationRange, shardingStats, gcBefore, parallelism));
+        else
+            tasks.add(createCompactionTask(transaction, operationRange, shardingStats, gcBefore));
     }
 
     /// Create the sstable writer used for flushing.
@@ -546,6 +620,15 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return new UnifiedCompactionTask(realm, this, transaction, gcBefore, getShardManager(), shardingStats);
     }
 
+    /// Create the task that in turns creates the sstable writer used for compaction. This version is for a ranged task,
+    /// where we produce outputs but cannot delete the input sstables until all components of the operation are complete.
+    ///
+    /// @return a sharded compaction task that in turn will create a sharded compaction writer.
+    private UnifiedCompactionTask createCompactionTask(LifecycleTransaction transaction, Range<Token> operationRange, ShardingStats shardingStats, int gcBefore)
+    {
+        return new UnifiedCompactionTask(realm, this, transaction, gcBefore, true, getShardManager(), shardingStats, operationRange, transaction.originals(), null, null);
+    }
+
     @Override
     protected UnifiedCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
@@ -558,7 +641,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return createCompactionTask(txn, makeShardingStats(txn), gcBefore);
     }
 
-    private Collection<CompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction, ShardingStats shardingStats, int gcBefore, int parallelism)
+    private Collection<CompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction,
+                                                                     ShardingStats shardingStats,
+                                                                     int gcBefore,
+                                                                     int parallelism)
     {
         final int coveredShardCount = shardingStats.coveredShardCount;
         assert parallelism > 1;
@@ -577,6 +663,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                 this,
                                                                 new PartialLifecycleTransaction(compositeTransaction),
                                                                 gcBefore,
+                                                                false,
                                                                 shardManager,
                                                                 shardingStats,
                                                                 range,
@@ -595,6 +682,54 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             assert tasks.get(0).inputSSTables().equals(sstables);
             return Collections.singletonList(createCompactionTask(transaction, shardingStats, gcBefore));
+        }
+        else
+            return tasks;
+    }
+
+    private Collection<CompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction,
+                                                                     Range<Token> operationRange,
+                                                                     ShardingStats shardingStats,
+                                                                     int gcBefore,
+                                                                     int parallelism)
+    {
+        final int coveredShardCount = shardingStats.coveredShardCount;
+        assert parallelism > 1;
+
+        Collection<SSTableReader> sstables = transaction.originals();
+        ShardManager shardManager = getShardManager();
+        CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
+        SharedCompactionProgress sharedProgress = new SharedCompactionProgress();
+        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
+        List<CompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
+            sstables,
+            operationRange,
+            shardingStats.shardCountForDensity,
+            shardingStats.coveredShardCount,
+            parallelism,
+            (rangeSSTables, range) -> new UnifiedCompactionTask(realm,
+                                                                this,
+                                                                new PartialLifecycleTransaction(compositeTransaction),
+                                                                gcBefore,
+                                                                true,
+                                                                shardManager,
+                                                                shardingStats,
+                                                                range,
+                                                                rangeSSTables,
+                                                                sharedProgress,
+                                                                sharedObserver)
+        );
+        compositeTransaction.completeInitialization();
+        assert tasks.size() <= parallelism;
+        assert tasks.size() <= coveredShardCount;
+
+        if (tasks.isEmpty())
+            transaction.close(); // this should not be reachable normally, close the transaction for safety
+
+        if (tasks.size() == 1) // if there's just one range, make it a non-ranged task (to apply early open etc.)
+        {
+            assert tasks.get(0).inputSSTables().equals(sstables);
+            return Collections.singletonList(createCompactionTask(transaction, operationRange, shardingStats, gcBefore));
         }
         else
             return tasks;
