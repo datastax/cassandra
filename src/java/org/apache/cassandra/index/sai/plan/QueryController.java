@@ -98,8 +98,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Controls whether we optimize query plans.
      * 0 disables the optimizer. As a side effect, hybrid ANN queries will default to FilterSortOrder.SCAN_THEN_FILTER.
-     * 1 enables the optimizer and tells the optimizer to respect the intersection clause limit.
-     * Higher values enable the optimizer and disable the hard intersection clause limit.
+     * 1 enables the optimizer.
      * Note: the config is not final to simplify testing.
      */
     @VisibleForTesting
@@ -346,34 +345,42 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         rowsIteration = planFactory.recheckFilter(command.rowFilter(), rowsIteration);
         rowsIteration = planFactory.limit(rowsIteration, command.limits().rows());
 
-        Plan optimizedPlan;
-        optimizedPlan = QUERY_OPT_LEVEL > 0
-                        ? rowsIteration.optimize()
-                        : rowsIteration;
-        optimizedPlan = KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT > 0 && QUERY_OPT_LEVEL <= 1
-                        ? optimizedPlan.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT)
-                        : optimizedPlan;
+        // Limit the number of intersected clauses before optimizing so we reduce the size of the
+        // plan given to the optimizer and hence reduce the plan search space and speed up optimization.
+        // It is possible that some index operators like ':' expand to a huge number of MATCH predicates
+        // (see CNDB-10085) and could overload the optimizer.
+        // The intersected subplans are ordered by selectivity in the way the best ones are at the beginning
+        // of the list, therefore this limit is unlikely to remove good branches of the tree.
+        // The limit here is higher than the final limit, so that the optimizer has a bit more freedom
+        // in which predicates it leaves in the plan and the probability of accidentally removing a good branch
+        // here is even lower.
+        Plan plan = rowsIteration.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT * 3);
 
-        if (optimizedPlan.contains(node -> node instanceof Plan.AnnIndexScan))
+        if (QUERY_OPT_LEVEL > 0)
+            plan = plan.optimize();
+
+        plan = plan.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
+
+        if (plan.contains(node -> node instanceof Plan.AnnIndexScan))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
-        if (optimizedPlan.contains(node -> node instanceof Plan.KeysSort))
+        if (plan.contains(node -> node instanceof Plan.KeysSort))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
 
         if (logger.isTraceEnabled())
-            logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
+            logger.trace("Query execution plan:\n" + plan.toStringRecursive());
 
         if (Tracing.isTracing())
         {
-            Tracing.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
+            Tracing.trace("Query execution plan:\n" + plan.toStringRecursive());
             List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
-            List<Plan.IndexScan> selectedIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
+            List<Plan.IndexScan> selectedIndexScans = plan.nodesOfType(Plan.IndexScan.class);
             Tracing.trace("Selecting {} {} of {} out of {} indexes",
                           selectedIndexScans.size(),
                           selectedIndexScans.size() > 1 ? "indexes with cardinalities" : "index with cardinality",
                           selectedIndexScans.stream().map(s -> "" + ((long) s.expectedKeys())).collect(Collectors.joining(", ")),
                           origIndexScans.size());
         }
-        return optimizedPlan;
+        return plan;
     }
 
     private Plan.KeysIteration buildKeysIterationPlan()

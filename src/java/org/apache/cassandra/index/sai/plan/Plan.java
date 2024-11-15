@@ -361,6 +361,7 @@ abstract public class Plan
 
     /**
      * Modifies all intersections to not intersect more clauses than the given limit.
+     * Retains the most selective clauses.
      */
     public final Plan limitIntersectedClauses(int clauseLimit)
     {
@@ -1700,7 +1701,8 @@ abstract public class Plan
         }
 
         /**
-         * Constructs a plan node representing an intersection of two key sets.
+         * Constructs a plan node representing an intersection of key sets.
+         * The subplans will be sorted by selectivity from the most selective to the least selective ones.
          * @param subplans a list of subplans for intersected key sets
          */
         public KeysIteration intersection(List<KeysIteration> subplans)
