@@ -55,8 +55,6 @@ import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
-import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -66,7 +64,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -91,7 +88,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                                                 .replace("\\d", "[0-9]");
 
     /// Special level definition for major compactions.
-    static final Level LEVEL_MAJOR = new Level(-1, 0, 0, 0, 1, 0, Double.POSITIVE_INFINITY);
+    static final Level LEVEL_MAXIMAL = new Level(-1, 0, 0, 0, 1, 0, Double.POSITIVE_INFINITY);
 
     private final Controller controller;
 
@@ -238,10 +235,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                                       UnifiedCompactionStrategy::startsAfter,
                                                                                       CompactionSSTable.firstKeyComparator,
                                                                                       CompactionSSTable.lastKeyComparator),
-                                                                 CompactionPick.create(nextTimeUUID(), LEVEL_MAJOR.index, group),
+                                                                 CompactionPick.create(nextTimeUUID(), LEVEL_MAXIMAL.index, group),
                                                                  Collections.emptyList(),
                                                                  arena,
-                                                                 LEVEL_MAJOR));
+                                                                 LEVEL_MAXIMAL));
             }
         }
         return aggregates;
@@ -265,11 +262,11 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                            OperationType.COMPACTION,
                                                            aggregate.getSelected().id());
                 if (txn != null)
-                {
-                    backgroundCompactions.setSubmitted(this, txn.opId(), aggregate);
                     createAndAddTasks(gcBefore, txn, getShardingStats(aggregate), permittedParallelism, tasks);
-                }
                 // we ignore splitOutput (always split according to the strategy's sharding) and do not need isMaximal
+
+                // Note: major compactions should not end up in the background compactions tracker to avoid wreaking
+                // havok in the thread assignment logic.
             }
 
             // If we have more arenas/non-overlapping sets than the permitted parallelism, we will try to run all the
