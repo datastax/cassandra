@@ -106,6 +106,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -115,6 +116,13 @@ import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K
 
 public class StorageAttachedIndex implements Index
 {
+    public static final String NGRAM_WITHOUT_QUERY_ANALYZER_WARNING =
+    "Using an ngram analyzer without defining a query_analyzer. " +
+    "This means that the same ngram analyzer will be applied to both indexed and queried column values. " +
+    "Applying ngram analysis to the queried values usually produces too many search tokens to be useful. " +
+    "The large number of tokens can also have a negative impact in performance. " +
+    "In most cases it's better to use a simpler query_analyzer such as the standard one.";
+
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
@@ -320,9 +328,16 @@ public class StorageAttachedIndex implements Index
         }
 
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
-        AbstractAnalyzer.fromOptions(type, options); // will throw if invalid
-        if (AbstractAnalyzer.hasQueryAnalyzer(options))
-            AbstractAnalyzer.fromOptionsQueryAnalyzer(type, options); // will throw if invalid
+
+        // Validate analyzers by building them
+        try (AbstractAnalyzer.AnalyzerFactory analyzerFactory = AbstractAnalyzer.fromOptions(type, options))
+        {
+            if (AbstractAnalyzer.hasQueryAnalyzer(options))
+                AbstractAnalyzer.fromOptionsQueryAnalyzer(type, options).close();
+            else if (analyzerFactory.isNGram())
+                ClientWarn.instance.warn(NGRAM_WITHOUT_QUERY_ANALYZER_WARNING);
+        }
+
         var config = IndexWriterConfig.fromOptions(null, type, options);
 
         // If we are indexing map entries we need to validate the sub-types
