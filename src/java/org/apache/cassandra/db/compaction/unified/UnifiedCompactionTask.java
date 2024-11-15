@@ -50,7 +50,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                  ShardManager shardManager,
                                  UnifiedCompactionStrategy.ShardingStats shardingStats)
     {
-        this(cfs, strategy, txn, gcBefore, shardManager, shardingStats, null, null, null, null);
+        this(cfs, strategy, txn, gcBefore, false, shardManager, shardingStats, null, null, null, null);
     }
 
 
@@ -58,6 +58,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                  UnifiedCompactionStrategy strategy,
                                  ILifecycleTransaction txn,
                                  int gcBefore,
+                                 boolean keepOriginals,
                                  ShardManager shardManager,
                                  UnifiedCompactionStrategy.ShardingStats shardingStats,
                                  Range<Token> operationRange,
@@ -65,16 +66,13 @@ public class UnifiedCompactionTask extends CompactionTask
                                  SharedCompactionProgress sharedProgress,
                                  SharedCompactionObserver sharedObserver)
     {
-        super(cfs, txn, gcBefore, strategy != null ? strategy.getController().getIgnoreOverlapsInExpirationCheck() : false, strategy, sharedObserver != null ? sharedObserver : strategy);
+        super(cfs, txn, gcBefore, keepOriginals, strategy, sharedObserver != null ? sharedObserver : strategy);
         this.shardManager = shardManager;
         this.shardingStats = shardingStats;
 
         if (operationRange != null)
-        {
             assert actuallyCompact != null : "Ranged tasks should use a set of sstables to compact";
-            assert sharedProgress != null : "Ranged tasks should use a shared progress object";
-            assert sharedObserver != null : "Ranged tasks should use a shared observer";
-        }
+
         this.operationRange = operationRange;
         this.sharedProgress = sharedProgress;
         if (sharedProgress != null)
@@ -105,7 +103,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                            earlyOpenAllowed,
                                            shardManager.boundaries(shardingStats.shardCountForDensity));
     }
-
+    strategy != null ? strategy.getController().getIgnoreOverlapsInExpirationCheck() : false
     @Override
     protected Range<Token> tokenRange()
     {
