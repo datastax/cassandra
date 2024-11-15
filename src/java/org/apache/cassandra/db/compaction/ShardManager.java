@@ -224,6 +224,49 @@ public interface ShardManager
     /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
     /// the given function on the combination of each shard range and the intersecting sstable set.
     ///
+    /// This version restricts the operation to the given token range, and assumes all sstables cover at least some
+    /// portion of that range.
+    default <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
+                                                                           Range<Token> operationRange,
+                                                                           int numShardsForDensity,
+                                                                           BiFunction<Collection<R>, Range<Token>, T> maker)
+    {
+        var boundaries = boundaries(numShardsForDensity);
+        List<T> tasks = new ArrayList<>();
+        SortingIterator<R> items = SortingIterator.create(CompactionSSTable.firstKeyComparator, sstables);
+        PriorityQueue<R> active = new PriorityQueue<>(CompactionSSTable.lastKeyComparator);
+        // Advance inside the range. This will add all sstables that start before the end of the covering shard.
+        boundaries.advanceTo(operationRange.left.nextValidToken());
+        while (items.hasNext() || !active.isEmpty())
+        {
+            if (active.isEmpty())
+            {
+                boundaries.advanceTo(items.peek().getFirst().getToken());
+                active.add(items.next());
+            }
+            Token shardEnd = boundaries.shardEnd();
+            if (shardEnd.compareTo(operationRange.right) >= 0)
+                shardEnd = null;    // Take all remaining sstables.
+
+            while (items.hasNext() && (shardEnd == null || items.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
+                active.add(items.next());
+
+            final T result = maker.apply(active, boundaries.shardSpan());
+            if (result != null)
+                tasks.add(result);
+
+            while (!active.isEmpty() && (shardEnd == null || active.peek().getLast().getToken().compareTo(shardEnd) <= 0))
+                active.poll();
+
+            if (!active.isEmpty()) // shardEnd must be non-null (otherwise the line above exhausts all)
+                boundaries.advanceTo(shardEnd.nextValidToken());
+        }
+        return tasks;
+    }
+
+    /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+    /// the given function on the combination of each shard range and the intersecting sstable set.
+    ///
     /// This version accepts a parallelism limit and will group shards together to fit within that limit.
     default <T, R extends CompactionSSTable> List<T> splitSSTablesInShardsLimited(Collection<R> sstables,
                                                                                   int numShardsForDensity,
@@ -241,6 +284,37 @@ public interface ShardManager
         var shards = splitSSTablesInShards(sstables,
                                            numShardsForDensity,
                                            (rangeSSTables, range) -> Pair.create(Set.copyOf(rangeSSTables), range));
+        return applyMaxParallelism(maxParallelism, maker, shards);
+    }
+
+    /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+    /// the given function on the combination of each shard range and the intersecting sstable set.
+    ///
+    /// This version accepts a parallelism limit and will group shards together to fit within that limit and a
+    /// restricted operation range.
+    default <T, R extends CompactionSSTable> List<T> splitSSTablesInShardsLimited(Collection<R> sstables,
+                                                                                  Range<Token> operationRange,
+                                                                                  int numShardsForDensity,
+                                                                                  int coveredShards,
+                                                                                  int maxParallelism,
+                                                                                  BiFunction<Collection<R>, Range<Token>, T> maker)
+    {
+        if (coveredShards <= maxParallelism)
+            return splitSSTablesInShards(sstables, operationRange, numShardsForDensity, maker);
+        // We may be in a simple case where we can reduce the number of shards by some power of 2.
+        int multiple = Integer.highestOneBit(coveredShards / maxParallelism);
+        if (maxParallelism * multiple == coveredShards)
+            return splitSSTablesInShards(sstables, operationRange, numShardsForDensity / multiple, maker);
+
+        var shards = splitSSTablesInShards(sstables,
+                                           operationRange,
+                                           numShardsForDensity,
+                                           (rangeSSTables, range) -> Pair.create(Set.copyOf(rangeSSTables), range));
+        return applyMaxParallelism(maxParallelism, maker, shards);
+    }
+
+    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelism(int maxParallelism, BiFunction<Collection<R>, Range<Token>, T> maker, List<Pair<Set<R>, Range<Token>>> shards)
+    {
         int actualParallelism = shards.size();
         if (maxParallelism >= actualParallelism)
         {
