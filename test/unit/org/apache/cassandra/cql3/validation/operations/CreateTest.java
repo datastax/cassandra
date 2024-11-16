@@ -627,6 +627,13 @@ public class CreateTest extends CQLTester
         testMemtableConfig("test_shortname", SkipListMemtable.FACTORY, SkipListMemtable.class);
         testMemtableConfig("default", MemtableParams.DEFAULT.factory(), defaultClass);
 
+        // Handle CC 4.0 memtable configuration given as a map
+        testMapMemtableConfig("", null, MemtableParams.DEFAULT.factory(), defaultClass);
+        testMapMemtableConfig("SkipListMemtable", "skiplist", MemtableParams.DEFAULT.factory(), defaultClass);
+        testMapMemtableConfig("TrieMemtable","trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
+        testMapMemtableConfig("TrieMemtableStage1", "trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
+        testMapMemtableConfig("PersistentMemoryMemtable", "skiplist", MemtableParams.DEFAULT.factory(), defaultClass);
+
         assertThrowsConfigurationException("The 'class_name' option must be specified.",
                                            "CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
                                            + " WITH memtable = 'test_empty_class';");
@@ -668,6 +675,17 @@ public class CreateTest extends CQLTester
         Assert.assertTrue(memtableClass.isInstance(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable()));
 
         assertSchemaOption("memtable", MemtableParams.DEFAULT.configurationKey().equals(memtableConfig) ? null : memtableConfig);
+    }
+
+    private void testMapMemtableConfig(String memtableConfig, String expectedMemtableConfig, Memtable.Factory factoryInstance, Class<? extends Memtable> memtableClass) throws Throwable
+    {
+        String memtableMap = "".equals(memtableConfig) ? memtableConfig : String.format("'class' : '%s'", memtableConfig);
+        createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
+                    + " WITH memtable = {" + memtableMap + "};");
+        assertSame(factoryInstance, getCurrentColumnFamilyStore().metadata().params.memtable.factory());
+        Assert.assertTrue(memtableClass.isInstance(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable()));
+
+        assertSchemaOption("memtable", expectedMemtableConfig);
     }
 
     void assertSchemaOption(String option, Object expected) throws Throwable
