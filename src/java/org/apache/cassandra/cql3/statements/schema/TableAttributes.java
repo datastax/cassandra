@@ -171,7 +171,28 @@ public final class TableAttributes extends PropertyDefinitions
             builder.compression(CompressionParams.fromMap(getMap(COMPRESSION)));
 
         if (hasOption(MEMTABLE))
-            builder.memtable(MemtableParams.get(getString(MEMTABLE)));
+        {
+            // Handle deserialzation of Astra/CC 4.0 schema with memtable option as a map
+            if (properties.get(MEMTABLE.toString()) instanceof Map)
+            {
+                String memtableClass = getMap(MEMTABLE)
+                             .entrySet()
+                             .stream()
+                             .filter(e -> e.getKey().equals("class"))
+                             .map(Map.Entry::getValue)
+                             .findFirst()
+                             .orElse(null);
+                // Not exhaustive, but avoids raising an error upgrading from a CC 4.0 schema
+                if (memtableClass == null)
+                    builder.memtable(MemtableParams.get(null));
+                else if ("SkipListMemtable".equalsIgnoreCase(memtableClass) || "PersistentMemoryMemtable".equalsIgnoreCase(memtableClass))
+                    builder.memtable(MemtableParams.get("skiplist"));
+                else
+                    builder.memtable(MemtableParams.get("trie"));
+            }
+            else
+                builder.memtable(MemtableParams.get(getString(MEMTABLE)));
+        }
 
         if (hasOption(DEFAULT_TIME_TO_LIVE))
             builder.defaultTimeToLive(getInt(DEFAULT_TIME_TO_LIVE));
