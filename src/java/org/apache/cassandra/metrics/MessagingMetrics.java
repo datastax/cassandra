@@ -145,6 +145,18 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
         recordDroppedMessage(verb, timeElapsed, timeUnit, true);
     }
 
+    @Override
+    public void recordMessageStageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+    {
+        // NOOP
+    }
+
+    @Override
+    public void recordTotalMessageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+    {
+        // NOOP
+    }
+
     public void recordDroppedMessage(Message<?> message, long timeElapsed, TimeUnit timeUnit)
     {
         recordDroppedMessage(message.verb(), timeElapsed, timeUnit, message.isCrossNode());

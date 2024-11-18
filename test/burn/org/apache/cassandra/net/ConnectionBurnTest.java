@@ -89,6 +89,16 @@ public class ConnectionBurnTest
         public void recordInternalLatency(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit timeUnit) {}
 
         public void recordInternodeDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
+
+        @Override
+        public void recordMessageStageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+        {
+        }
+
+        @Override
+        public void recordTotalMessageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+        {
+        }
     }
 
     static class Inbound
@@ -562,6 +572,13 @@ public class ConnectionBurnTest
             {
                 forId(header.id).onExecuted(messageSize, header, timeElapsed, unit);
                 wrapped.onExecuted(messageSize, header, timeElapsed, unit);
+            }
+
+            @Override
+            public void onMessageHandlingCompleted(Message.Header header, long timeElapsed, TimeUnit unit)
+            {
+                forId(header.id).onMessageHandlingCompleted(header, timeElapsed, unit);
+                wrapped.onMessageHandlingCompleted(header, timeElapsed, unit);
             }
         }
 
