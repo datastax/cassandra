@@ -333,6 +333,11 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     {
     }
 
+    @Override
+    public void onMessageHandlingCompleted(Message.Header header, long timeElapsed, TimeUnit unit)
+    {
+    }
+
     InboundCounters inboundCounters()
     {
         return inbound.countersFor(outbound.type());
