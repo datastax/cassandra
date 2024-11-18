@@ -169,7 +169,7 @@ public class GuardrailsConfig
         enforceDefault(logged_batch_enabled, v -> logged_batch_enabled = v, true, true);
         enforceDefault(batch_size_warn_threshold_in_kb, v -> batch_size_warn_threshold_in_kb = v, 64, 64);
         enforceDefault(batch_size_fail_threshold_in_kb, v -> batch_size_fail_threshold_in_kb = v, 640, 640);
-        enforceDefault(unlogged_batch_across_partitions_warn_threshold, v -> unlogged_batch_across_partitions_warn_threshold = v, 10, 10);
+        enforceDefault(unlogged_batch_across_partitions_warn_threshold, v -> unlogged_batch_across_partitions_warn_threshold = v, -1, -1);
 
         enforceDefault(truncate_table_enabled, v -> truncate_table_enabled = v, true, true);
 
