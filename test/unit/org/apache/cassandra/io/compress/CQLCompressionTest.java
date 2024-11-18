@@ -175,6 +175,39 @@ public class CQLCompressionTest extends CQLTester
     }
 
     @Test
+    public void adaptiveFlushTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text PRIMARY KEY, v text) WITH compression = {'class': 'AdaptiveCompressor'};");
+        DatabaseDescriptor.setFlushCompression(Config.FlushCompression.fast);
+        ColumnFamilyStore store = flushTwice();
+
+        // Should flush as LZ4
+        Set<SSTableReader> sstables = store.getLiveSSTables();
+        sstables.forEach(sstable -> {
+            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof LZ4Compressor);
+        });
+        store.truncateBlocking();
+
+        DatabaseDescriptor.setFlushCompression(Config.FlushCompression.adaptive);
+        store = flushTwice();
+
+        // Should flush as Adaptive
+        sstables = store.getLiveSSTables();
+        sstables.forEach(sstable -> {
+            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof AdaptiveCompressor);
+        });
+
+        // Should compact to Adaptive
+        compact();
+
+        sstables = store.getLiveSSTables();
+        assertEquals(1, sstables.size());
+        store.getLiveSSTables().forEach(sstable -> {
+            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof AdaptiveCompressor);
+        });
+    }
+
+    @Test
     public void deflateFlushTest() throws Throwable
     {
         createTable("CREATE TABLE %s (k text PRIMARY KEY, v text) WITH compression = {'class': 'DeflateCompressor'};");
