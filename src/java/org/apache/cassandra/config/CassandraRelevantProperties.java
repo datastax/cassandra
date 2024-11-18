@@ -29,6 +29,8 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.compress.AdaptiveCompressor;
+import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
@@ -329,6 +331,11 @@ public enum CassandraRelevantProperties
     DEFAULT_COMPACTION_LOG_MINUTES("default.compaction.log_minutes"),
     DEFAULT_INDEX_CLASS("cassandra.default_index_implementation_class"),
     DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES("default.provide.overlapping.tombstones"),
+    /**
+     * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
+     * Can be "fast", which selects {@link LZ4Compressor}, or "adaptive" which selects {@link AdaptiveCompressor}.
+     */
+    DEFAULT_SSTABLE_COMPRESSION("cassandra.default_sstable_compression", "fast"),
     // Allow disabling deletions of corrupt index components for troubleshooting
     DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
     /** determinism properties for testing */
