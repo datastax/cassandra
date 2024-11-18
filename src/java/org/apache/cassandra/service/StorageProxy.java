@@ -400,8 +400,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             EndpointsForToken selected = targets.contacts().withoutSelf();
             Replicas.temporaryAssertFull(selected); // TODO CASSANDRA-14548
-            Stage.COUNTER_MUTATION.executor()
-                                  .execute(counterWriteTask(mutation, targets.withContacts(selected), responseHandler, localDataCenter));
+            Stage.COUNTER_MUTATION.execute(counterWriteTask(mutation, targets.withContacts(selected), responseHandler, localDataCenter));
         };
 
         ReadRepairMetrics.init();
