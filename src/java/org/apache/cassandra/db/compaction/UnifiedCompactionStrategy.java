@@ -68,6 +68,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.utils.Throwables.perform;
 
@@ -172,6 +173,11 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return "N";
     }
 
+    private static UUID nextTimeUUID()
+    {
+        return UUIDGen.withSequence(UUIDGen.getTimeUUID(), 0);
+    }
+
     @Override
     public Collection<Collection<CompactionSSTable>> groupSSTablesForAntiCompaction(Collection<? extends CompactionSSTable> sstablesToGroup)
     {
@@ -227,7 +233,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
                 for (Collection<CompactionSSTable> set : groups)
                 {
-                    LifecycleTransaction txn = realm.tryModify(set, OperationType.COMPACTION);
+                    LifecycleTransaction txn = realm.tryModify(set, OperationType.COMPACTION, nextTimeUUID());
                     // Further split each of these into up to permittedParallelism tasks to run in parallel.
                     if (txn != null)
                         createAndAddTasks(gcBefore, txn, makeShardingStats(txn), permittedParallelism, tasks);
@@ -327,8 +333,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         // TODO - we should perhaps consider executing this code less frequently than legacy strategies
         // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
 
-        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables. 
-        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction 
+        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables.
+        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction
         // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
         Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
                                                                      .instance
@@ -1532,7 +1538,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // greater than F. See {@link Controller#MAX_SSTABLES_TO_COMPACT_OPTION} for more details.
                 return CompactionAggregate.createUnified(allSSTablesSorted,
                                                          maxOverlap,
-                                                         CompactionPick.create(index, allSSTablesSorted),
+                                                         CompactionPick.create(nextTimeUUID(), index, allSSTablesSorted),
                                                          Collections.emptySet(),
                                                          arena,
                                                          level);
@@ -1548,17 +1554,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 if (count <= maxSSTablesToCompact)
                     return CompactionAggregate.createUnified(allSSTablesSorted,
                                                              maxOverlap,
-                                                             CompactionPick.create(index, allSSTablesSorted),
+                                                             CompactionPick.create(nextTimeUUID(), index, allSSTablesSorted),
                                                              Collections.emptySet(),
                                                              arena,
                                                              level);
 
-                CompactionPick pick = CompactionPick.create(index, pullOldestSSTables(maxSSTablesToCompact));
+                CompactionPick pick = CompactionPick.create(nextTimeUUID(), index, pullOldestSSTables(maxSSTablesToCompact));
                 count -= maxSSTablesToCompact;
                 List<CompactionPick> pending = new ArrayList<>();
                 while (count >= threshold)
                 {
-                    pending.add(CompactionPick.create(index, pullOldestSSTables(maxSSTablesToCompact)));
+                    pending.add(CompactionPick.create(nextTimeUUID(), index, pullOldestSSTables(maxSSTablesToCompact)));
                     count -= maxSSTablesToCompact;
                 }
 
@@ -1592,7 +1598,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (size - pos >= level.threshold) // can only happen in the levelled case.
             {
                 assert size - pos < maxSSTablesToCompact; // otherwise it should have already been picked
-                pending.add(CompactionPick.create(level.index, allSSTablesSorted));
+                pending.add(CompactionPick.create(nextTimeUUID(), level.index, allSSTablesSorted));
             }
             return pending;
         }
@@ -1655,7 +1661,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // threshold (which corresponds to pickSize == step, always the case for tiered); in the case of
                 // levelled compaction, when we compact more than 1 but less than F sstables on a level (which
                 // corresponds to pickSize > step), it is an operation that is triggered on the same level.
-                list.add(CompactionPick.create(pickSize > step ? level : level - 1,
+                list.add(CompactionPick.create(nextTimeUUID(),
+                                               pickSize > step ? level : level - 1,
                                                pullOldestSSTables(pickSize)));
                 pos += pickSize;
             }
@@ -1665,7 +1672,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (pos + step <= total)
             {
                 pickSize = ((total - pos) / step) * step;
-                list.add(CompactionPick.create(pickSize > step ? level : level - 1,
+                list.add(CompactionPick.create(nextTimeUUID(),
+                                               pickSize > step ? level : level - 1,
                                                pullOldestSSTables(pickSize)));
                 pos += pickSize;
             }

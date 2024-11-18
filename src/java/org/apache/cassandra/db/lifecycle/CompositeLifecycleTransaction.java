@@ -18,10 +18,14 @@
 
 package org.apache.cassandra.db.lifecycle;
 
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.UUIDGen;
 
 /// Composite lifecycle transaction. This is a wrapper around a lifecycle transaction that allows for multiple partial
 /// operations that comprise the whole transaction. This is used to parallelize compaction operations over individual
@@ -64,9 +68,10 @@ public class CompositeLifecycleTransaction
     /// Register one part of the composite transaction. Every part must register itself before the composite transaction
     /// is initialized and the parts are allowed to proceed.
     /// @param part the part to register
-    public int register(PartialLifecycleTransaction part)
+    public UUID register(PartialLifecycleTransaction part)
     {
-        return partsToCommitOrAbort.getAndIncrement();
+        int index = partsToCommitOrAbort.incrementAndGet();
+        return UUIDGen.withSequence(mainTransaction.opId(), index);
     }
 
     /// Complete the initialization of the composite transaction. This must be called before any of the parts are
