@@ -35,6 +35,7 @@ import com.google.common.collect.Sets;
 import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
@@ -665,7 +666,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     {
         assert executionController != null && executionController.validForReadOn(cfs);
         if (Tracing.traceSinglePartitions())
-            Tracing.trace("Executing single-partition query on {}", cfs.name);
+            Tracing.trace("Executing single-partition query on {}; stage READ pending: {}, active: {}", cfs.name, Stage.READ.getPendingTaskCount(), Stage.READ.getActiveTaskCount());
 
         return queryMemtableAndDiskInternal(cfs, executionController, Clock.Global.nanoTime());
     }
@@ -677,7 +678,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     {
         assert executionController != null && executionController.validForReadOn(cfs);
         if (Tracing.traceSinglePartitions())
-            Tracing.trace("Executing single-partition query on {}", cfs.name);
+            Tracing.trace("Executing single-partition query on {}; stage READ pending: {}, active: {}", cfs.name, Stage.READ.getPendingTaskCount(), Stage.READ.getActiveTaskCount());
 
         return queryMemtableAndDiskInternal(cfs, view, rowTransformer, executionController, Clock.Global.nanoTime());
     }
