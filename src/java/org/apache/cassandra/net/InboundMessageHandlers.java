@@ -87,6 +87,8 @@ public final class InboundMessageHandlers
         LatencyConsumer internodeLatencyRecorder(InetAddressAndPort to);
         void recordInternalLatency(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit timeUnit);
         void recordInternodeDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit);
+        void recordMessageStageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit);
+        void recordTotalMessageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit);
     }
 
     public InboundMessageHandlers(InetAddressAndPort self,
@@ -268,6 +270,13 @@ public final class InboundMessageHandlers
             public void onExecuted(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 counters.removePending(messageSize);
+                globalMetrics.recordMessageStageProcessingTime(header.verb, header.from, timeElapsed, unit);
+            }
+
+            @Override
+            public void onMessageHandlingCompleted(Header header, long timeElapsed, TimeUnit unit)
+            {
+                globalMetrics.recordTotalMessageProcessingTime(header.verb, header.from, timeElapsed, unit);
             }
 
             @Override
