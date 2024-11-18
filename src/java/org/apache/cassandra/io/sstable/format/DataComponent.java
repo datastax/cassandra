@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.io.sstable.format;
 
+import java.util.Optional;
+
 import org.apache.cassandra.config.Config.FlushCompression;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
@@ -88,13 +90,21 @@ public class DataComponent
                 case fast:
                     if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
                     {
-                        // The default compressor is generally fast (LZ4 with 16KiB block size)
-                        compressionParams = CompressionParams.DEFAULT;
+                        compressionParams = CompressionParams.FAST;
+                        break;
+                    }
+                    // else fall through
+                case adaptive:
+                    if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
+                    {
+                        compressionParams = CompressionParams.FAST_ADAPTIVE;
                         break;
                     }
                     // else fall through
                 case table:
                 default:
+                    compressionParams = Optional.ofNullable(compressionParams.forUse(ICompressor.Uses.FAST_COMPRESSION))
+                                                .orElse(compressionParams);
                     break;
             }
         }
