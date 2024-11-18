@@ -1258,8 +1258,8 @@ public abstract class CQLTester
                   .atMost(10, TimeUnit.MINUTES)
                   .pollDelay(0, TimeUnit.MILLISECONDS)
                   .pollInterval(1, TimeUnit.MILLISECONDS)
-                  .until(() -> Stage.VIEW_MUTATION.executor().getPendingTaskCount() == 0 &&
-                               Stage.VIEW_MUTATION.executor().getActiveTaskCount() == 0);
+                  .until(() -> Stage.VIEW_MUTATION.getPendingTaskCount() == 0 &&
+                               Stage.VIEW_MUTATION.getActiveTaskCount() == 0);
     }
 
     /**
@@ -1592,7 +1592,7 @@ public abstract class CQLTester
     {
         try
         {
-            Stage.TRACING.executor().submit(() -> {}).get();
+            Stage.TRACING.submit(() -> {}).get();
         }
         catch (Throwable t)
         {

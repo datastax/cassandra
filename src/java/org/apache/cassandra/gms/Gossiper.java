@@ -1129,7 +1129,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         long now = currentTimeMillis();
         long nowNano = nanoTime();
 
-        long pending = Stage.GOSSIP.executor().getPendingTaskCount();
+        long pending = Stage.GOSSIP.getPendingTaskCount();
         if (pending > 0 && lastProcessedMessageAt < now - 1000)
         {
             // if some new messages just arrived, give the executor some time to work on them

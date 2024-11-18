@@ -106,7 +106,7 @@ public class TraceStateImpl extends TraceState
 
     void executeMutation(final Mutation mutation)
     {
-        Future<Void> fut = Stage.TRACING.executor().submit(() -> mutateWithCatch(clientState, mutation), null);
+        Future<Void> fut = Stage.TRACING.submit(() -> mutateWithCatch(clientState, mutation), null);
         boolean ret = pendingFutures.add(fut);
         if (!ret)
             logger.warn("Failed to insert pending future, tracing synchronization may not work");
