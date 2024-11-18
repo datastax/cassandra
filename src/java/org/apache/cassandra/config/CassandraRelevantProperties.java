@@ -334,6 +334,11 @@ public enum CassandraRelevantProperties
     CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class"),
 
     /**
+     * Which class to use when notifying about stage task execution
+     */
+    CUSTOM_TASK_EXECUTION_CALLBACK_CLASS("cassandra.custom_task_execution_callback_class"),
+
+    /**
      * Used to support directory creation for different file system and remote/local conversion
      */
     CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
