@@ -2992,7 +2992,9 @@ public class DatabaseDescriptor
 
     public static Config.FlushCompression getFlushCompression()
     {
-        return conf.flush_compression;
+        return Objects.requireNonNullElseGet(conf.flush_compression, () -> shouldUseAdaptiveCompressionByDefault()
+                                                                           ? Config.FlushCompression.adaptive
+                                                                           : Config.FlushCompression.fast);
     }
 
     public static void setFlushCompression(Config.FlushCompression compression)
@@ -3000,7 +3002,12 @@ public class DatabaseDescriptor
         conf.flush_compression = compression;
     }
 
-   /**
+    public static boolean shouldUseAdaptiveCompressionByDefault()
+    {
+        return CassandraRelevantProperties.DEFAULT_SSTABLE_COMPRESSION.getString().equals("adaptive");
+    }
+
+    /**
     * Maximum number of buffers in the compression pool. The default value is 3, it should not be set lower than that
     * (one segment in compression, one written to, one in reserve); delays in compression may cause the log to use
     * more, depending on how soon the sync policy stops all writing threads.
