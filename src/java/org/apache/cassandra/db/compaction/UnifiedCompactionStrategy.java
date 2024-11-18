@@ -172,7 +172,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return "N";
     }
 
-    private static UUID nextTimeUUID()
+    /// Generate a time-based UUID for unified compaction tasks. These IDs' sequence numbers are 0 for non-parallellized
+    /// tasks. Parallelized tasks update the transaction ID to put the task's index in the parallel set as the sequence
+    /// number.
+    public static UUID nextTimeUUID()
     {
         return UUIDGen.withSequence(UUIDGen.getTimeUUID(), 0);
     }

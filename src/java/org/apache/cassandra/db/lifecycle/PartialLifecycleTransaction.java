@@ -207,6 +207,12 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
         }
     }
 
+    @Override
+    public String toString()
+    {
+        return opIdString();
+    }
+
     public static class AbortedException extends RuntimeException
     {
         public AbortedException(String message)
