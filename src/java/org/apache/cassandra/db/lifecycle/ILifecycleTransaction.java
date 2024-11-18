@@ -41,6 +41,13 @@ public interface ILifecycleTransaction extends Transactional, LifecycleNewTracke
     boolean isOffline();
     UUID opId();
 
+    /// Op identifier as a string to use in debug prints. Usually just the opId, with added part information for partial
+    /// transactions.
+    default String opIdString()
+    {
+        return opId().toString();
+    }
+
     void cancel(SSTableReader removedSSTable);
 
     default void abort()

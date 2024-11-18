@@ -86,7 +86,7 @@ public class LeveledCompactionTask extends CompactionTask
                                    .stream()
                                    .map(sstable -> String.format("%s (level=%s, size=%s)", sstable, sstable.getSSTableLevel(), sstable.onDiskLength()))
                                    .collect(Collectors.joining(",")),
-                        transaction.opId());
+                        transaction.opIdString());
             // Note that we have removed files that are still marked as compacting.
             // This suboptimal but ok since the caller will unmark all the sstables at the end.
             int l0SSTableCount = 0;
@@ -107,7 +107,7 @@ public class LeveledCompactionTask extends CompactionTask
                             largestL0SSTable,
                             largestL0SSTable.getSSTableLevel(),
                             largestL0SSTable.onDiskLength(),
-                            transaction.opId());
+                            transaction.opIdString());
                 transaction.cancel(largestL0SSTable);
                 return true;
             }

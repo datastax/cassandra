@@ -20,6 +20,9 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /// Composite lifecycle transaction. This is a wrapper around a lifecycle transaction that allows for multiple partial
 /// operations that comprise the whole transaction. This is used to parallelize compaction operations over individual
 /// output shards where the compaction sources are shared among the operations; in this case we can only release the
@@ -41,11 +44,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 /// and we consider that all parts will have the same opinion about the obsoletion of the originals.
 public class CompositeLifecycleTransaction
 {
+    protected static final Logger logger = LoggerFactory.getLogger(CompositeLifecycleTransaction.class);
+
     final LifecycleTransaction mainTransaction;
     private final AtomicInteger partsToCommitOrAbort;
     private volatile boolean obsoleteOriginalsRequested;
     private volatile boolean wasAborted;
     private volatile boolean initializationComplete;
+    private volatile int partsCount = 0;
 
     public CompositeLifecycleTransaction(LifecycleTransaction mainTransaction)
     {
@@ -58,16 +64,26 @@ public class CompositeLifecycleTransaction
     /// Register one part of the composite transaction. Every part must register itself before the composite transaction
     /// is initialized and the parts are allowed to proceed.
     /// @param part the part to register
-    public void register(PartialLifecycleTransaction part)
+    public int register(PartialLifecycleTransaction part)
     {
-        partsToCommitOrAbort.incrementAndGet();
+        return partsToCommitOrAbort.getAndIncrement();
     }
 
     /// Complete the initialization of the composite transaction. This must be called before any of the parts are
     /// executed.
     public void completeInitialization()
     {
+        partsCount = partsToCommitOrAbort.get();
         initializationComplete = true;
+        // TODO: Switch to trace before merging.
+        if (logger.isDebugEnabled())
+            logger.debug("Composite transaction {} initialized with {} parts.", mainTransaction.opIdString(), partsCount);
+    }
+
+    /// Get the number of parts in the composite transaction. 0 if the transaction is not yet initialized.
+    public int partsCount()
+    {
+        return partsCount;
     }
 
     /// Request that the original sstables are obsoleted when the transaction is committed. Note that this class has
@@ -109,9 +125,24 @@ public class CompositeLifecycleTransaction
         if (partsToCommitOrAbort.decrementAndGet() == 0)
         {
             if (wasAborted)
+            {
+                // TODO: Switch to trace before merging.
+                if (logger.isDebugEnabled())
+                    logger.debug("Composite transaction {} with {} parts aborted.",
+                                 mainTransaction.opIdString(),
+                                 partsCount);
+
                 mainTransaction.abort();
+            }
             else
             {
+                // TODO: Switch to trace before merging.
+                if (logger.isDebugEnabled())
+                    logger.debug("Composite transaction {} with {} parts completed{}.",
+                                 mainTransaction.opIdString(),
+                                 partsCount,
+                                 obsoleteOriginalsRequested ? " with obsoletion" : "");
+
                 mainTransaction.checkpoint();
                 if (obsoleteOriginalsRequested)
                     mainTransaction.obsoleteOriginals();
