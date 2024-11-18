@@ -215,11 +215,6 @@ public class StubIndex implements Index
         return new Searcher(command);
     }
 
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand readCommand)
-    {
-        return (iter, command) -> iter;
-    }
-
     protected class Searcher implements Index.Searcher
     {
         private final ReadCommand command;

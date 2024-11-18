@@ -170,7 +170,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                                                                    command.selectsFullPartition(),
                                                                    enforceStrictLiveness);
 
-            // In case of top-k query, do not trim reconciled rows here because QueryPlan#postProcessor() needs to compare all rows
+            // In case of top-k query, do not trim reconciled rows here because sorting needs to compare all rows
             if (command.isTopK())
                 this.mergedResultCounter.onlyCount();
         }

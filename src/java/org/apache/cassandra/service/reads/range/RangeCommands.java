@@ -27,7 +27,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
-import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.service.QueryInfoTracker;
@@ -61,7 +60,7 @@ public class RangeCommands
         // otherwise we can skip the data limits here and let the CQL layer apply them.
         RangeCommandIterator rangeCommands = rangeCommandIterator(command, consistencyLevel, queryStartNanoTime, readTracker);
         return consistencyLevel.needsReconciliation()
-                ? command.limits().filter(command.postReconciliationProcessing(rangeCommands),
+                ? command.limits().filter(rangeCommands,
                                           command.nowInSec(),
                                           command.selectsFullPartition(),
                                           command.metadata().enforceStrictLiveness())
