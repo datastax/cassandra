@@ -104,7 +104,7 @@ public class CompactionTask extends AbstractCompactionTask
         if (observer != null)
             addObserver(observer);
 
-        logger.debug("Created compaction task with id {} and strategy {}", txn.opId(), strategy);
+        logger.debug("Created compaction task with id {} and strategy {}", txn.opIdString(), strategy);
     }
 
     /**
@@ -164,7 +164,7 @@ public class CompactionTask extends AbstractCompactionTask
             logger.warn("insufficient space to compact all requested files. {}MB required, {} for compaction {} - removing largest SSTable: {}",
                         (float) expectedSize / 1024 / 1024,
                         StringUtils.join(transaction.originals(), ", "),
-                        transaction.opId(),
+                        transaction.opIdString(),
                         removedSSTable);
             // Note that we have removed files that are still marked as compacting.
             // This suboptimal but ok since the caller will unmark all the sstables at the end.
@@ -248,7 +248,7 @@ public class CompactionTask extends AbstractCompactionTask
         if (shouldReduceScopeForSpace() && !buildCompactionCandidatesForAvailableDiskSpace(actuallyCompact, !fullyExpiredSSTables.isEmpty()))
         {
             // The set of sstables has changed (one or more were excluded due to limited available disk space).
-            // We need to recompute the overlaps between sstables. The iterators used in the compaction controller 
+            // We need to recompute the overlaps between sstables. The iterators used in the compaction controller
             // and tracker will reflect the changed set of sstables made by LifecycleTransaction.cancel(),
             // so refreshing the overlaps will be based on the updated set of sstables.
             controller.refreshOverlaps();
@@ -294,6 +294,7 @@ public class CompactionTask extends AbstractCompactionTask
     {
         final CompactionController controller;
         final UUID taskId;
+        final String taskIdString;
         final RateLimiter limiter;
         private final long startNanos;
         private final long startTime;
@@ -329,6 +330,7 @@ public class CompactionTask extends AbstractCompactionTask
             this.controller = controller;
             this.actuallyCompact = actuallyCompact;
             this.taskId = transaction.opId();
+            this.taskIdString = transaction.opIdString();
 
             this.limiter = CompactionManager.instance.getRateLimiter();
             this.startNanos = System.nanoTime();
@@ -390,7 +392,7 @@ public class CompactionTask extends AbstractCompactionTask
                 // all the sstables (that existed when we started)
                 if (logger.isDebugEnabled())
                 {
-                    debugLogCompactingMessage(taskId);
+                    debugLogCompactingMessage(taskIdString);
                 }
 
                 if (!controller.realm.isCompactionActive())
@@ -492,7 +494,7 @@ public class CompactionTask extends AbstractCompactionTask
                 }
 
                 if (logger.isDebugEnabled())
-                    debugLogCompactionSummaryInfo(taskId, System.nanoTime() - startNanos, totalKeysWritten, newSStables, this);
+                    debugLogCompactionSummaryInfo(taskIdString, System.nanoTime() - startNanos, totalKeysWritten, newSStables, this);
                 if (logger.isTraceEnabled())
                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, this);
                 if (strategy != null)
@@ -1015,7 +1017,7 @@ public class CompactionTask extends AbstractCompactionTask
         return max;
     }
 
-    private void debugLogCompactionSummaryInfo(UUID taskId,
+    private void debugLogCompactionSummaryInfo(String taskId,
                                                long durationInNano,
                                                long totalKeysWritten,
                                                Collection<SSTableReader> newSStables,
@@ -1063,7 +1065,7 @@ public class CompactionTask extends AbstractCompactionTask
                      mergeSummary);
     }
 
-    private void debugLogCompactingMessage(UUID taskId)
+    private void debugLogCompactingMessage(String taskId)
     {
         Set<SSTableReader> originals = transaction.originals();
         StringBuilder ssTableLoggerMsg = new StringBuilder(originals.size() * 100);
@@ -1073,10 +1075,11 @@ public class CompactionTask extends AbstractCompactionTask
         ssTableLoggerMsg.append(") [");
         for (SSTableReader sstr : originals)
         {
-            ssTableLoggerMsg.append(sstr.getFilename())
-                            .append(":level=")
-                            .append(sstr.getSSTableLevel())
-                            .append(", ");
+            ssTableLoggerMsg.append(sstr.getFilename());
+            if (sstr.getSSTableLevel() != 0)
+                ssTableLoggerMsg.append(":level=")
+                                .append(sstr.getSSTableLevel());
+            ssTableLoggerMsg.append(", ");
         }
         ssTableLoggerMsg.append(']');
 
