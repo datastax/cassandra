@@ -403,7 +403,7 @@ public class Config
     @Replaces(oldName = "commitlog_segment_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
     public DataStorageSpec.IntMebibytesBound commitlog_segment_size = new DataStorageSpec.IntMebibytesBound("32MiB");
     public ParameterizedClass commitlog_compression;
-    public FlushCompression flush_compression = FlushCompression.fast;
+    public FlushCompression flush_compression;
     public int commitlog_max_compression_buffers_in_pool = 3;
     public DiskAccessMode commitlog_disk_access_mode = DiskAccessMode.legacy;
     @Replaces(oldName = "periodic_commitlog_sync_lag_block_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
@@ -1203,6 +1203,7 @@ public class Config
     {
         none,
         fast,
+        adaptive,
         table
     }
 
