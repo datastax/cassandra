@@ -219,6 +219,22 @@ public class GuardrailQueryFiltersTest extends GuardrailTester
                           () -> "SELECT * FROM %s WHERE x = '1 2 3' AND y = '4 5 6'");
     }
 
+    @Test
+    public void testDisabledGuardrail() throws Throwable
+    {
+        config().query_filters_warn_threshold = -1;
+        config().query_filters_fail_threshold = -1;
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(v) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        assertValid("SELECT * FROM %s WHERE v = '1'");
+        assertValid("SELECT * FROM %s WHERE v = '1 2 3 4 5 6'");
+    }
+
     private void assertWarns(String query, int operations) throws Throwable
     {
         assertWarns(format("Select query has %s column value filters after analysis, this exceeds the warning threshold of %s.",
