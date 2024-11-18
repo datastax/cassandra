@@ -59,6 +59,12 @@ public class GuardrailQueryFiltersTest extends GuardrailTester
         config().query_filters_warn_threshold = -1;
         testValidationOfStrictlyPositiveProperty((c, v) -> c.query_filters_fail_threshold = v.intValue(),
                                                  "query_filters_fail_threshold");
+
+        // warn threshold larger than fail threshold
+        config().query_filters_warn_threshold = 2;
+        config().query_filters_fail_threshold = 1;
+        assertConfigFails(config()::validate, "The warn threshold 2 for the query_filters_threshold guardrail " +
+                                              "should be lower than the failure threshold 1");
     }
 
     @Test
@@ -144,7 +150,7 @@ public class GuardrailQueryFiltersTest extends GuardrailTester
         assertFails("SELECT * FROM %s WHERE k1 = 0 AND k2 = 0 AND x = '1 2 3 4 5'", 5);
         assertFails("SELECT * FROM %s WHERE k1 = 0 AND k2 = 0 AND x = '1 2 3 4 5 6'", 6);
 
-        // partial partition key restrictions don't count as filters
+        // partial partition key restrictions do count as filters
         assertValid("SELECT * FROM %s WHERE k1 = 0 AND x = '1' ALLOW FILTERING");
         assertWarns("SELECT * FROM %s WHERE k1 = 0 AND x = '1 2' ALLOW FILTERING", 3);
         assertWarns("SELECT * FROM %s WHERE k1 = 0 AND x = '1 2 3' ALLOW FILTERING", 4);

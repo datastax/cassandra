@@ -145,7 +145,7 @@ public class GuardrailsConfig
     public volatile Integer offset_rows_warn_threshold;
     public volatile Integer offset_rows_failure_threshold;
 
-    // Limit the number of column value filters per SELECT query (after applying analyzers)
+    // Limit the number of column value filters per SELECT query (after applying analyzers, in case they are used)
     public volatile Integer query_filters_warn_threshold;
     public volatile Integer query_filters_fail_threshold;
 
