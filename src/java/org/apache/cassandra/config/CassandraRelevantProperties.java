@@ -281,6 +281,11 @@ public enum CassandraRelevantProperties
      */
     CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
 
+    /**
+     * Which class to use when notifying about stage task execution
+     */
+    CUSTOM_TASK_EXECUTION_CALLBACK_CLASS("cassandra.custom_task_execution_callback_class"),
+
     /** Which class to use for token metadata provider */
     CUSTOM_TMD_PROVIDER_PROPERTY("cassandra.custom_token_metadata_provider_class"),
 
