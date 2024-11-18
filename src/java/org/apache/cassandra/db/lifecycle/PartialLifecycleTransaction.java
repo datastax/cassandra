@@ -23,12 +23,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import javax.annotation.concurrent.NotThreadSafe;
-
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.UUIDGen;
 
 /// Partial lifecycle transaction. This works together with a CompositeLifecycleTransaction to allow for multiple
 /// tasks using a shared transaction to be committed or aborted together. This is used to parallelize compaction
@@ -42,13 +41,13 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     final CompositeLifecycleTransaction composite;
     final ILifecycleTransaction mainTransaction;
     final AtomicBoolean committedOrAborted = new AtomicBoolean(false);
-    final int index;
+    final UUID id;
 
     public PartialLifecycleTransaction(CompositeLifecycleTransaction composite)
     {
         this.composite = composite;
         this.mainTransaction = composite.mainTransaction;
-        this.index = composite.register(this);
+        this.id = composite.register(this);
     }
 
     public void checkpoint()
@@ -190,13 +189,13 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     @Override
     public UUID opId()
     {
-        return mainTransaction.opId();
+        return id;
     }
 
     @Override
     public String opIdString()
     {
-        return String.format("%s (%d/%d)", mainTransaction.opIdString(), index + 1, composite.partsCount());
+        return String.format("%s (%d/%d)", id, UUIDGen.sequence(id), composite.partsCount());
     }
 
     @Override
