@@ -692,6 +692,8 @@ commitlog_disk_access_mode: legacy
 # none : Flush without compressing blocks but while still doing checksums.
 # fast : Flush with a fast compressor. If the table is already using a
 #        fast compressor that compressor is used.
+# adaptive : Flush with a fast adaptive compressor. If the table is already using a
+#        fast compressor that compressor is used.
 # table: Always flush with the same compressor that the table uses. This
 #        was the pre 4.0 behavior.
 #
