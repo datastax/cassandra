@@ -42,12 +42,13 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     final CompositeLifecycleTransaction composite;
     final ILifecycleTransaction mainTransaction;
     final AtomicBoolean committedOrAborted = new AtomicBoolean(false);
+    final int index;
 
     public PartialLifecycleTransaction(CompositeLifecycleTransaction composite)
     {
         this.composite = composite;
         this.mainTransaction = composite.mainTransaction;
-        composite.register(this);
+        this.index = composite.register(this);
     }
 
     public void checkpoint()
@@ -190,6 +191,12 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     public UUID opId()
     {
         return mainTransaction.opId();
+    }
+
+    @Override
+    public String opIdString()
+    {
+        return String.format("%s (%d/%d)", mainTransaction.opIdString(), index + 1, composite.partsCount());
     }
 
     @Override
