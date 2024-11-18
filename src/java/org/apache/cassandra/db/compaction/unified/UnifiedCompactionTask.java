@@ -60,7 +60,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                  Range<Token> operationRange,
                                  Collection<SSTableReader> actuallyCompact)
     {
-        super(cfs, txn, gcBefore, strategy.getController().getIgnoreOverlapsInExpirationCheck(), strategy);
+        super(cfs, txn, gcBefore, strategy != null ? strategy.getController().getIgnoreOverlapsInExpirationCheck() : false, strategy);
         this.shardManager = shardManager;
         this.shardingStats = shardingStats;
 
