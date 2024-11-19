@@ -1080,12 +1080,16 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                     case CLUSTERING:
                         result.add(row.clustering().bufferAt(def.position()));
                         break;
+                    case SYNTHETIC:
+                        // treat as REGULAR
                     case REGULAR:
                         result.add(row.getColumnData(def), nowInSec);
                         break;
                     case STATIC:
                         result.add(staticRow.getColumnData(def), nowInSec);
                         break;
+                    default:
+                        throw new AssertionError();
                 }
             }
         }
@@ -1159,7 +1163,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             // Besides actual restrictions (where clauses), prepareRestrictions will include pseudo-restrictions
             // on indexed columns to allow pushing ORDER BY into the index; see StatementRestrictions::addOrderingRestrictions.
-            // Therefore, we don't want to convert the Ordering column into a +score column until after that.
+            // Therefore, we don't want to convert an ANN Ordering column into a +score column until after that.
             List<Ordering> orderings = getOrderings(table);
             StatementRestrictions restrictions = prepareRestrictions(
                     table, bindVariables, orderings, containsOnlyStaticColumns, forView);
@@ -1235,14 +1239,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 return null;
 
             // Create synthetic score column
-            // Use the original column's table metadata but create new identifier and type
             ColumnMetadata sourceColumn = expr.getColumn();
-            var cm = new ColumnMetadata(sourceColumn.ksName,
-                                        sourceColumn.cfName,
-                                        new ColumnIdentifier("+score", true),
-                                        FloatType.instance,
-                                        ColumnMetadata.NO_POSITION,
-                                        ColumnMetadata.Kind.REGULAR);
+            var cm = ColumnMetadata.syntheticColumn(sourceColumn.ksName, sourceColumn.cfName, ColumnMetadata.SYNTHETIC_SCORE_ID, FloatType.instance);
             return Map.of(cm, orderings.get(0));
         }
 
@@ -1264,7 +1262,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             if (selectables.isEmpty()) // wildcard query
             {
                 return hasGroupBy ? Selection.wildcardWithGroupBy(table, boundNames, parameters.isJson, restrictions.returnStaticContentOnPartitionWithNoRows())
-                                  : Selection.wildcard(table, parameters.isJson, restrictions.returnStaticContentOnPartitionWithNoRows());
+                                  : Selection.wildcard(table, resultSetOrderingColumns, parameters.isJson, restrictions.returnStaticContentOnPartitionWithNoRows());
             }
 
             return Selection.fromSelectors(table,
@@ -1502,7 +1500,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             {
                 ColumnMetadata def = entry.getKey();
                 Ordering ordering = entry.getValue();
-                // We defined ANN OF to be ASC ordering, as in, "order by near-ness".  But since score goves from
+                // We defined ANN OF to be ASC ordering, as in, "order by near-ness".  But since score goes from
                 // 0 (worst) to 1 (closest), we need to reverse the ordering for the comparator when we're sorting
                 // by synthetic +score column.
                 boolean cqlReversed = ordering.direction == Ordering.Direction.DESC;

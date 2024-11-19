@@ -135,14 +135,6 @@ public class StorageAttachedIndexTest
 
     @Test
     public void testOrderResults() {
-        QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ONE,
-                                                        byteBufferList,
-                                                        false,
-                                                        PageSize.inRows(1),
-                                                        null,
-                                                        null,
-                                                        ProtocolVersion.CURRENT,
-                                                        KEYSPACE);
         List<List<ByteBuffer>> rows = new ArrayList<>();
         rows.add(byteBufferList);
 

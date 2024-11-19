@@ -585,7 +585,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             private final Unfiltered row;
             public final PrimaryKeyWithSortKey primaryKeyWithSortKey;
 
-            public PrimaryKeyIterator(PrimaryKeyWithSortKey key, UnfilteredRowIterator partition, Row staticRow, Unfiltered content) {
+            public PrimaryKeyIterator(PrimaryKeyWithSortKey key, UnfilteredRowIterator partition, Row staticRow, Unfiltered content)
+            {
                 super(partition.metadata(),
                       partition.partitionKey(),
                       partition.partitionLevelDeletion(),
@@ -602,15 +603,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     return;
                 }
 
-                var tm = metadata();
-                var scoreColumn = ColumnMetadata.regularColumn(tm.keyspace, tm.name, "+score", FloatType.instance);
-
                 // clone the original Row
                 Row originalRow = (Row) content;
                 ArrayList<ColumnData> columnData = new ArrayList<>(originalRow.columnCount() + 1);
                 columnData.addAll(originalRow.columnData());
 
                 // inject +score as a new column
+                var tm = metadata();
+                var scoreColumn = ColumnMetadata.syntheticColumn(tm.keyspace, tm.name, ColumnMetadata.SYNTHETIC_SCORE_ID, FloatType.instance);
                 var pkWithScore = (PrimaryKeyWithScore) key;
                 columnData.add(BufferCell.live(scoreColumn,
                                                FBUtilities.nowInSeconds(),
@@ -626,7 +626,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             }
 
             @Override
-            protected Unfiltered computeNext() {
+            protected Unfiltered computeNext()
+            {
                 if (consumed)
                     return endOfData();
                 consumed = true;

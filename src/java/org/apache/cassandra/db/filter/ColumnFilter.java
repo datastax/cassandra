@@ -103,7 +103,8 @@ public abstract class ColumnFilter
             @Override
             RegularAndStaticColumns getFetchedColumns(TableMetadata metadata, RegularAndStaticColumns queried)
             {
-                return metadata.regularAndStaticColumns();
+                var merged = queried.regulars.mergeTo(metadata.regularColumns());
+                return new RegularAndStaticColumns(metadata.staticColumns(), merged);
             }
         },
 
@@ -124,7 +125,8 @@ public abstract class ColumnFilter
             @Override
             RegularAndStaticColumns getFetchedColumns(TableMetadata metadata, RegularAndStaticColumns queried)
             {
-                return new RegularAndStaticColumns(queried.statics, metadata.regularColumns());
+                var merged = queried.regulars.mergeTo(metadata.regularColumns());
+                return new RegularAndStaticColumns(queried.statics, merged);
             }
         },
 
@@ -295,14 +297,16 @@ public abstract class ColumnFilter
     }
 
     /**
-     * The columns that needs to be fetched internally for this filter.
+     * The columns that needs to be fetched internally.  See FetchingStrategy for why this is
+     * always a superset of the queried columns.
      *
      * @return the columns to fetch for this filter.
      */
     public abstract RegularAndStaticColumns fetchedColumns();
 
     /**
-     * The columns actually queried by the user.
+     * The columns needed to process the query, including selected columns, ordering columns,
+     * restriction (predicate) columns, and synthetic columns.
      * <p>
      * Note that this is in general not all the columns that are fetched internally (see {@link #fetchedColumns}).
      */
@@ -619,9 +623,7 @@ public abstract class ColumnFilter
      */
     public static class WildCardColumnFilter extends ColumnFilter
     {
-        /**
-         * The queried and fetched columns.
-         */
+        // for wildcards, there is no distinction between fetched and queried because queried is already "everything"
         private final RegularAndStaticColumns fetchedAndQueried;
 
         /**
@@ -739,14 +741,9 @@ public abstract class ColumnFilter
     {
         public final FetchingStrategy fetchingStrategy;
 
-        /**
-         * The selected columns
-         */
+        // Materializes the columns required to implement queriedColumns() and fetchedColumns(),
+        // see the comments to superclass's methods
         private final RegularAndStaticColumns queried;
-
-        /**
-         * The columns that need to be fetched to be able
-         */
         private final RegularAndStaticColumns fetched;
 
         private final SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections; // can be null
