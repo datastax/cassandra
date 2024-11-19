@@ -124,7 +124,8 @@ public abstract class ColumnFilter
             @Override
             RegularAndStaticColumns getFetchedColumns(TableMetadata metadata, RegularAndStaticColumns queried)
             {
-                return new RegularAndStaticColumns(queried.statics, metadata.regularColumns());
+                var merged = queried.regulars.mergeTo(metadata.regularColumns());
+                return new RegularAndStaticColumns(queried.statics, merged);
             }
         },
 

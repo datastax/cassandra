@@ -28,6 +28,7 @@ import com.google.common.collect.Iterators;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.ColumnData;
@@ -36,6 +37,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.SearchIterator;
@@ -334,6 +336,11 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
         return BTree.iterator(columns, 0, complexIdx - 1, BTree.Dir.ASC);
     }
 
+    public Iterator<ColumnMetadata> simpleColumnsDesc()
+    {
+        return BTree.iterator(columns, 0, complexIdx - 1, BTree.Dir.DESC);
+    }
+
     /**
      * Iterator over the complex columns of this object.
      *
@@ -459,40 +466,108 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
 
     public static class Serializer
     {
+        AbstractTypeSerializer typeSerializer = new AbstractTypeSerializer();
+
         public void serialize(Columns columns, DataOutputPlus out) throws IOException
         {
-            out.writeUnsignedVInt(columns.size());
+            int regularCount = 0;
+            int syntheticCount = 0;
+
+            // Count regular and synthetic columns
             for (ColumnMetadata column : columns)
-                ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
+            {
+                if (column.isSynthetic())
+                    syntheticCount++;
+                else
+                    regularCount++;
+            }
+
+            // Write counts
+            out.writeUnsignedVInt(regularCount);
+            out.writeUnsignedVInt(syntheticCount);
+
+            // First pass - write regular columns
+            for (ColumnMetadata column : columns)
+            {
+                if (!column.isSynthetic())
+                    ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
+            }
+
+            // Second pass - write synthetic columns with their full metadata
+            for (ColumnMetadata column : columns)
+            {
+                if (column.isSynthetic())
+                {
+                    ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
+                    ByteBufferUtil.writeWithVIntLength(UTF8Type.instance.getSerializer().serialize(column.ksName), out);
+                    ByteBufferUtil.writeWithVIntLength(UTF8Type.instance.getSerializer().serialize(column.cfName), out);
+                    typeSerializer.serialize(column.type, out);
+                }
+            }
         }
 
         public long serializedSize(Columns columns)
         {
-            long size = TypeSizes.sizeofUnsignedVInt(columns.size());
+            int regularCount = 0;
+            int syntheticCount = 0;
+            long size = 0;
+
+            // Count and calculate sizes
             for (ColumnMetadata column : columns)
-                size += ByteBufferUtil.serializedSizeWithVIntLength(column.name.bytes);
-            return size;
+            {
+                if (column.isSynthetic())
+                {
+                    syntheticCount++;
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(column.name.bytes);
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(UTF8Type.instance.getSerializer().serialize(column.ksName));
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(UTF8Type.instance.getSerializer().serialize(column.cfName));
+                    size += typeSerializer.serializedSize(column.type);
+                }
+                else
+                {
+                    regularCount++;
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(column.name.bytes);
+                }
+            }
+
+            return TypeSizes.sizeofUnsignedVInt(regularCount) +
+                   TypeSizes.sizeofUnsignedVInt(syntheticCount) +
+                   size;
         }
 
         public Columns deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
-            int length = (int)in.readUnsignedVInt();
+            int regularCount = (int)in.readUnsignedVInt();
+            int syntheticCount = (int)in.readUnsignedVInt();
+
             try (BTree.FastBuilder<ColumnMetadata> builder = BTree.fastBuilder())
             {
-                for (int i = 0; i < length; i++)
+                // First pass - read regular columns
+                for (int i = 0; i < regularCount; i++)
                 {
                     ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
                     ColumnMetadata column = metadata.getColumn(name);
                     if (column == null)
                     {
-                        // If we don't find the definition, it could be we have data for a dropped column, and we shouldn't
-                        // fail deserialization because of that. So we grab a "fake" ColumnMetadata that ensure proper
-                        // deserialization. The column will be ignore later on anyway.
+                        // If we don't find the definition, it could be we have data for a dropped column
                         column = metadata.getDroppedColumn(name);
-
                         if (column == null)
                             throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
                     }
+                    builder.add(column);
+                }
+
+                // Second pass - read synthetic columns
+                for (int i = 0; i < syntheticCount; i++)
+                {
+                    ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
+                    ByteBuffer ksNameBuf = ByteBufferUtil.readWithVIntLength(in);
+                    ByteBuffer cfNameBuf = ByteBufferUtil.readWithVIntLength(in);
+                    String ksName = UTF8Type.instance.getSerializer().deserialize(ksNameBuf);
+                    String cfName = UTF8Type.instance.getSerializer().deserialize(cfNameBuf);
+                    AbstractType<?> type = typeSerializer.deserialize(in);
+
+                    ColumnMetadata column = ColumnMetadata.syntheticColumn(ksName, cfName, UTF8Type.instance.getString(name), type);
                     builder.add(column);
                 }
                 return new Columns(builder.build());

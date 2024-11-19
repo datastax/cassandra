@@ -127,9 +127,14 @@ public abstract class Selection
 
     public static Selection wildcard(TableMetadata table, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
     {
+        return wildcard(table, Collections.emptySet(), isJson, returnStaticContentOnPartitionWithNoRows);
+    }
+
+    public static Selection wildcard(TableMetadata table, Set<ColumnMetadata> orderingColumns, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
+    {
         List<ColumnMetadata> all = new ArrayList<>(table.columns().size());
         Iterators.addAll(all, table.allColumnsInSelectOrder());
-        return new SimpleSelection(table, all, Collections.emptySet(), true, isJson, returnStaticContentOnPartitionWithNoRows);
+        return new SimpleSelection(table, all, orderingColumns, true, isJson, returnStaticContentOnPartitionWithNoRows);
     }
 
     public static Selection wildcardWithGroupBy(TableMetadata table,

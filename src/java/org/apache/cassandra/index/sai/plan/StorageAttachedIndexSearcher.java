@@ -602,15 +602,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     return;
                 }
 
-                var tm = metadata();
-                var scoreColumn = ColumnMetadata.regularColumn(tm.keyspace, tm.name, "+score", FloatType.instance);
-
                 // clone the original Row
                 Row originalRow = (Row) content;
                 ArrayList<ColumnData> columnData = new ArrayList<>(originalRow.columnCount() + 1);
                 columnData.addAll(originalRow.columnData());
 
                 // inject +score as a new column
+                var tm = metadata();
+                var scoreColumn = ColumnMetadata.syntheticColumn(tm.keyspace, tm.name, "+score", FloatType.instance);
                 var pkWithScore = (PrimaryKeyWithScore) key;
                 columnData.add(BufferCell.live(scoreColumn,
                                                FBUtilities.nowInSeconds(),

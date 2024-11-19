@@ -45,6 +45,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.repair.SyncNodePair;
 import org.apache.cassandra.serializers.MarshalException;
 import org.github.jamm.Unmetered;
 
@@ -71,9 +72,9 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
 
     /**
      * The type of CQL3 column this definition represents.
-     * There is 4 main type of CQL3 columns: those parts of the partition key,
-     * those parts of the clustering columns and amongst the others, regular and
-     * static ones.
+     * There are 4 main type of CQL3 columns: those parts of the partition key,
+     * those parts of the clustering columns and amongst the others, regular,
+     * static, and synthetic ones.
      *
      * IMPORTANT: this enum is serialized as toString() and deserialized by calling
      * Kind.valueOf(), so do not override toString() or rename existing values.
@@ -84,13 +85,13 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         PARTITION_KEY,
         CLUSTERING,
         REGULAR,
-        STATIC;
+        STATIC,
+        SYNTHETIC;  // New kind for synthetic columns
 
         public boolean isPrimaryKeyKind()
         {
             return this == PARTITION_KEY || this == CLUSTERING;
         }
-
     }
 
     /**
@@ -121,10 +122,17 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
      */
     private final long comparisonOrder;
 
+    /**
+     * Bit layout (from most to least significant):
+     * - Bits 61-63: Kind ordinal (3 bits, supporting up to 8 Kind values)
+     * - Bit 60: isComplex flag
+     * - Bits 48-59: position (12 bits, see assert)
+     * - Bits 0-47: name.prefixComparison (shifted right by 16)
+     */
     private static long comparisonOrder(Kind kind, boolean isComplex, long position, ColumnIdentifier name)
     {
         assert position >= 0 && position < 1 << 12;
-        return   (((long) kind.ordinal()) << 61)
+        return (((long) kind.ordinal()) << 61)
                | (isComplex ? 1L << 60 : 0)
                | (position << 48)
                | (name.prefixComparison >>> 16);
@@ -168,6 +176,19 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     public static ColumnMetadata staticColumn(String keyspace, String table, String name, AbstractType<?> type)
     {
         return new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, NO_POSITION, Kind.STATIC);
+    }
+
+    /**
+     * Creates a new synthetic column metadata instance.
+     */
+    public static ColumnMetadata syntheticColumn(String keyspace, String table, String name, AbstractType<?> type)
+    {
+        return new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, NO_POSITION, Kind.SYNTHETIC);
+    }
+
+    public static ColumnMetadata syntheticColumn(String keyspace, String table, ColumnIdentifier id, AbstractType<?> type)
+    {
+        return new ColumnMetadata(keyspace, table, id, type, NO_POSITION, Kind.SYNTHETIC);
     }
 
     /**
@@ -225,6 +246,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         this.kind = kind;
         this.position = position;
         this.cellPathComparator = makeCellPathComparator(kind, type);
+        assert kind != Kind.SYNTHETIC || cellPathComparator == null;
         this.cellComparator = cellPathComparator == null ? ColumnData.comparator : new Comparator<Cell<?>>()
         {
             @Override
@@ -591,6 +613,11 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         if (type instanceof CollectionType) // Possible with, for example, supercolumns
             return ((CollectionType) type).valueComparator().isCounter();
         return type.isCounter();
+    }
+
+    public boolean isSynthetic()
+    {
+        return kind == Kind.SYNTHETIC;
     }
 
     public Selector.Factory newSelectorFactory(TableMetadata table, AbstractType<?> expectedType, List<ColumnMetadata> defs, VariableSpecifications boundNames) throws InvalidRequestException
