@@ -651,27 +651,6 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public ISSTableScanner getScanner()
-    {
-        return TrieIndexScanner.getScanner(this);
-    }
-
-    @Override
-    public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
-    {
-        if (ranges != null)
-            return TrieIndexScanner.getScanner(this, ranges);
-        else
-            return getScanner();
-    }
-
-    @Override
-    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
-    {
-        return TrieIndexScanner.getScanner(this, rangeIterator);
-    }
-
-    @Override
     public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
     {
         return TrieIndexScanner.getScanner(this, columns, dataRange, listener);
