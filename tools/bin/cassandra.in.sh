@@ -31,9 +31,9 @@ CLASSPATH="$CASSANDRA_CONF"
 # it's just used here in constructing the classpath.
 if [ -d $CASSANDRA_HOME/build ] ; then
     #dse_db_bin="$CASSANDRA_HOME/build/classes/main"
-    dse_db_bin=`ls -1 $CASSANDRA_HOME/build/dse-db*.jar`
-    dse_db_bin="$dse_db_bin:$CASSANDRA_HOME/build/classes/stress:$CASSANDRA_HOME/build/classes/fqltool"
-    CLASSPATH="$CLASSPATH:$dse_db_bin"
+    ds_db_bin=`ls -1 $CASSANDRA_HOME/build/ds-db*.jar`
+    ds_db_bin="$ds_db_bin:$CASSANDRA_HOME/build/classes/stress:$CASSANDRA_HOME/build/classes/fqltool"
+    CLASSPATH="$CLASSPATH:$ds_db_bin"
 fi
 
 # the default location for commitlogs, sstables, and saved caches
