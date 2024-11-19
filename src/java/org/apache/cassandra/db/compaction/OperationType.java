@@ -31,6 +31,7 @@ public enum OperationType
 {
     /** Each modification here should be also applied to {@link org.apache.cassandra.tools.nodetool.Stop#compactionType} */
     COMPACTION("Compaction"),
+    COMPACTION_PARTIAL("CompactionPartial"), // used by CNDB for Partial Compaction tasks
     VALIDATION("Validation"),
     KEY_CACHE_SAVE("Key cache save"),
     ROW_CACHE_SAVE("Row cache save"),
