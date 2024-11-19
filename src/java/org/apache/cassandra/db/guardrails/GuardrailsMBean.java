@@ -989,4 +989,22 @@ public interface GuardrailsMBean
      * @param fail the failure threshold for the offset rows used in SELECT queries. -1 means disabled.
      */
     void setOffsetRowsThreshold(int warn, int fail);
+
+    /**
+     * @return the warning threshold for the offset rows used in SELECT queries
+     * -1 means disabled.
+     */
+    int getQueryFiltersWarnThreshold();
+
+    /**
+     * @return the failure threshold for the offset rows used in SELECT queries
+     * -1 means disabled.
+     */
+    int getQueryFiltersFailThreshold();
+
+    /**
+     * @param warn the warning threshold for the offset rows used in SELECT queries. -1 means disabled.
+     * @param fail the failure threshold for the offset rows used in SELECT queries. -1 means disabled.
+     */
+    void setQueryFiltersThreshold(int warn, int fail);
 }

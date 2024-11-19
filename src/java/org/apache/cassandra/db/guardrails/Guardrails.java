@@ -660,6 +660,18 @@ public final class Guardrails implements GuardrailsMBean
                                                 ? format("%s requested to skip %s rows, this exceeds the warning threshold of %s.", what, v, t)
                                                 : format("%s requested to skip %s rows, this exceeds the failure threshold of %s.", what, v, t));
 
+    /**
+     * Guardrail on the number of query filtering operations per SELECT query (after analysis).
+     */
+    public static final Threshold queryFilters =
+    new MaxThreshold("query_filters",
+                      null,
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getQueryFiltersWarnThreshold(),
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getQueryFiltersFailThreshold(),
+                      (isWarning, what, v, t) -> isWarning
+                                                 ? format("%s has %s column value filters after analysis, this exceeds the warning threshold of %s.", what, v, t)
+                                                 : format("%s has %s column value filters after analysis, this exceeds the failure threshold of %s.", what, v, t));
+
     private Guardrails()
     {
         MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
@@ -1593,6 +1605,24 @@ public final class Guardrails implements GuardrailsMBean
     public void setOffsetRowsThreshold(int warn, int fail)
     {
         DEFAULT_CONFIG.setOffsetRowsThreshold(warn, fail);
+    }
+
+    @Override
+    public int getQueryFiltersWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getQueryFiltersWarnThreshold();
+    }
+
+    @Override
+    public int getQueryFiltersFailThreshold()
+    {
+        return DEFAULT_CONFIG.getQueryFiltersFailThreshold();
+    }
+
+    @Override
+    public void setQueryFiltersThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setQueryFiltersThreshold(warn, fail);
     }
 
     private static String toCSV(Set<String> values)
