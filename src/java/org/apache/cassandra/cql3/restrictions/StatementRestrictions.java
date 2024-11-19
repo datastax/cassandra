@@ -1094,7 +1094,7 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options)
+    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, ClientState state)
     {
         if (filterRestrictions.isEmpty() && children.isEmpty())
             return RowFilter.none();
@@ -1104,7 +1104,7 @@ public class StatementRestrictions
                                       && options.getConsistency().needsReconciliation()
                                       && Keyspace.open(table.keyspace).getReplicationStrategy().getReplicationFactor().allReplicas > 1;
 
-        return RowFilter.builder(needsReconciliation, indexManager).buildFromRestrictions(this, table, options);
+        return RowFilter.builder(needsReconciliation, indexManager).buildFromRestrictions(this, table, options, state);
     }
 
     /**
