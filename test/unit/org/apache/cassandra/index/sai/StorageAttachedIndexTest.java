@@ -148,7 +148,7 @@ public class StorageAttachedIndexTest
 
         SelectStatement selectStatementInstance = (SelectStatement) QueryProcessor.prepareInternal("SELECT key, value FROM " + KEYSPACE + '.' + TABLE).statement;
 
-        SortedRowsBuilder builder = selectStatementInstance.sortedRowsBuilder(Integer.MAX_VALUE, 0, queryOptions);
+        SortedRowsBuilder builder = selectStatementInstance.sortedRowsBuilder(Integer.MAX_VALUE, 0);
         rows.forEach(builder::add);
         List<List<ByteBuffer>> sortedRows = builder.build();
 

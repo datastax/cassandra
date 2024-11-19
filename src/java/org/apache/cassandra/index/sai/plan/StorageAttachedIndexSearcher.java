@@ -18,17 +18,16 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,8 +37,12 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -53,13 +56,16 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.btree.BTree;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
@@ -103,8 +109,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 assert !(keysIterator instanceof KeyRangeIterator);
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-                var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
-                                                             executionController, queryContext);
+                var result = new ScoreOrderedResultRetriever(scoredKeysIterator,
+                                                             filterTree,
+                                                             controller,
+                                                             executionController,
+                                                             queryContext);
                 return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
             }
             else
@@ -558,36 +567,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return true;
         }
 
-        public static class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
-        {
-            private boolean consumed = false;
-            private final Unfiltered row;
-            public final PrimaryKeyWithSortKey primaryKeyWithSortKey;
-
-            public PrimaryKeyIterator(PrimaryKeyWithSortKey key, UnfilteredRowIterator partition, Row staticRow, Unfiltered content)
-            {
-                super(partition.metadata(),
-                      partition.partitionKey(),
-                      partition.partitionLevelDeletion(),
-                      partition.columns(),
-                      staticRow,
-                      partition.isReverseOrder(),
-                      partition.stats());
-
-                row = content;
-                primaryKeyWithSortKey = key;
-            }
-
-            @Override
-            protected Unfiltered computeNext()
-            {
-                if (consumed)
-                    return endOfData();
-                consumed = true;
-                return row;
-            }
-        }
-
         @Override
         public TableMetadata metadata()
         {
@@ -598,6 +577,61 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
             controller.finish();
+        }
+
+        public static class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
+        {
+            private boolean consumed = false;
+            private final Unfiltered row;
+            public final PrimaryKeyWithSortKey primaryKeyWithSortKey;
+
+            public PrimaryKeyIterator(PrimaryKeyWithSortKey key, UnfilteredRowIterator partition, Row staticRow, Unfiltered content) {
+                super(partition.metadata(),
+                      partition.partitionKey(),
+                      partition.partitionLevelDeletion(),
+                      partition.columns(),
+                      staticRow,
+                      partition.isReverseOrder(),
+                      partition.stats());
+
+                this.primaryKeyWithSortKey = key;
+
+                if (!content.isRow() || !(key instanceof PrimaryKeyWithScore))
+                {
+                    this.row = content;
+                    return;
+                }
+
+                var tm = metadata();
+                var scoreColumn = ColumnMetadata.regularColumn(tm.keyspace, tm.name, "+score", FloatType.instance);
+
+                // clone the original Row
+                Row originalRow = (Row) content;
+                ArrayList<ColumnData> columnData = new ArrayList<>(originalRow.columnCount() + 1);
+                columnData.addAll(originalRow.columnData());
+
+                // inject +score as a new column
+                var pkWithScore = (PrimaryKeyWithScore) key;
+                columnData.add(BufferCell.live(scoreColumn,
+                                               FBUtilities.nowInSeconds(),
+                                               FloatType.instance.decompose(pkWithScore.indexScore)));
+
+                this.row = BTreeRow.create(originalRow.clustering(),
+                                           originalRow.primaryKeyLivenessInfo(),
+                                           originalRow.deletion(),
+                                           BTree.builder(ColumnData.comparator)
+                                                .auto(true)
+                                                .addAll(columnData)
+                                                .build());
+            }
+
+            @Override
+            protected Unfiltered computeNext() {
+                if (consumed)
+                    return endOfData();
+                consumed = true;
+                return row;
+            }
         }
     }
 
