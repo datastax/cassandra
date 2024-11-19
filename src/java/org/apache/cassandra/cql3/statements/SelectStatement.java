@@ -1365,6 +1365,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                     checkTrue(restrictions.isColumnRestrictedByEq(table.clusteringColumns().get(i++)),
                               "Ordering by clustered columns must follow the declared order in the PRIMARY KEY");
                 }
+                i++;
             }
         }
 
