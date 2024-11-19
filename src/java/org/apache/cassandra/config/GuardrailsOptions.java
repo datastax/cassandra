@@ -1294,6 +1294,31 @@ public class GuardrailsOptions implements GuardrailsConfig
                                   x -> config.offset_rows_fail_threshold = x);
     }
 
+    @Override
+    public int getQueryFiltersWarnThreshold()
+    {
+        return config.query_filters_warn_threshold;
+    }
+
+    @Override
+    public int getQueryFiltersFailThreshold()
+    {
+        return config.query_filters_fail_threshold;
+    }
+
+    public void setQueryFiltersThreshold(int warn, int fail)
+    {
+        validateMaxIntThreshold(warn, fail, "query_filters", false);
+        updatePropertyWithLogging("query_filters_warn_threshold",
+                                  warn,
+                                  () -> config.query_filters_warn_threshold,
+                                  x -> config.query_filters_warn_threshold = x);
+        updatePropertyWithLogging("query_filters_fail_threshold",
+                                  fail,
+                                  () -> config.query_filters_fail_threshold,
+                                  x -> config.query_filters_fail_threshold = x);
+    }
+
     private static <T> void updatePropertyWithLogging(String propertyName, T newValue, Supplier<T> getter, Consumer<T> setter)
     {
         T oldValue = getter.get();
