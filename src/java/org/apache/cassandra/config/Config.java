@@ -981,6 +981,10 @@ public class Config
     public volatile int offset_rows_warn_threshold = -1;
     public volatile int offset_rows_fail_threshold = -1;
 
+    // Limit the number of column value filters per SELECT query (after applying analyzers, in case they are used)
+    public volatile int query_filters_warn_threshold = -1;
+    public volatile int query_filters_fail_threshold = -1;
+
     /**
      * The variants of paxos implementation and semantics supported by Cassandra.
      */
