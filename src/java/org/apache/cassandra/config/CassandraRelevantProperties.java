@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
@@ -520,7 +521,12 @@ public enum CassandraRelevantProperties
      * This is to remain compatible with older workflows that first change the replication before adding the nodes.
      * Otherwise, it will validate that the names match existing DCs before allowing replication change.
      */
-    DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false");
+    DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false"),
+    /**
+     * If provided, this custom factory class will be used to create stage executor for a couple of stages.
+     * @see Stage for details
+     */
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
