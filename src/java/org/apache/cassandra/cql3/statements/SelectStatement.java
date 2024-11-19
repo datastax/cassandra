@@ -153,7 +153,7 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 /**
  * Encapsulates a completely parsed SELECT query, including the target
  * column family, expression, result count, and ordering clause.
- * <p>
+ * </p>
  * A number of public methods here are only used internally. However,
  * many of these are made accessible for the benefit of custom
  * QueryHandler implementations, so before reducing their accessibility
@@ -1187,7 +1187,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     public RowFilter getRowFilter(QueryOptions options, ClientState state) throws InvalidRequestException
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-        RowFilter filter = restrictions.getRowFilter(indexRegistry, options);
+        RowFilter filter = restrictions.getRowFilter(indexRegistry, options, state);
 
         if (filter.needsReconciliation() && filter.isMutableIntersection() && restrictions.needFiltering(table))
             Guardrails.intersectFilteringQueryEnabled.ensureEnabled(state);
