@@ -25,7 +25,6 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Preconditions;
 import com.google.common.math.IntMath;
 
 import org.apache.cassandra.cql3.Ordering;
@@ -1102,7 +1101,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private boolean needsPostQueryOrdering()
     {
         // We need post-query ordering only for queries with IN on the partition key and an ORDER BY or index restriction reordering
-        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || needIndexOrdering();
+        return (restrictions.keyIsInRelation() && !parameters.orderings.isEmpty())
+               || needIndexOrdering();
     }
 
     private boolean needIndexOrdering()
@@ -1125,8 +1125,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
         else if (orderingComparator instanceof IndexColumnComparator)
         {
-            SingleRestriction restriction = ((IndexColumnComparator<?>) orderingComparator).restriction;
-            int columnIndex = ((IndexColumnComparator<?>) orderingComparator).columnIndex;
+            SingleRestriction restriction = ((IndexColumnComparator) orderingComparator).restriction;
+            int columnIndex = ((IndexColumnComparator) orderingComparator).columnIndex;
 
             Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
             assert index != null;
@@ -1455,20 +1455,18 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                                          Map<ColumnMetadata, Ordering> orderingColumns)
                                                                    throws InvalidRequestException
         {
-            for (Map.Entry<ColumnMetadata, Ordering> e : orderingColumns.entrySet())
+            if (orderingColumns.values().stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
             {
-                if (e.getValue().expression.hasNonClusteredOrdering())
-                {
-                    Preconditions.checkState(orderingColumns.size() == 1);
-                    return new IndexColumnComparator<>(e.getValue().expression.toRestriction(), selection.getOrderingIndex(e.getKey()));
-                }
+                assert orderingColumns.size() == 1 : orderingColumns.keySet();
+                var e = orderingColumns.entrySet().iterator().next();
+                return new IndexColumnComparator(e.getValue().expression.toRestriction(), selection.getOrderingIndex(e.getKey()));
             }
-
+            
             if (!restrictions.keyIsInRelation())
                 return null;
 
-            List<Integer> idToSort = new ArrayList<Integer>(orderingColumns.size());
-            List<Comparator<ByteBuffer>> sorters = new ArrayList<Comparator<ByteBuffer>>(orderingColumns.size());
+            List<Integer> idToSort = new ArrayList<>(orderingColumns.size());
+            List<Comparator<ByteBuffer>> sorters = new ArrayList<>(orderingColumns.size());
 
             for (ColumnMetadata orderingColumn : orderingColumns.keySet())
             {
@@ -1671,7 +1669,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
     }
 
-    private static class IndexColumnComparator<T> extends ColumnComparator<List<ByteBuffer>>
+    private static class IndexColumnComparator extends ColumnComparator<List<ByteBuffer>>
     {
         private final SingleRestriction restriction;
         private final int columnIndex;
