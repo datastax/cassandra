@@ -648,4 +648,14 @@ public interface GuardrailsConfig
      * @return the failure threshold for the offset rows used in SELECT queries
      */
     int getOffsetRowsFailThreshold();
+
+    /**
+     * @return the warning threshold for the number of query filtering operations per SELECT query (after analysis)
+     */
+    int getQueryFiltersWarnThreshold();
+
+    /**
+     * @return the failure threshold for the number of query filtering operations per SELECT query (after analysis)
+     */
+    int getQueryFiltersFailThreshold();
 }
