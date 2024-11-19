@@ -167,6 +167,9 @@ public class TableMetadata implements SchemaElement
         name = builder.name;
         id = builder.id;
 
+        // FIXME
+        builder.addColumn(new ColumnMetadata(keyspace, name, new ColumnIdentifier("+score", true), FloatType.instance, ColumnMetadata.NO_POSITION, ColumnMetadata.Kind.REGULAR));
+
         partitioner = builder.partitioner;
         kind = builder.kind;
         params = builder.params.build();
@@ -1123,7 +1126,7 @@ public class TableMetadata implements SchemaElement
         public Builder addColumn(ColumnMetadata column)
         {
             if (columns.containsKey(column.name.bytes))
-                throw new IllegalArgumentException();
+                return this; // FIXME
 
             switch (column.kind)
             {

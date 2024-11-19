@@ -28,7 +28,7 @@ import org.apache.cassandra.index.sai.IndexContext;
  */
 public class PrimaryKeyWithScore extends PrimaryKeyWithSortKey
 {
-    private final float indexScore;
+    public final float indexScore;
 
     public PrimaryKeyWithScore(IndexContext context, Object source, PrimaryKey primaryKey, float indexScore)
     {

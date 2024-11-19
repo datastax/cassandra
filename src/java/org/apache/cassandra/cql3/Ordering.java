@@ -48,6 +48,11 @@ public class Ordering
         SingleRestriction toRestriction();
 
         ColumnMetadata getColumn();
+
+        default boolean isScored()
+        {
+            return false;
+        }
     }
 
     /**
@@ -117,6 +122,12 @@ public class Ordering
         public ColumnMetadata getColumn()
         {
             return column;
+        }
+
+        @Override
+        public boolean isScored()
+        {
+            return true;
         }
     }
 
