@@ -28,7 +28,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
-import java.util.function.LongPredicate;
+
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -39,7 +40,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
-import org.apache.cassandra.db.compaction.CompactionController;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -57,7 +57,6 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -70,7 +69,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 {
     private final static Logger logger = LoggerFactory.getLogger(SortedTableVerifier.class);
 
-    protected final CompactionRealm realm;
+    protected final @Nullable CompactionRealm realm;
     protected final R sstable;
 
     protected final ReadWriteLock fileAccessLock;
@@ -272,8 +271,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
     {
         outputHandler.output("Extended Verify requested, proceeding to inspect values");
 
-        try (VerifyController verifyController = VerifyController.create(this);
-             KeyReader indexIterator = sstable.keyReader())
+        try (KeyReader indexIterator = sstable.keyReader())
         {
             if (indexIterator.dataPosition() != sstable.getDataFileSliceDescriptor().dataStart)
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
@@ -514,33 +512,6 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
         public boolean isGlobal()
         {
             return false;
-        }
-    }
-
-    protected static class VerifyController extends CompactionController
-    {
-        public static VerifyController create(SortedTableVerifier<?> verifier)
-        {
-            if (verifier.realm != null)
-                return new VerifyController(verifier.realm);
-            else
-                return new VerifyController(verifier.sstable.metadata());
-        }
-
-        public VerifyController(CompactionRealm realm)
-        {
-            super(realm, Integer.MAX_VALUE);
-        }
-
-        public VerifyController(TableMetadata metadata)
-        {
-            super(null, null, Integer.MAX_VALUE, null, metadata.params.compaction.tombstoneOption());
-        }
-
-        @Override
-        public LongPredicate getPurgeEvaluator(DecoratedKey key)
-        {
-            return time -> false;
         }
     }
 }
