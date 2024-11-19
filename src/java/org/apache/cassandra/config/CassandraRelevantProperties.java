@@ -25,6 +25,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.primitives.Ints;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -270,6 +271,11 @@ public enum CassandraRelevantProperties
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
+    /**
+     * If provided, this custom factory class will be used to create stage executor for a couple of stages.
+     * @see Stage for details
+     */
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class"),
     /**
      * Used to support directory creation for different file system and remote/local conversion
      */
