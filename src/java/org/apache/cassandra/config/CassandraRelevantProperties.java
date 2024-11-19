@@ -513,7 +513,14 @@ public enum CassandraRelevantProperties
     CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
 
     /** Class used to discover/load the proper SAI index components file for a given sstable. */
-    CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY("cassandra.sai.custom_components_discovery_class");
+    CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY("cassandra.sai.custom_components_discovery_class"),
+
+    /**
+     * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
+     * this is to remain compatible with older workflows that first change the replication before adding the nodes.
+     * Otherwise, it will validate that the names match existing DCs before allowing replication change.
+     */
+    DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
