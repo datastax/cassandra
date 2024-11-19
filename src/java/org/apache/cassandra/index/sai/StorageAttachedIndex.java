@@ -681,18 +681,6 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        assert restriction instanceof SingleColumnRestriction.OrderRestriction;
-
-        SingleColumnRestriction.OrderRestriction orderRestriction = (SingleColumnRestriction.OrderRestriction) restriction;
-        var typeComparator = orderRestriction.getDirection() == Operator.ORDER_BY_DESC
-                             ? indexContext.getValidator().reversed()
-                             : indexContext.getValidator();
-        return (a, b) -> typeComparator.compare(a.get(columnIndex), b.get(columnIndex));
-    }
-
-    @Override
     public Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
     {
         // For now, only support ANN
