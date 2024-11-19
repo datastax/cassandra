@@ -266,12 +266,12 @@ public class Tracker
 
     public void addInitialSSTables(Collection<SSTableReader> sstables)
     {
-        addSSTablesInternal(sstables, OperationType.UNKNOWN, true, false, true);
+        addSSTablesInternal(sstables, OperationType.INITIAL_LOAD, true, false, true);
     }
 
     public void addInitialSSTablesWithoutUpdatingSize(Collection<SSTableReader> sstables)
     {
-        addSSTablesInternal(sstables, OperationType.UNKNOWN, true, false, false);
+        addSSTablesInternal(sstables, OperationType.INITIAL_LOAD, true, false, false);
     }
 
     public void updateInitialSSTableSize(Iterable<SSTableReader> sstables)
