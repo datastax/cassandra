@@ -331,7 +331,7 @@ public class StorageAttachedIndex implements Index
         {
             for (AbstractType<?> subType : type.subTypes())
             {
-                if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()) && !TypeUtil.isFrozen(subType))
+                if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()) && !TypeUtil.isNonVectorFrozenMultivalued(subType))
                     throw new InvalidRequestException("Unsupported composite type for SAI: " + subType.asCQL3Type());
             }
         }
@@ -358,7 +358,7 @@ public class StorageAttachedIndex implements Index
                 logger.warn(error);
             }
         }
-        else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozen(type))
+        else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isNonVectorFrozenMultivalued(type))
         {
             throw new InvalidRequestException("Unsupported type for SAI: " + type.asCQL3Type());
         }
