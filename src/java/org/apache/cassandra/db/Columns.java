@@ -567,7 +567,8 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                     String cfName = UTF8Type.instance.getSerializer().deserialize(cfNameBuf);
                     AbstractType<?> type = typeSerializer.deserialize(in);
 
-                    ColumnMetadata column = ColumnMetadata.syntheticColumn(ksName, cfName, UTF8Type.instance.getString(name), type);
+                    // TODO generalize support for other synthetic columns
+                    ColumnMetadata column = ColumnMetadata.syntheticColumn(ksName, cfName, ColumnMetadata.SYNTHETIC_SCORE_ID, type);
                     builder.add(column);
                 }
                 return new Columns(builder.build());

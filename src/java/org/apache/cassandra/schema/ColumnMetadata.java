@@ -45,7 +45,6 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.repair.SyncNodePair;
 import org.apache.cassandra.serializers.MarshalException;
 import org.github.jamm.Unmetered;
 
@@ -93,6 +92,8 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
             return this == PARTITION_KEY || this == CLUSTERING;
         }
     }
+
+    public static final ColumnIdentifier SYNTHETIC_SCORE_ID = ColumnIdentifier.getInterned("+ds+score", true);
 
     /**
      * Whether this is a dropped column.
@@ -181,11 +182,6 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     /**
      * Creates a new synthetic column metadata instance.
      */
-    public static ColumnMetadata syntheticColumn(String keyspace, String table, String name, AbstractType<?> type)
-    {
-        return new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, NO_POSITION, Kind.SYNTHETIC);
-    }
-
     public static ColumnMetadata syntheticColumn(String keyspace, String table, ColumnIdentifier id, AbstractType<?> type)
     {
         return new ColumnMetadata(keyspace, table, id, type, NO_POSITION, Kind.SYNTHETIC);

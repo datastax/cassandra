@@ -609,7 +609,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
                 // inject +score as a new column
                 var tm = metadata();
-                var scoreColumn = ColumnMetadata.syntheticColumn(tm.keyspace, tm.name, "+score", FloatType.instance);
+                var scoreColumn = ColumnMetadata.syntheticColumn(tm.keyspace, tm.name, ColumnMetadata.SYNTHETIC_SCORE_ID, FloatType.instance);
                 var pkWithScore = (PrimaryKeyWithScore) key;
                 columnData.add(BufferCell.live(scoreColumn,
                                                FBUtilities.nowInSeconds(),

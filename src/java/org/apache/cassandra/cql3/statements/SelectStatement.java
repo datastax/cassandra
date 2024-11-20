@@ -1240,7 +1240,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             // Create synthetic score column
             ColumnMetadata sourceColumn = expr.getColumn();
-            var cm = ColumnMetadata.syntheticColumn(sourceColumn.ksName, sourceColumn.cfName, "+score", FloatType.instance);
+            var cm = ColumnMetadata.syntheticColumn(sourceColumn.ksName, sourceColumn.cfName, ColumnMetadata.SYNTHETIC_SCORE_ID, FloatType.instance);
             return Map.of(cm, orderings.get(0));
         }
 
