@@ -348,7 +348,7 @@ public abstract class SegmentBuilder
         public VectorOnHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
-            graphIndex = new CassandraOnHeapGraph<>(components.context(), false);
+            graphIndex = new CassandraOnHeapGraph<>(components.context(), false, null);
             totalBytesAllocated = graphIndex.ramBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
