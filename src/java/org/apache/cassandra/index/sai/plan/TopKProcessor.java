@@ -31,7 +31,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import javax.annotation.Nullable;
 
-import com.google.common.base.Preconditions;
 import org.apache.commons.lang3.tuple.Triple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +43,6 @@ import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.concurrent.SharedExecutorPool;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -91,8 +89,8 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  */
 public class TopKProcessor
 {
-    private static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. Ordering on non-clustering " +
-                                                              "column requires the column to be indexed";
+    public static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. Ordering on non-clustering " +
+                                                             "column requires the column to be indexed";
     protected static final Logger logger = LoggerFactory.getLogger(TopKProcessor.class);
     private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor();
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
@@ -109,7 +107,7 @@ public class TopKProcessor
         this.command = command;
 
         Pair<IndexContext, RowFilter.Expression> annIndexAndExpression = findTopKIndexContext();
-        //this can happen in case an index was dropped after the query was initiated
+        // this can happen in case an index was dropped after the query was initiated
         if (annIndexAndExpression == null)
             throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
 

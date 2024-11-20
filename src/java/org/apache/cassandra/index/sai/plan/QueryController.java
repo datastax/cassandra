@@ -95,7 +95,8 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
 
 public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
-    private static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped.";
+    public static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. " +
+                                                             StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
     /**
@@ -401,7 +402,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // This would mean we have no WHERE nor ANN clauses at all; this can happen in case an index was dropped after the
         // query was initiated
         if (keysIterationPlan == planFactory.everything)
-            throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED + StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+            throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
 
         return keysIterationPlan;
     }
