@@ -20,12 +20,14 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.PriorityQueue;
 import java.util.Queue;
-import java.util.TreeMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -457,6 +459,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      * apply the filter tree to the row to test that the real row satisfies the WHERE clause, and finally tests
      * that the row is valid for the ORDER BY clause. The class performs some optimizations to avoid materializing
      * rows unnecessarily. See the class for more details.
+     * <p>
+     * The resulting {@link UnfilteredRowIterator} objects are not guaranteed to be in any particular order. It is
+     * the responsibility of the caller to sort the results if necessary.
      */
     public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
@@ -472,7 +477,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final HashSet<PrimaryKey> processedKeys;
         private final Queue<UnfilteredRowIterator> pendingRows;
 
-        private final int limit;
+        // The limit requested by the query. We cannot load more than softLimit rows in bulk because we only want
+        // to fetch the topk rows where k is the limit. However, we allow the iterator to fetch more rows than the
+        // soft limit to avoid confusing behavior. When the softLimit is reached, the iterator will fetch one row
+        // at a time.
+        private final int softLimit;
         private int returnedRowCount = 0;
 
         private ScoreOrderedResultRetriever(CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
@@ -495,7 +504,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             this.processedKeys = new HashSet<>(limit);
             this.pendingRows = new ArrayDeque<>(limit);
-            this.limit = limit;
+            this.softLimit = limit;
         }
 
         @Override
@@ -514,41 +523,50 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          */
         private void fillPendingRows()
         {
-            int count = Math.max(1, limit - returnedRowCount);
+            // We always want to get at least 1.
+            int rowsToRetrieve = Math.max(1, softLimit - returnedRowCount);
+            var keys = new HashMap<PrimaryKey, List<PrimaryKeyWithSortKey>>();
+            // We want to get the first unique `rowsToRetrieve` keys to materialize
+            fillKeys(keys, rowsToRetrieve, null);
             // Sort the primary keys by PrK order, just in case that helps with cache and disk efficiency
-            var keys = new TreeMap<PrimaryKey, List<PrimaryKeyWithSortKey>>();
-            // We want to get the first unique `count` keys to materialize
-            fillKeys(keys, count);
+            var primaryKeyPriorityQueue = new PriorityQueue<>(keys.keySet());
 
             while (!keys.isEmpty())
             {
-                var entry = keys.pollFirstEntry();
-                var partitionIterator = readAndValidatePartition(entry.getKey(), entry.getValue());
+                var primaryKey = primaryKeyPriorityQueue.poll();
+                var primaryKeyWithSortKeys = keys.remove(primaryKey);
+                var partitionIterator = readAndValidatePartition(primaryKey, primaryKeyWithSortKeys);
                 if (partitionIterator != null)
                     pendingRows.add(partitionIterator);
                 else
-                    // Fill the keys becuase we know we'll need count rows, and it is more efficient
-                    // to do it now than to do it later
-                    fillKeys(keys, count - pendingRows.size());
+                    // The current primaryKey did not produce a partition iterator. We know the caller will need
+                    // `rowsToRetrieve` rows, so we get the next unique key and add it to the queue.
+                    fillKeys(keys, 1, primaryKeyPriorityQueue);
             }
         }
 
         /**
          * Fills the keys map with the next `count` unique primary keys that are in the keys produced by calling
-         * {@link #nextSelectedKeyInRange()}.
+         * {@link #nextSelectedKeyInRange()}. We map PrimaryKey to List<PrimaryKeyWithSortKey> because the same
+         * primary key can be in the result set multiple times, but with different source tables.
+         * @param keys the map to fill
+         * @param count the number of unique PrimaryKeys to consume from the iterator
+         * @param primaryKeyPriorityQueue the priority queue to add new keys to. If the queue is null, we do not add
+         *                                keys to the queue.
          */
-        private void fillKeys(TreeMap<PrimaryKey, List<PrimaryKeyWithSortKey>> keys, int count)
+        private void fillKeys(Map<PrimaryKey, List<PrimaryKeyWithSortKey>> keys, int count, PriorityQueue<PrimaryKey> primaryKeyPriorityQueue)
         {
-            while (keys.size() < count)
+            int initialSize = keys.size();
+            while (keys.size() - initialSize < count)
             {
                 var primaryKeyWithSortKey = nextSelectedKeyInRange();
                 if (primaryKeyWithSortKey == null)
                     return;
-                // Becuase tree maps use the object's comparator to determine equality, and PrimaryKeyWithSortKey's
-                // implementations have a comparator that does not agree with equals, we need to use the actual primary
-                // key as the key in the map.
-                keys.computeIfAbsent(primaryKeyWithSortKey.primaryKey(), k -> new ArrayList<>())
-                    .add(primaryKeyWithSortKey);
+                var nextPrimaryKey = primaryKeyWithSortKey.primaryKey();
+                var accumulator = keys.computeIfAbsent(nextPrimaryKey, k -> new ArrayList<>());
+                if (primaryKeyPriorityQueue != null && accumulator.isEmpty())
+                    primaryKeyPriorityQueue.add(nextPrimaryKey);
+                accumulator.add(primaryKeyWithSortKey);
             }
         }
 
