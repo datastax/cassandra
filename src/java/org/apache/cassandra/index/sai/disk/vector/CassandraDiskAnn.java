@@ -43,6 +43,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -50,6 +51,7 @@ import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.PQVersion;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
@@ -65,6 +67,7 @@ public class CassandraDiskAnn
     protected final PerIndexFiles indexFiles;
     protected final SegmentMetadata.ComponentMetadataMap componentMetadatas;
 
+    private final SSTableId<?> source;
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final Set<FeatureId> features;
@@ -79,8 +82,9 @@ public class CassandraDiskAnn
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
-    public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
+    public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {
+        this.source = sstableContext.sstable().getId();
         this.componentMetadatas = componentMetadatas;
         this.indexFiles = indexFiles;
 
@@ -253,8 +257,8 @@ public class CassandraDiskAnn
             var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
             if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
                 context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
-            Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results",
-                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
+            Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
+                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             if (threshold > 0)
             {
                 // Threshold based searches are comprehensive and do not need to resume the search.
@@ -265,7 +269,7 @@ public class CassandraDiskAnn
             }
             else
             {
-                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false);
+                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false, source.toString());
                 return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
             }
         }
