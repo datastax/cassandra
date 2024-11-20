@@ -40,6 +40,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     private final int limit;
     private final int rerankK;
     private final boolean inMemory;
+    private final String source;
     private final IntConsumer nodesVisitedConsumer;
     private Iterator<SearchResult.NodeScore> nodeScores;
     private int cumulativeNodesVisited;
@@ -54,6 +55,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
      * @param limit the limit to pass to the {@link GraphSearcher} when resuming search
      * @param rerankK the rerankK to pass to the {@link GraphSearcher} when resuming search
      * @param inMemory whether the graph is in memory or on disk (used for trace logging)
+     * @param source the source of the search (used for trace logging)
      */
     public AutoResumingNodeScoreIterator(GraphSearcher searcher,
                                          GraphSearcherAccessManager accessManager,
@@ -61,7 +63,8 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
                                          IntConsumer nodesVisitedConsumer,
                                          int limit,
                                          int rerankK,
-                                         boolean inMemory)
+                                         boolean inMemory,
+                                         String source)
     {
         this.searcher = searcher;
         this.accessManager = accessManager;
@@ -71,6 +74,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         this.limit = max(1, limit / 2); // we shouldn't need as many results on resume
         this.rerankK = rerankK;
         this.inMemory = inMemory;
+        this.source = source;
     }
 
     @Override
@@ -89,11 +93,9 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
 
     private void maybeLogTrace(SearchResult result)
     {
-        if (!Tracing.isTracing())
-            return;
-        String msg = inMemory ? "ANN resume for {}/{} visited {} nodes, reranked {} to return {} results"
-                              : "DiskANN resume for {}/{} visited {} nodes, reranked {} to return {} results";
-        Tracing.trace(msg, limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
+        String msg = inMemory ? "ANN resume for {}/{} visited {} nodes, reranked {} to return {} results from {}"
+                              : "DiskANN resume for {}/{} visited {} nodes, reranked {} to return {} results from {}";
+        Tracing.trace(msg, limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
     }
 
     @Override
