@@ -274,7 +274,7 @@ public enum CassandraRelevantProperties
     CUSTOM_TRACING_CLASS("cassandra.custom_tracing_class"),
     /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
-     * this is to remain compatible with older workflows that first change the replication before adding the nodes.
+     * This is to remain compatible with older workflows that first change the replication before adding the nodes.
      * Otherwise, it will validate that the names match existing DCs before allowing replication change.
      */
     DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false"),
