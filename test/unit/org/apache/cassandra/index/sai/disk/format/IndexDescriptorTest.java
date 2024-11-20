@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.disk.format;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -36,9 +37,11 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
+import org.mortbay.util.IO;
 
 import static org.apache.cassandra.index.sai.SAIUtil.setLatestVersion;
 import static org.junit.Assert.assertEquals;
@@ -81,11 +84,17 @@ public class IndexDescriptorTest
 
     private IndexDescriptor loadDescriptor(IndexContext... contexts)
     {
-        IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
-        indexDescriptor.reload(new HashSet<>(Arrays.asList(contexts)));
-        return indexDescriptor;
+        return loadDescriptor(descriptor, contexts);
     }
 
+    static IndexDescriptor loadDescriptor(Descriptor sstableDescriptor, IndexContext... contexts)
+    {
+        IndexDescriptor indexDescriptor = IndexDescriptor.empty(sstableDescriptor);
+        // Note: passing `null` as metadata is a bit hacky, but it only exists to be passed to the underlying index
+        // discovery class, and the default one ignores it so ... keeping it simple.
+        indexDescriptor.reload(null, new HashSet<>(Arrays.asList(contexts)));
+        return indexDescriptor;
+    }
 
     @Test
     public void versionAAPerSSTableComponentIsParsedCorrectly() throws Throwable
@@ -94,8 +103,8 @@ public class IndexDescriptorTest
 
         // As mentioned in the class javadoc, we rely on the no-TOC fallback path and that only kick in if there is a
         // data file. Otherwise, it assumes the SSTable simply does not exist at all.
-        createFileOnDisk("-Data.db");
-        createFileOnDisk("-SAI_GroupComplete.db");
+        createFakeDataFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.AA, 0);
 
         IndexDescriptor indexDescriptor = loadDescriptor();
 
@@ -108,11 +117,12 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.AA);
 
-        createFileOnDisk("-Data.db");
-        createFileOnDisk("-SAI_GroupComplete.db");
-        createFileOnDisk("-SAI_test_index_ColumnComplete.db");
-
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
+
+        createFakeDataFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.AA, 0);
+        createFakePerIndexComponents(descriptor, indexContext, Version.AA, 0);
+
         IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
 
         assertEquals(Version.AA, indexDescriptor.perSSTableComponents().version());
@@ -124,8 +134,8 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.BA);
 
-        createFileOnDisk("-Data.db");
-        createFileOnDisk("-SAI+ba+GroupComplete.db");
+        createFakeDataFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.BA, 0);
 
         IndexDescriptor indexDescriptor = loadDescriptor();
 
@@ -138,13 +148,14 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.BA);
 
-        createFileOnDisk("-Data.db");
-        createFileOnDisk("-SAI+ba+test_index+ColumnComplete.db");
-
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
+
+        createFakeDataFile(descriptor);
+        createFakePerIndexComponents(descriptor, indexContext, Version.BA, 0);
+
         IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
 
-        assertEquals(Version.BA, indexDescriptor.perSSTableComponents().version());
+        assertEquals(Version.BA, indexDescriptor.perIndexComponents(indexContext).version());
         assertTrue(indexDescriptor.perIndexComponents(indexContext).has(IndexComponentType.COLUMN_COMPLETION_MARKER));
     }
 
@@ -153,11 +164,8 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.AA);
 
-        createFileOnDisk("-Data.db");
-        createFileOnDisk("-SAI_GroupComplete.db");
-        createFileOnDisk("-SAI_GroupMeta.db");
-        createFileOnDisk("-SAI_TokenValues.db");
-        createFileOnDisk("-SAI_OffsetsValues.db");
+        createFakeDataFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.AA, 0);
 
         IndexDescriptor result = loadDescriptor();
 
@@ -172,15 +180,12 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.AA);
 
-        createFileOnDisk("-Data.db");
-        createFileOnDisk("-SAI_GroupComplete.db");
-        createFileOnDisk("-SAI_test_index_ColumnComplete.db");
-        createFileOnDisk("-SAI_test_index_Meta.db");
-        createFileOnDisk("-SAI_test_index_TermsData.db");
-        createFileOnDisk("-SAI_test_index_PostingLists.db");
-
-
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
+
+        createFakeDataFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.AA, 0);
+        createFakePerIndexComponents(descriptor, indexContext, Version.AA, 0);
+
         IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
 
         IndexComponents.ForRead components = indexDescriptor.perIndexComponents(indexContext);
@@ -195,14 +200,12 @@ public class IndexDescriptorTest
     {
         setLatestVersion(Version.AA);
 
-        createFileOnDisk("-Data.db");
-        createFileOnDisk("-SAI_GroupComplete.db");
-        createFileOnDisk("-SAI_test_index_ColumnComplete.db");
-        createFileOnDisk("-SAI_test_index_Meta.db");
-        createFileOnDisk("-SAI_test_index_KDTree.db");
-        createFileOnDisk("-SAI_test_index_KDTreePostingLists.db");
-
         IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
+
+        createFakeDataFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.AA, 0);
+        createFakePerIndexComponents(descriptor, indexContext, Version.AA, 0);
+
         IndexDescriptor indexDescriptor = loadDescriptor(indexContext);
 
         IndexComponents.ForRead components = indexDescriptor.perIndexComponents(indexContext);
@@ -225,13 +228,12 @@ public class IndexDescriptorTest
         assertFalse(indexDescriptor.perIndexComponents(indexContext).isComplete());
 
         // We then create the proper files and call reload
-        createFileOnDisk("-Data.db");
-        createFileOnDisk("-SAI_GroupComplete.db");
-        createFileOnDisk("-SAI_test_index_ColumnComplete.db");
-        createFileOnDisk("-SAI_test_index_Meta.db");
-        createFileOnDisk("-SAI_test_index_KDTree.db");
-        createFileOnDisk("-SAI_test_index_KDTreePostingLists.db");
-        indexDescriptor.reload(Set.of(indexContext));
+        createFakeDataFile(descriptor);
+        createFakePerSSTableComponents(descriptor, latest, 0);
+        createFakePerIndexComponents(descriptor, indexContext, latest, 0);
+
+        // See comment on `loadDescriptor` regarding passing null
+        indexDescriptor.reload(null, Set.of(indexContext));
 
         // Both the perSSTableComponents and perIndexComponents should now be complete and the components should be present
 
@@ -244,8 +246,25 @@ public class IndexDescriptorTest
         assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
     }
 
-    private void createFileOnDisk(String filename) throws Throwable
+    private static void createFileOnDisk(Descriptor descriptor, String componentStr) throws IOException
     {
-        Files.touch(new File(PathUtils.getPath(descriptor.baseFileUri() + filename)).toJavaIOFile());
+        Files.touch(new File(PathUtils.getPath(descriptor.baseFileUri() + '-' + componentStr)).toJavaIOFile());
+    }
+
+    static void createFakeDataFile(Descriptor descriptor) throws IOException
+    {
+        createFileOnDisk(descriptor, Component.DATA.name());
+    }
+
+    static void createFakePerSSTableComponents(Descriptor descriptor, Version version, int generation) throws IOException
+    {
+        for (IndexComponentType type : version.onDiskFormat().perSSTableComponentTypes())
+            createFileOnDisk(descriptor, version.fileNameFormatter().format(type, null, generation));
+    }
+
+    static void createFakePerIndexComponents(Descriptor descriptor, IndexContext context, Version version, int generation) throws IOException
+    {
+        for (IndexComponentType type : version.onDiskFormat().perIndexComponentTypes(context))
+            createFileOnDisk(descriptor, version.fileNameFormatter().format(type, context, generation));
     }
 }

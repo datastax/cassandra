@@ -20,8 +20,11 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.Set;
 
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_SSTABLE_WATCHER;
@@ -59,7 +62,7 @@ public interface SSTableWatcher
     /**
      * Called before executing index build on existing sstable
      */
-    default void onIndexBuild(SSTableReader sstable)
+    default void onIndexBuild(SSTableReader sstable, Set<? extends Index> indexes)
     {
     }
 
@@ -69,6 +72,7 @@ public interface SSTableWatcher
      * By default, this method simply deletes the components locally, but it can overriden if different/additional
      * behavior is needed.
      *
+     * @param metadata table metadata of the table the index was dropped from.
      * @param components index components that are no longer in used due to an index drop. Note that this can
      *                   be either per-index components (for the components of the exact index being dropped),
      *                   or per-sstable components if the index dropped was the only index for the table and the
@@ -76,7 +80,7 @@ public interface SSTableWatcher
      *                   is dropped, then this method will usually be called twice per sstable, once for the index
      *                   components, and once for the per-sstable components.
      */
-    default void onIndexDropped(IndexComponents.ForWrite components)
+    default void onIndexDropped(TableMetadata metadata, IndexComponents.ForWrite components)
     {
         components.forceDeleteAllComponents();
     }

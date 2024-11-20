@@ -69,6 +69,7 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -110,6 +111,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnHeapGraph.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
+    // We use the metable reference for easier tracing.
+    private final String source;
     private final ConcurrentVectorValues vectorValues;
     private final GraphIndexBuilder builder;
     private final VectorType.VectorSerializer serializer;
@@ -129,8 +132,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
     /**
      * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
      */
-    public CassandraOnHeapGraph(IndexContext context, boolean forSearching)
+    public CassandraOnHeapGraph(IndexContext context, boolean forSearching, Memtable memtable)
     {
+        this.source = memtable == null
+                      ? "null"
+                      : memtable.getClass().getSimpleName() + '@' + Integer.toHexString(memtable.hashCode());
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
@@ -325,8 +331,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
             var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
             var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
-            Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results",
-                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
+            Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
+                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             context.addAnnNodesVisited(result.getVisitedCount());
             if (threshold > 0)
             {
@@ -334,7 +340,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 graphAccessManager.release();
                 return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
             }
-            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true);
+            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true, source);
         }
         catch (Throwable t)
         {

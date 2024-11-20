@@ -265,6 +265,17 @@ public abstract class Guardrails
                       format("%s requested to skip %s rows, this exceeds the %s threshold of %s.",
                              what, value, isWarning ? "warning" : "failure", threshold));
 
+    /**
+     * Guardrail on the number of query filtering operations per SELECT query (after analysis).
+     */
+    public static final Threshold queryFilters =
+    factory.threshold("query_filters",
+                      () -> config.query_filters_warn_threshold,
+                      () -> config.query_filters_fail_threshold,
+                      (isWarning, what, value, threshold) ->
+                      format("%s has %s column value filters after analysis, this exceeds the %s threshold of %s.",
+                             what, value, isWarning ? "warning" : "failure", threshold));
+
     private static String formatSize(long size)
     {
         return Units.toString(size, SizeUnit.BYTES);

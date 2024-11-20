@@ -102,6 +102,12 @@ public interface IndexRegistry
         public void validate(PartitionUpdate update)
         {
         }
+
+        @Override
+        public void validate(RowFilter filter)
+        {
+            // no-op since it's an empty registry
+        }
     };
 
     /**
@@ -288,7 +294,12 @@ public interface IndexRegistry
 
         public void validate(PartitionUpdate update)
         {
+        }
 
+        @Override
+        public void validate(RowFilter filter)
+        {
+            // no-op since it's an empty registry
         }
     };
 
@@ -303,6 +314,20 @@ public interface IndexRegistry
     Index getIndex(IndexMetadata indexMetadata);
     Collection<Index> listIndexes();
 
+    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator)
+    {
+        for (Index index : listIndexes())
+        {
+            if (index.supportsExpression(column, operator))
+            {
+                Optional<Index.Analyzer> analyzer = index.getAnalyzer();
+                if (analyzer.isPresent())
+                    return analyzer;
+            }
+        }
+        return Optional.empty();
+    }
+
     Optional<Index> getBestIndexFor(RowFilter.Expression expression);
 
     /**
@@ -315,6 +340,8 @@ public interface IndexRegistry
      * @param update PartitionUpdate containing the values to be validated by registered Index implementations
      */
     void validate(PartitionUpdate update);
+
+    void validate(RowFilter filter);
 
     /**
      * Returns the {@code IndexRegistry} associated to the specified table.

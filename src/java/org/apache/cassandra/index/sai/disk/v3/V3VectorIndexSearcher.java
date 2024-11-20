@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.Optional;
 
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -33,15 +34,15 @@ import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
  */
 public class V3VectorIndexSearcher extends V2VectorIndexSearcher
 {
-    public V3VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    public V3VectorIndexSearcher(SSTableContext sstableContext,
                                  PerIndexFiles perIndexFiles,
                                  SegmentMetadata segmentMetadata,
                                  IndexContext indexContext) throws IOException
     {
-        super(primaryKeyMapFactory,
+        super(sstableContext.primaryKeyMapFactory(),
               perIndexFiles,
               segmentMetadata,
               indexContext,
-              new CassandraDiskAnn(segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V2OnDiskOrdinalsMap::new));
+              new CassandraDiskAnn(sstableContext, segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V2OnDiskOrdinalsMap::new));
     }
 }

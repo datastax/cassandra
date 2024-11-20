@@ -27,6 +27,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -49,6 +51,7 @@ import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
@@ -275,6 +278,16 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         // there are system queries with USING TIMESTAMP, e.g. SchemaKeyspace#saveSystemKeyspacesSchema
         if (SchemaConstants.isUserKeyspace(metadata.keyspace) && attrs.isTimestampSet())
             Guardrails.userTimestampsEnabled.ensureEnabled(state);
+
+        // Warn but otherwise accept conditions on analyzed columns. The analyzers won't be used (see CNDB-11658).
+        IndexRegistry indexRegistry = IndexRegistry.obtain(metadata);
+        Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry);
+        if (!analyzedColumns.isEmpty())
+        {
+            StringJoiner joiner = new StringJoiner(", ");
+            analyzedColumns.forEach(c -> joiner.add(c.name.toString()));
+            ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.LWT_CONDITION_ON_ANALYZED_WARNING, joiner));
+        }
     }
 
     public RegularAndStaticColumns updatedColumns()
