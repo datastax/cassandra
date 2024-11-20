@@ -79,8 +79,7 @@ public class DropIndexWhileQueryingTest extends SAITester
                                              .newActionBuilder()
                                              .actions()
                                              .doAction("org.apache.cassandra.index.sai.cql.DropIndexWhileQueryingTest" +
-                                                       ".dropIndexForBytemanInjections" +
-                                                       "(\"DROP INDEX cql_test_keyspace." + indexName + "\")"))
+                                                       ".dropIndexForBytemanInjections(\"" + indexName + "\")"))
                                         .build();
         Injections.inject(injection);
         injection.enable();
@@ -89,9 +88,9 @@ public class DropIndexWhileQueryingTest extends SAITester
 
     // the method is used by the byteman rule to drop the index
     @SuppressWarnings("unused")
-    public static void dropIndexForBytemanInjections(String query)
+    public static void dropIndexForBytemanInjections(String indexName)
     {
-        String fullQuery = String.format(query, KEYSPACE);
+        String fullQuery = String.format("DROP INDEX %s.%s", KEYSPACE, indexName);
         logger.info(fullQuery);
         schemaChange(fullQuery);
     }
