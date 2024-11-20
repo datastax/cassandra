@@ -40,6 +40,7 @@
 ### JPMS
 
 -Djdk.attach.allowAttachSelf=true
+-Djava.security.manager=allow
 --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
 --add-exports java.base/jdk.internal.ref=ALL-UNNAMED
 --add-exports java.base/jdk.internal.perf=ALL-UNNAMED
@@ -60,6 +61,7 @@
 --add-opens java.base/java.nio=ALL-UNNAMED
 --add-opens java.base/java.net=ALL-UNNAMED
 --add-opens java.base/java.util=ALL-UNNAMED
+--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED
 --add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED
 --add-opens java.base/jdk.internal.loader=ALL-UNNAMED
 --add-opens java.base/jdk.internal.math=ALL-UNNAMED
@@ -67,6 +69,7 @@
 --add-opens java.base/jdk.internal.ref=ALL-UNNAMED
 --add-opens java.base/jdk.internal.reflect=ALL-UNNAMED
 --add-opens java.base/jdk.internal.vm=ALL-UNNAMED
+--add-opens java.base/sun.nio.ch=ALL-UNNAMED
 --add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED
 --add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED
 --add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED
@@ -75,14 +78,12 @@
 # required for org.apache.cassandra.Util.getSupportedMTimeGranularity
 --add-opens java.base/java.nio.file.attribute=ALL-UNNAMED
 
---add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED
-
 ### GC logging options -- uncomment to enable
 
 # Java 11 (and newer) GC logging options:
 # See description of https://bugs.openjdk.java.net/browse/JDK-8046148 for details about the syntax
 # The following is the equivalent to -XX:+PrintGCDetails -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=10 -XX:GCLogFileSize=10M
--Xlog:gc=info,heap*=debug,age*=debug,safepoint=info,promotion*=debug:file=/var/log/cassandra/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10485760
+# -Xlog:gc=info,heap*=debug,age*=debug,safepoint=info,promotion*=debug:file=/var/log/cassandra/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10485760
 
 # Notes for Java 8 migration:
 #
@@ -105,14 +106,5 @@
 ### Enable vector incubator feature (simd support)
 
 --add-modules jdk.incubator.vector
-
-### Compatibility Options
---add-opens java.base/java.io=ALL-UNNAMED
---add-opens java.base/java.lang=ALL-UNNAMED
---add-opens java.base/java.nio=ALL-UNNAMED
---add-opens java.base/java.util=ALL-UNNAMED
---add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED
---add-opens java.base/sun.nio.ch=ALL-UNNAMED
--Djava.security.manager=allow
 
 # The newline in the end of file is intentional
