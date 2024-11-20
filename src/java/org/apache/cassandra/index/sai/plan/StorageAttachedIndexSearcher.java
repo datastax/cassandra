@@ -527,6 +527,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             int rowsToRetrieve = Math.max(1, softLimit - returnedRowCount);
             var keys = new HashMap<PrimaryKey, List<PrimaryKeyWithSortKey>>();
             // We want to get the first unique `rowsToRetrieve` keys to materialize
+            // Don't pass the priority queue here because it is more efficient to add keys in bulk
             fillKeys(keys, rowsToRetrieve, null);
             // Sort the primary keys by PrK order, just in case that helps with cache and disk efficiency
             var primaryKeyPriorityQueue = new PriorityQueue<>(keys.keySet());
