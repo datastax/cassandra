@@ -43,6 +43,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
@@ -474,43 +475,33 @@ public class CreateTest extends CQLTester
     @Test
     public void testCreateKeyspaceWithNTSOnlyAcceptsConfiguredDataCenterNames() throws Throwable
     {
-        synchronized(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION)
-        {
-            assertInvalidThrow(ConfigurationException.class, "CREATE KEYSPACE testABC WITH replication = { 'class' : 'NetworkTopologyStrategy', 'INVALID_DC' : 2 }");
-            execute("CREATE KEYSPACE testABC WITH replication = {'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 }");
+        assertInvalidThrow(ConfigurationException.class, "CREATE KEYSPACE testABC WITH replication = { 'class' : 'NetworkTopologyStrategy', 'INVALID_DC' : 2 }");
+        execute("CREATE KEYSPACE testABC WITH replication = {'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 }");
 
-            // Mix valid and invalid, should throw an exception
-            assertInvalidThrow(ConfigurationException.class, "CREATE KEYSPACE testXYZ WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
+        // Mix valid and invalid, should throw an exception
+        assertInvalidThrow(ConfigurationException.class, "CREATE KEYSPACE testXYZ WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
 
-            // clean-up
-            execute("DROP KEYSPACE IF EXISTS testABC");
-            execute("DROP KEYSPACE IF EXISTS testXYZ");
-        }
+        // clean-up
+        execute("DROP KEYSPACE IF EXISTS testABC");
+        execute("DROP KEYSPACE IF EXISTS testXYZ");
     }
 
     /**
-     *
      *  Test that when cassandra.dc_skip_name_validation=true nothing is thrown on create keyspace with invalid DC option in replication configuration.
      */
     @Test
     public void testCreateKeyspaceWithNTSAcceptsAnyDataCenterNamesIfValidationIgnored() throws Throwable
     {
-        synchronized(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION)
+        try (WithProperties properties = new WithProperties())
         {
-            try
-            {
-                CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION.setBoolean(true);
-                execute("CREATE KEYSPACE testABC WITH replication = { 'class' : 'NetworkTopologyStrategy', 'INVALID_DC' : 2 }");
-                execute("CREATE KEYSPACE testXYZ WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
+            properties.set(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION, true);
 
-                // clean-up
-                execute("DROP KEYSPACE IF EXISTS testABC");
-                execute("DROP KEYSPACE IF EXISTS testXYZ");
-            }
-            finally
-            {
-                CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION.setBoolean(false);
-            }
+            execute("CREATE KEYSPACE testABC WITH replication = { 'class' : 'NetworkTopologyStrategy', 'INVALID_DC' : 2 }");
+            execute("CREATE KEYSPACE testXYZ WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
+
+            // clean-up
+            execute("DROP KEYSPACE IF EXISTS testABC");
+            execute("DROP KEYSPACE IF EXISTS testXYZ");
         }
     }
 

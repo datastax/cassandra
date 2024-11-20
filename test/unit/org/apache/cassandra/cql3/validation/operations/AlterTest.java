@@ -30,6 +30,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -383,8 +384,6 @@ public class AlterTest extends CQLTester
     @Test
     public void testAlterKeyspaceWithNTSOnlyAcceptsConfiguredDataCenterNames() throws Throwable
     {
-        synchronized(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION)
-        {
             // Create a keyspace with expected DC name.
             createKeyspace("CREATE KEYSPACE %s WITH replication = {'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 }");
 
@@ -399,7 +398,6 @@ public class AlterTest extends CQLTester
             assertAlterKeyspaceThrowsException(ConfigurationException.class,
                                                "Unrecognized strategy option {INVALID_DC} passed to NetworkTopologyStrategy for keyspace " + currentKeyspace(),
                                                "ALTER KEYSPACE %s WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
-        }
     }
 
     /**
@@ -408,24 +406,18 @@ public class AlterTest extends CQLTester
     @Test
     public void testAlterKeyspaceWithNTSAcceptsAnyDataCenterNamesIfValidationIgnored() throws Throwable
     {
-        synchronized(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION)
+        try (WithProperties properties = new WithProperties())
         {
-            try
-            {
-                CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION.setBoolean(true);
-                // Create a keyspace with expected DC name.
-                createKeyspace("CREATE KEYSPACE %s WITH replication = {'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 }");
+            properties.set(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION, true);
 
-                // try modifying the keyspace
-                alterKeyspace("ALTER KEYSPACE %s WITH replication = { 'class' : 'NetworkTopologyStrategy', 'INVALID_DC' : 2 }");
+            // Create a keyspace with expected DC name.
+            createKeyspace("CREATE KEYSPACE %s WITH replication = {'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 }");
 
-                // Mix valid and invalid
-                alterKeyspace("ALTER KEYSPACE %s WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
-            }
-            finally
-            {
-                CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION.setBoolean(false);
-            }
+            // try modifying the keyspace
+            alterKeyspace("ALTER KEYSPACE %s WITH replication = { 'class' : 'NetworkTopologyStrategy', 'INVALID_DC' : 2 }");
+
+            // Mix valid and invalid
+            alterKeyspace("ALTER KEYSPACE %s WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
         }
     }
 
