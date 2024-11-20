@@ -171,9 +171,6 @@
 #-Xms4G
 #-Xmx4G
 
-# Need experimental bytebuddy for JDK21
--Dnet.bytebuddy.experimental
-
 # Young generation size is automatically calculated by cassandra-env
 # based on this formula: min(100 * num_cores, 1/4 * heap size)
 #
