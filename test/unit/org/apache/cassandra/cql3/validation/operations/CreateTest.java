@@ -29,6 +29,7 @@ import java.util.stream.IntStream;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
@@ -38,6 +39,7 @@ import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.memtable.TestMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
@@ -398,7 +400,7 @@ public class CreateTest extends CQLTester
     }
 
     /**
-     *  Test {@link ConfigurationException} is thrown on create keyspace with invalid DC option in replication configuration .
+     *  Test {@link ConfigurationException} is thrown on create keyspace with invalid DC option in replication configuration.
      */
     @Test
     public void testCreateKeyspaceWithNTSOnlyAcceptsConfiguredDataCenterNames() throws Throwable
@@ -412,6 +414,24 @@ public class CreateTest extends CQLTester
         // clean-up
         execute("DROP KEYSPACE IF EXISTS testABC");
         execute("DROP KEYSPACE IF EXISTS testXYZ");
+    }
+
+    /**
+     *  Test that when cassandra.dc_skip_name_validation=true nothing is thrown on create keyspace with invalid DC option in replication configuration.
+     */
+    @Test
+    public void testCreateKeyspaceWithNTSAcceptsAnyDataCenterNamesIfValidationIgnored() throws Throwable
+    {
+        try (WithProperties properties = new WithProperties().set(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION, true))
+        {
+            CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION.setBoolean(true);
+            execute("CREATE KEYSPACE testABC WITH replication = { 'class' : 'NetworkTopologyStrategy', 'INVALID_DC' : 2 }");
+            execute("CREATE KEYSPACE testXYZ WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
+
+            // clean-up
+            execute("DROP KEYSPACE IF EXISTS testABC");
+            execute("DROP KEYSPACE IF EXISTS testXYZ");
+        }
     }
 
     /**
