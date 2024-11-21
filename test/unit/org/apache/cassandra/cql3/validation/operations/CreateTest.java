@@ -422,9 +422,10 @@ public class CreateTest extends CQLTester
     @Test
     public void testCreateKeyspaceWithNTSAcceptsAnyDataCenterNamesIfValidationIgnored() throws Throwable
     {
-        try (WithProperties properties = new WithProperties().set(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION, true))
+        try (WithProperties properties = new WithProperties())
         {
-            CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION.setBoolean(true);
+            properties.set(CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION, true);
+
             execute("CREATE KEYSPACE testABC WITH replication = { 'class' : 'NetworkTopologyStrategy', 'INVALID_DC' : 2 }");
             execute("CREATE KEYSPACE testXYZ WITH replication={ 'class' : 'NetworkTopologyStrategy', '" + DATA_CENTER + "' : 2 , 'INVALID_DC': 1}");
 
