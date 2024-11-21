@@ -35,20 +35,18 @@ public class DropIndexWhileQueryingTest extends SAITester
     // See CNDB-10732
     @Test
     public void testDropIndexWhileQuerying() throws Throwable
-
     {
-        createTable("CREATE TABLE %s (electronicVehicle TEXT PRIMARY KEY, modelYear INT, make TEXT, vehType TEXT) WITH compaction = " +
-                "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        createTable("CREATE TABLE %s (k text PRIMARY KEY, x int, y text, z text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(make) USING 'StorageAttachedIndex'");
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(modelYear) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(vehType) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(y) USING 'StorageAttachedIndex'");
+        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(x) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(z) USING 'StorageAttachedIndex'");
         waitForTableIndexesQueryable();
 
         injectIndexDrop("drop_index", indexName, true);
 
-        execute("INSERT INTO %s (electronicVehicle, modelYear, make, vehType) VALUES (?, ?, ?, ?)", "car", 1998, "Ford", "SUV");
-        String query = "SELECT * FROM %s WHERE modelYear IN (1998, 2000) OR (make IN ('FORD', 'OPEL' ) OR vehType IN ('car', 'truck'))";
+        execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "car", 0, "y0", "z0");
+        String query = "SELECT * FROM %s WHERE x IN (0, 1) OR (y IN ('Y0', 'Y1' ) OR z IN ('z1', 'z2'))";
         assertInvalidMessage(QueryController.INDEX_MAY_HAVE_BEEN_DROPPED, query);
         assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE, query);
     }
