@@ -274,6 +274,12 @@ public enum CassandraRelevantProperties
     CUSTOM_TMD_PROVIDER_PROPERTY("cassandra.custom_token_metadata_provider_class"),
 
     CUSTOM_TRACING_CLASS("cassandra.custom_tracing_class"),
+    /**
+     * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
+     * This is to remain compatible with older workflows that first change the replication before adding the nodes.
+     * Otherwise, it will validate that the names match existing DCs before allowing replication change.
+     */
+    DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false"),
     /** Controls the type of bufffer (heap/direct) used for shared scratch buffers */
     DATA_OUTPUT_BUFFER_ALLOCATE_TYPE("cassandra.dob.allocate_type"),
     DATA_OUTPUT_STREAM_PLUS_TEMP_BUFFER_SIZE("cassandra.data_output_stream_plus_temp_buffer_size", "8192"),
