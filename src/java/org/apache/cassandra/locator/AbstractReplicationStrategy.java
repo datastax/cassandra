@@ -34,6 +34,7 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
@@ -510,7 +511,18 @@ public abstract class AbstractReplicationStrategy
         for (String key : configOptions.keySet())
         {
             if (!expectedOptions.contains(key))
-                throw new ConfigurationException(String.format("Unrecognized strategy option {%s} passed to %s for keyspace %s", key, getClass().getSimpleName(), keyspaceName));
+            {
+                String message = String.format("Unrecognized strategy option {%s} passed to %s for keyspace %s", key, getClass().getSimpleName(), keyspaceName);
+
+                if (CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION.getBoolean())
+                {
+                    logger.warn("{}=true. Ignoring: {}", CassandraRelevantProperties.DATACENTER_SKIP_NAME_VALIDATION.getKey(), message);
+                }
+                else
+                {
+                    throw new ConfigurationException(message);
+                }
+            }
         }
     }
 
