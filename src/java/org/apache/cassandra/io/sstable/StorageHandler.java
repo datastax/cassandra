@@ -32,6 +32,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STORAGE_HANDLER;
+import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STORAGE_HANDLER_FOR_LOCAL_KEYSPACES;
 
 /**
  * The handler of the storage of sstables, and possibly other files such as txn logs.
@@ -49,6 +50,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STO
 public abstract class StorageHandler
 {
     private final static String remoteStorageHandler = REMOTE_STORAGE_HANDLER.getString();
+    private final static String remoteStorageHandlerForLocalKeyspaces = REMOTE_STORAGE_HANDLER_FOR_LOCAL_KEYSPACES.getString();
 
     public enum ReloadReason
     {
@@ -146,20 +148,22 @@ public abstract class StorageHandler
 
     public static StorageHandler create(TableMetadataRef metadata, Directories directories, Tracker dataTracker)
     {
-        // local keyspaces are always local so don't use the remote handler even if it has been configured
-        if (remoteStorageHandler == null || Schema.isKeyspaceWithLocalStrategy(metadata.keyspace))
-            return new DefaultStorageHandler(metadata, directories, dataTracker);
+        String handler = Schema.isKeyspaceWithLocalStrategy(metadata.keyspace) ? remoteStorageHandlerForLocalKeyspaces : remoteStorageHandler;
+        return handler == null ? new DefaultStorageHandler(metadata, directories, dataTracker) : createRemoteHandler(metadata, directories, dataTracker, handler);
+    }
 
-        Class<StorageHandler> factoryClass =  FBUtilities.classForName(remoteStorageHandler, "Remote storage handler");
+    private static StorageHandler createRemoteHandler(TableMetadataRef metadata, Directories directories, Tracker dataTracker, String handler)
+    {
+        Class<StorageHandler> factoryClass =  FBUtilities.classForName(handler, "Remote storage handler");
 
         try
         {
             return factoryClass.getConstructor(TableMetadataRef.class, Directories.class, Tracker.class)
-                    .newInstance(metadata, directories, dataTracker);
+                               .newInstance(metadata, directories, dataTracker);
         }
         catch (NoSuchMethodException | IllegalAccessException | InstantiationException | InvocationTargetException e)
         {
-            throw new ConfigurationException("Unable to find correct constructor for " + remoteStorageHandler, e);
+            throw new ConfigurationException("Unable to find correct constructor for " + handler, e);
         }
     }
 }

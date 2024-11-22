@@ -219,6 +219,11 @@ public enum CassandraRelevantProperties
     REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
 
     /**
+     * The handler of the storage of sstables, and possibly other files such as txn logs for local keyspaces
+     */
+    REMOTE_STORAGE_HANDLER_FOR_LOCAL_KEYSPACES("cassandra.remote_storage_handler_for_local_keyspaces"),
+
+    /**
      * To provide a provider to a different implementation of the truncate statement.
      */
     TRUNCATE_STATEMENT_PROVIDER("cassandra.truncate_statement_provider"),
