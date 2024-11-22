@@ -127,11 +127,11 @@ public class CustomStorageProviderTest
          */
         @Override
         public Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata,
-                                                                 String keyspaceName,
+                                                                 TableMetadata tableMetadata,
                                                                  Directories.DataDirectory[] dirs)
         {
             if (!useCustomBehavior)
-                return super.createDataDirectories(ksMetadata, keyspaceName, dirs);
+                return super.createDataDirectories(ksMetadata, tableMetadata, dirs);
 
             for (Directories.DataDirectory d : dirs)
             {

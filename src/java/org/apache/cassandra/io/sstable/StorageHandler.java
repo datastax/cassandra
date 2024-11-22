@@ -27,11 +27,10 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STORAGE_HANDLER;
+import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STORAGE_HANDLER_FACTORY;
 
 /**
  * The handler of the storage of sstables, and possibly other files such as txn logs.
@@ -39,16 +38,17 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STO
  * If sstables are stored on the local disk, then this handler is a thin wrapper of {@link Directories.SSTableLister},
  * but for sstables stored remotely, for example on S3, then the handler may need to perform more
  * work, such as selecting only part of the remote sstables available, or adding new ones when offline compaction
- * has run. This behaviour can be implemented in a sub-class that can be set with {@link #remoteStorageHandler}.
- * <p/>
- * Local sytem tables will always use the default storage handler, {@link DefaultStorageHandler}
- * whereas user tables will use {@link #remoteStorageHandler} if one is set, or the default handler if none
- * has been set.
+ * has run. This behaviour can be implemented in a sub-class created from factory that can be set with {@link #remoteStorageHandlerFactory}.
  * <p/>
  */
 public abstract class StorageHandler
 {
-    private final static String remoteStorageHandler = REMOTE_STORAGE_HANDLER.getString();
+    private final static String remoteStorageHandlerFactory = REMOTE_STORAGE_HANDLER_FACTORY.getString();
+
+    private static class InstanceHolder
+    {
+        private static final StorageHandlerFactory FACTORY = maybeInitializeFactory(remoteStorageHandlerFactory);
+    }
 
     public enum ReloadReason
     {
@@ -122,11 +122,11 @@ public abstract class StorageHandler
     public abstract Collection<SSTableReader> reloadSSTables(ReloadReason reason);
 
     /**
-     * This method determines if the backing storage handles is remote storage
+     * This method determines if the backing storage handler allows auto compaction
      * <p/>
-     * @return true if storage handler is remote
+     * @return true if auto compaction should be enabled
      */
-    public abstract boolean isRemote();
+    public abstract boolean enableAutoCompaction();
 
     /**
      * This method will run the operation specified by the {@link Runnable} passed it
@@ -146,20 +146,23 @@ public abstract class StorageHandler
 
     public static StorageHandler create(TableMetadataRef metadata, Directories directories, Tracker dataTracker)
     {
-        // local keyspaces are always local so don't use the remote handler even if it has been configured
-        if (remoteStorageHandler == null || Schema.isKeyspaceWithLocalStrategy(metadata.keyspace))
-            return new DefaultStorageHandler(metadata, directories, dataTracker);
+        return InstanceHolder.FACTORY.create(metadata, directories, dataTracker);
+    }
 
-        Class<StorageHandler> factoryClass =  FBUtilities.classForName(remoteStorageHandler, "Remote storage handler");
+    private static StorageHandlerFactory maybeInitializeFactory(String factory)
+    {
+        if (factory == null)
+            return StorageHandlerFactory.DEFAULT;
+
+        Class<StorageHandlerFactory> factoryClass =  FBUtilities.classForName(factory, "Remote storage handler factory");
 
         try
         {
-            return factoryClass.getConstructor(TableMetadataRef.class, Directories.class, Tracker.class)
-                    .newInstance(metadata, directories, dataTracker);
+            return factoryClass.getConstructor().newInstance();
         }
         catch (NoSuchMethodException | IllegalAccessException | InstantiationException | InvocationTargetException e)
         {
-            throw new ConfigurationException("Unable to find correct constructor for " + remoteStorageHandler, e);
+            throw new ConfigurationException("Unable to find correct constructor for " + factory, e);
         }
     }
 }
