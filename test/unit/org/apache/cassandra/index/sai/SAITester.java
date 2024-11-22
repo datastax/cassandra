@@ -92,6 +92,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.snapshot.TableSnapshot;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
 import org.awaitility.Awaitility;
@@ -898,7 +899,7 @@ public class SAITester extends CQLTester
         NamedMemoryLimiter limiter = (NamedMemoryLimiter) V1OnDiskFormat.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMITER").get(null);
         Field limitBytes = limiter.getClass().getDeclaredField("limitBytes");
         limitBytes.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
+        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
         modifiersField.setAccessible(true);
         modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
         limitBytes.set(limiter, segmentSize);
