@@ -414,7 +414,7 @@
     <resources id="_jvm22_test_arg_items">
         <string>-Djava.security.manager=allow</string>
         <string>-Dio.netty.tryReflectionSetAccessible=true</string>
-        <string>-Dnet.bytebuddy.experimental=true"/></string>
+        <string>-Dnet.bytebuddy.experimental=true</string>
 
         <!-- Enable vector incubator feature (simd support)-->
         <string>--add-modules jdk.incubator.vector</string>
