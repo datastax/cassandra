@@ -42,6 +42,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.INativeLibrary;
 
@@ -108,11 +109,11 @@ public interface StorageProvider
      *
      * @param ksMetadata   The keyspace metadata, can be null. This is used when schema metadata is
      *                     not available in {@link Schema}, eg. CNDB backup & restore
-     * @param keyspaceName the name of the keyspace
+     * @param tableMetadata the metadata of the table
      * @param dirs         current local data directories
      * @return data directories that are created
      */
-    Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, String keyspaceName, Directories.DataDirectory[] dirs);
+    Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, TableMetadata tableMetadata, Directories.DataDirectory[] dirs);
 
     /**
      * Create directory for the given path and type, either locally or remotely if any remote storage parameters are passed in.
@@ -237,7 +238,7 @@ public interface StorageProvider
         }
 
         @Override
-        public Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, String keyspaceName, Directories.DataDirectory[] dirs)
+        public Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, TableMetadata tableMetadata, Directories.DataDirectory[] dirs)
         {
             // data directories are already created in DatabadeDescriptor#createAllDirectories
             return dirs;
