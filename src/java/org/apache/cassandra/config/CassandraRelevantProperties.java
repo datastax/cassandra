@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.config;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -520,7 +523,13 @@ public enum CassandraRelevantProperties
      * This is to remain compatible with older workflows that first change the replication before adding the nodes.
      * Otherwise, it will validate that the names match existing DCs before allowing replication change.
      */
-    DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false");
+    DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false"),
+
+    /**
+     * This is a list of table attributes to ignore. This is useful for handling compatibilty while
+     * upgrading to a newer version of Cassandra.
+     */
+    TABLE_ATTRIBUTES_IGNORE_KEYS("cassandra.table_attributes_ignore_keys", "");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
@@ -677,6 +686,16 @@ public enum CassandraRelevantProperties
     }
 
     /**
+     * Gets the value of a system property as a list of lists, delimited by commas.
+     * @return system property value if it exists, defaultValue otherwise.
+     */
+    public List<String> getListOfStrings()
+    {
+        String value = System.getProperty(key);
+        return LIST_OF_STRINGS_CONVERTER.convert(value == null ? defaultVal : value);
+    }
+
+    /**
      * Sets the value into system properties.
      * @param value to set
      */
@@ -752,6 +771,16 @@ public enum CassandraRelevantProperties
                                                            "expected integer value but got '%s'", value));
         }
     };
+
+    private static final PropertyConverter<List<String>> LIST_OF_STRINGS_CONVERTER = value ->
+    {
+        return Arrays.asList(value.split(","))
+                     .stream()
+                     .filter(s -> !s.isBlank())
+                     .collect(Collectors.toList());
+    };
+
+
 
     private static final PropertyConverter<Double> DOUBLE_CONVERTER = value ->
     {
