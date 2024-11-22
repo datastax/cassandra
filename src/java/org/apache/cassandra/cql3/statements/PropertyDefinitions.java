@@ -46,7 +46,7 @@ public class PropertyDefinitions
             throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
     }
 
-    public void validate(Set<String> keywords, Set<String> obsolete) throws SyntaxException
+    public void validate(Set<String> keywords, Set<String> obsolete, Set<String> keywordsFromNewVersions) throws SyntaxException
     {
         for (String name : properties.keySet())
         {
@@ -55,6 +55,8 @@ public class PropertyDefinitions
 
             if (obsolete.contains(name))
                 logger.warn("Ignoring obsolete property {}", name);
+            else if (keywordsFromNewVersions.contains(name))
+                logger.warn("Ignoring property {} that is not supported in this version", name);
             else
                 throw new SyntaxException(String.format("Unknown property '%s'", name));
         }

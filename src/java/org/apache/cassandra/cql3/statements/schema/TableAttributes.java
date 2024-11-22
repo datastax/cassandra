@@ -26,6 +26,9 @@ import java.util.stream.Collectors;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.functions.types.utils.Bytes;
@@ -45,9 +48,12 @@ import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TABLE_ATTRIBUTES_IGNORE_KEYS;
 
 public final class TableAttributes extends PropertyDefinitions
 {
+    private static final Logger logger = LoggerFactory.getLogger(TableAttributes.class);
+
     public static final String ID = "id";
     public static final Set<String> validKeywords;
     private static final Set<String> obsoleteKeywords = ImmutableSet.of(
@@ -55,6 +61,11 @@ public final class TableAttributes extends PropertyDefinitions
         "dse_vertex_label_property",
         "dse_edge_label_property"
     );
+
+    private static final Set<String> keywordsFromNewVersions = ImmutableSet.<String>builder()
+                                                                .add("allow_auto_snapshot")
+                                                                .addAll(TABLE_ATTRIBUTES_IGNORE_KEYS.getListOfStrings())
+                                                                .build();
 
     private static final Set<String> UNSUPPORTED_DSE_COMPACTION_STRATEGIES = ImmutableSet.of(
         "org.apache.cassandra.db.compaction.TieredCompactionStrategy",
@@ -70,13 +81,14 @@ public final class TableAttributes extends PropertyDefinitions
             validBuilder.add(option.toString());
         validBuilder.add(ID);
         validKeywords = validBuilder.build();
+        logger.debug("Ignored keyworks for compatibility with newer versions: {}", keywordsFromNewVersions);
     }
 
     private final Map<ColumnIdentifier, DroppedColumn.Raw> droppedColumnRecords = new HashMap<>();
 
     public void validate()
     {
-        validate(validKeywords, obsoleteKeywords);
+        validate(validKeywords, obsoleteKeywords, keywordsFromNewVersions);
         build(TableParams.builder()).validate();
     }
 
@@ -137,7 +149,7 @@ public final class TableAttributes extends PropertyDefinitions
 
     public static Set<String> allKeywords()
     {
-        return Sets.union(validKeywords, obsoleteKeywords);
+        return Sets.union(Sets.union(validKeywords, obsoleteKeywords), keywordsFromNewVersions);
     }
 
     private TableParams build(TableParams.Builder builder)
