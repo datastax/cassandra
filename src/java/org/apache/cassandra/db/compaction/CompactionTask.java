@@ -570,12 +570,6 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         @Override
-        public boolean isStopRequested()
-        {
-            return op.isStopRequested();
-        }
-
-        @Override
         public Collection<SSTableReader> inSSTables()
         {
             // TODO should we use transaction.originals() and include the expired sstables?

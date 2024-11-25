@@ -122,12 +122,6 @@ public class SharedCompactionProgress implements CompactionProgress
     }
 
     @Override
-    public boolean isStopRequested()
-    {
-        return sources.stream().anyMatch(CompactionProgress::isStopRequested);
-    }
-
-    @Override
     public Set<SSTableReader> inSSTables()
     {
         Set<SSTableReader> set = new HashSet<>();
