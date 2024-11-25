@@ -1741,35 +1741,35 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     public void testMaximalSelection()
     {
         // shared transaction, all tasks refer to the same input sstables
-        testMaximalSelection(1, 1, 0, false, true, 12 + 18 + 30, ((12 * 100L + 18 * 200 + 30 * 400) << 20));
-        testMaximalSelection(5, 5, 0, true, true, 12 + 18 + 30, ((12 * 100L + 18 * 200 + 30 * 400) << 20));
+        testMaximalSelection(1, 1, 0, false, 12 + 18 + 30, ((12 * 100L + 18 * 200 + 30 * 400) << 20));
+        testMaximalSelection(5, 5, 0, true, 12 + 18 + 30, ((12 * 100L + 18 * 200 + 30 * 400) << 20));
         // when there's a common split point of existing and new sharding (i.e. gcd(num_shards,12,18,30) > 1), it should be used
-        testMaximalSelection(3, 3, 0, false, true, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
-        testMaximalSelection(9, 3, 0, false, true, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
-        testMaximalSelection(9, 9, 0, true, true, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
-        testMaximalSelection(2, 2, 0, false, true, 6 + 9 + 15, ((6 * 100L + 9 * 200 + 15 * 400) << 20));
-        testMaximalSelection(4, 2, 0, false, true, 6 + 9 + 15, ((6 * 100L + 9 * 200 + 15 * 400) << 20));
-        testMaximalSelection(4, 4, 0, true, true, 6 + 9 + 15, ((6 * 100L + 9 * 200 + 15 * 400) << 20));
-        testMaximalSelection(18, 6, 0, false, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
-        testMaximalSelection(18, 18, 0, true, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
+        testMaximalSelection(3, 3, 0, false, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
+        testMaximalSelection(9, 3, 0, false, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
+        testMaximalSelection(9, 9, 0, true, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
+        testMaximalSelection(2, 2, 0, false, 6 + 9 + 15, ((6 * 100L + 9 * 200 + 15 * 400) << 20));
+        testMaximalSelection(4, 2, 0, false, 6 + 9 + 15, ((6 * 100L + 9 * 200 + 15 * 400) << 20));
+        testMaximalSelection(4, 4, 0, true, 6 + 9 + 15, ((6 * 100L + 9 * 200 + 15 * 400) << 20));
+        testMaximalSelection(18, 6, 0, false, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
+        testMaximalSelection(18, 18, 0, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
     }
 
     @Test
     public void testMaximalSelectionWithLimit()
     {
         // shared transaction, all tasks refer to the same input sstables
-        testMaximalSelection(5, 2, 2, true, true, 12 + 18 + 30, ((12 * 100L + 18 * 200 + 30 * 400) << 20));
+        testMaximalSelection(5, 2, 2, true, 12 + 18 + 30, ((12 * 100L + 18 * 200 + 30 * 400) << 20));
         // when there's a common split point of existing and new sharding (i.e. gcd(num_shards,12,18,30) > 1), it should be used
-        testMaximalSelection(3, 3, 2, false, true, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
-        testMaximalSelection(9, 3, 1, false, true, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
-        testMaximalSelection(9, 9, 3, true, true, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
-        testMaximalSelection(18, 6, 3, false, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
-        testMaximalSelection(18, 6, 2, false, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
-        testMaximalSelection(18, 12, 2, true, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
-        testMaximalSelection(18, 18, 3, true, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
+        testMaximalSelection(3, 3, 2, false, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
+        testMaximalSelection(9, 3, 1, false, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
+        testMaximalSelection(9, 9, 3, true, 4 + 6 + 10, ((4 * 100L + 6 * 200 + 10 * 400) << 20));
+        testMaximalSelection(18, 6, 3, false, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
+        testMaximalSelection(18, 6, 2, false, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
+        testMaximalSelection(18, 12, 2, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
+        testMaximalSelection(18, 18, 3, true, 2 + 3 + 5, ((2 * 100L + 3 * 200 + 5 * 400) << 20));
     }
 
-    private void testMaximalSelection(int numShards, int expectedTaskCount, int parallelismLimit, boolean parallelize, boolean reshard, int originalsCount, long onDiskLength)
+    private void testMaximalSelection(int numShards, int expectedTaskCount, int parallelismLimit, boolean parallelize, int originalsCount, long onDiskLength)
     {
         Set<SSTableReader> allSSTables = new HashSet<>();
         allSSTables.addAll(mockNonOverlappingSSTables(12, 0, 100 << 20));
