@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.util.Collection;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
@@ -60,7 +61,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                  ShardManager shardManager,
                                  UnifiedCompactionStrategy.ShardingStats shardingStats,
                                  Range<Token> operationRange,
-                                 Set<SSTableReader> actuallyCompact,
+                                 Collection<SSTableReader> actuallyCompact,
                                  SharedCompactionProgress sharedProgress,
                                  SharedCompactionObserver sharedObserver)
     {

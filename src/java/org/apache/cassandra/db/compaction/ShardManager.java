@@ -32,6 +32,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SortingIterator;
 
 public interface ShardManager
@@ -203,15 +204,13 @@ public interface ShardManager
         return onDiskLength / adjustSmallSpans(span, approximatePartitionCount);
     }
 
-    /**
-     * Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
-     * the given function on the combination of each shard range and the intersecting sstable set.
-     */
+    /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+    /// the given function on the combination of each shard range and the intersecting sstable set.
     default <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
-                                                                           int numShards,
-                                                                           BiFunction<Set<R>, Range<Token>, T> maker)
+                                                                           int numShardsForDensity,
+                                                                           BiFunction<? super Set<R>, Range<Token>, T> maker)
     {
-        var boundaries = boundaries(numShards);
+        var boundaries = boundaries(numShardsForDensity);
         List<T> tasks = new ArrayList<>();
         SortingIterator<R> firsts = SortingIterator.create(CompactionSSTable.firstKeyComparator, sstables);
         SortingIterator<R> lasts = SortingIterator.create(CompactionSSTable.lastKeyComparator, sstables);
@@ -238,6 +237,77 @@ public interface ShardManager
             if (!current.isEmpty()) // shardEnd must be non-null (otherwise the line above exhausts all)
                 boundaries.advanceTo(shardEnd.nextValidToken());
         }
+        return tasks;
+    }
+
+    /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+    /// the given function on the combination of each shard range and the intersecting sstable set.
+    ///
+    /// This version accepts a parallelism limit and will group shards together to fit within that limit.
+    default <T, R extends CompactionSSTable> List<T> splitSSTablesInShardsLimited(Collection<R> sstables,
+                                                                                  int numShardsForDensity,
+                                                                                  int coveredShards,
+                                                                                  int maxParallelism,
+                                                                                  BiFunction<? super Set<R>, Range<Token>, T> maker)
+    {
+        if (coveredShards <= maxParallelism)
+            return splitSSTablesInShards(sstables, numShardsForDensity, maker);
+        // We may be in a simple case where we can reduce the number of shards by some power of 2.
+        int multiple = Integer.highestOneBit(coveredShards / maxParallelism);
+        if (maxParallelism * multiple == coveredShards)
+            return splitSSTablesInShards(sstables, numShardsForDensity / multiple, maker);
+
+        var shards = splitSSTablesInShards(sstables,
+                                           numShardsForDensity,
+                                           (rangeSSTables, range) -> Pair.create(Set.copyOf(rangeSSTables), range));
+        int actualParallelism = shards.size();
+        if (maxParallelism >= actualParallelism)
+        {
+            // We can fit within the parallelism limit without grouping, because some ranges are empty.
+            // This is not expected to happen often, but if it does, take advantage.
+            List<T> tasks = new ArrayList<>();
+            for (Pair<Set<R>, Range<Token>> pair : shards)
+                tasks.add(maker.apply(pair.left, pair.right));
+            return tasks;
+        }
+
+        // Otherwise we have to group shards together. Define a target token span per task and greedily group
+        // to be as close to it as possible.
+        double spanPerTask = shards.stream().map(Pair::right).mapToDouble(t -> t.left.size(t.right)).sum() / maxParallelism;
+        double currentSpan = 0;
+        Set<R> currentSSTables = new HashSet<>();
+        Token rangeStart = null;
+        Token prevEnd = null;
+        List<T> tasks = new ArrayList<>(maxParallelism);
+        for (var pair : shards)
+        {
+            final Token currentEnd = pair.right.right;
+            final Token currentStart = pair.right.left;
+            double span = currentStart.size(currentEnd);
+            if (rangeStart == null)
+                rangeStart = currentStart;
+            if (currentSpan + span >= spanPerTask - 0.001) // rounding error safety
+            {
+                boolean includeCurrent = currentSpan + span - spanPerTask <= spanPerTask - currentSpan;
+                if (includeCurrent)
+                    currentSSTables.addAll(pair.left);
+                tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, includeCurrent ? currentEnd : prevEnd)));
+                currentSpan -= spanPerTask;
+                rangeStart = null;
+                currentSSTables.clear();
+                if (!includeCurrent)
+                {
+                    currentSSTables.addAll(pair.left);
+                    rangeStart = currentStart;
+                }
+            }
+            else
+                currentSSTables.addAll(pair.left);
+
+            currentSpan += span;
+            prevEnd = currentEnd;
+        }
+        assert currentSSTables.isEmpty();
         return tasks;
     }
 
