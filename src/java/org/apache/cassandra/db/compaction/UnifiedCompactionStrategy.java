@@ -564,97 +564,22 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
         SharedCompactionProgress sharedProgress = new SharedCompactionProgress();
         SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
-        List<CompactionTask> tasks;
-        if (parallelism >= coveredShardCount)
-        {
-            // if we have as many shards as we have sstables, we can just split the sstables into the shards.
-            tasks = shardManager.splitSSTablesInShards(sstables,
-                                                      shardingStats.shardCountForDensity,
-                                                      (rangeSSTables, range) ->
-                                                          new UnifiedCompactionTask(realm,
-                                                                                    this,
-                                                                                    new PartialLifecycleTransaction(compositeTransaction),
-                                                                                    gcBefore,
-                                                                                    shardManager,
-                                                                                    shardingStats,
-                                                                                    range,
-                                                                                    rangeSSTables,
-                                                                                    sharedProgress,
-                                                                                    sharedObserver));
-        }
-        else
-        {
-            // Otherwise we have to group some of the ranges together.
-            var shards = shardManager.splitSSTablesInShards(sstables,
-                                                            shardingStats.shardCountForDensity,
-                                                            (rangeSSTables, range) -> Pair.create(Set.copyOf(rangeSSTables), range));
-            int actualParallelism = shards.size();
-            if (parallelism >= actualParallelism)
-            {
-                // We can fit within the parallelism limit without grouping
-                tasks = new ArrayList<>();
-                for (Pair<Set<SSTableReader>, Range<Token>> pair : shards)
-                {
-                    tasks.add(new UnifiedCompactionTask(realm,
-                                                        this,
-                                                        new PartialLifecycleTransaction(compositeTransaction),
-                                                        gcBefore,
-                                                        shardManager,
-                                                        shardingStats,
-                                                        pair.right,
-                                                        pair.left,
-                                                        sharedProgress,
-                                                        sharedObserver));
-                }
-            }
-            else
-            {
-                double spanPerTask = shards.stream().map(Pair::right).mapToDouble(t -> t.left.size(t.right)).sum() / parallelism;
-                double currentSpan = 0;
-                Set<SSTableReader> currentSSTables = new HashSet<>();
-                Token rangeStart = null;
-                Token prevEnd = null;
-                tasks = new ArrayList<>(parallelism);
-                for (var pair : shards)
-                {
-                    final Token currentEnd = pair.right.right;
-                    final Token currentStart = pair.right.left;
-                    double span = currentStart.size(currentEnd);
-                    if (rangeStart == null)
-                        rangeStart = currentStart;
-                    if (currentSpan + span >= spanPerTask - 0.001) // rounding error safety
-                    {
-                        boolean includeCurrent = currentSpan + span - spanPerTask <= spanPerTask - currentSpan;
-                        if (includeCurrent)
-                            currentSSTables.addAll(pair.left);
-                        tasks.add(new UnifiedCompactionTask(realm,
-                                                            this,
-                                                            new PartialLifecycleTransaction(compositeTransaction),
-                                                            gcBefore,
-                                                            shardManager,
-                                                            shardingStats,
-                                                            new Range<>(rangeStart, includeCurrent ? currentEnd : prevEnd),
-                                                            currentSSTables,
-                                                            sharedProgress,
-                                                            sharedObserver));
-                        currentSpan -= spanPerTask;
-                        rangeStart = null;
-                        currentSSTables.clear();
-                        if (!includeCurrent)
-                        {
-                            currentSSTables.addAll(pair.left);
-                            rangeStart = currentStart;
-                        }
-                    }
-                    else
-                        currentSSTables.addAll(pair.left);
-
-                    currentSpan += span;
-                    prevEnd = currentEnd;
-                }
-                assert currentSSTables.isEmpty();
-            }
-        }
+        List<CompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
+            sstables,
+            shardingStats.shardCountForDensity,
+            shardingStats.coveredShardCount,
+            parallelism,
+            (rangeSSTables, range) -> new UnifiedCompactionTask(realm,
+                                                                this,
+                                                                new PartialLifecycleTransaction(compositeTransaction),
+                                                                gcBefore,
+                                                                shardManager,
+                                                                shardingStats,
+                                                                range,
+                                                                rangeSSTables,
+                                                                sharedProgress,
+                                                                sharedObserver)
+        );
         compositeTransaction.completeInitialization();
         assert tasks.size() <= parallelism;
         assert tasks.size() <= coveredShardCount;

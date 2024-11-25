@@ -95,7 +95,7 @@ public class Overlaps
 
     public enum InclusionMethod
     {
-        NONE, SINGLE, TRANSITIVE;
+        NONE, SINGLE, TRANSITIVE
     }
 
     public interface BucketMaker<E, B>
