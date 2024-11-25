@@ -43,11 +43,6 @@ public interface CompactionProgress extends TableOperation.Progress
     CompactionStrategy strategy();
 
     /**
-     * @return true if the compaction was requested to interrupt
-     */
-    boolean isStopRequested();
-
-    /**
      * @return input sstables
      */
     Collection<SSTableReader> inSSTables();
