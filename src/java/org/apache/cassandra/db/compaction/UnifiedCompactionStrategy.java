@@ -253,34 +253,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     }
 
     /**
-     * Split the given set of sstables into non-overlapping sets that split on boundaries that apply for the current
-     * sharding configuration.
-     */
-    public List<Set<CompactionSSTable>> splitInNonOverlappingShardSets(List<CompactionSSTable> sstables)
-    {
-        var outputShards = getShardManager().splitSSTablesInShards(sstables, makeShardingStats(sstables).shardCountForDensity,
-                                                                   (sstableShard, shardRange) -> new HashSet<>(sstableShard));
-        return combineSetsWithCommonElement(outputShards);
-    }
-
-    /**
-     * Utility method to split a list of sstables into non-overlapping sets. Used by CNDB.
-     *
-     * @param sstables A list of items to distribute in overlap sets. This is assumed to be a transient list and the
-     *                 method may modify or consume it. It is assumed that the start and end positions of an item are
-     *                 ordered, and the items are non-empty.
-     * @return list of non-overlapping sets of sstables
-     */
-    public static List<Set<CompactionSSTable>> splitInNonOverlappingSets(List<CompactionSSTable> sstables)
-    {
-        List<Set<CompactionSSTable>> overlapSets = Overlaps.constructOverlapSets(sstables,
-                                                                                 UnifiedCompactionStrategy::startsAfter,
-                                                                                 CompactionSSTable.firstKeyComparator,
-                                                                                 CompactionSSTable.lastKeyComparator);
-        return combineSetsWithCommonElement(overlapSets);
-    }
-
-    /**
      * Transform a list to transitively combine adjacent sets that have a common element, resulting in disjoint sets.
      */
     private static <T> List<Set<T>> combineSetsWithCommonElement(List<? extends Set<T>> overlapSets)
