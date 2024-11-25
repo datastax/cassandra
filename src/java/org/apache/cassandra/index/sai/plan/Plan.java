@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
@@ -45,6 +46,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
 
+import static java.lang.Math.abs;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.round;
@@ -160,9 +162,15 @@ abstract public class Plan
     protected abstract @Nullable Orderer ordering();
 
     /** selectivity comparisons to 0 will probably cause bugs, use this instead */
-    protected static boolean isEffectivelyZero(double a) {
+    protected static boolean isEffectivelyZero(double a)
+    {
         assert a >= 0;
         return a < 1e-9;
+    }
+
+    protected static boolean isEffectivelyEqual(double a, double b)
+    {
+        return isEffectivelyZero(abs(a - b));
     }
 
     /** dividing by extremely tiny numbers can cause overflow so clamp the minimum to 1e-9 */
@@ -1205,6 +1213,138 @@ abstract public class Plan
         }
     }
 
+    static final class AntiJoin extends KeysIteration
+    {
+        private final LazyTransform<List<KeysIteration>> subplansSupplier;
+
+        private AntiJoin(Factory factory, int id, KeysIteration left, KeysIteration right, Access access)
+        {
+            super(factory, id, access);
+
+            // We propagate Access lazily just before we need the subplans.
+            // This is because there may be several requests to change the access pattern from the top,
+            // and we don't want to reconstruct the whole subtree each time.
+            List<KeysIteration> subplans = new ArrayList<>(Arrays.asList(left, right));
+            this.subplansSupplier = new LazyTransform<>(subplans, this::propagateAccess);
+        }
+
+        private KeysIteration leftOrig()
+        {
+            return subplansSupplier.orig.get(0);
+        }
+
+        private KeysIteration rightOrig()
+        {
+            return subplansSupplier.orig.get(1);
+        }
+
+        private KeysIteration leftResult()
+        {
+            return subplansSupplier.get().get(0);
+        }
+
+        private KeysIteration rightResult()
+        {
+            return subplansSupplier.get().get(1);
+        }
+
+        /**
+         * Adjusts the access patterns for each subplan to account for the other subplans
+         * based on this access pattern pushed from the parent.
+         * The left subplan has selectivity 1.0 and thus doesn't skip by default. The
+         * right subplan is against the same index but with a restriction. Thus, it will
+         * skip to the first key satisfying the restriction. Since the keys from the right
+         * subplan are used to discard them, the amount of keys depends on its selectivity.
+         * @param subplans - list with left and right subplans
+         * @return list with left and right subplans with adjusted access patterns
+         */
+        private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
+        {
+            Preconditions.checkArgument(subplans.size() == 2, "Expected exactly two subplans for AntiJoin");
+
+            KeysIteration left = subplans.get(0);
+            KeysIteration right = subplans.get(1);
+            assert isEffectivelyEqual(1.0, left.selectivity());
+
+            double loops = 1.0 / boundedSelectivity(selectivity());
+            KeysIteration newLeft = left.withAccess(access.scaleDistance(loops).convolute(loops, 1.0));
+
+            // The right iterator uses the same index as the left and on the first access
+            // will skip to the first condition satisfying value. Then, it will access
+            // each satisfying value in a row, i.e., skip distance is 1.0.
+            double rightCountFactor = Math.min(left.expectedKeys(), loops * right.selectivity());
+            Access rightAccess = access.scaleDistance(1.0 / boundedSelectivity(right.selectivity()))
+                                     .convolute(rightCountFactor , 1.0)
+                                     .forceSkip();
+
+            return new ArrayList<>(Arrays.asList(newLeft, right.withAccess(rightAccess)));
+        }
+
+        @Override
+        protected KeysIterationCost estimateCost()
+        {
+            double initCost = leftResult().initCost() + rightResult().initCost();
+            double iterCost = leftResult().iterCost() + rightResult().iterCost();
+            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows * selectivity());
+            return new KeysIterationCost(expectedKeys, initCost, iterCost);
+        }
+
+        @Override
+        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        {
+            KeyRangeIterator leftIterator = (KeyRangeIterator) leftResult().execute(executor);
+            KeyRangeIterator rightIterator = (KeyRangeIterator) rightResult().execute(executor);
+            return KeyRangeAntiJoinIterator.create(leftIterator, rightIterator);
+        }
+
+        @Override
+        protected KeysIteration withAccess(Access patterns)
+        {
+            return Objects.equals(access, this.access)
+                   ? this
+                   : new AntiJoin(factory, id, leftOrig(), rightOrig(), access);
+        }
+
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return leftResult().ordering();
+        }
+
+        @Override
+        ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
+        {
+            for (Plan s : subplansSupplier.get())
+            {
+                if (function.apply(s) == ControlFlow.Break)
+                    return ControlFlow.Break;
+            }
+            return ControlFlow.Continue;
+        }
+
+        @Override
+        protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
+        {
+            KeysIteration newLeft = (KeysIteration) updater.apply(leftResult());
+            KeysIteration newRight = (KeysIteration) updater.apply(rightResult());
+
+            if (newLeft == leftResult() && newRight == rightResult())
+                return this;
+            else
+                return factory.antiJoin(newLeft, newRight, id).withAccess(access);
+        }
+
+        @Override
+        protected double estimateSelectivity()
+        {
+            assert isEffectivelyEqual(1.0, leftOrig().selectivity());
+            double selectivity = 1.0 - rightOrig().selectivity();
+            assert selectivity >= 0;
+            return selectivity;
+        }
+    }
+
     /**
      * Sorts keys in ANN order.
      * Must fetch all keys from the source before sorting, so it has a high initial cost.
@@ -1723,6 +1863,17 @@ abstract public class Plan
             return new Intersection(this, id, subplans, defaultAccess);
         }
 
+        private KeysIteration antiJoin(KeysIteration left, KeysIteration right) {
+            return antiJoin(left, right, nextId++);
+        }
+
+        private KeysIteration antiJoin(KeysIteration left, KeysIteration right, int id)
+        {
+            if (left == nothing || right == everything)
+                return nothing;
+            return new AntiJoin(this, id, left, right, defaultAccess);
+        }
+
         public Builder unionBuilder()
         {
             return new Builder(this, Operation.OperationType.OR);
@@ -2046,7 +2197,7 @@ abstract public class Plan
         /** Multiplies all counts by a constant without changing the distribution */
         Access scaleCount(double factor)
         {
-            assert Double.isFinite(factor) : "Count multiplier must not be finite; got " + factor;
+            assert Double.isFinite(factor) : "Count multiplier must be finite; got " + factor;
 
             double[] counts = Arrays.copyOf(this.counts, this.counts.length);
             double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length);
@@ -2083,24 +2234,24 @@ abstract public class Plan
          * ***   ***   ***   ***
          * </pre>
          * */
-        Access convolute(double count, double skipDistance)
+        Access convolute(double countFactor, double skipDistance)
         {
-            assert !Double.isNaN(count) : "Count must not be NaN";
+            assert !Double.isNaN(countFactor) : "Count factor must not be NaN";
             assert !Double.isNaN(skipDistance) : "Skip distance must not be NaN";
 
-            if (count <= 1.0)
-                return scaleCount(count);
+            if (countFactor <= 1.0)
+                return scaleCount(countFactor);
 
             double[] counts = Arrays.copyOf(this.counts, this.counts.length + 1);
             double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length + 1);
-
-            counts[counts.length - 1] = (count - 1) * totalCount;
+    
+            counts[counts.length - 1] = (countFactor - 1) * totalCount;
             skipDistances[skipDistances.length - 1] = skipDistance;
 
             // Because we added new accesses, we need to adjust the distance of the remaining points
             // in a way that the total distance stays the same:
             for (int i = 0; i < skipDistances.length - 1; i++)
-                skipDistances[i] -= (count - 1) * skipDistance;
+                skipDistances[i] -= (countFactor - 1) * skipDistance;
 
             return new Access(counts, skipDistances, forceSkip);
         }
@@ -2131,14 +2282,12 @@ abstract public class Plan
                 return 0.0;  // we don't want NaNs ;)
 
             double totalCost = 0.0;
-            double totalWeight = 0.0;
             for (int i = 0; i < counts.length; i++)
             {
                 double skipCost = (distances[i] > 1.0 || forceSkip) ? skipCostFn.apply(distances[i]) : 0.0;
                 totalCost += counts[i] * (nextCost + skipCost);
-                totalWeight += counts[i];
             }
-            return totalCost / totalWeight;
+            return totalCost / totalCount;
         }
 
         public double meanDistance()
