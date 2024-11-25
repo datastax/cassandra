@@ -115,10 +115,7 @@ public class SortedStringTableCursor implements SSTableCursor
                 if (position != null)
                     this.endPosition = position.position; // 0 if end is before our first key.
                 else
-                {
-                    assert false : "Range " + tokenRange + " end is before last sstable token " + sstable.last.getToken() + " but no position was found";
-                    this.endPosition = dataFile.length();
-                }
+                    throw new AssertionError("Range " + tokenRange + " end is before last sstable token " + sstable.last.getToken() + " but no position was found");
             }
             else
                 this.endPosition = dataFile.length();
