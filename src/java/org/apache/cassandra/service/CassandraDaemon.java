@@ -62,6 +62,7 @@ import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.nodes.virtual.LegacySystemKeyspaceToNodes;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -282,6 +283,10 @@ public class CassandraDaemon
         }
 
         setupVirtualKeyspaces();
+
+        LegacySystemKeyspaceToNodes.convertToNodesFilesIfNecessary();
+
+        SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
 
         try
         {

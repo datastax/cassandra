@@ -50,6 +50,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
+import org.apache.cassandra.db.marshal.*;
 import org.apache.commons.lang3.ObjectUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,12 +62,6 @@ import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionHistoryTabularData;
-import org.apache.cassandra.db.marshal.ByteBufferAccessor;
-import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.db.marshal.TimeUUIDType;
-import org.apache.cassandra.db.marshal.TupleType;
-import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
@@ -286,6 +281,12 @@ public final class SystemKeyspace
                 + "truncated_at map<uuid, blob>,"
                 + "PRIMARY KEY ((key)))"
                 ).recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance)
+                // the following columns come from DSE 5.1
+                .recordDeprecatedSystemColumn("dse_version", UTF8Type.instance)
+                .recordDeprecatedSystemColumn("graph", BooleanType.instance)
+                .recordDeprecatedSystemColumn("server_id", UTF8Type.instance)
+                .recordDeprecatedSystemColumn("workload", UTF8Type.instance)
+                .recordDeprecatedSystemColumn("workloads", SetType.getInstance(UTF8Type.instance, false))
                 .build();
 
     // Used by CNDB
@@ -489,6 +490,12 @@ public final class SystemKeyspace
             + "schema_version uuid,"
             + "tokens set<varchar>,"
             + "PRIMARY KEY ((peer)))")
+            // the following columns come from DSE 5.1
+            .recordDeprecatedSystemColumn("dse_version", UTF8Type.instance)
+            .recordDeprecatedSystemColumn("graph", BooleanType.instance)
+            .recordDeprecatedSystemColumn("server_id", UTF8Type.instance)
+            .recordDeprecatedSystemColumn("workload", UTF8Type.instance)
+            .recordDeprecatedSystemColumn("workloads", SetType.getInstance(UTF8Type.instance, false))
             .build();
 
     /** @deprecated See CASSANDRA-7544 */
