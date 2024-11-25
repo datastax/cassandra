@@ -1956,7 +1956,7 @@ abstract public class Plan
      * Each access pattern is assumed to follow uniform distribution and
      * is represented by a pair of values:
      * - a count (number of expected occurrences) and
-     * - a distance to next occurrence (skip distance).
+     * - an average distance to next occurrence (skip distance).
      * For performance, these are split into arrays of the primitives.
      * <br>
      * For example, given:
