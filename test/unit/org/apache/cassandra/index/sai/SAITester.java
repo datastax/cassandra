@@ -558,7 +558,7 @@ public class SAITester extends CQLTester
 
         for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perSSTableComponentTypes())
         {
-            Set<File> tableFiles = componentFiles(indexFiles, new Component(Component.Type.CUSTOM, Version.latest().fileNameFormatter().format(indexComponentType, null, 0)));
+            Set<File> tableFiles = componentFiles(indexFiles, new Component(Component.Type.CUSTOM, Version.latest().fileNameFormatter().format(indexComponentType, (String)null, 0)));
             assertEquals(tableFiles.toString(), perSSTableFiles, tableFiles.size());
         }
 
