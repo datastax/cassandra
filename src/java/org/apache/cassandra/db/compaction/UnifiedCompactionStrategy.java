@@ -540,8 +540,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Collection<SSTableReader> sstables = transaction.originals();
         ShardManager shardManager = getShardManager();
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
-        SharedCompactionProgress sharedProgress = new SharedCompactionProgress();
-        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
         List<CompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
             sstables,
             shardingStats.shardCountForDensity,
@@ -554,9 +552,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                 shardManager,
                                                                 shardingStats,
                                                                 range,
-                                                                rangeSSTables,
-                                                                sharedProgress,
-                                                                sharedObserver)
+                                                                rangeSSTables)
         );
         compositeTransaction.completeInitialization();
         assert tasks.size() <= parallelism;
