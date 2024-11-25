@@ -212,15 +212,6 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     /**
-     * If this is a partial compaction, its progress reports are shared between tasks. This method returns the shared
-     * progress object.
-     */
-    protected SharedCompactionProgress sharedProgress()
-    {
-        return null;
-    }
-
-    /**
      * @return The set of input sstables for this compaction. This must be a subset of the transaction originals and
      * must reflect any removal of sstables from the originals set for correct overlap tracking.
      * See {@link UnifiedCompactionTask} for an example.
@@ -351,16 +342,9 @@ public class CompactionTask extends AbstractCompactionTask
                 this.op = initializeSource(tokenRange());
                 this.writer = getCompactionAwareWriter(realm, dirs, actuallyCompact);
                 this.obsCloseable = opObserver.onOperationStart(op);
-                CompactionProgress progress = this;
-                var sharedProgress = sharedProgress();
-                if (sharedProgress != null)
-                {
-                    sharedProgress.addSubtask(this);
-                    progress = sharedProgress;
-                }
 
                 for (var obs : getCompObservers())
-                    obs.onInProgress(progress);
+                    obs.onInProgress(this);
             }
             catch (Throwable t)
             {
@@ -476,22 +460,14 @@ public class CompactionTask extends AbstractCompactionTask
 
             if (completed)
             {
-                boolean shouldSignalCompletion = true;
-                var sharedProgress = sharedProgress();
-                if (sharedProgress != null)
-                    shouldSignalCompletion = sharedProgress.completeSubtask(this);
-
-                if (shouldSignalCompletion)
+                if (COMPACTION_HISTORY_ENABLED.getBoolean())
                 {
-                    if (COMPACTION_HISTORY_ENABLED.getBoolean())
-                    {
-                        updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this);
-                    }
-                    CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTablesCount);
-                    if (!transaction.originals().isEmpty() && actuallyCompact.isEmpty())
-                        // this CompactionOperation only deleted fully expired SSTables without compacting anything
-                        CompactionManager.instance.incrementDeleteOnlyCompactions();
+                    updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this);
                 }
+                CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTablesCount);
+                if (!transaction.originals().isEmpty() && actuallyCompact.isEmpty())
+                    // this CompactionOperation only deleted fully expired SSTables without compacting anything
+                    CompactionManager.instance.incrementDeleteOnlyCompactions();
 
                 if (logger.isDebugEnabled())
                     debugLogCompactionSummaryInfo(taskIdString, System.nanoTime() - startNanos, totalKeysWritten, newSStables, this);
