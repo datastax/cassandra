@@ -543,7 +543,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Collection<SSTableReader> sstables = transaction.originals();
         ShardManager shardManager = getShardManager();
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
-        SharedCompactionProgress sharedProgress = new SharedCompactionProgress();
+        SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
         SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
         List<CompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
             sstables,
