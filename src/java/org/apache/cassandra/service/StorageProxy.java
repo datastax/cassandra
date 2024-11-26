@@ -53,6 +53,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -341,6 +342,8 @@ public class StorageProxy implements StorageProxyMBean
     private static final String DISABLE_SERIAL_READ_LINEARIZABILITY_KEY = "cassandra.unsafe.disable-serial-reads-linearizability";
     private static final boolean disableSerialReadLinearizability =
         Boolean.parseBoolean(System.getProperty(DISABLE_SERIAL_READ_LINEARIZABILITY_KEY, "false"));
+
+    private static volatile Integer maxPaxosBackoffMillis = CassandraRelevantProperties.LWT_MAX_BACKOFF_MS.getInt();
 
     private StorageProxy()
     {
@@ -691,7 +694,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
                 contentions++;
-                int sleepInMillis = ThreadLocalRandom.current().nextInt(100);
+                int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
                 Uninterruptibles.sleepUninterruptibly(sleepInMillis, TimeUnit.MILLISECONDS);
                 casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
                 // continue to retry
@@ -761,7 +764,7 @@ public class StorageProxy implements StorageProxyMBean
                     Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                     contentions++;
                     // sleep a random amount to give the other proposer a chance to finish
-                    int sleepInMillis = ThreadLocalRandom.current().nextInt(100);
+                    int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
                     Uninterruptibles.sleepUninterruptibly(sleepInMillis, MILLISECONDS);
                     casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
                     continue;
@@ -802,7 +805,7 @@ public class StorageProxy implements StorageProxyMBean
                         Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                         // sleep a random amount to give the other proposer a chance to finish
                         contentions++;
-                        int sleepInMillis = ThreadLocalRandom.current().nextInt(100);
+                        int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
                         Uninterruptibles.sleepUninterruptibly(sleepInMillis, MILLISECONDS);
                         casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
                     }
@@ -3013,5 +3016,17 @@ public class StorageProxy implements StorageProxyMBean
     public void disableCheckForDuplicateRowsDuringCompaction()
     {
         DatabaseDescriptor.setCheckForDuplicateRowsDuringCompaction(false);
+    }
+
+    @Override
+    public int getMaxPaxosBackoffMillis()
+    {
+        return maxPaxosBackoffMillis;
+    }
+
+    @Override
+    public void setMaxPaxosBackoffMillis(int maxPaxosBackoffMillis)
+    {
+        StorageProxy.maxPaxosBackoffMillis = maxPaxosBackoffMillis;
     }
 }
