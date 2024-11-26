@@ -45,6 +45,16 @@ public class SharedCompactionProgress implements CompactionProgress
 {
     private final List<CompactionProgress> sources = new ArrayList<>();
     private final AtomicInteger toComplete = new AtomicInteger(0);
+    private final UUID operationId;
+    private final OperationType operationType;
+    private final TableOperation.Unit unit;
+
+    public SharedCompactionProgress(UUID operationId, OperationType operationType, TableOperation.Unit unit)
+    {
+        this.operationId = operationId;
+        this.operationType = operationType;
+        this.unit = unit;
+    }
 
     public void registerExpectedSubtask()
     {
@@ -53,9 +63,9 @@ public class SharedCompactionProgress implements CompactionProgress
 
     public synchronized void addSubtask(CompactionProgress progress)
     {
-        if (!sources.isEmpty())
-            assert sources.get(0).operationId() == progress.operationId();
         sources.add(progress);
+        assert progress.operationType() == operationType;
+        assert progress.unit() == unit;
     }
 
     /// Mark a subtask as complete. Returns true if the caller is the last subtask to complete.
@@ -106,19 +116,19 @@ public class SharedCompactionProgress implements CompactionProgress
     @Override
     public OperationType operationType()
     {
-        return sources.get(0).operationType();
+        return operationType;
     }
 
     @Override
     public UUID operationId()
     {
-        return sources.get(0).operationId();
+        return operationId;
     }
 
     @Override
     public TableOperation.Unit unit()
     {
-        return sources.get(0).unit();
+        return unit;
     }
 
     @Override

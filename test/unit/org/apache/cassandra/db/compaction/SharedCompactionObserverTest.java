@@ -183,13 +183,4 @@ public class SharedCompactionObserverTest
         when(mockProgress2.operationId()).thenReturn(UUID.randomUUID());
         Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onInProgress(mockProgress2));
     }
-
-    @Test
-    public void testErrorWrongId()
-    {
-        Util.assumeAssertsEnabled();
-        sharedCompactionObserver.registerExpectedSubtask();
-        sharedCompactionObserver.onInProgress(mockProgress);
-        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(UUID.randomUUID(), true));
-    }
 }
