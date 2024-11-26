@@ -65,11 +65,10 @@ public class SharedCompactionObserver implements CompactionObserver
     {
         onCompleteIsSuccess.compareAndSet(true, isSuccess); // acts like AND
         final int remainingToComplete = toReportOnComplete.decrementAndGet();
-        if (remainingToComplete == 0)
-            observer.onCompleted(id, onCompleteIsSuccess.get());
-        assert remainingToComplete >= 0 : "onCompleted called without corresponding registerExpectedSubtask";
         assert inProgressReported.get() != null : "onCompleted called before onInProgress";
-        assert inProgressReported.get().operationId().equals(id)
-            : "onComplete reported a different operation id, " + id + " vs " + inProgressReported.get().operationId();
+        assert remainingToComplete >= 0 : "onCompleted called without corresponding registerExpectedSubtask";
+        // The individual operation ID given here may be different from the shared ID. Pass on the shared one.
+        if (remainingToComplete == 0)
+            observer.onCompleted(inProgressReported.get().operationId(), onCompleteIsSuccess.get());
     }
 }

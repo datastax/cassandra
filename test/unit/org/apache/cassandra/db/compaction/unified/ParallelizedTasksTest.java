@@ -26,15 +26,19 @@ import java.util.stream.Collectors;
 
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
-import org.apache.cassandra.db.compaction.CompactionLogger;
+import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionStrategyFactory;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.ShardManager;
 import org.apache.cassandra.db.compaction.ShardManagerNoDisks;
-import org.apache.cassandra.db.compaction.TableOperationObserver;
+import org.apache.cassandra.db.compaction.SharedCompactionObserver;
+import org.apache.cassandra.db.compaction.SharedCompactionProgress;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.lifecycle.CompositeLifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -55,21 +59,36 @@ public class ParallelizedTasksTest extends ShardingTestBase
     }
 
     @Test
-    public void testOneSSTablePerShard() throws Throwable
+    public void testOneSSTablePerShardIterators() throws Throwable
     {
         int numShards = 5;
-        testParallelized(numShards, PARTITIONS, numShards, true);
+        testParallelized(numShards, PARTITIONS, numShards, true, false);
     }
 
     @Test
-    public void testMultipleInputSSTables() throws Throwable
+    public void testMultipleInputSSTablesIterators() throws Throwable
     {
         int numShards = 3;
-        testParallelized(numShards, PARTITIONS, numShards, false);
+        testParallelized(numShards, PARTITIONS, numShards, false, false);
     }
 
-    private void testParallelized(int numShards, int rowCount, int numOutputSSTables, boolean compact) throws Throwable
+    @Test
+    public void testOneSSTablePerShardCursors() throws Throwable
     {
+        int numShards = 5;
+        testParallelized(numShards, PARTITIONS, numShards, true, true);
+    }
+
+    @Test
+    public void testMultipleInputSSTablesCursors() throws Throwable
+    {
+        int numShards = 3;
+        testParallelized(numShards, PARTITIONS, numShards, false, true);
+    }
+
+    private void testParallelized(int numShards, int rowCount, int numOutputSSTables, boolean compact, boolean useCursors) throws Throwable
+    {
+        CassandraRelevantProperties.CURSORS_ENABLED.setBoolean(useCursors);
         ColumnFamilyStore cfs = getColumnFamilyStore();
         cfs.disableAutoCompaction();
 
@@ -85,23 +104,38 @@ public class ParallelizedTasksTest extends ShardingTestBase
         Collection<SSTableReader> sstables = transaction.originals();
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
 
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(new CompactionStrategyFactory(cfs), mockController);
+        UnifiedCompactionStrategy mockStrategy = strategy;
+        strategy.getCompactionLogger().enable();
+
+        SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
+        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(strategy);
+
         List<AbstractCompactionTask> tasks = shardManager.splitSSTablesInShards(
             sstables,
             numShards,
             (rangeSSTables, range) ->
             new UnifiedCompactionTask(cfs,
-                                      null,
+                                      mockStrategy,
                                       new PartialLifecycleTransaction(compositeTransaction),
                                       0,
                                       shardManager,
                                       new UnifiedCompactionStrategy.ShardingStats(rangeSSTables, shardManager, mockController),
                                       range,
-                                      rangeSSTables)
+                                      rangeSSTables,
+                                      sharedProgress,
+                                      sharedObserver)
         );
         compositeTransaction.completeInitialization();
         assertEquals(numOutputSSTables, tasks.size());
 
-        List<Future<?>> futures = tasks.stream().map(t -> ForkJoinPool.commonPool().submit(() -> t.execute(TableOperationObserver.NOOP))).collect(Collectors.toList());
+        List<Future<?>> futures = tasks.stream()
+                                       .map(t -> ForkJoinPool.commonPool()
+                                                             .submit(() -> {
+                                                                 t.execute(CompactionManager.instance.active);
+                                                             }))
+                                       .collect(Collectors.toList());
+
         FBUtilities.waitOnFutures(futures);
         assertTrue(transaction.state() == Transactional.AbstractTransactional.State.COMMITTED);
 
