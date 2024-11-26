@@ -463,6 +463,7 @@ public enum CassandraRelevantProperties
     CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
 
     LWT_LOCKS_PER_THREAD("cassandra.lwt_locks_per_thread", "1024"),
+    LWT_MAX_BACKOFF_MS("cassandra.lwt_max_backoff_ms", "50"),
     COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
 
