@@ -968,4 +968,29 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         // Ensure that we only have one vector
         assertEquals("The TTL'd row is overwritten and removed during flush.", 1, sai.getIndexContext().getCellCount());
     }
+
+    // This test mimics having rf > 1.
+    @Test
+    public void testSameRowInMultipleSSTablesWithSameTimestamp() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, val vector<float, 3>, PRIMARY KEY(pk, ck))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        // We don't want compaction preventing us from hitting the intended code path.
+        disableCompaction();
+
+        // This test is fairly contrived, but covers the case where the first row we attempt to materialize in the
+        // ScoreOrderedResultRetriever is shadowed by a row in a different sstable. And then, when we go to pull in
+        // the next row, we find that the PK is already pulled in, so we need to skip it.
+        execute("INSERT INTO %s (pk, ck, val) VALUES (0, 0, [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, ck, val) VALUES (0, 1, [1.0, 2.0, 3.0]) USING TIMESTAMP 1");
+        flush();
+        // Now, delete row pk=0, ck=0 so that we can test that the shadowed row is not returned and that we need
+        // to get the next row from the score ordered iterator.
+        execute("DELETE FROM %s WHERE pk = 0 AND ck = 0");
+        execute("INSERT INTO %s (pk, ck, val) VALUES (0, 1, [1.0, 2.0, 3.0]) USING TIMESTAMP 1");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT ck FROM %s ORDER BY val ANN OF [1.0, 2.0, 3.0] LIMIT 2"), row(1));
+        });
+    }
 }
