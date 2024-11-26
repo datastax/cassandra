@@ -26,6 +26,8 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionTask;
 import org.apache.cassandra.db.compaction.ShardManager;
+import org.apache.cassandra.db.compaction.SharedCompactionObserver;
+import org.apache.cassandra.db.compaction.SharedCompactionProgress;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
@@ -38,6 +40,7 @@ public class UnifiedCompactionTask extends CompactionTask
     private final ShardManager shardManager;
     private final Range<Token> operationRange;
     private final Set<SSTableReader> actuallyCompact;
+    private final SharedCompactionProgress sharedProgress;
     private final UnifiedCompactionStrategy.ShardingStats shardingStats;
 
     public UnifiedCompactionTask(CompactionRealm cfs,
@@ -47,7 +50,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                  ShardManager shardManager,
                                  UnifiedCompactionStrategy.ShardingStats shardingStats)
     {
-        this(cfs, strategy, txn, gcBefore, shardManager, shardingStats, null, null);
+        this(cfs, strategy, txn, gcBefore, shardManager, shardingStats, null, null, null, null);
     }
 
 
@@ -58,16 +61,26 @@ public class UnifiedCompactionTask extends CompactionTask
                                  ShardManager shardManager,
                                  UnifiedCompactionStrategy.ShardingStats shardingStats,
                                  Range<Token> operationRange,
-                                 Collection<SSTableReader> actuallyCompact)
+                                 Collection<SSTableReader> actuallyCompact,
+                                 SharedCompactionProgress sharedProgress,
+                                 SharedCompactionObserver sharedObserver)
     {
-        super(cfs, txn, gcBefore, strategy != null ? strategy.getController().getIgnoreOverlapsInExpirationCheck() : false, strategy);
+        super(cfs, txn, gcBefore, strategy != null ? strategy.getController().getIgnoreOverlapsInExpirationCheck() : false, strategy, sharedObserver != null ? sharedObserver : strategy);
         this.shardManager = shardManager;
         this.shardingStats = shardingStats;
 
         if (operationRange != null)
+        {
             assert actuallyCompact != null : "Ranged tasks should use a set of sstables to compact";
-
+            assert sharedProgress != null : "Ranged tasks should use a shared progress object";
+            assert sharedObserver != null : "Ranged tasks should use a shared observer";
+        }
         this.operationRange = operationRange;
+        this.sharedProgress = sharedProgress;
+        if (sharedProgress != null)
+            sharedProgress.registerExpectedSubtask();
+        if (sharedObserver != null)
+            sharedObserver.registerExpectedSubtask();
         // To make sure actuallyCompact tracks any removals from txn.originals(), we intersect the given set with it.
         // This should not be entirely necessary (as shouldReduceScopeForSpace() is false for ranged tasks), but it
         // is cleaner to enforce inputSSTables()'s requirements.
@@ -97,6 +110,12 @@ public class UnifiedCompactionTask extends CompactionTask
     protected Range<Token> tokenRange()
     {
         return operationRange;
+    }
+
+    @Override
+    protected SharedCompactionProgress sharedProgress()
+    {
+        return sharedProgress;
     }
 
     @Override
