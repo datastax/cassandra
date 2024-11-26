@@ -516,17 +516,37 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             // (if most of the keys belong to this sstable, bsearch will actually be slower)
             var comparisonsSavedByBsearch = new QuickSlidingWindowReservoir(10);
             boolean preferSeqScanToBsearch = false;
+            long minTimestamp = primaryKeyMap.getMinTimestamp();
+            long maxTimestamp = primaryKeyMap.getMaxTimestamp();
 
             for (int i = 0; i < keysInRange.size();)
             {
                 // turn the pk back into a row id, with a fast path for the case where the pk is from this sstable
                 var primaryKey = keysInRange.get(i);
+                var isPrimaryKeyWithSource = primaryKey instanceof PrimaryKeyWithSource;
                 long sstableRowId;
-                if (primaryKey instanceof PrimaryKeyWithSource
-                    && ((PrimaryKeyWithSource) primaryKey).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
-                    sstableRowId = ((PrimaryKeyWithSource) primaryKey).getSourceRowId();
-                else
+                if (!isPrimaryKeyWithSource)
+                {
                     sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
+                }
+                else
+                {
+                    var pkms = (PrimaryKeyWithSource) primaryKey;
+                    if (pkms.matchesSource(primaryKeyMap.getSSTableId()))
+                    {
+                        sstableRowId = pkms.getSourceRowId();
+                    }
+                    else if (pkms.isInTimestampWindow(minTimestamp, maxTimestamp))
+                    {
+                        sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
+                    }
+                    else
+                    {
+                        // The key is not in the timestamp window, so we can skip it.
+                        i++;
+                        continue;
+                    }
+                }
 
                 if (sstableRowId < 0)
                 {

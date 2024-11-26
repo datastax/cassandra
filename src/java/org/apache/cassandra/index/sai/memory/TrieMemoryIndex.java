@@ -57,6 +57,7 @@ import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -220,7 +221,7 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             return KeyRangeIterator.empty();
         }
-        return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys()), keyRange);
+        return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys(), memtable), keyRange);
     }
 
     private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
@@ -228,7 +229,7 @@ public class TrieMemoryIndex extends MemoryIndex
         Trie<PrimaryKeys> subtrie = getSubtrie(expression);
 
         var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
-        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
+        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, memtable, indexContext.keyFactory(), capacity);
         lastQueueSize.set(mergingIteratorBuilder.size());
 
         if (!Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
@@ -542,9 +543,9 @@ public class TrieMemoryIndex extends MemoryIndex
             this.keySets = new SortingSingletonOrSetIterator(keySets);
         }
 
-        static Builder builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity)
+        static Builder builder(AbstractBounds<PartitionPosition> keyRange, Memtable mt, PrimaryKey.Factory factory, int capacity)
         {
-            return new Builder(keyRange, factory, capacity);
+            return new Builder(keyRange, mt, factory, capacity);
         }
 
         @Override
@@ -575,13 +576,14 @@ public class TrieMemoryIndex extends MemoryIndex
             private final PrimaryKey min;
             private final PrimaryKey max;
             private long count;
+            private final Memtable mt;
 
-
-            Builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity)
+            Builder(AbstractBounds<PartitionPosition> keyRange, Memtable mt, PrimaryKey.Factory factory, int capacity)
             {
                 this.min = factory.createTokenOnly(keyRange.left.getToken());
                 this.max = factory.createTokenOnly(keyRange.right.getToken());
                 this.keySets = new ArrayList<>(capacity);
+                this.mt = mt;
             }
 
             public void add(PrimaryKeys primaryKeys)
@@ -592,9 +594,9 @@ public class TrieMemoryIndex extends MemoryIndex
                 int size = primaryKeys.size();
                 SortedSet<PrimaryKey> keys = primaryKeys.keys();
                 if (size == 1)
-                    keySets.add(keys.first());
+                    keySets.add(new PrimaryKeyWithSource(keys.first(), mt));
                 else
-                    keySets.add(new SortedSetKeyRangeIterator(keys, min, max, size));
+                    keySets.add(new SortedSetKeyRangeIterator(keys, mt, min, max, size));
 
                 count += size;
             }
@@ -621,17 +623,20 @@ public class TrieMemoryIndex extends MemoryIndex
         private SortedSet<PrimaryKey> primaryKeySet;
         private Iterator<PrimaryKey> iterator;
         private PrimaryKey lastComputedKey;
+        private final Memtable mt;
 
-        public SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source)
+        public SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source, Memtable mt)
         {
             super(source.first(), source.last(), source.size());
             this.primaryKeySet = source;
+            this.mt = mt;
         }
 
-        private SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source, PrimaryKey min, PrimaryKey max, long count)
+        private SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source, Memtable mt, PrimaryKey min, PrimaryKey max, long count)
         {
             super(min, max, count);
             this.primaryKeySet = source;
+            this.mt = mt;
         }
 
 
@@ -642,7 +647,7 @@ public class TrieMemoryIndex extends MemoryIndex
             if (iterator == null)
                 iterator = primaryKeySet.iterator();
             lastComputedKey = iterator.hasNext() ? iterator.next() : endOfData();
-            return lastComputedKey;
+            return lastComputedKey != null ? new PrimaryKeyWithSource(lastComputedKey, mt) : null;
         }
 
         @Override

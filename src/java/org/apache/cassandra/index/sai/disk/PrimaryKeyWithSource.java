@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableId;
@@ -29,25 +30,45 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class PrimaryKeyWithSource implements PrimaryKey
 {
     private final PrimaryKey primaryKey;
-    private final SSTableId<?> sourceSstableId;
+    private final Object source;
     private final long sourceRowId;
+    private final long ssTableMinTimestamp;
+    private final long ssTableMaxTimestamp;
 
-    public PrimaryKeyWithSource(PrimaryKey primaryKey, SSTableId<?> sstableId, long sstableRowId)
+    public PrimaryKeyWithSource(PrimaryKey primaryKey, Memtable memtable)
     {
         assert primaryKey != null : "Cannot construct a PrimaryKeyWithSource with a null primaryKey";
         this.primaryKey = primaryKey;
-        this.sourceSstableId = sstableId;
+        this.source = memtable;
+        this.sourceRowId = -1; // memtables don't have row ids
+        this.ssTableMinTimestamp = memtable.getMinTimestamp();
+        this.ssTableMaxTimestamp = Long.MAX_VALUE; // memtables don't have max timestamps
+    }
+
+    public PrimaryKeyWithSource(PrimaryKey primaryKey, SSTableId<?> sstableId, long sstableRowId, long sstableMinTimestamp, long sstableMaxTimestamp)
+    {
+        assert primaryKey != null : "Cannot construct a PrimaryKeyWithSource with a null primaryKey";
+        this.primaryKey = primaryKey;
+        this.source = sstableId;
         this.sourceRowId = sstableRowId;
+        this.ssTableMinTimestamp = sstableMinTimestamp;
+        this.ssTableMaxTimestamp = sstableMaxTimestamp;
     }
 
     public long getSourceRowId()
     {
+        assert sourceRowId >= 0 : "Source row id is not set";
         return sourceRowId;
     }
 
-    public SSTableId<?> getSourceSstableId()
+    public boolean matchesSource(SSTableId<?> sstableId)
     {
-        return sourceSstableId;
+        return source.equals(sstableId);
+    }
+
+    public boolean isInTimestampWindow(long minTimestamp, long maxTimestamp)
+    {
+        return ssTableMinTimestamp <= maxTimestamp && ssTableMaxTimestamp >= minTimestamp;
     }
 
     @Override
@@ -98,7 +119,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
         if (o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;
-            if (sourceSstableId.equals(other.sourceSstableId))
+            if (source.equals(other.source))
                 return Long.compare(sourceRowId, other.sourceRowId);
         }
         return primaryKey.compareTo(o);
@@ -110,7 +131,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
         if (o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;
-            if (sourceSstableId.equals(other.sourceSstableId))
+            if (source.equals(other.source))
                 return sourceRowId == other.sourceRowId;
         }
         return primaryKey.equals(o);
@@ -125,6 +146,6 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public String toString()
     {
-        return String.format("%s (source sstable: %s, %s)", primaryKey, sourceSstableId, sourceRowId);
+        return String.format("%s (source sstable: %s, %s)", primaryKey, source, sourceRowId);
     }
 }

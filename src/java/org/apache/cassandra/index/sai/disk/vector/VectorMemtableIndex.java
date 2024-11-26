@@ -51,6 +51,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -293,6 +294,12 @@ public class VectorMemtableIndex implements MemtableIndex
             .takeWhile(k -> k.compareTo(maximumKey) <= 0)
             .forEach(k ->
         {
+            // We use max value for the upper bound of the timestamp window because memtables are constantly written to.
+            // TODO do we have multiple memtables? Is it valid to check the source here? The graph lookup should
+            // be pretty cheap, so leaving it as is for now.
+            if (k instanceof PrimaryKeyWithSource &&
+                !((PrimaryKeyWithSource) k).isInTimestampWindow(mt.getMinTimestamp(), Long.MAX_VALUE))
+                return;
             var v = graph.vectorForKey(k);
             if (v == null)
                 return;

@@ -65,9 +65,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private final LongArray.Factory offsetReaderFactory;
         private final MetadataSource metadata;
         private final KeyFetcher keyFetcher;
-        private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
-        private final SSTableId<?> sstableId;
+        private final SSTableReader sstableReader;
         private final long count;
 
         private FileHandle token = null;
@@ -92,10 +91,9 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
 
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
                 this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);
-                this.partitioner = sstable.metadata().partitioner;
                 this.keyFetcher = new KeyFetcher(sstable);
                 this.primaryKeyFactory = primaryKeyFactory;
-                this.sstableId = sstable.getId();
+                this.sstableReader = sstable;
             }
             catch (Throwable t)
             {
@@ -109,7 +107,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
             final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
             final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
 
-            return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);
+            return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, keyFetcher, primaryKeyFactory, sstableReader);
         }
 
         @Override
@@ -131,29 +129,40 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     private final KeyFetcher keyFetcher;
     private final RandomAccessReader reader;
     private final PrimaryKey.Factory primaryKeyFactory;
-    private final SSTableId<?> sstableId;
+    private final SSTableReader ssTableReader;
     private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
 
     private PartitionAwarePrimaryKeyMap(LongArray rowIdToToken,
                                         LongArray rowIdToOffset,
-                                        IPartitioner partitioner,
                                         KeyFetcher keyFetcher,
                                         PrimaryKey.Factory primaryKeyFactory,
-                                        SSTableId<?> sstableId)
+                                        SSTableReader ssTableReader)
     {
         this.rowIdToToken = rowIdToToken;
         this.rowIdToOffset = rowIdToOffset;
-        this.partitioner = partitioner;
+        this.partitioner = ssTableReader.metadata().partitioner;
         this.keyFetcher = keyFetcher;
         this.reader = keyFetcher.createReader();
         this.primaryKeyFactory = primaryKeyFactory;
-        this.sstableId = sstableId;
+        this.ssTableReader = ssTableReader;
     }
 
     @Override
     public SSTableId<?> getSSTableId()
     {
-        return sstableId;
+        return ssTableReader.getId();
+    }
+
+    @Override
+    public long getMinTimestamp()
+    {
+        return ssTableReader.getMinTimestamp();
+    }
+
+    @Override
+    public long getMaxTimestamp()
+    {
+        return ssTableReader.getMaxTimestamp();
     }
 
     @Override

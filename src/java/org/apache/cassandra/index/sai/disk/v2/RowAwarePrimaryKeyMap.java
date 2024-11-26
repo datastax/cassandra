@@ -71,7 +71,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class RowAwarePrimaryKeyMapFactory implements Factory
     {
-        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final SortedTermsReader sortedTermsReader;
         private final long count;
@@ -79,16 +78,13 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private FileHandle termsDataBlockOffsets = null;
         private FileHandle termsData = null;
         private FileHandle termsTrie = null;
-        private final IPartitioner partitioner;
-        private final ClusteringComparator clusteringComparator;
         private final PrimaryKey.Factory primaryKeyFactory;
-        private final SSTableId<?> sstableId;
+        private final SSTableReader ssTableReader;
 
         public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
         {
             try
             {
-                this.perSSTableComponents = perSSTableComponents;
                 MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
                 count = tokensMeta.valueCount;
@@ -101,10 +97,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.termsData = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS).createFileHandle();
                 this.termsTrie = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
                 this.sortedTermsReader = new SortedTermsReader(termsData, termsDataBlockOffsets, termsTrie, sortedTermsMeta, blockOffsetsMeta);
-                this.partitioner = sstable.metadata().partitioner;
                 this.primaryKeyFactory = primaryKeyFactory;
-                this.clusteringComparator = sstable.metadata().comparator;
-                this.sstableId = sstable.getId();
+                this.ssTableReader = sstable;
             }
             catch (Throwable t)
             {
@@ -115,16 +109,13 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         @Override
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
+            final LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
             try
             {
                 return new RowAwarePrimaryKeyMap(rowIdToToken,
-                                                 sortedTermsReader,
                                                  sortedTermsReader.openCursor(),
-                                                 partitioner,
                                                  primaryKeyFactory,
-                                                 clusteringComparator,
-                                                 sstableId);
+                                                 ssTableReader);
             }
             catch (IOException e)
             {
@@ -146,35 +137,42 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     private final LongArray rowIdToToken;
-    private final SortedTermsReader sortedTermsReader;
     private final SortedTermsReader.Cursor cursor;
     private final IPartitioner partitioner;
     private final PrimaryKey.Factory primaryKeyFactory;
     private final ClusteringComparator clusteringComparator;
-    private final SSTableId<?> sstableId;
+    private final SSTableReader ssTableReader;
     private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
 
     private RowAwarePrimaryKeyMap(LongArray rowIdToToken,
-                                  SortedTermsReader sortedTermsReader,
                                   SortedTermsReader.Cursor cursor,
-                                  IPartitioner partitioner,
                                   PrimaryKey.Factory primaryKeyFactory,
-                                  ClusteringComparator clusteringComparator,
-                                  SSTableId<?> sstableId)
+                                  SSTableReader ssTableReader)
     {
         this.rowIdToToken = rowIdToToken;
-        this.sortedTermsReader = sortedTermsReader;
         this.cursor = cursor;
-        this.partitioner = partitioner;
         this.primaryKeyFactory = primaryKeyFactory;
-        this.clusteringComparator = clusteringComparator;
-        this.sstableId = sstableId;
+        this.partitioner = ssTableReader.metadata().partitioner;
+        this.clusteringComparator = ssTableReader.metadata().comparator;
+        this.ssTableReader = ssTableReader;
     }
 
     @Override
     public SSTableId<?> getSSTableId()
     {
-        return sstableId;
+        return ssTableReader.getId();
+    }
+
+    @Override
+    public long getMinTimestamp()
+    {
+        return ssTableReader.getMinTimestamp();
+    }
+
+    @Override
+    public long getMaxTimestamp()
+    {
+        return ssTableReader.getMaxTimestamp();
     }
 
     public long count()
