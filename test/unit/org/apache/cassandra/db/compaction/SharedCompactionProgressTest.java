@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -35,6 +36,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.UUIDGen;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -46,22 +48,24 @@ import static org.mockito.Mockito.when;
 /// Tests partially written by Copilot.
 public class SharedCompactionProgressTest
 {
-
     private SharedCompactionProgress sharedCompactionProgress;
     private UUID operationId;
 
+    int id = 0;
 
     @Before
     public void setUp()
     {
-        sharedCompactionProgress = new SharedCompactionProgress();
         operationId = UUID.randomUUID();
+        sharedCompactionProgress = new SharedCompactionProgress(operationId, OperationType.COMPACTION, TableOperation.Unit.BYTES);
     }
 
     private CompactionProgress getMockProgress()
     {
         CompactionProgress mockProgress = Mockito.mock(CompactionProgress.class);
-        when(mockProgress.operationId()).thenReturn(operationId);
+        when(mockProgress.operationId()).thenReturn(UUIDGen.withSequence(operationId, id++));
+        when(mockProgress.operationType()).thenReturn(OperationType.COMPACTION);
+        when(mockProgress.unit()).thenReturn(TableOperation.Unit.BYTES);
         var input = mockSSTable("i");
         when(mockProgress.inSSTables()).thenReturn(input);
         var output = mockSSTable("o");
