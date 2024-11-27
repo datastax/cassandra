@@ -135,8 +135,12 @@ public class LegacySSTableTest
      */
     protected Descriptor getDescriptor(String legacyVersion, String table) throws IOException
     {
-        Path file = Files.list(getTableDir(legacyVersion, table).toPath()).findFirst().orElseThrow(() -> new RuntimeException(String.format("No files for verion=%s and table=%s", legacyVersion, table)));
-        return Descriptor.fromFilename(new File(file));
+        Path file = Files.list(getTableDir(legacyVersion, table).toPath())
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException(String.format("No files for verion=%s and table=%s", legacyVersion, table)));
+
+        // ignore intentionally empty directory .keep files
+        return ".keep".equals(file.toFile().getName()) ? null : Descriptor.fromFilename(new File(file));
     }
 
     @Test
@@ -424,17 +428,21 @@ public class LegacySSTableTest
     {
         String table = String.format(tablePattern, legacyVersion);
         Descriptor descriptor = getDescriptor(legacyVersion, table);
-        SSTableReader sstable = descriptor.formatType.info.getReaderFactory().open(getDescriptor(legacyVersion, table));
-        IPartitioner p = sstable.getPartitioner();
-        List<Range<Token>> ranges = new ArrayList<>();
-        ranges.add(new Range<>(p.getMinimumToken(), p.getToken(ByteBufferUtil.bytes("100"))));
-        ranges.add(new Range<>(p.getToken(ByteBufferUtil.bytes("100")), p.getMinimumToken()));
-        List<OutgoingStream> streams = Lists.newArrayList(new CassandraOutgoingFile(StreamOperation.OTHER,
-                                                                                    sstable.ref(),
-                                                                                    sstable.getPositionsForRanges(ranges),
-                                                                                    ranges,
-                                                                                    sstable.estimatedKeysForRanges(ranges)));
-        new StreamPlan(StreamOperation.OTHER).transferStreams(FBUtilities.getBroadcastAddressAndPort(), streams).execute().get();
+        if (null != descriptor) {
+            SSTableReader sstable = descriptor.formatType.info.getReaderFactory().open(descriptor);
+            IPartitioner p = sstable.getPartitioner();
+            List<Range<Token>> ranges = new ArrayList<>();
+            ranges.add(new Range<>(p.getMinimumToken(), p.getToken(ByteBufferUtil.bytes("100"))));
+            ranges.add(new Range<>(p.getToken(ByteBufferUtil.bytes("100")), p.getMinimumToken()));
+
+            List<OutgoingStream> streams = Lists.newArrayList(new CassandraOutgoingFile(StreamOperation.OTHER,
+                    sstable.ref(),
+                    sstable.getPositionsForRanges(ranges),
+                    ranges,
+                    sstable.estimatedKeysForRanges(ranges)));
+
+            new StreamPlan(StreamOperation.OTHER).transferStreams(FBUtilities.getBroadcastAddressAndPort(), streams).execute().get();
+        }
     }
 
     public static void truncateLegacyTables(String legacyVersion)
