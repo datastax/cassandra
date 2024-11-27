@@ -765,12 +765,18 @@ public class SSTableHeaderFixTest
 
     private void commonColumns(TableMetadata.Builder cols)
     {
+
         cols.addRegularColumn("regular_a", UTF8Type.instance)
             .addRegularColumn("regular_b", udtRegular)
             .addRegularColumn("regular_c", Int32Type.instance)
+            .addRegularColumn("to_be_dropped", udtRegular.freeze())
             .addStaticColumn("static_a", UTF8Type.instance)
             .addStaticColumn("static_b", udtStatic)
             .addStaticColumn("static_c", Int32Type.instance);
+
+        // drop a column for SSTableHeaderFix to execute
+        ColumnMetadata dropped = cols.getColumn(ByteBufferUtil.bytes("to_be_dropped"));
+        cols.removeRegularOrStaticColumn(dropped.name).recordColumnDrop(dropped, FBUtilities.timestampMicros());
     }
 
     private File buildFakeSSTable(File dir, int generation, TableMetadata.Builder cols, boolean freezeInSchema)
@@ -787,6 +793,7 @@ public class SSTableHeaderFixTest
         TableMetadata.Builder schemaCols = TableMetadata.builder("ks", "cf");
         for (ColumnMetadata cm : cols.columns())
             schemaCols.addColumn(freezer.apply(cm));
+        schemaCols.droppedColumns(headerMetadata.droppedColumns);
         tableMetadata = schemaCols.build();
 
         try
