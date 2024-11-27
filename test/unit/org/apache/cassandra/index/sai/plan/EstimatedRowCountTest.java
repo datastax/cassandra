@@ -18,51 +18,61 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import org.junit.BeforeClass;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import com.google.common.collect.Lists;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.RowUpdateBuilder;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.index.sai.IndexingSchemaLoader;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
-public class EstimatedRowCountTest extends IndexingSchemaLoader
+@RunWith(Parameterized.class)
+public class EstimatedRowCountTest extends SAITester
 {
-    private static final String KS_NAME = "sai";
-    private static final String CF_NAME = "test_cf";
-    private static final String CLUSTERING_CF_NAME = "clustering_test_cf";
-    private static final String STATIC_CF_NAME = "static_ndi_test_cf";
+    @Parameterized.Parameter
+    public Version version;
+    @Parameterized.Parameter(1)
+    public String numType;
 
-    private static ColumnFamilyStore BACKEND;
+    private Version latest;
 
-    @BeforeClass
-    public static void loadSchema() throws ConfigurationException
+    @Before
+    public void setup() throws Throwable
     {
-        System.setProperty("cassandra.config", "cassandra-murmur.yaml");
-        IndexingSchemaLoader.loadSchema();
-        IndexingSchemaLoader.createKeyspace(KS_NAME,
-                                            KeyspaceParams.simpleTransient(1),
-                                            IndexingSchemaLoader.ndiCFMD(KS_NAME, CF_NAME),
-                                            IndexingSchemaLoader.clusteringNDICFMD(KS_NAME, CLUSTERING_CF_NAME),
-                                            IndexingSchemaLoader.staticNDICFMD(KS_NAME, STATIC_CF_NAME));
-        BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(CF_NAME);
+        latest = Version.latest();
+        SAIUtil.setLatestVersion(version);
+    }
+
+    @After
+    public void teardown() throws Throwable
+    {
+        SAIUtil.setLatestVersion(latest);
     }
 
     @Test
-    public void testIneqRowEstimation()
+    public void testIneqNrRowsWithHistograms()
     {
-        ColumnFamilyStore cfs = Keyspace.open(KS_NAME).getColumnFamilyStore(CF_NAME);
+        var tableName = createTable("CREATE TABLE %s (pk text PRIMARY KEY, age int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
+        ColumnFamilyStore cfs = Keyspace.open(CQLTester.KEYSPACE).getColumnFamilyStore(tableName);
         for (int i = 0; i < 100; i++)
         {
             new RowUpdateBuilder(cfs.metadata(), FBUtilities.timestampMicros(), "key" + i)
@@ -70,22 +80,31 @@ public class EstimatedRowCountTest extends IndexingSchemaLoader
             .build()
             .applyUnsafe();
         }
-
-        ReadCommand rc = Util.cmd(BACKEND)
+        ReadCommand rc = Util.cmd(cfs)
                              .columns("age")
                              .filterOn("age", Operator.NEQ, 25)
                              .build();
-        QueryController controller = new QueryController(BACKEND, rc,
-                                         V1OnDiskFormat.instance.indexFeatureSet(),
+        QueryController controller = new QueryController(cfs, rc,
+                                         version.onDiskFormat().indexFeatureSet(),
                                          new QueryContext(), null);
-
         Plan plan = controller.buildPlan();
+
         assert plan instanceof Plan.RowsIteration;
         Plan.RowsIteration root = (Plan.RowsIteration) plan;
         assertEquals(97, root.expectedRows(), 0.1);
         Plan.KeysIteration planNode =root.firstNodeOfType(Plan.KeysIteration.class);
+        assert planNode instanceof Plan.IndexScan;
         assertNotNull(planNode);
         assertEquals(97, planNode.expectedKeys(), 0.1);
         assertEquals(1.0, planNode.selectivity(), 0.001);
+    }
+
+    @Parameterized.Parameters
+    public static List<Object[]> data()
+    {
+        var indexVersions = List.of(Version.DB, Version.EB);
+        var truncatedTypes = List.of("int", "decimal", "varint");
+        return Lists.cartesianProduct(indexVersions, truncatedTypes)
+                    .stream().map(List::toArray).collect(Collectors.toList());
     }
 }
