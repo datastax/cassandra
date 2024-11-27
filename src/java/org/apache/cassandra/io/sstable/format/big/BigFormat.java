@@ -589,7 +589,7 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         @Override
         public boolean hasImplicitlyFrozenTuples()
         {
-            return false;
+            return true;
         }
     }
 
