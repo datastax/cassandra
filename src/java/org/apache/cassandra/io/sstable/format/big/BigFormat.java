@@ -368,7 +368,7 @@ public class BigFormat implements SSTableFormat
         @Override
         public boolean hasImplicitlyFrozenTuples()
         {
-            return false;
+            return version.equals("me");
         }
 
         @Override
