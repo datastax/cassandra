@@ -32,14 +32,10 @@ import com.codahale.metrics.ExponentiallyDecayingReservoir;
 import com.codahale.metrics.Snapshot;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.net.LatencySubscribers;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 
@@ -52,6 +48,10 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
 
     private static final double ALPHA = 0.75; // set to 0.75 to make EDS more biased to towards the newer values
     private static final int WINDOW_SIZE = 100;
+
+    // these need not be volatile; eventually the snitch will see the update and that's good enough
+    private double replicaLatencyQuantile = CassandraRelevantProperties.DYNAMIC_ENDPOINT_SNITCH_QUANTILE.getDouble();
+    private boolean quantizeToMillis = CassandraRelevantProperties.DYNAMIC_ENDPOINT_SNITCH_QUANTIZE_TO_MILLIS.getBoolean();
 
     private volatile int dynamicUpdateInterval = DatabaseDescriptor.getDynamicUpdateInterval();
     private volatile int dynamicResetInterval = DatabaseDescriptor.getDynamicResetInterval();
@@ -268,7 +268,10 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
             if (sample == null)
                 sample = maybeNewSample;
         }
-        sample.update(unit.toMillis(latency));
+        if (quantizeToMillis)
+            sample.update(unit.toMillis(latency));
+        else
+            sample.update(unit.toNanos(latency));
     }
 
     @VisibleForTesting
@@ -298,14 +301,14 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
         HashMap<InetAddressAndPort, Double> newScores = new HashMap<>();
         for (Map.Entry<InetAddressAndPort, Snapshot> entry : snapshots.entrySet())
         {
-            double mean = entry.getValue().getMedian();
-            if (mean > maxLatency)
-                maxLatency = mean;
+            double replicaLatency = entry.getValue().getValue(replicaLatencyQuantile);
+            if (replicaLatency > maxLatency)
+                maxLatency = replicaLatency;
         }
         // now make another pass to do the weighting based on the maximums we found before
         for (Map.Entry<InetAddressAndPort, Snapshot> entry : snapshots.entrySet())
         {
-            double score = entry.getValue().getMedian() / maxLatency;
+            double score = entry.getValue().getValue(replicaLatencyQuantile) / maxLatency;
             // finally, add the severity without any weighting, since hosts scale this relative to their own load and the size of the task causing the severity.
             // "Severity" is basically a measure of compaction activity (CASSANDRA-3722).
             if (USE_SEVERITY)
@@ -376,6 +379,34 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
     public double getSeverity()
     {
         return getSeverity(FBUtilities.getBroadcastAddressAndPort());
+    }
+
+    @Override
+    public void setQuantile(double quantile)
+    {
+        if (quantile < 0.0 || quantile > 1.0 || Double.isNaN(quantile))
+        {
+            throw new IllegalArgumentException(quantile + " is not in [0..1]");
+        }
+        replicaLatencyQuantile = quantile;
+    }
+
+    @Override
+    public double getQuantile()
+    {
+        return replicaLatencyQuantile;
+    }
+
+    @Override
+    public void setQuantization(boolean enabled)
+    {
+        quantizeToMillis = enabled;
+    }
+
+    @Override
+    public boolean getQuantization()
+    {
+        return quantizeToMillis;
     }
 
     public boolean isWorthMergingForRangeQuery(ReplicaCollection<?> merged, ReplicaCollection<?> l1, ReplicaCollection<?> l2)

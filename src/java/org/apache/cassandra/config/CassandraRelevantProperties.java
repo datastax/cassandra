@@ -428,6 +428,12 @@ public enum CassandraRelevantProperties
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
     PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
 
+    // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
+    DYNAMIC_ENDPOINT_SNITCH_QUANTILE("cassandra.dynamic_endpoint_snitch_quantile", "0.5"),
+
+    // whether to quantize the dynamic endpoint snitch score to milliseconds; if set to false the nanosecond measurement
+    // is used
+    DYNAMIC_ENDPOINT_SNITCH_QUANTIZE_TO_MILLIS("cassandra.dynamic_endpoint_snitch_quantize_to_millis", "true"),
     // bloom filter lazy loading
     /**
      * true if non-local table's bloom filter should be deserialized on read instead of when opening sstable
