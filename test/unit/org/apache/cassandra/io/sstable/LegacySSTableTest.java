@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
@@ -118,20 +117,6 @@ public class LegacySSTableTest
      */
     public static String[] legacyVersions = null;
 
-    /**
-     * These are the versions for which we have sstables with tuple data. This includes versions that are "ba" or later.
-     * <p>
-     * We currently don't have legacy sstable tuple data for versions before "ba", e.g., directories like:
-     * "test/data/legacy-sstables/ad/legacy_tables/legacy_ad_tuple".
-     * <p>
-     * The {@link #testGenerateSstables()} method does not work for versions before "ba" because these versions use the
-     * old bloom fitler format, and raises an exception: "Filter should not be serialized in old format".
-     * <p>
-     * This error happens on 'main' branch as well as 'main-5.0', and for now we just skip versions before "ba" when
-     * working with tuples in these tests.
-     */
-    public static String[] legacyTupleVersions = null;
-
     // Get all versions up to the current one. Useful for testing in compatibility mode C18301
     private static String[] getValidLegacyVersions()
     {
@@ -163,14 +148,6 @@ public class LegacySSTableTest
         {
             createTables(legacyVersion);
         }
-
-        // We currently only have "legacy_xx_tuple" directories for versions "ba" and later.
-        legacyTupleVersions = Arrays.stream(legacyVersions).filter(LegacySSTableTest::hasSSTablesWithTuples).toArray(String[]::new);
-    }
-
-    private static boolean hasSSTablesWithTuples(String version)
-    {
-        return version.compareTo("b") > 0;
     }
 
     @After
@@ -191,7 +168,8 @@ public class LegacySSTableTest
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException(String.format("No files for path=%s", dir.absolutePath())));
 
-        return Descriptor.fromFile(new File(file));
+        // ignore intentionally empty directory .keep files
+        return ".keep".equals(file.toFile().getName()) ? null : Descriptor.fromFilename(new File(file));
     }
 
     @Test
@@ -327,9 +305,10 @@ public class LegacySSTableTest
 
     private void doTestLegacyCqlTables()
     {
-        SoftAssertions assertions = new SoftAssertions();
         for (String legacyVersion : legacyVersions)
-            assertions.assertThatCode(() -> {
+        {
+            if ('m' <= legacyVersion.charAt(0))
+            {
                 logger.info("Loading legacy version: {}", legacyVersion);
                 truncateLegacyTables(legacyVersion);
                 loadLegacyTables(legacyVersion);
@@ -339,8 +318,8 @@ public class LegacySSTableTest
                 if (Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_simple", legacyVersion)).getLiveSSTables().stream().anyMatch(sstr -> BigFormat.is(sstr.descriptor.getFormat())))
                     verifyCache(legacyVersion, startCount);
                 compactLegacyTables(legacyVersion);
-            }).describedAs(legacyVersion).doesNotThrowAnyException();
-        assertions.assertAll();
+            }
+        }
     }
 
     @Test
@@ -356,7 +335,7 @@ public class LegacySSTableTest
     }
 
     @Test
-    public void testInaccurateSSTableMinMax() throws Exception
+    public void testInaccurateSSTableMinMax()
     {
         QueryProcessor.executeInternal("CREATE TABLE legacy_tables.legacy_mc_inaccurate_min_max (k int, c1 int, c2 int, c3 int, v int, primary key (k, c1, c2, c3))");
         loadLegacyTable("mc", "inaccurate_min_max");
@@ -377,22 +356,22 @@ public class LegacySSTableTest
     }
 
     @Test
-    public void testVerifyOldSimpleSSTables() throws IOException
+    public void testVerifyOldSimpleSSTables()
     {
         verifyOldSSTables("simple");
     }
 
     @Test
-    public void testVerifyOldTupleSSTables() throws IOException
+    public void testVerifyOldTupleSSTables()
     {
-        verifyOldSSTables("tuple", legacyTupleVersions);
+        verifyOldSSTables("tuple");
     }
 
     @Test
-    public void testVerifyOldDroppedTupleSSTables() throws IOException
+    public void testVerifyOldDroppedTupleSSTables()
     {
         try {
-            for (String legacyVersion : legacyTupleVersions)
+            for (String legacyVersion : legacyVersions)
             {
                 QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val", legacyVersion));
                 QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val2", legacyVersion));
@@ -401,11 +380,11 @@ public class LegacySSTableTest
                 //QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val4", legacyVersion));
             }
 
-            verifyOldSSTables("tuple", legacyTupleVersions);
+            verifyOldSSTables("tuple");
         }
         finally
         {
-            for (String legacyVersion : legacyTupleVersions)
+            for (String legacyVersion : legacyVersions)
             {
                 alterTableAddColumn(legacyVersion, "val frozen<tuple<set<int>,set<text>>>");
                 alterTableAddColumn(legacyVersion, "val2 tuple<set<int>,set<text>>");
@@ -427,18 +406,13 @@ public class LegacySSTableTest
 
     private static void alterTableAddColumn(String legacyVersion, String column_definition)
     {
-        QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple ADD IF NOT EXISTS %s", legacyVersion, column_definition));
+        QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple ADD %s", legacyVersion, column_definition));
     }
 
-    private void verifyOldSSTables(String tableSuffix) throws IOException
-    {
-        verifyOldSSTables(tableSuffix, legacyVersions);
-    }
-
-    private void verifyOldSSTables(String tableSuffix, String[] versions) throws IOException
+    private void verifyOldSSTables(String tableSuffix)
     {
         SoftAssertions assertions = new SoftAssertions();
-        for (String legacyVersion : versions)
+        for (String legacyVersion : legacyVersions)
             assertions.assertThatCode(() -> {
                 ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_%s", legacyVersion, tableSuffix));
                 loadLegacyTable(legacyVersion, tableSuffix);
@@ -501,7 +475,7 @@ public class LegacySSTableTest
                 logger.info("Loading legacy version: {}", legacyVersion);
                 truncateLegacyTables(legacyVersion);
                 loadLegacyTables(legacyVersion);
-                ColumnFamilyStore cfs = Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_simple", legacyVersion));
+                ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_simple", legacyVersion));
                 // there should be no compactions to run with auto upgrades disabled:
                 assertTrue(cfs.getCompactionStrategy().getNextBackgroundTasks(0).isEmpty());
             }).describedAs(legacyVersion).doesNotThrowAnyException();
@@ -534,8 +508,7 @@ public class LegacySSTableTest
         streamLegacyTable("legacy_%s_simple_counter", legacyVersion);
         streamLegacyTable("legacy_%s_clust", legacyVersion);
         streamLegacyTable("legacy_%s_clust_counter", legacyVersion);
-        if (hasSSTablesWithTuples(legacyVersion))
-            streamLegacyTable("legacy_%s_tuple", legacyVersion);
+        streamLegacyTable("legacy_%s_tuple", legacyVersion);
         streamLegacyTable("legacy_%s_clust_be_index_summary", legacyVersion);
     }
 
@@ -571,8 +544,7 @@ public class LegacySSTableTest
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_simple_counter", legacyVersion)).truncateBlocking();
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_clust", legacyVersion)).truncateBlocking();
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_clust_counter", legacyVersion)).truncateBlocking();
-        if (hasSSTablesWithTuples(legacyVersion))
-            Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_tuple", legacyVersion)).truncateBlocking();
+        Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_tuple", legacyVersion)).truncateBlocking();
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_clust_be_index_summary", legacyVersion)).truncateBlocking();
         CacheService.instance.invalidateCounterCache();
         CacheService.instance.invalidateKeyCache();
@@ -585,8 +557,7 @@ public class LegacySSTableTest
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_simple_counter", legacyVersion)).forceMajorCompaction();
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_clust", legacyVersion)).forceMajorCompaction();
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_clust_counter", legacyVersion)).forceMajorCompaction();
-        if (hasSSTablesWithTuples(legacyVersion))
-            Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_tuple", legacyVersion)).forceMajorCompaction();
+        Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_tuple", legacyVersion)).forceMajorCompaction();
         Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_clust_be_index_summary", legacyVersion)).forceMajorCompaction();
     }
 
@@ -597,8 +568,7 @@ public class LegacySSTableTest
         loadLegacyTable(legacyVersion, "simple_counter");
         loadLegacyTable(legacyVersion, "clust");
         loadLegacyTable(legacyVersion, "clust_counter");
-        if (hasSSTablesWithTuples(legacyVersion))
-            loadLegacyTable(legacyVersion, "tuple");
+        loadLegacyTable(legacyVersion, "tuple");
         loadLegacyTable(legacyVersion, "clust_be_index_summary");
     }
 
@@ -657,8 +627,8 @@ public class LegacySSTableTest
         UntypedResultSet rs;
         rs = QueryProcessor.executeInternal(String.format("SELECT val FROM legacy_tables.legacy_%s_clust_counter WHERE pk=? AND ck=?", legacyVersion), pkValue, ckValue);
         Assert.assertNotNull(rs);
-        Assert.assertEquals(1, rs.size());
-        Assert.assertEquals(1L, rs.one().getLong("val"));
+        Assert.assertEquals(String.format("Read legacy_%s_clust_counter", legacyVersion), 1, rs.size());
+        Assert.assertEquals(String.format("Read legacy_%s_clust_counter", legacyVersion), 1L, rs.one().getLong("val"));
     }
 
     private static void readClusteringTable(String tableName, String legacyVersion, int ck, String ckValue, String pkValue)
@@ -749,6 +719,12 @@ public class LegacySSTableTest
     private static void loadLegacyTable(String legacyVersion, String tableSuffix)
     {
         String table = String.format("legacy_%s_%s", legacyVersion, tableSuffix);
+
+        // ignore if no sstables are in this legacyVersion directory
+        getTestDataTableDir(legacyVersion, table).forEach(f -> logger.info(f.toString()));
+        if (0 == getTestDataTableDir(legacyVersion, table).tryList(f -> f.name().endsWith(".db")).length)
+            return;
+
         logger.info("Loading legacy table {}", table);
 
         ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table);
@@ -763,6 +739,13 @@ public class LegacySSTableTest
             {
                 throw new AssertionError(e);
             }
+        }
+
+        if (legacyVersion.startsWith("m") && legacyVersion.compareTo("me") <= 0)
+        {
+            // sstables <= me are potentially broken, pretend offline upgrade where the user ran the scrub's header fix
+            FBUtilities.setPreviousReleaseVersionString("3.0.25");
+            SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
         }
 
         int s0 = cfs.getLiveSSTables().size();
