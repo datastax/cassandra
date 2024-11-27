@@ -395,9 +395,8 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             hasZeroCopyMetadata = bOrLater && !cOrLater; // DSE only field
             hasIncrementalNodeSyncMetadata = bOrLater && !cOrLater; // DSE only field
 
-            // TODO figure out which versions support that
-            hasImplicitlyFrozenTuples = version.compareTo("cc") < 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include explicitly frozen tuples
-            
+            hasImplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // `da` is found in C* 5.0 and CC `main-5.0`, and both have implicitly frozen tuples
+
             // encryption support - enabled for DSE 6.8 (ba) and later, and for BTI format (da) and later
             indicesAreEncrypted = (bOrLater && version.compareTo("ba") >= 0) || dOrLater;
             metadataIsEncrypted = (bOrLater && version.compareTo("ba") >= 0) || dOrLater;
