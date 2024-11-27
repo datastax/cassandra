@@ -23,6 +23,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,6 +51,7 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DynamicCompositeType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UserType;
@@ -58,6 +60,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -86,7 +89,19 @@ public abstract class SSTableHeaderFix
         CassandraVersion previousVersion = new CassandraVersion(previousVersionString);
         if (previousVersion.major != 3 || previousVersion.minor > 0)
         {
-            // Not an upgrade from 3.0 to 3.x, nothing to do here
+            // Not an upgrade from 3.0, nothing to do here
+            return;
+        }
+
+        boolean hasDroppedFrozenColumn = false;
+        for (String keyspace : Schema.instance.getUserKeyspaces())
+            for (TableMetadata tableMetadata : Schema.instance.getTablesAndViews(keyspace))
+                if (!tableMetadata.isIndex() && !tableMetadata.isView() && !tableMetadata.isVirtual())
+                    hasDroppedFrozenColumn |= hasDroppedFrozenColumn(tableMetadata.droppedColumns.values());
+
+        if (!hasDroppedFrozenColumn)
+        {
+            logger.info("No dropped frozen columns found - NOT fixing sstable metadata serialization-headers");
             return;
         }
 
@@ -315,6 +330,16 @@ public abstract class SSTableHeaderFix
                                    .map(File::toPath);
     }
 
+    private static boolean hasDroppedFrozenColumn(Collection<DroppedColumn> droppedColumns)
+    {
+        boolean hasDroppedFrozenColumn = false;
+        for (DroppedColumn droppedColumn : droppedColumns)
+            hasDroppedFrozenColumn |= droppedColumn.column.type.equals(droppedColumn.column.type.freeze())
+                    && droppedColumn.column.type instanceof MultiCellCapableType;
+
+        return hasDroppedFrozenColumn;
+    }
+
     private void processSSTable(Descriptor desc)
     {
         if (desc.cfname.indexOf('.') != -1)
@@ -331,6 +356,12 @@ public abstract class SSTableHeaderFix
         if (tableMetadata == null)
         {
             error("Table %s.%s not found in the schema - NOT checking sstable %s", desc.ksname, desc.cfname, desc);
+            return;
+        }
+
+        if (!hasDroppedFrozenColumn(tableMetadata.droppedColumns.values()))
+        {
+            info.accept(String.format("Table %s.%s has no dropped frozen columns - NOT checking sstable %s", desc.ksname, desc.cfname, desc));
             return;
         }
 
@@ -579,8 +610,8 @@ public abstract class SSTableHeaderFix
                 info.accept(String.format("sstable %s: Column '%s' needs to be updated from type '%s' to '%s'",
                                           desc,
                                           logColumnName(name),
-                                          typeInHeader.asCQL3Type(),
-                                          fixedType.asCQL3Type()));
+                                          typeInHeader.asCQL3Type().toSchemaString(),
+                                          fixedType.asCQL3Type().toSchemaString()));
             return fixedType;
         }
 
