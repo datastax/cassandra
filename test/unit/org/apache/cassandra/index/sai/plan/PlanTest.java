@@ -218,6 +218,32 @@ public class PlanTest
     }
 
     @Test
+    public void antiJoin()
+    {
+        Plan.KeysIteration left = factory.indexScan(saiPred1, factory.tableMetrics.rows);
+        Plan.KeysIteration right = factory.indexScan(saiPred1, (long) (0.1 * factory.tableMetrics.rows));
+        Plan.KeysIteration plan = factory.antiJoin(left, right);
+        assertTrue(plan instanceof Plan.AntiJoin);
+        assertEquals(0.9, plan.selectivity(), 0.01);
+        assertTrue(plan.costPerKey() > left.costPerKey());
+        assertTrue(plan.costPerKey() > right.costPerKey());
+    }
+
+    @Test
+    public void intersectionWithAntiJoin()
+    {
+        Plan.KeysIteration left = factory.indexScan(saiPred1, factory.tableMetrics.rows);
+        Plan.KeysIteration right = factory.indexScan(saiPred1, (long) (0.1 * factory.tableMetrics.rows));
+        Plan.KeysIteration s = factory.indexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
+        Plan.KeysIteration antiJoin = factory.antiJoin(left, right);
+        Plan.KeysIteration plan = factory.intersection(Lists.newArrayList(antiJoin, s));
+        assertTrue(plan instanceof Plan.Intersection);
+        assertEquals(0.009, plan.selectivity(), 10e-5);
+        assertTrue(plan.costPerKey() > antiJoin.costPerKey());
+        assertTrue(plan.costPerKey() > s.costPerKey());
+    }
+
+    @Test
     public void rangeScanVsPointLookupIntersection()
     {
         // Intersecting range scans is

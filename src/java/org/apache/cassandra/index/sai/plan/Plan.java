@@ -1863,7 +1863,7 @@ abstract public class Plan
             return new Intersection(this, id, subplans, defaultAccess);
         }
 
-        private KeysIteration antiJoin(KeysIteration left, KeysIteration right) {
+        public KeysIteration antiJoin(KeysIteration left, KeysIteration right) {
             return antiJoin(left, right, nextId++);
         }
 
