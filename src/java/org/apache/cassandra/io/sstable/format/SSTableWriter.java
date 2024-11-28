@@ -261,11 +261,9 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
 
     public SSTableReader finish(boolean openResult)
     {
-        txnProxy.prepareToCommit();
+        prepareToCommit();
         if (openResult)
             openResult();
-
-        observers.forEach(obs -> obs.complete(this));
         txnProxy.commit();
         return finished();
     }
@@ -291,7 +289,10 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         {
             // need to generate all index files before commit, so they will be included in txn log
             observers.forEach(obs -> obs.complete(this));
-        }
+
+            // track newly written sstable after index files are written
+            lifecycleNewTracker.trackNewWritten(this);
+         }
     }
 
     // notify sstable flush observer about sstable writer switched
