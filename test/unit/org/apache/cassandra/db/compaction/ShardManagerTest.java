@@ -23,11 +23,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -36,26 +36,19 @@ import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SortedLocalRanges;
-import org.apache.cassandra.db.compaction.unified.Controller;
-import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.concurrent.Transactional;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.when;
 
 public class ShardManagerTest
@@ -394,10 +387,55 @@ public class ShardManagerTest
                     ++count;
                 }
                 assertEquals(numDisks * numShards, count);
+
+                assertEquals(numDisks * numShards, iterator.count());
             }
         }
     }
 
+    @Test
+    public void testSpannedShardCount()
+    {
+        CompactionRealm realm = Mockito.mock(CompactionRealm.class);
+        when(realm.getPartitioner()).thenReturn(partitioner);
+        SortedLocalRanges sortedRanges = SortedLocalRanges.forTestingFull(realm);
+
+        for (int numDisks = 1; numDisks <= 3; ++numDisks)
+        {
+            List<Token> diskBoundaries = sortedRanges.split(numDisks);
+            DiskBoundaries db = Mockito.mock(DiskBoundaries.class);
+            when(db.getLocalRanges()).thenReturn(sortedRanges);
+            when(db.getPositions()).thenReturn(diskBoundaries);
+
+            var rs = Mockito.mock(AbstractReplicationStrategy.class);
+
+            ShardManager shardManager = ShardManager.create(db, rs, false);
+            for (int numShards = 1; numShards <= 3; ++numShards)
+            {
+                checkCoveredCount(shardManager, numDisks, numShards, 0.01, 0.99);
+                checkCoveredCount(shardManager, numDisks, numShards, 0.01, 0.49);
+                checkCoveredCount(shardManager, numDisks, numShards, 0.51, 0.99);
+                checkCoveredCount(shardManager, numDisks, numShards, 0.26, 0.74);
+
+                for (double l = 0; l <= 1; l += 0.05)
+                    for (double r = l; r <= 1; r += 0.05)
+                        checkCoveredCount(shardManager, numDisks, numShards, l, r);
+            }
+        }
+    }
+
+    private void checkCoveredCount(ShardManager shardManager, int numDisks, int numShards, double left, double right)
+    {
+        Token min = partitioner.getMinimumToken();
+        int totalSplits = numDisks * numShards;
+        int leftIdx = left == 0 ? 0 : (int) Math.ceil(left * totalSplits) - 1; // to reflect end-inclusiveness of ranges
+        int rightIdx = right == 0 ? 0 : (int) Math.ceil(right * totalSplits) - 1;
+        assertEquals(String.format("numDisks %d numShards %d left %f right %f", numDisks, numShards, left, right),
+                     rightIdx - leftIdx + 1,
+                     shardManager.coveredShardCount(partitioner.split(min, min, left).maxKeyBound(),
+                                                    partitioner.split(min, min, right).maxKeyBound(),
+                                                    numShards));
+    }
 
     @Test
     public void testSplitSSTablesInRanges()
