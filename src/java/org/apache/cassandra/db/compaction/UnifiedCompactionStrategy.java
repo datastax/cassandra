@@ -209,7 +209,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return CompactionTasks.create(tasks);
     }
 
-    public synchronized Collection<CompactionAggregate.UnifiedAggregate> getMaximalAggregates(int permittedParallelism)
+    public synchronized Collection<CompactionAggregate.UnifiedAggregate> getMaximalAggregates()
     {
         maybeUpdateSelector();
         // The aggregates are split by repair status and disk, as well as in non-overlapping sections to enable some
@@ -259,7 +259,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         List<AbstractCompactionTask> tasks = new ArrayList<>();
         try
         {
-            for (var aggregate : getMaximalAggregates(permittedParallelism))
+            for (var aggregate : getMaximalAggregates())
             {
                 LifecycleTransaction txn = realm.tryModify(aggregate.getSelected().sstables(),
                                                            OperationType.COMPACTION,
@@ -702,7 +702,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Collection<SSTableReader> sstables = transaction.originals();
         ShardManager shardManager = getShardManager();
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
-        SharedCompactionProgress sharedProgress = new SharedCompactionProgress();
+        SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
         SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
         List<CompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
             sstables,
