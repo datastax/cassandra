@@ -371,6 +371,8 @@ public class StorageProxy implements StorageProxyMBean
     private volatile long logBlockingReadRepairAttemptsUntilNanos = Long.MIN_VALUE;
     private static volatile QueryInfoTracker queryInfoTracker = QueryInfoTracker.NOOP;
 
+    private static volatile Integer maxPaxosBackoffMillis = CassandraRelevantProperties.LWT_MAX_BACKOFF_MS.getInt();
+
     private StorageProxy()
     {
     }
@@ -750,7 +752,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
                 contentions++;
-                int sleepInMillis = ThreadLocalRandom.current().nextInt(100);
+                int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
                 Uninterruptibles.sleepUninterruptibly(sleepInMillis, TimeUnit.MILLISECONDS);
                 casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
                 // continue to retry
@@ -819,7 +821,7 @@ public class StorageProxy implements StorageProxyMBean
                     Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                     contentions++;
                     // sleep a random amount to give the other proposer a chance to finish
-                    int sleepInMillis = ThreadLocalRandom.current().nextInt(100);
+                    int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
                     Uninterruptibles.sleepUninterruptibly(sleepInMillis, MILLISECONDS);
                     casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
                     continue;
@@ -860,7 +862,7 @@ public class StorageProxy implements StorageProxyMBean
                         Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                         // sleep a random amount to give the other proposer a chance to finish
                         contentions++;
-                        int sleepInMillis = ThreadLocalRandom.current().nextInt(100);
+                        int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
                         Uninterruptibles.sleepUninterruptibly(sleepInMillis, MILLISECONDS);
                         casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
                     }
@@ -3566,5 +3568,17 @@ public class StorageProxy implements StorageProxyMBean
     public void setClientRequestSizeMetricsEnabled(boolean enabled)
     {
         DatabaseDescriptor.setClientRequestSizeMetricsEnabled(enabled);
+    }
+
+    @Override
+    public int getMaxPaxosBackoffMillis()
+    {
+        return maxPaxosBackoffMillis;
+    }
+
+    @Override
+    public void setMaxPaxosBackoffMillis(int maxPaxosBackoffMillis)
+    {
+        StorageProxy.maxPaxosBackoffMillis = maxPaxosBackoffMillis;
     }
 }
