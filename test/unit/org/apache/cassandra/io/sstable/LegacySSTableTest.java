@@ -118,7 +118,6 @@ public class LegacySSTableTest
         {
             createTables(legacyVersion);
         }
-
     }
 
     @After
@@ -329,6 +328,21 @@ public class LegacySSTableTest
         verifyOldSSTables("tuple");
     }
 
+    @Test
+    public void testVerifyOldDroppedTupleSSTables() throws IOException
+    {
+        try {
+            for (String legacyVersion : legacyVersions)
+                QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val", legacyVersion));
+
+            verifyOldSSTables("tuple");
+        }
+        finally
+        {
+            for (String legacyVersion : legacyVersions)
+                QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple ADD val frozen<tuple<set<int>,set<text>>>", legacyVersion));
+        }
+    }
 
     private void verifyOldSSTables(String tableSuffix) throws IOException
     {
@@ -572,7 +586,7 @@ public class LegacySSTableTest
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_simple_counter (pk text PRIMARY KEY, val counter)", legacyVersion));
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_clust (pk text, ck text, val text, PRIMARY KEY (pk, ck))", legacyVersion));
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_clust_counter (pk text, ck text, val counter, PRIMARY KEY (pk, ck))", legacyVersion));
-        QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_tuple (pk text PRIMARY KEY, val frozen<tuple<set<int>,set<text>>>)", legacyVersion));
+        QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_tuple (pk text PRIMARY KEY, val frozen<tuple<set<int>,set<text>>>, extra text)", legacyVersion));
     }
 
     private static void truncateTables(String legacyVersion)
@@ -603,6 +617,10 @@ public class LegacySSTableTest
     {
         String table = String.format("legacy_%s_%s", legacyVersion, tableSuffix);
 
+        // ignore if no sstables are in this legacyVersion directory
+        if (0 == getTableDir(legacyVersion, table).tryList(f -> f.name().endsWith(".db")).length)
+            return;
+
         logger.info("Loading legacy table {}", table);
 
         ColumnFamilyStore cfs = Keyspace.open("legacy_tables").getColumnFamilyStore(table);
@@ -619,10 +637,17 @@ public class LegacySSTableTest
             }
         }
 
+        // if reading mc or lower format sstables, behave like upgrading from a CassandraVersion 3.0
+        if (legacyVersion.compareTo("mc") <= 0)
+            FBUtilities.setPreviousReleaseVersionString("3.0.8");
+
+        // mimic what StorageService does
+        //FIXME – SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
+
         int s0 = cfs.getLiveSSTables().size();
         cfs.loadNewSSTables();
         int s1 = cfs.getLiveSSTables().size();
-        // FIXME restore – assertThat(s1).isGreaterThan(s0);
+        assertThat(s1).isGreaterThan(s0);
     }
 
     /**
@@ -657,7 +682,6 @@ public class LegacySSTableTest
             QueryProcessor.executeInternal(String.format("UPDATE legacy_tables.legacy_%s_simple_counter SET val = val + 1 WHERE pk = '%s'",
                                                          version, valPk));
 
-            // FIXME _tuple inserts
             QueryProcessor.executeInternal(
                     String.format("INSERT INTO legacy_tables.legacy_%s_tuple (pk, val) VALUES ('%s', ({1,2,3},{'a','b','c'}))", version, valPk));
 
