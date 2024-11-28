@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Random;
 
 import org.junit.AfterClass;
-import org.junit.Before;
 import org.junit.BeforeClass;
 
 import org.apache.cassandra.cql3.CQLTester;
@@ -75,7 +74,7 @@ public class ShardingTestBase extends CQLTester
         QueryProcessor.executeInternal("DROP KEYSPACE IF EXISTS " + KEYSPACE);
     }
 
-    private ColumnFamilyStore getColumnFamilyStore()
+    ColumnFamilyStore getColumnFamilyStore()
     {
         return Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE);
     }
@@ -109,7 +108,7 @@ public class ShardingTestBase extends CQLTester
 
         cfs.getLiveSSTables().forEach(s -> System.out.println("SSTable: " + s.toString() + " covers " + s.getFirst() + " to " + s.getLast()));
 
-        validateData(cfs, rowCount);
+        validateData(rowCount);
     }
 
     static long getFilterSize(SSTableReader rdr)
@@ -196,7 +195,7 @@ public class ShardingTestBase extends CQLTester
         }
     }
 
-    void validateData(ColumnFamilyStore cfs, int rowCount) throws Throwable
+    void validateData(int rowCount) throws Throwable
     {
         for (int i = 0; i < rowCount; i++)
         {
