@@ -99,6 +99,12 @@ public class WrappedLifecycleTransaction implements ILifecycleTransaction
         delegate.trackNew(table);
     }
 
+    @Override
+    public void trackNewWritten(SSTable table)
+    {
+        delegate.trackNewWritten(table);
+    }
+
     public void untrackNew(SSTable table)
     {
         delegate.untrackNew(table);
