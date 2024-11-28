@@ -71,6 +71,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableWriter.class);
 
+    protected final LifecycleNewTracker lifecycleNewTracker;
+
     protected long repairedAt;
     protected UUID pendingRepair;
     protected boolean isTransient;
@@ -85,6 +87,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     protected SSTableWriter(Descriptor descriptor,
                             Set<Component> components,
+                            LifecycleNewTracker lifecycleNewTracker,
                             long keyCount,
                             long repairedAt,
                             UUID pendingRepair,
@@ -95,6 +98,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                             Collection<SSTableFlushObserver> observers)
     {
         super(descriptor, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
+        this.lifecycleNewTracker = lifecycleNewTracker;
         this.keyCount = keyCount;
         this.repairedAt = repairedAt;
         this.pendingRepair = pendingRepair;
@@ -317,11 +321,10 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     public SSTableReader finish(boolean openResult)
     {
-        txnProxy().prepareToCommit();
+        prepareToCommit();
         if (openResult)
             openResult();
         txnProxy().commit();
-        observers.forEach(obs -> obs.complete(this));
         return finished();
     }
 
@@ -342,6 +345,9 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         {
             // need to generate all index files before commit, so they will be included in txn log
             observers.forEach(obs -> obs.complete(this));
+
+            // track newly written sstable after index files are written
+            lifecycleNewTracker.trackNewWritten(this);
          }
     }
 

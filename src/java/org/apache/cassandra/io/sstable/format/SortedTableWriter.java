@@ -91,7 +91,7 @@ public abstract class SortedTableWriter extends SSTableWriter
                                 SerializationHeader header,
                                 Collection<SSTableFlushObserver> observers)
     {
-        super(descriptor, components, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
+        super(descriptor, components, lifecycleNewTracker, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
         lifecycleNewTracker.trackNew(this); // must track before any files are created
 
         dataFile = constructDataFileWriter(descriptor, metadata, metadataCollector, lifecycleNewTracker, writerOption);

@@ -138,6 +138,15 @@ public class CassandraStreamReceiver implements StreamReceiver
             }
 
             @Override
+            public void trackNewWritten(SSTable table)
+            {
+                synchronized (CassandraStreamReceiver.this)
+                {
+                    txn.trackNewWritten(table);
+                }
+            }
+
+            @Override
             public void untrackNew(SSTable table)
             {
                 synchronized (CassandraStreamReceiver.this)

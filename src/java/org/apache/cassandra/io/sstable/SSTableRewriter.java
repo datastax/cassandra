@@ -354,6 +354,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             transaction.update(reader, false);
             preparedForCommit.add(reader);
         }
+        // staged sstables will be made visible in Tracker
         transaction.checkpoint();
 
         if (throwLate)

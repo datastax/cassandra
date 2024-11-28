@@ -600,6 +600,12 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     }
 
     @Override
+    public void trackNewWritten(SSTable table)
+    {
+        log.trackNewWritten(table);
+    }
+
+    @Override
     public void trackNewAttachedIndexFiles(SSTable table)
     {
         log.trackNewAttachedIndexFiles(table);
