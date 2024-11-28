@@ -55,12 +55,14 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
 
     private volatile SSTableReader finalReader;
     private final Map<String, ZeroCopySequentialWriter> componentWriters; // indexed by component name
+    private final LifecycleNewTracker lifecycleNewTracker;
 
     public SSTableZeroCopyWriter(Builder<?, ?> builder,
                                  LifecycleNewTracker lifecycleNewTracker,
                                  SSTable.Owner owner)
     {
         super(builder, owner);
+        this.lifecycleNewTracker = lifecycleNewTracker;
 
         lifecycleNewTracker.trackNew(this);
         this.componentWriters = new HashMap<>();
@@ -134,6 +136,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
             writer.finish();
 
         TOCComponent.updateTOC(descriptor, components());
+        lifecycleNewTracker.trackNewWritten(this);
         return finished();
     }
 
@@ -197,6 +200,8 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     {
         for (ZeroCopySequentialWriter writer : componentWriters.values())
             writer.prepareToCommit();
+
+        lifecycleNewTracker.trackNewWritten(this);
     }
 
     @Override
