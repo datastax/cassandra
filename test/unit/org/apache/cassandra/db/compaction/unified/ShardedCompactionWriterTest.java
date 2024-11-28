@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.ShardManager;
@@ -37,11 +36,6 @@ import static org.junit.Assert.assertEquals;
 
 public class ShardedCompactionWriterTest extends ShardingTestBase
 {
-    private ColumnFamilyStore getColumnFamilyStore()
-    {
-        return Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE);
-    }
-
     @Test
     public void testOneSSTablePerShard() throws Throwable
     {
@@ -140,7 +134,7 @@ public class ShardedCompactionWriterTest extends ShardingTestBase
             assertEquals(expectedSize, rdr.onDiskLength(), expectedSize * 0.1);
         }
 
-        validateData(cfs, rowCount);
+        validateData(rowCount);
         cfs.truncateBlocking();
     }
 }

@@ -28,7 +28,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -53,11 +52,6 @@ import static org.junit.Assert.assertTrue;
 
 public class ParallelizedTasksTest extends ShardingTestBase
 {
-    private ColumnFamilyStore getColumnFamilyStore()
-    {
-        return Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE);
-    }
-
     @Test
     public void testOneSSTablePerShardIterators() throws Throwable
     {
@@ -107,7 +101,6 @@ public class ParallelizedTasksTest extends ShardingTestBase
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(new CompactionStrategyFactory(cfs), mockController);
         UnifiedCompactionStrategy mockStrategy = strategy;
         strategy.getCompactionLogger().enable();
-
         SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
         SharedCompactionObserver sharedObserver = new SharedCompactionObserver(strategy);
 
