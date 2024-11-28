@@ -123,11 +123,11 @@ public abstract class StorageHandler
     public abstract Collection<SSTableReader> reloadSSTables(ReloadReason reason);
 
     /**
-     * This method determines if the backing storage handles is remote storage
+     * This method determines if the backing storage handler allows auto compaction
      * <p/>
-     * @return true if storage handler is remote
+     * @return true if auto compaction should be enabled
      */
-    public abstract boolean isRemote();
+    public abstract boolean enableAutoCompaction();
 
     /**
      * This method will run the operation specified by the {@link Runnable} passed it
