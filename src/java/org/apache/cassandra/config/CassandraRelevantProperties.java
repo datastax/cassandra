@@ -489,6 +489,7 @@ public enum CassandraRelevantProperties
     LOG_TRANSACTIONS_FACTORY("cassandra.log_transactions_factory"),
     /** Loosen the definition of "empty" for gossip state, for use during host replacements if things go awry */
     LOOSE_DEF_OF_EMPTY_ENABLED(Config.PROPERTY_PREFIX + "gossiper.loose_empty_enabled"),
+    LWT_MAX_BACKOFF_MS("cassandra.lwt_max_backoff_ms", "50"),
     MAX_CONCURRENT_RANGE_REQUESTS("cassandra.max_concurrent_range_requests"),
     MAX_HINT_BUFFERS("cassandra.MAX_HINT_BUFFERS", "3"),
     MAX_LOCAL_PAUSE_IN_MS("cassandra.max_local_pause_in_ms", "5000"),
