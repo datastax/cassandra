@@ -567,6 +567,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             this.directories = new Directories(metadata.get());
 
         storageHandler = StorageHandler.create(metadata, directories, data);
+        logger.debug("Initialized storage handler with {} for {}.{}", storageHandler.getClass().getSimpleName(), keyspace.getName(), name);
 
         Collection<SSTableReader> sstables = null;
         // scan for sstables corresponding to this cf and load them
