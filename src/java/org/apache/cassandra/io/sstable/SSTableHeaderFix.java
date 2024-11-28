@@ -82,9 +82,9 @@ public abstract class SSTableHeaderFix
         if (previousVersionString == null)
             return;
         CassandraVersion previousVersion = new CassandraVersion(previousVersionString);
-        if (previousVersion.major != 3)
+        if (previousVersion.major != 3 || previousVersion.minor > 0)
         {
-            // Not an upgrade from 3.0 to 3.x, nothing to do here
+            // Not an upgrade from 3.0, nothing to do here
             return;
         }
 
