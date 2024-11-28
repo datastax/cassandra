@@ -103,7 +103,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                            earlyOpenAllowed,
                                            shardManager.boundaries(shardingStats.shardCountForDensity));
     }
-    strategy != null ? strategy.getController().getIgnoreOverlapsInExpirationCheck() : false
+
     @Override
     protected Range<Token> tokenRange()
     {

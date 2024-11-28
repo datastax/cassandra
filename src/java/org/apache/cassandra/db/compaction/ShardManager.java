@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
@@ -189,7 +190,7 @@ public interface ShardManager
     /// the given function on the combination of each shard range and the intersecting sstable set.
     default <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
                                                                            int numShardsForDensity,
-                                                                           BiFunction<? super Set<R>, Range<Token>, T> maker)
+                                                                           BiFunction<Collection<R>, Range<Token>, T> maker)
     {
         var boundaries = boundaries(numShardsForDensity);
         List<T> tasks = new ArrayList<>();
@@ -271,7 +272,7 @@ public interface ShardManager
                                                                                   int numShardsForDensity,
                                                                                   int coveredShards,
                                                                                   int maxParallelism,
-                                                                                  BiFunction<? super Set<R>, Range<Token>, T> maker)
+                                                                                  BiFunction<Collection<R>, Range<Token>, T> maker)
     {
         if (coveredShards <= maxParallelism)
             return splitSSTablesInShards(sstables, numShardsForDensity, maker);
