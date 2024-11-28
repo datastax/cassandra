@@ -112,6 +112,7 @@ public class ParallelizedTasksTest extends ShardingTestBase
                                       mockStrategy,
                                       new PartialLifecycleTransaction(compositeTransaction),
                                       0,
+                                      false,
                                       shardManager,
                                       new UnifiedCompactionStrategy.ShardingStats(rangeSSTables, shardManager, mockController),
                                       range,
