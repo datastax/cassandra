@@ -79,6 +79,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -388,7 +389,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (orderer != null)
             keysIterationPlan = planFactory.sort(keysIterationPlan, orderer);
 
-        assert keysIterationPlan != planFactory.everything; // This would mean we have no WHERE nor ANN clauses at all
         return keysIterationPlan;
     }
 
@@ -464,12 +464,40 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
-     * Build a {@link Plan} from the given list of expressions by applying given operation (OR/AND).
-     * Building of such builder involves index search, results of which are persisted in the internal resources list
-     *
-     * @param builder The plan node builder which receives the built index scans
-     * @param expressions The expressions to build the plan from
+     * Build a subplan for inequality predicate.
+     * Inequality is planned as an Anti-join, which iterates over all keys of the index
+     * (left subplan) and disregards keys, which are returned by index scan on the positive
+     * predicate negated the original (right subplan).
+     * In the case of truncatable index, the right subplan might return false positives,
+     * which translates to false negatives for the anti-join. Thus instead of the anti-join
+     * only the full scan is performed.
+     * @param predicate the inequality predicate
+     * @return the plan node
      */
+    private Plan.KeysIteration buildInequalityPlan(Expression predicate)
+    {
+        Preconditions.checkArgument(predicate.getOp().isNonEquality(),
+                                    "Only inequality predicate is expected");
+
+        Plan.KeysIteration fullScan = planFactory.indexScan(null, planFactory.tableMetrics.rows);
+        if (TypeUtil.supportsRounding(predicate.validator))
+            return fullScan;
+        else
+        {
+            Expression positivePredicate = predicate.negated();
+            long rightMatchingRowCount = Math.min(estimateMatchingRowCount(positivePredicate), planFactory.tableMetrics.rows);
+            Plan.KeysIteration right = planFactory.indexScan(positivePredicate, rightMatchingRowCount);
+            return planFactory.antiJoin(fullScan, right);
+        }
+    }
+
+        /**
+         * Build a {@link Plan} from the given list of expressions by applying given operation (OR/AND).
+         * Building of such builder involves index search, results of which are persisted in the internal resources list
+         *
+         * @param builder The plan node builder which receives the built index scans
+         * @param expressions The expressions to build the plan from
+         */
     public void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
     {
         Operation.OperationType op = builder.type;
@@ -489,8 +517,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             if (expression.context.isIndexed())
             {
-                long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
-                builder.add(planFactory.indexScan(expression, expectedMatchingRowCount));
+                if (expression.getOp().isNonEquality())
+                    builder.add(buildInequalityPlan(expression));
+                else
+                {
+                    long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
+                    builder.add(planFactory.indexScan(expression, expectedMatchingRowCount));
+                }
             }
         }
     }

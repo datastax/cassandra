@@ -257,18 +257,6 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                 var value = asByteComparable(predicate.lower.value.encoded, predicate.validator);
                 return termsDistribution.estimateNumRowsMatchingExact(value);
             }
-            case NOT_EQ:
-            case NOT_CONTAINS_KEY:
-            case NOT_CONTAINS_VALUE:
-            {
-                if (TypeUtil.supportsRounding(predicate.validator))
-                    return numRows;
-                else
-                {
-                    var value = asByteComparable(predicate.lower.value.encoded, predicate.validator);
-                    return numRows - termsDistribution.estimateNumRowsMatchingExact(value);
-                }
-            }
             case RANGE:
             {
                 var lower = predicate.lower != null ? asByteComparable(predicate.lower.value.encoded, predicate.validator) : null;

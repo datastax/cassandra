@@ -34,6 +34,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 
 import org.slf4j.Logger;
@@ -69,7 +70,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
-import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
@@ -429,40 +429,11 @@ public class IndexContext
                             .orElse(null);
     }
 
-    // Returns an iterator for NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE, which
-    // 1. Either includes everything if the column type values can be truncated and
-    // thus the keys cannot be matched precisely,
-    // 2. or includes everything minus the keys matching the expression
-    // if the column type values cannot be truncated, i.e., matching the keys is always precise.
-    // (not matching precisely will lead to false negatives)
-    //
-    // keys k such that row(k) not contains v = (all keys) \ (keys k such that row(k) contains v)
-    //
-    // Note that rows in other indexes are not matched, so this can return false positives,
-    // but they are not a problem as post-filtering would get rid of them.
-    // The keys matched in other indexes cannot be safely subtracted
-    // as indexes may contain false positives caused by deletes and updates.
-    private KeyRangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
-    {
-        KeyRangeIterator allKeys = scanMemtable(keyRange);
-        if (TypeUtil.supportsRounding(expression.validator))
-        {
-            return allKeys;
-        }
-        else
-        {
-            Expression negExpression = expression.negated();
-            KeyRangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
-            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
-        }
-    }
-
     public KeyRangeIterator searchMemtable(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
-        if (expression.getOp().isNonEquality())
-        {
-            return getNonEqIterator(context, expression, keyRange);
-        }
+        Preconditions.checkArgument(!expression.getOp().isNonEquality(),
+                      "Ineqaulity expression cannot reach index iterator creation, " +
+                      "since it is rewritten during the planning phase.");
 
         Collection<MemtableIndex> memtables = liveMemtables.values();
 

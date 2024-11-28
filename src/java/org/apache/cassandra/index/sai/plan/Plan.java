@@ -1213,7 +1213,7 @@ abstract public class Plan
         }
     }
 
-    static final class AntiJoin extends KeysIteration
+    static final class AntiJoin extends Leaf
     {
         private final LazyTransform<List<KeysIteration>> subplansSupplier;
 
@@ -1300,9 +1300,9 @@ abstract public class Plan
         @Override
         protected KeysIteration withAccess(Access patterns)
         {
-            return Objects.equals(access, this.access)
+            return Objects.equals(patterns, this.access)
                    ? this
-                   : new AntiJoin(factory, id, leftOrig(), rightOrig(), access);
+                   : new AntiJoin(factory, id, leftOrig(), rightOrig(), patterns);
         }
 
         @Nullable
@@ -1310,29 +1310,6 @@ abstract public class Plan
         protected Orderer ordering()
         {
             return leftResult().ordering();
-        }
-
-        @Override
-        ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
-        {
-            for (Plan s : subplansSupplier.get())
-            {
-                if (function.apply(s) == ControlFlow.Break)
-                    return ControlFlow.Break;
-            }
-            return ControlFlow.Continue;
-        }
-
-        @Override
-        protected Plan withUpdatedSubplans(Function<Plan, Plan> updater)
-        {
-            KeysIteration newLeft = (KeysIteration) updater.apply(leftResult());
-            KeysIteration newRight = (KeysIteration) updater.apply(rightResult());
-
-            if (newLeft == leftResult() && newRight == rightResult())
-                return this;
-            else
-                return factory.antiJoin(newLeft, newRight, id).withAccess(access);
         }
 
         @Override

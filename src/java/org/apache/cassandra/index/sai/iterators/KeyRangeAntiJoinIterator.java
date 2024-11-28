@@ -37,7 +37,7 @@ public class KeyRangeAntiJoinIterator extends KeyRangeIterator
 
     private KeyRangeAntiJoinIterator(KeyRangeIterator left, KeyRangeIterator right)
     {
-        super(left.getMinimum(), left.getMaximum(), left.getMaxKeys());
+        super(left.getMinimum(), left.getMaximum(), left.getMaxKeys() - right.getMaxKeys());
         this.left = left;
         this.right = right;
     }
