@@ -404,7 +404,7 @@ public class NodeProbe implements AutoCloseable
         ssProxy.forceKeyspaceCompaction(splitOutput, keyspaceName, tableNames);
     }
 
-    public void forceKeyspaceCompaction(boolean splitOutput, Integer parallelism, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    public void forceKeyspaceCompaction(boolean splitOutput, int parallelism, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
         ssProxy.forceKeyspaceCompaction(splitOutput, parallelism, keyspaceName, tableNames);
     }

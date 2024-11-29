@@ -894,7 +894,7 @@ public class CompactionManager implements CompactionManagerMBean
         FBUtilities.waitOnFutures(submitMaximal(cfStore, getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()), splitOutput));
     }
 
-    public void performMaximal(final ColumnFamilyStore cfStore, boolean splitOutput, Integer parallelism)
+    public void performMaximal(final ColumnFamilyStore cfStore, boolean splitOutput, int parallelism)
     {
         FBUtilities.waitOnFutures(submitMaximal(cfStore, getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()), splitOutput, parallelism, active));
     }
@@ -909,7 +909,7 @@ public class CompactionManager implements CompactionManagerMBean
                                          boolean splitOutput,
                                          TableOperationObserver obs)
     {
-        return submitMaximal(cfStore, gcBefore, splitOutput, null, obs);
+        return submitMaximal(cfStore, gcBefore, splitOutput, 0, obs);
     }
 
     @VisibleForTesting
@@ -917,7 +917,7 @@ public class CompactionManager implements CompactionManagerMBean
     public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore,
                                          final int gcBefore,
                                          boolean splitOutput,
-                                         Integer parallelism,
+                                         int parallelism,
                                          TableOperationObserver obs)
     {
         // here we compute the task off the compaction executor, so having that present doesn't
@@ -925,7 +925,7 @@ public class CompactionManager implements CompactionManagerMBean
         // for ourselves to finish/acknowledge cancellation before continuing.
 
         // The default parallelism is half the number of compaction threads to leave enough room for other compactions.
-        final int permittedParallelism = parallelism != null ? parallelism : executor.getCorePoolSize() / 2;
+        final int permittedParallelism = parallelism > 0 ? parallelism : executor.getCorePoolSize() / 2;
         CompactionTasks tasks = cfStore.getCompactionStrategy().getMaximalTasks(gcBefore, splitOutput, permittedParallelism);
 
         if (tasks.isEmpty())
@@ -952,7 +952,7 @@ public class CompactionManager implements CompactionManagerMBean
                 futures.add(fut);
             else
             {
-                Throwable error = task.rejected(null);
+                Throwable error = task.rejected(new RejectedExecutionException("rejected by executor"));
                 if (error != null)
                     futures.add(Futures.immediateFailedFuture(error));
             }
