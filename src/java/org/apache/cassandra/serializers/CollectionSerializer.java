@@ -229,4 +229,45 @@ public abstract class CollectionSerializer<T> extends TypeSerializer<T>
             throw new MarshalException("Not enough bytes to read a set");
         }
     }
+
+    /**
+     * Checks if the specified serialized collection contains the specified serialized collection element.
+     *
+     * @param elementType the type of the collection elements
+     * @param collection a serialized collection
+     * @param element a serialized collection element
+     * @param hasKeys whether the collection has keys, that is, it's a map
+     * @param getKeys whether to check keys or values
+     * @return {@code true} if the collection contains the element, {@code false} otherwise
+     */
+    public static boolean contains(AbstractType<?> elementType,
+                                   ByteBuffer collection,
+                                   ByteBuffer element,
+                                   boolean hasKeys,
+                                   boolean getKeys)
+    {
+        assert hasKeys || !getKeys;
+        int size = readCollectionSize(collection, ByteBufferAccessor.instance);
+        int offset = sizeOfCollectionSize();
+
+        for (int i = 0; i < size; i++)
+        {
+            // read the key (if the collection has keys)
+            if (hasKeys)
+            {
+                ByteBuffer key = readValue(collection, ByteBufferAccessor.instance, offset);
+                if (getKeys && elementType.compare(key, element) == 0)
+                    return true;
+                offset += sizeOfValue(key, ByteBufferAccessor.instance);
+            }
+
+            // read the value
+            ByteBuffer value = readValue(collection, ByteBufferAccessor.instance, offset);
+            if (!getKeys && elementType.compare(value, element) == 0)
+                return true;
+            offset += sizeOfValue(value, ByteBufferAccessor.instance);
+        }
+
+        return false;
+    }
 }
