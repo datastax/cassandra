@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
@@ -127,7 +128,7 @@ public class RealEnvironment implements Environment
     @Override
     public int maxConcurrentCompactions()
     {
-        return DatabaseDescriptor.getConcurrentCompactors();
+        return CompactionManager.instance.getMaximumCompactorThreads();
     }
 
     @Override
