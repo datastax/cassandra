@@ -78,10 +78,10 @@ public interface CompactionStrategy extends CompactionObserver
 
     /**
      * @param gcBefore             throw away tombstones older than this
-     * @param permittedParallelism
-     * @param reshard
-     * @return a compaction task that should be run to compact this table
-     * as much as possible.  Null if nothing to do.
+     * @param splitOutput          whether the output of the compaction should be split (only applicable to STCS)
+     * @param permittedParallelism the maximum number of tasks that can be run in parallel, if the operation can be
+     *                             parallelized (UCS with parallelize_output_shards enabled)
+     * @return compaction tasks that should be run to compact this table as much as possible.
      * <p>
      * Is responsible for marking its sstables as compaction-pending.
      */
