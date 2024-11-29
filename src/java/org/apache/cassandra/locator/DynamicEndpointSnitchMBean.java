@@ -74,7 +74,7 @@ public interface DynamicEndpointSnitchMBean
     /**
      * set replica latency quantization to 1ms
      */
-    public void setQuantization(boolean enabled);
+    public void setQuantizationToMillis(boolean enabled);
 
-    public boolean getQuantization();
+    public boolean getQuantizationToMillis();
 }

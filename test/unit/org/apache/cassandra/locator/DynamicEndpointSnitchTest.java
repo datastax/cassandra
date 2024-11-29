@@ -140,15 +140,15 @@ public class DynamicEndpointSnitchTest
     }
 
     @Test
-    public void testDynamicSnitchSetQuantization()
+    public void testDynamicSnitchSetQuantizationToMillis()
     {
         // do this because SS needs to be initialized before DES can work properly.
         SimpleSnitch ss = new SimpleSnitch();
 
         DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
-        boolean originalQuantization = dsnitch.getQuantization();
-        dsnitch.setQuantization(!originalQuantization);
-        Assert.assertEquals(!originalQuantization, dsnitch.getQuantization());
+        boolean originalQuantization = dsnitch.getQuantizationToMillis();
+        dsnitch.setQuantizationToMillis(!originalQuantization);
+        Assert.assertEquals(!originalQuantization, dsnitch.getQuantizationToMillis());
     }
 
     @Test
@@ -200,7 +200,7 @@ public class DynamicEndpointSnitchTest
 
         DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
 
-        dsnitch.setQuantization(true);
+        dsnitch.setQuantizationToMillis(true);
         // add a slow replica, that always reports 1999us
         for (int i = 0; i < 100; i++)
         {
@@ -229,7 +229,7 @@ public class DynamicEndpointSnitchTest
 
         DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
 
-        dsnitch.setQuantization(false);
+        dsnitch.setQuantizationToMillis(false);
         dsnitch.setQuantile(0.9);
         // add a slow replica, that always reports 100us
         for (int i = 0; i < 100; i++)

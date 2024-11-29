@@ -260,14 +260,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
 
     public void receiveTiming(InetAddressAndPort host, long latency, TimeUnit unit) // this is cheap
     {
-        ExponentiallyDecayingReservoir sample = samples.get(host);
-        if (sample == null)
-        {
-            ExponentiallyDecayingReservoir maybeNewSample = new ExponentiallyDecayingReservoir(WINDOW_SIZE, ALPHA);
-            sample = samples.putIfAbsent(host, maybeNewSample);
-            if (sample == null)
-                sample = maybeNewSample;
-        }
+        ExponentiallyDecayingReservoir sample = samples.computeIfAbsent(host, k -> new ExponentiallyDecayingReservoir(WINDOW_SIZE, ALPHA));
         if (quantizeToMillis)
             sample.update(unit.toMillis(latency));
         else
@@ -298,7 +291,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
 
         // We're going to weight the latency for each host against the worst one we see, to
         // arrive at sort of a 'badness percentage' for them. First, find the worst for each:
-        HashMap<InetAddressAndPort, Double> newScores = new HashMap<>();
+        HashMap<InetAddressAndPort, Double> newScores = new HashMap<>(samples.size());
         for (Map.Entry<InetAddressAndPort, Snapshot> entry : snapshots.entrySet())
         {
             double replicaLatency = entry.getValue().getValue(replicaLatencyQuantile);
@@ -398,13 +391,13 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
     }
 
     @Override
-    public void setQuantization(boolean enabled)
+    public void setQuantizationToMillis(boolean enabled)
     {
         quantizeToMillis = enabled;
     }
 
     @Override
-    public boolean getQuantization()
+    public boolean getQuantizationToMillis()
     {
         return quantizeToMillis;
     }
