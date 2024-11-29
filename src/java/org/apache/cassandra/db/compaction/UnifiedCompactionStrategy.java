@@ -292,7 +292,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         if (!repairFinalizationTasks.isEmpty())
             return repairFinalizationTasks;
 
-        // Always check for expired sstables (not just periodically) as expiration will save us unnecessary work.
         // Expirations have to run before compaction (if run in parallel they may cause overlap tracker to leave
         // unnecessary tombstones in place), so return only them if found.
         Collection<AbstractCompactionTask> expirationTasks = getExpirationTasks(gcBefore);
