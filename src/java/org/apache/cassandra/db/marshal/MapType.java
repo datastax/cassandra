@@ -306,4 +306,29 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     {
         return decompose(Collections.emptyMap());
     }
+
+    /**
+     * Checks if the specified serialized map contains the specified serialized map value.
+     *
+     * @param map a serialized map
+     * @param value a serialized map value
+     * @return {@code true} if the map contains the value, {@code false} otherwise
+     */
+    @Override
+    public boolean contains(ByteBuffer map, ByteBuffer value)
+    {
+        return CollectionSerializer.contains(getValuesType(), map, value, true, false);
+    }
+
+    /**
+     * Checks if the specified serialized map contains the specified serialized map key.
+     *
+     * @param map a serialized map
+     * @param key a serialized map key
+     * @return {@code true} if the map contains the key, {@code false} otherwise
+     */
+    public boolean containsKey(ByteBuffer map, ByteBuffer key)
+    {
+        return CollectionSerializer.contains(getKeysType(), map, key, true, true);
+    }
 }
