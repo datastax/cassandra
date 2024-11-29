@@ -1903,7 +1903,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         if (range == null)
             return getScanner();
-        return getScanner(Collections.singletonList(range));
+        else
+            return getScanner(Collections.singletonList(range));
     }
 
     /**
