@@ -332,16 +332,34 @@ public class LegacySSTableTest
     public void testVerifyOldDroppedTupleSSTables() throws IOException
     {
         try {
-            for (String legacyVersion : legacyVersions)
+            for (String legacyVersion : legacyVersions) {
                 QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val", legacyVersion));
+                QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val2", legacyVersion));
+                QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val3", legacyVersion));
+                QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val4", legacyVersion));
+            }
 
             verifyOldSSTables("tuple");
         }
         finally
         {
-            for (String legacyVersion : legacyVersions)
-                QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple ADD val frozen<tuple<set<int>,set<text>>>", legacyVersion));
+            for (String legacyVersion : legacyVersions) {
+                alterTableAddColumn(legacyVersion, "val frozen<tuple<set<int>,set<text>>>");
+                alterTableAddColumn(legacyVersion, "val2 tuple<set<int>,set<text>>");
+                alterTableAddColumn(legacyVersion, String.format("val3 frozen<legacy_%s_tuple_udt>", legacyVersion));
+                alterTableAddColumn(legacyVersion, String.format("val4 legacy_%s_tuple_udt", legacyVersion));
+            }
         }
+    }
+
+    private static void alterTableAddColumn(String legacyVersion, String column_definition) {
+        // main-5.0 can use "IF NOT EXISTS" (and can also do all columns in one ALTER TABLE…
+        //QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple ADD IF NOT EXISTS %s", legacyVersion, column_definition));
+        try
+        {
+            QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple ADD %s", legacyVersion, column_definition));
+        }
+        catch (Throwable e) {}
     }
 
     private void verifyOldSSTables(String tableSuffix) throws IOException
@@ -586,7 +604,12 @@ public class LegacySSTableTest
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_simple_counter (pk text PRIMARY KEY, val counter)", legacyVersion));
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_clust (pk text, ck text, val text, PRIMARY KEY (pk, ck))", legacyVersion));
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_clust_counter (pk text, ck text, val counter, PRIMARY KEY (pk, ck))", legacyVersion));
-        QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_tuple (pk text PRIMARY KEY, val frozen<tuple<set<int>,set<text>>>, extra text)", legacyVersion));
+
+
+        QueryProcessor.executeInternal(String.format("CREATE TYPE legacy_tables.legacy_%s_tuple_udt (name tuple<text,text>)", legacyVersion));
+
+        QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%1$s_tuple (pk text PRIMARY KEY, " +
+                "val frozen<tuple<set<int>,set<text>>>, val2 tuple<set<int>,set<text>>, val3 frozen<legacy_%1$s_tuple_udt>, val4 legacy_%1$s_tuple_udt, extra text)", legacyVersion));
     }
 
     private static void truncateTables(String legacyVersion)
@@ -683,7 +706,9 @@ public class LegacySSTableTest
                                                          version, valPk));
 
             QueryProcessor.executeInternal(
-                    String.format("INSERT INTO legacy_tables.legacy_%s_tuple (pk, val) VALUES ('%s', ({1,2,3},{'a','b','c'}))", version, valPk));
+                    String.format("INSERT INTO legacy_tables.legacy_%s_tuple (pk, val, val2, val3, val4, extra)"
+                                    + " VALUES ('%s', ({1,2,3},{'a','b','c'}), ({1,2,3},{'a','b','c'}), {name: ('abc','def')}, {name: ('abc','def')}, '%s')",
+                                  version, valPk, randomString));
 
             for (int ck = 0; ck < 50; ck++)
             {
