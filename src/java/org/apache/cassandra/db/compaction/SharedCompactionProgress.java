@@ -18,13 +18,13 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import javax.annotation.Nullable;
@@ -43,7 +43,7 @@ import org.apache.cassandra.schema.TableMetadata;
 /// before any of them start.
 public class SharedCompactionProgress implements CompactionProgress
 {
-    private final List<CompactionProgress> sources = new ArrayList<>();
+    private final List<CompactionProgress> sources = new CopyOnWriteArrayList<>();
     private final AtomicInteger toComplete = new AtomicInteger(0);
     private final UUID operationId;
     private final OperationType operationType;
@@ -61,7 +61,7 @@ public class SharedCompactionProgress implements CompactionProgress
         toComplete.incrementAndGet();
     }
 
-    public synchronized void addSubtask(CompactionProgress progress)
+    public void addSubtask(CompactionProgress progress)
     {
         sources.add(progress);
         assert progress.operationType() == operationType;
