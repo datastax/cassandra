@@ -158,10 +158,14 @@ public class BackgroundCompactionTrackingTest extends CQLTester
             {
                 BitSet seqs = new BitSet(shards);
                 int expectedSize = tasks - i;
-                final int size = operations.get(i).size();
+                var ops = operations.get(i)
+                                    .stream()
+                                    .filter(op -> op.metadata() == cfs.metadata())
+                                    .collect(Collectors.toList());
+                final int size = ops.size();
                 int finished = tasks - size;
                 assertTrue(size >= expectedSize); // some task may have not managed to close
-                for (var op : operations.get(i))
+                for (var op : ops)
                 {
                     assertSame(cfs.metadata(), op.metadata());
 
