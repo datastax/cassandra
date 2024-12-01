@@ -1251,10 +1251,12 @@ abstract public class Plan
         /**
          * Adjusts the access patterns for each subplan to account for the other subplans
          * based on this access pattern pushed from the parent.
-         * The left subplan has selectivity 1.0 and thus doesn't skip by default. The
-         * right subplan is against the same index but with a restriction. Thus, it will
-         * skip to the first key satisfying the restriction. Since the keys from the right
-         * subplan are used to discard them, the amount of keys depends on its selectivity.
+         * The left subplan has selectivity 1.0 (if the table is not empty) and,
+         * thus, doesn't skip by default.
+         * The right subplan is against the same index but with a restriction.
+         * Thus, it will skip to the first key satisfying the restriction.
+         * Since the keys from the right subplan are used to discard them,
+         * the amount of keys depends on its selectivity.
          * @param subplans - list with left and right subplans
          * @return list with left and right subplans with adjusted access patterns
          */
@@ -1264,7 +1266,6 @@ abstract public class Plan
 
             KeysIteration left = subplans.get(0);
             KeysIteration right = subplans.get(1);
-            assert isEffectivelyEqual(1.0, left.selectivity());
 
             double loops = 1.0 / boundedSelectivity(selectivity());
             KeysIteration newLeft = left.withAccess(access.scaleDistance(loops).convolute(loops, 1.0));
@@ -1315,8 +1316,7 @@ abstract public class Plan
         @Override
         protected double estimateSelectivity()
         {
-            assert isEffectivelyEqual(1.0, leftOrig().selectivity());
-            double selectivity = 1.0 - rightOrig().selectivity();
+            double selectivity = leftOrig().selectivity() - rightOrig().selectivity();
             assert selectivity >= 0;
             return selectivity;
         }

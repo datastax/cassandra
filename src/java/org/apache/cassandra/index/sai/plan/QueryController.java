@@ -479,7 +479,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Preconditions.checkArgument(predicate.getOp().isNonEquality(),
                                     "Only inequality predicate is expected");
 
-        Plan.KeysIteration fullScan = planFactory.indexScan(null, planFactory.tableMetrics.rows);
+        Expression everythingExpression = new Expression(predicate.context);
+        everythingExpression.operation = Expression.Op.RANGE;
+        Plan.KeysIteration fullScan = planFactory.indexScan(everythingExpression, planFactory.tableMetrics.rows);
         if (TypeUtil.supportsRounding(predicate.validator))
             return fullScan;
         else
