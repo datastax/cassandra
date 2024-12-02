@@ -83,10 +83,14 @@ memtable:
     configurations:
         skiplist:
             class_name: SkipListMemtable
+        persistent_memory:
+            class_name: PersistentMemoryMemtable
         trie:
             class_name: TrieMemtable
             parameters:
                 shards: 4
+        trie_stage1:
+            class_name: TrieMemtableStage1
         skiplist_sharded:
             class_name: ShardedSkipListMemtable
             parameters:
