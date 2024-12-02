@@ -31,5 +31,5 @@ public class TestMemtable
             return FACTORY;
     }
 
-    public static Memtable.Factory FACTORY = SkipListMemtable::new;
+    public static Memtable.Factory FACTORY = (commitLogLowerBound, metadataRef, owner) -> new SkipListMemtable(commitLogLowerBound, metadataRef, owner);
 }

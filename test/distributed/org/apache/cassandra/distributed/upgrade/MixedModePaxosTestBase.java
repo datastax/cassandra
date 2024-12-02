@@ -27,6 +27,8 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SimpleBuilders;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -168,7 +170,8 @@ public abstract class MixedModePaxosTestBase extends UpgradeTestBase
 
             this.key = ByteBufferUtil.bytes(key);
             Row row = new SimpleBuilders.RowBuilder(metadata).add("v", (int) key).build();
-            this.update = PartitionUpdate.singleRowUpdate(metadata, this.key, row);
+            DecoratedKey decoratedKey = DatabaseDescriptor.getPartitioner().decorateKey(this.key);
+            this.update = PartitionUpdate.singleRowUpdate(metadata, decoratedKey, row);
 
 
 

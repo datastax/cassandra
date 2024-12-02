@@ -51,7 +51,6 @@ import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -72,11 +71,14 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
+
+import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 
 /**
  * Previous TrieMemtable implementation, provided for two reasons:
@@ -291,7 +293,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         int total = 0;
-        for (MemtableUnfilteredPartitionIterator iter = makePartitionIterator(columnFilter, dataRange); iter.hasNext(); )
+        for (MemtableUnfilteredPartitionIterator iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
         {
             for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
             {
@@ -323,28 +325,10 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     }
 
     @Override
-    public UnfilteredPartitionIterator partitionIterator(ColumnFilter columnFilter, DataRange dataRange, SSTableReadsListener listener)
+    public UnfilteredRowIterator rowIterator(DecoratedKey key)
     {
-        AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
-
-        PartitionPosition left = keyRange.left;
-        PartitionPosition right = keyRange.right;
-        if (left.isMinimum())
-            left = null;
-        if (right.isMinimum())
-            right = null;
-
-        boolean isBound = keyRange instanceof Bounds;
-        boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
-        boolean includeStop = isBound || keyRange instanceof Range;
-
-        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(left, includeStart, right, includeStop);
-
-        return new MemtableUnfilteredPartitionIterator(metadata(),
-                                                       allocator.ensureOnHeap(),
-                                                       subMap,
-                                                       columnFilter,
-                                                       dataRange);
+        Partition p = getPartition(key);
+        return p != null ? p.unfilteredIterator() : null;
     }
 
     /**
@@ -403,7 +387,10 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         return statsCollector.get();
     }
 
-    public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
+    @Override
+    public MemtableUnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
+                                                                 final DataRange dataRange,
+                                                                 SSTableReadsListener readsListener)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -464,7 +451,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         for (Iterator<Map.Entry<ByteComparable, BTreePartitionData>> it = toFlush.entryIterator(); it.hasNext(); )
         {
             Map.Entry<ByteComparable, BTreePartitionData> en = it.next();
-            ByteComparable byteComparable = v -> en.getKey().asComparableBytes(BYTE_COMPARABLE_VERSION);
+            ByteComparable byteComparable = v -> ByteSource.peekable(en.getKey().asComparableBytes(BYTE_COMPARABLE_VERSION));
             byte[] keyBytes = DecoratedKey.keyFromByteComparable(byteComparable, BYTE_COMPARABLE_VERSION, metadata().partitioner);
             keySize += keyBytes.length;
             keyCount++;

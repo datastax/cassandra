@@ -267,6 +267,19 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
              + (deletionInfo.getPartitionDeletion().isLive() ? 0 : 1);
     }
 
+    // FIXME review
+    /**
+     * The accumulated BTree size of the data contained in this update.
+     *
+     * @return the accumulated BTree size of the data contained in this update.
+     */
+    @VisibleForTesting
+    @Override
+    public long accumulatedDataSize()
+    {
+        return BTree.<Row>accumulate(holder.tree, (row, value) -> row.dataSize() + value, 0L);
+    }
+
     /**
      * The size of the data contained in this update.
      *
