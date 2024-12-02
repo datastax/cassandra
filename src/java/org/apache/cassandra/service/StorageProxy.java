@@ -487,7 +487,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 consistencyForPaxos,
                                                                                 consistencyForCommit);
         // Request sensors are utilized to track usages from replicas serving a cas request
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(keyspaceName);;
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(keyspaceName);
         Context context = Context.from(metadata);
         sensors.registerSensor(context, Type.WRITE_BYTES); // track user table + paxos table write bytes
         sensors.registerSensor(context, Type.READ_BYTES); // track user table + paxos table read bytes
