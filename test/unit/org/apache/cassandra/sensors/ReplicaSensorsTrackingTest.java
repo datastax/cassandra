@@ -155,7 +155,7 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT ENTRY",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testReadCallbackSensorsTracking() throws InterruptedException
+    public void testSensorsTrackedForReadCallback() throws InterruptedException
     {
         DecoratedKey key = cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("4"));
         ReadCommand command = Util.cmd(cfs, key).build();
@@ -188,12 +188,12 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT ENTRY",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testWriteCallbackSensorsTrackingAllow_HintsEnabled() throws InterruptedException
+    public void testSensorsTrackedForWriteCallback_HintsEnabled() throws InterruptedException
     {
         boolean allowHints = true;
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> writeRequest = Message.builder(Verb.MUTATION_REQ, mutation).build();
-        testPrepareCallbackSensorsTracking(writeRequest, allowHints);
+        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
     }
 
     @Test
@@ -202,12 +202,12 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT ENTRY",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testWriteCallbackSensorsTrackingAllow_HintsDisabled() throws InterruptedException
+    public void testSensorsTrackedForWriteCallback_HintsDisabled() throws InterruptedException
     {
         boolean allowHints = false;
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> writeRequest = Message.builder(Verb.MUTATION_REQ, mutation).build();
-        testPrepareCallbackSensorsTracking(writeRequest, allowHints);
+        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
     }
 
     @Test
@@ -216,13 +216,13 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT ENTRY",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testWriteCallbackSensorsTracking_CounterMutation() throws InterruptedException
+    public void testSensorsTrackedForWriteCallback_CounterMutation() throws InterruptedException
     {
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         CounterMutation counterMutation = new CounterMutation(mutation, ConsistencyLevel.ALL);
         Message<CounterMutation> writeRequest = Message.builder(Verb.COUNTER_MUTATION_REQ, counterMutation).build();
         boolean allowHints = false;
-        testPrepareCallbackSensorsTracking(writeRequest, allowHints);
+        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
     }
 
     @Test
@@ -231,12 +231,12 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT ENTRY",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testWriteCallbackSensorsTracking_HintsEnabled_PaxosCommit() throws InterruptedException
+    public void testSensorsTrackedForWriteCallback_HintsEnabled_PaxosCommit() throws InterruptedException
     {
         Commit commit = Commit.emptyCommit(cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("0")), cfs.metadata());
         Message<Commit> writeRequest = Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build();
         boolean allowHints = true;
-        testPrepareCallbackSensorsTracking(writeRequest, allowHints);
+        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
     }
 
     @Test
@@ -245,12 +245,12 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT ENTRY",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testWriteCallbackSensorsTracking_HintsDisabled_PaxosCommit() throws InterruptedException
+    public void testSensorsTrackedForWriteCallback_HintsDisabled_PaxosCommit() throws InterruptedException
     {
         Commit commit = Commit.emptyCommit(cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("0")), cfs.metadata());
         Message<Commit> writeRequest = Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build();
         boolean allowHints = false;
-        testPrepareCallbackSensorsTracking(writeRequest, allowHints);
+        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
     }
 
     @Test
@@ -259,7 +259,7 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT ENTRY",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testPrepareCallbackSensorsTracking() throws InterruptedException
+    public void testSensorsTrackedForPaxosPrepareCallback() throws InterruptedException
     {
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> prepare = Message.builder(Verb.PAXOS_PREPARE_REQ, mutation).build();
@@ -294,7 +294,7 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT ENTRY",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testProposeCallbackSensorsTracking() throws InterruptedException
+    public void testSensorsTrackedForPaxosProposeCallback() throws InterruptedException
     {
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> propose = Message.builder(Verb.PAXOS_PROPOSE_REQ, mutation).build();
@@ -334,7 +334,7 @@ public class ReplicaSensorsTrackingTest
         assertThat(onResponseStartSignal[replica].await(1, TimeUnit.SECONDS)).isTrue();
     }
 
-    private void testPrepareCallbackSensorsTracking(Message writeRequest, boolean allowHints) throws InterruptedException
+    private void assertSensorsTrackedForWriteRequest(Message writeRequest, boolean allowHints) throws InterruptedException
     {
         // init request sensors, must happen before the callback is created
         RequestSensors requestSensors = new ActiveRequestSensors();
