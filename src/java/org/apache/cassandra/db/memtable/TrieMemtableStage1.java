@@ -64,16 +64,21 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
+
+import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 
 /**
  * Previous TrieMemtable implementation, provided for two reasons:
@@ -146,7 +151,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     TrieMemtableStage1(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
-        this.boundaries = owner.localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this.boundaries = owner.localRangeSplits(AbstractShardedMemtable.getDefaultShardCount());
         this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics);
         this.mergedTrie = makeMergedTrie(shards);
@@ -263,7 +268,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     }
 
     @Override
-    public long getOperations()
+    public long operationCount()
     {
         long total = 0L;
         for (MemtableShard shard : shards)
@@ -288,7 +293,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         int total = 0;
-        for (MemtableUnfilteredPartitionIterator iter = makePartitionIterator(columnFilter, dataRange); iter.hasNext(); )
+        for (MemtableUnfilteredPartitionIterator iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
         {
             for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
             {
@@ -307,6 +312,23 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
             estimatedAverageRowSize = new MemtableAverageRowSize(this);
         return estimatedAverageRowSize.rowSize;
+    }
+
+    @Override
+    public UnfilteredRowIterator rowIterator(DecoratedKey key, Slices slices, ColumnFilter columnFilter, boolean reversed, SSTableReadsListener listener)
+    {
+        Partition p = getPartition(key);
+        if (p == null)
+            return null;
+        else
+            return p.unfilteredIterator(columnFilter, slices, reversed);
+    }
+
+    @Override
+    public UnfilteredRowIterator rowIterator(DecoratedKey key)
+    {
+        Partition p = getPartition(key);
+        return p != null ? p.unfilteredIterator() : null;
     }
 
     /**
@@ -365,7 +387,10 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         return statsCollector.get();
     }
 
-    public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
+    @Override
+    public MemtableUnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
+                                                                 final DataRange dataRange,
+                                                                 SSTableReadsListener readsListener)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -417,7 +442,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         return BufferDecoratedKey.fromByteComparable(path, BYTE_COMPARABLE_VERSION, metadata.partitioner);
     }
 
-    public FlushCollection<MemtablePartition> getFlushSet(PartitionPosition from, PartitionPosition to)
+    public FlushablePartitionSet<MemtablePartition> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
         Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(from, true, to, false);
         long keySize = 0;
@@ -426,7 +451,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         for (Iterator<Map.Entry<ByteComparable, BTreePartitionData>> it = toFlush.entryIterator(); it.hasNext(); )
         {
             Map.Entry<ByteComparable, BTreePartitionData> en = it.next();
-            ByteComparable byteComparable = v -> en.getKey().asPeekableBytes(BYTE_COMPARABLE_VERSION);
+            ByteComparable byteComparable = v -> ByteSource.peekable(en.getKey().asComparableBytes(BYTE_COMPARABLE_VERSION));
             byte[] keyBytes = DecoratedKey.keyFromByteComparable(byteComparable, BYTE_COMPARABLE_VERSION, metadata().partitioner);
             keySize += keyBytes.length;
             keyCount++;
@@ -434,7 +459,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         long partitionKeySize = keySize;
         int partitionCount = keyCount;
 
-        return new AbstractFlushCollection<MemtablePartition>()
+        return new AbstractFlushablePartitionSet<MemtablePartition>()
         {
             public Memtable memtable()
             {
@@ -464,7 +489,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
                                            entry -> getPartitionFromTrieEntry(metadata(), EnsureOnHeap.NOOP, entry));
             }
 
-            public long partitionKeySize()
+            public long partitionKeysSize()
             {
                 return partitionKeySize;
             }
@@ -518,7 +543,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
         MemtableShard(TableMetadataRef metadata, TrieMemtableMetricsView metrics)
         {
-            this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator(), metrics);
+            this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator(metadata.toString()), metrics);
         }
 
         @VisibleForTesting
@@ -544,9 +569,9 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
             else
             {
                 metrics.contendedPuts.inc();
-                long lockStartTime = System.nanoTime();
+                long lockStartTime = Clock.Global.nanoTime();
                 writeLock.lock();
-                metrics.contentionTime.addNano(System.nanoTime() - lockStartTime);
+                metrics.contentionTime.addNano(Clock.Global.nanoTime() - lockStartTime);
             }
             try
             {
@@ -671,9 +696,9 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
             this.dataRange = dataRange;
         }
 
-        public int getMinLocalDeletionTime()
+        public long getMinLocalDeletionTime()
         {
-            int minLocalDeletionTime = Integer.MAX_VALUE;
+            long minLocalDeletionTime = Long.MAX_VALUE;
             for (BTreePartitionData partition : source.values())
                 minLocalDeletionTime = EncodingStats.mergeMinLocalDeletionTime(minLocalDeletionTime, partition.stats);
 

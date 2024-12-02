@@ -19,7 +19,9 @@ package org.apache.cassandra.db.partitions;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
@@ -35,12 +37,14 @@ import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
@@ -98,7 +102,7 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
      *
      * @return the newly created partition deletion update.
      */
-    public static BTreePartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, int nowInSec)
+    public static BTreePartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, long nowInSec)
     {
         MutableDeletionInfo deletionInfo = new MutableDeletionInfo(timestamp, nowInSec);
         BTreePartitionData holder = new BTreePartitionData(RegularAndStaticColumns.NONE, BTree.empty(), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
@@ -143,6 +147,19 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
     public static BTreePartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row)
     {
         return singleRowUpdate(metadata, key, row.isStatic() ? null : row, row.isStatic() ? row : null);
+    }
+
+    @Override
+    public PartitionUpdate withOnlyPresentColumns()
+    {
+        Set<ColumnMetadata> columnSet = new HashSet<>();
+
+        for (Row row : rows())
+            for (ColumnData column : row)
+                columnSet.add(column.column());
+
+        RegularAndStaticColumns columns = RegularAndStaticColumns.builder().addAll(columnSet).build();
+        return new BTreePartitionUpdate(metadata, partitionKey, holder.withColumns(columns), deletionInfo.mutableCopy(), false);
     }
 
     /**
@@ -249,6 +266,19 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
              + (deletionInfo.getPartitionDeletion().isLive() ? 0 : 1);
     }
 
+    // FIXME review
+    /**
+     * The accumulated BTree size of the data contained in this update.
+     *
+     * @return the accumulated BTree size of the data contained in this update.
+     */
+    @VisibleForTesting
+    @Override
+    public long accumulatedDataSize()
+    {
+        return BTree.<Row>accumulate(holder.tree, (row, value) -> row.dataSize() + value, 0L);
+    }
+
     /**
      * The size of the data contained in this update.
      *
@@ -259,6 +289,19 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
     {
         return Ints.saturatedCast(BTree.<Row>accumulate(holder.tree, (row, value) -> row.dataSize() + value, 0L)
                 + holder.staticRow.dataSize());
+    }
+
+    // FIXME review
+    /**
+     * The size of the data contained in this update.
+     *
+     * @return the size of the data contained in this update.
+     */
+    @Override
+    public long unsharedHeapSize()
+    {
+        return BTree.<Row>accumulate(holder.tree, (row, value) -> row.unsharedHeapSize() + value, 0L)
+                + holder.staticRow.unsharedHeapSize();
     }
 
     @Override
@@ -580,7 +623,7 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
         }
 
         @Override
-        public PartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, int nowInSec)
+        public PartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, long nowInSec)
         {
             return BTreePartitionUpdate.fullPartitionDelete(metadata, key, timestamp, nowInSec);
         }
