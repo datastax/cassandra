@@ -32,11 +32,15 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * A utility class that groups methods to facilitate encoding sensors in native or internode protocol messages:
- * <li>Sensors in internode messages: Use to communicate sensors values from replicas to coordinators in the internode
- * message response {@link Message.Header#customParams()} bytes map. See {@link SensorsCustomParams#addSensorsToInternodeResponse(RequestSensors, Message.Builder)} and
- * {@link SensorsCustomParams#sensorValueFromInternodeResponse(Message, String)}.</li>
- * <li>Sensors in native protocol messages: Use to communicate sensors values from coordinator to upstream callers native
- * protocol response {@link org.apache.cassandra.transport.Message#getCustomPayload()} bytes map. See {@link SensorsCustomParams#addSensorToCQLResponse(org.apache.cassandra.transport.Message.Response, ProtocolVersion, RequestSensors, Context, Type)}.</li
+ * <ul>
+ *   <li>Sensors in internode messages: used to communicate sensors values from replicas to coordinators in the internode
+ *   message response {@link Message.Header#customParams()} bytes map.
+ *   See {@link SensorsCustomParams#addSensorsToInternodeResponse(RequestSensors, Message.Builder)} and
+ *   {@link SensorsCustomParams#sensorValueFromInternodeResponse(Message, String)}.</li>
+ *   <li>Sensors in native protocol messages: used to communicate sensors values from coordinator to upstream callers via the native protocol
+ *   response {@link org.apache.cassandra.transport.Message#getCustomPayload()} bytes map.
+ *   See {@link SensorsCustomParams#addSensorToCQLResponse(org.apache.cassandra.transport.Message.Response, ProtocolVersion, RequestSensors, Context, Type)}.</li
+ * </ul>
  */
 public final class SensorsCustomParams
 {
@@ -109,8 +113,8 @@ public final class SensorsCustomParams
      * Reads the sensor value encoded in the response message header as {@link Message.Header#customParams()} bytes map.
      *
      * @param message the message to read the sensor value from
-     * @param customParam   the name of the header in custom params to read the sensor value from
-     * @param <T>     the message type
+     * @param customParam the name of the header in custom params to read the sensor value from
+     * @param <T> the message type
      * @return the sensor value
      */
     public static <T> double sensorValueFromInternodeResponse(Message<T> message, String customParam)
@@ -133,11 +137,11 @@ public final class SensorsCustomParams
      * Adds a sensor of a given type and context to the native protocol response message encoded in the custom payload bytes map.
      * If the sensor is already present in the custom payload, it will be overwritten.
      *
-     * @param response        the response message to add the sensors to
+     * @param response the response message to add the sensors to
      * @param protocolVersion the protocol version specified in query options to determine if custom payload is supported (should be V4 or later).
-     * @param sensors         the requests sensors associated with the request to get the sensor values from.
-     * @param context         the context of the sensor to add to the response
-     * @param type            the type of the sensor to add to the response
+     * @param sensors the requests sensors associated with the request to get the sensor values from.
+     * @param context the context of the sensor to add to the response
+     * @param type the type of the sensor to add to the response
      */
     public static void addSensorToCQLResponse(org.apache.cassandra.transport.Message.Response response,
                                               ProtocolVersion protocolVersion,
