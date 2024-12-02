@@ -232,4 +232,47 @@ public abstract class CollectionSerializer<T> extends TypeSerializer<T>
         ByteBufferUtil.copyBytes(input, startPos, output, sizeLen, bodyLen);
         return output;
     }
+
+    /**
+     * Checks if the specified serialized collection contains the specified serialized collection element.
+     *
+     * @param elementType the type of the collection elements
+     * @param collection a serialized collection
+     * @param element a serialized collection element
+     * @param hasKeys whether the collection has keys, that is, it's a map
+     * @param getKeys whether to check keys or values
+     * @param version the protocol version uses for serialization
+     * @return {@code true} if the collection contains the element, {@code false} otherwise
+     */
+    public static boolean contains(AbstractType<?> elementType,
+                                   ByteBuffer collection,
+                                   ByteBuffer element,
+                                   boolean hasKeys,
+                                   boolean getKeys,
+                                   ProtocolVersion version)
+    {
+        assert hasKeys || !getKeys;
+        int size = readCollectionSize(collection, ByteBufferAccessor.instance, version);
+        int offset = sizeOfCollectionSize(size, version);
+
+        for (int i = 0; i < size; i++)
+        {
+            // read the key (if the collection has keys)
+            if (hasKeys)
+            {
+                ByteBuffer key = readValue(collection, ByteBufferAccessor.instance, offset, version);
+                if (getKeys && elementType.compare(key, element) == 0)
+                    return true;
+                offset += sizeOfValue(key, ByteBufferAccessor.instance, version);
+            }
+
+            // read the value
+            ByteBuffer value = readValue(collection, ByteBufferAccessor.instance, offset, version);
+            if (!getKeys && elementType.compare(value, element) == 0)
+                return true;
+            offset += sizeOfValue(value, ByteBufferAccessor.instance, version);
+        }
+
+        return false;
+    }
 }

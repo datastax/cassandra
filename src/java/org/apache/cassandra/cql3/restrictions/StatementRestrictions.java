@@ -75,11 +75,13 @@ public class StatementRestrictions
     public static final String INDEX_DOES_NOT_SUPPORT_DISJUNCTION =
     "An index involved in this query does not support disjunctive queries using the OR operator";
 
+    public static final String RESTRICTION_REQUIRES_INDEX_MESSAGE = "%s restriction is only supported on properly indexed columns. %s is not valid.";
+
     public static final String PARTITION_KEY_RESTRICTION_MUST_BE_TOP_LEVEL =
     "Restriction on partition key column %s must not be nested under OR operator";
 
     public static final String GEO_DISTANCE_REQUIRES_INDEX_MESSAGE = "GEO_DISTANCE requires the vector column to be indexed";
-    public static final String NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE = "Ordering on non-clustering column %s requires the column to be indexed";
+    public static final String NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE = "Ordering on non-clustering column %s requires the column to be indexed.";
     public static final String NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
     "Ordering on non-clustering column requires each restricted column to be indexed except for fully-specified partition keys";
 
@@ -391,7 +393,7 @@ public class StatementRestrictions
                     {
                         if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
                         {
-                            throw invalidRequest("LIKE restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
+                            throw invalidRequest(RESTRICTION_REQUIRES_INDEX_MESSAGE, relation.operator(), relation.toString());
                         }
                         else
                         {
@@ -408,7 +410,7 @@ public class StatementRestrictions
                         {
                             if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
                             {
-                                throw invalidRequest(": restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
+                                throw invalidRequest(RESTRICTION_REQUIRES_INDEX_MESSAGE, relation.operator(), relation.toString());
                             }
                             else
                             {
@@ -983,12 +985,12 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options)
+    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState)
     {
         if (filterRestrictions.isEmpty() && children.isEmpty())
             return RowFilter.NONE;
 
-        return RowFilter.builder().buildFromRestrictions(this, indexManager, table, options);
+        return RowFilter.builder(indexManager).buildFromRestrictions(this, table, options, queryState);
     }
 
     /**

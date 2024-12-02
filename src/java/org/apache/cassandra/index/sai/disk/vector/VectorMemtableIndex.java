@@ -96,7 +96,7 @@ public class VectorMemtableIndex implements MemtableIndex
     public VectorMemtableIndex(IndexContext indexContext, Memtable mt)
     {
         this.indexContext = indexContext;
-        this.graph = new CassandraOnHeapGraph<>(indexContext, true);
+        this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
         this.mt = mt;
     }
 

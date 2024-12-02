@@ -45,6 +45,7 @@ import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.ComponentsBuildId;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -148,9 +149,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return false;
         }
 
-        SSTableWatcher.instance.onIndexBuild(sstable);
+        SSTableWatcher.instance.onIndexBuild(sstable, indexes);
 
         IndexDescriptor indexDescriptor = group.descriptorFor(sstable);
+
         Set<Component> replacedComponents = new HashSet<>();
 
         try (RandomAccessReader dataFile = sstable.openDataReader();
@@ -309,16 +311,16 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         // The current components are "replaced" (by "other" components) if the build create different components than
         // the existing ones. This will happen in the following cases:
         // 1. if we use immutable components, that's the point of immutable components.
-        // 2. when we do not use immutable components, there is still 2 cases where this will happen:
+        // 2. when we do not use immutable components, the rebuild components will always be for the latest version and
+        // for generation 0, so if the current components are not for that specific built, then we won't be rebuilding
+        // the exact same components, and we're "replacing", not "overwriting" ()
         //   a) the old components are from an older version: a new build will alawys be for `Version.latest()` and
-        //     so will create new files in that case.
-        //   b) the old components are from a non-0 generation: a new build will always be for generation 0 and so
-        //     here again new files will be created. Note that "normally" we should not have non-0 generation in the
+        //     so will create new files in that case (Note that "normally" we should not have non-0 generation in the
         //     first place if immutable components are not used, but we handle this case to better support "downgrades"
         //     where immutable components was enabled, but then disabled for some reason. If that happens, we still
         //     want to ensure a new build removes the old files both from disk (happens below) and from the sstable TOC
-        //     (which is what `replacedComponents` is about).
-        if (components.version().useImmutableComponentFiles() || !components.version().equals(Version.latest()) || components.generation() != 0)
+        //     (which is what `replacedComponents` is about)).
+        if (components.version().useImmutableComponentFiles() || !components.buildId().equals(ComponentsBuildId.forNewSSTable()))
             replacedComponents.addAll(components.allAsCustomComponents());
 
         if (!components.version().useImmutableComponentFiles())

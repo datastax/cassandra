@@ -25,7 +25,6 @@ import java.util.function.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.Maps;
 import org.apache.cassandra.cql3.Term;
@@ -345,5 +344,30 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             sb.append(values.toJSONString(vv, protocolVersion));
         }
         return sb.append('}').toString();
+    }
+
+    /**
+     * Checks if the specified serialized map contains the specified serialized map value.
+     *
+     * @param map a serialized map
+     * @param value a serialized map value
+     * @return {@code true} if the map contains the value, {@code false} otherwise
+     */
+    @Override
+    public boolean contains(ByteBuffer map, ByteBuffer value)
+    {
+        return CollectionSerializer.contains(getValuesType(), map, value, true, false, ProtocolVersion.V3);
+    }
+
+    /**
+     * Checks if the specified serialized map contains the specified serialized map key.
+     *
+     * @param map a serialized map
+     * @param key a serialized map key
+     * @return {@code true} if the map contains the key, {@code false} otherwise
+     */
+    public boolean containsKey(ByteBuffer map, ByteBuffer key)
+    {
+        return CollectionSerializer.contains(getKeysType(), map, key, true, true, ProtocolVersion.V3);
     }
 }

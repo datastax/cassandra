@@ -62,7 +62,8 @@ public enum OperationType
     REGION_BOOTSTRAP("Region Bootstrap"),
     REGION_DECOMMISSION("Region Decommission"),
     REGION_REPAIR("Region Repair"),
-    SSTABLE_DISCARD("Local-only sstable discard", true);
+    SSTABLE_DISCARD("Local-only sstable discard", true),
+    INITIAL_LOAD("Local-only sstable loading during node initialization", true);
 
     public final String type;
     public final String fileName;

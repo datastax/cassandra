@@ -1295,7 +1295,7 @@ public abstract class CQLTester
     {
         try
         {
-            Stage.TRACING.executor().submit(() -> {}).get();
+            Stage.TRACING.submit(() -> {}).get();
         }
         catch (Throwable t)
         {

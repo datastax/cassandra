@@ -57,6 +57,7 @@ import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.pq.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.DenseIntMap;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -68,6 +69,7 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -109,12 +111,14 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnHeapGraph.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
+    // We use the metable reference for easier tracing.
+    private final String source;
     private final ConcurrentVectorValues vectorValues;
     private final GraphIndexBuilder builder;
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
     private final ConcurrentMap<VectorFloat<?>, VectorPostings<T>> postingsMap;
-    private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
+    private final DenseIntMap<VectorPostings<T>> postingsByOrdinal;
     private final NonBlockingHashMap<T, VectorFloat<?>> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private final VectorSourceModel sourceModel;
@@ -128,8 +132,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
     /**
      * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
      */
-    public CassandraOnHeapGraph(IndexContext context, boolean forSearching)
+    public CassandraOnHeapGraph(IndexContext context, boolean forSearching, Memtable memtable)
     {
+        this.source = memtable == null
+                      ? "null"
+                      : memtable.getClass().getSimpleName() + '@' + Integer.toHexString(memtable.hashCode());
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
@@ -144,7 +151,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         postingsMap = new ConcurrentSkipListMap<>((a, b) -> {
             return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
         });
-        postingsByOrdinal = new NonBlockingHashMapLong<>();
+        postingsByOrdinal = new DenseIntMap<>(1024);
         deletedOrdinals = new IntHashSet();
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
@@ -251,7 +258,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 bytesUsed += RamEstimation.concurrentHashMapRamUsed(1); // the new posting Map entry
                 bytesUsed += vectorValues.add(ordinal, vector);
                 bytesUsed += postings.ramBytesUsed();
-                postingsByOrdinal.put(ordinal, postings);
+                var success = postingsByOrdinal.compareAndPut(ordinal, null, postings);
+                assert success : "postingsByOrdinal already contains an entry for ordinal " + ordinal;
                 bytesUsed += builder.addGraphNode(ordinal, vector);
                 return bytesUsed;
             }
@@ -323,8 +331,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
             var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
             var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
-            Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results",
-                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length);
+            Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
+                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             context.addAnnNodesVisited(result.getVisitedCount());
             if (threshold > 0)
             {
@@ -332,7 +340,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 graphAccessManager.release();
                 return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
             }
-            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true);
+            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true, source);
         }
         catch (Throwable t)
         {
@@ -633,7 +641,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
     private long postingsBytesUsed()
     {
-        return RamEstimation.concurrentHashMapRamUsed(postingsByOrdinal.size()) // NBHM is close to CHM
+        return RamEstimation.denseIntMapRamUsed(postingsByOrdinal.size())
                + 3 * RamEstimation.concurrentHashMapRamUsed(postingsMap.size()) // CSLM is much less efficient than CHM
                + postingsMap.values().stream().mapToLong(VectorPostings::ramBytesUsed).sum();
     }

@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.sensors.SensorsFactory;
@@ -334,6 +335,11 @@ public enum CassandraRelevantProperties
     CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class"),
 
     /**
+     * Which class to use when notifying about stage task execution
+     */
+    CUSTOM_TASK_EXECUTION_CALLBACK_CLASS("cassandra.custom_task_execution_callback_class"),
+
+    /**
      * Used to support directory creation for different file system and remote/local conversion
      */
     CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
@@ -423,6 +429,12 @@ public enum CassandraRelevantProperties
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
     PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
 
+    // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
+    DYNAMIC_ENDPOINT_SNITCH_QUANTILE("cassandra.dynamic_endpoint_snitch_quantile", "0.5"),
+
+    // whether to quantize the dynamic endpoint snitch score to milliseconds; if set to false the nanosecond measurement
+    // is used
+    DYNAMIC_ENDPOINT_SNITCH_QUANTIZE_TO_MILLIS("cassandra.dynamic_endpoint_snitch_quantize_to_millis", "true"),
     // bloom filter lazy loading
     /**
      * true if non-local table's bloom filter should be deserialized on read instead of when opening sstable
@@ -458,6 +470,7 @@ public enum CassandraRelevantProperties
     CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
 
     LWT_LOCKS_PER_THREAD("cassandra.lwt_locks_per_thread", "1024"),
+    LWT_MAX_BACKOFF_MS("cassandra.lwt_max_backoff_ms", "50"),
     COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
 
@@ -512,6 +525,21 @@ public enum CassandraRelevantProperties
      * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
      */
     CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
+
+    /** Class used to discover/load the proper SAI index components file for a given sstable. */
+    CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY("cassandra.sai.custom_components_discovery_class"),
+
+    /**
+     * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
+     * This is to remain compatible with older workflows that first change the replication before adding the nodes.
+     * Otherwise, it will validate that the names match existing DCs before allowing replication change.
+     */
+    DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false"),
+    /**
+     * If provided, this custom factory class will be used to create stage executor for a couple of stages.
+     * @see Stage for details
+     */
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class"),
 
     /**
      * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.

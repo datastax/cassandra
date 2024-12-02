@@ -361,6 +361,7 @@ abstract public class Plan
 
     /**
      * Modifies all intersections to not intersect more clauses than the given limit.
+     * Retains the most selective clauses.
      */
     public final Plan limitIntersectedClauses(int clauseLimit)
     {
@@ -1087,7 +1088,7 @@ abstract public class Plan
          */
         private ArrayList<KeysIteration> propagateAccess(List<KeysIteration> subplans)
         {
-            double loops = isEffectivelyZero(selectivity()) ? 1.0 : subplans.get(0).selectivity() / selectivity();
+            double loops = subplans.get(0).selectivity() / boundedSelectivity(selectivity());
             ArrayList<KeysIteration> newSubplans = new ArrayList<>(subplans.size());
             KeysIteration s0 = subplans.get(0).withAccess(access.scaleDistance(loops).convolute(loops, 1.0));
             newSubplans.add(s0);
@@ -1700,7 +1701,8 @@ abstract public class Plan
         }
 
         /**
-         * Constructs a plan node representing an intersection of two key sets.
+         * Constructs a plan node representing an intersection of key sets.
+         * The subplans will be sorted by selectivity from the most selective to the least selective ones.
          * @param subplans a list of subplans for intersected key sets
          */
         public KeysIteration intersection(List<KeysIteration> subplans)
@@ -1951,11 +1953,13 @@ abstract public class Plan
     }
 
     /**
-     * Describes the expected distribution of data access patterns for a plan node.
+     * Describes the expected data access patterns for a plan node.
      * <br>
-     * Each access pattern is represented by a pair of values:
-     * a count (number of expected occurrences) and a distance (skip distance).
-     * For performance, these are split into arrays of primitives.
+     * Each access pattern is assumed to follow uniform distribution and
+     * is represented by a pair of values:
+     * - a count (number of expected occurrences) and
+     * - an average distance to next occurrence (skip distance).
+     * For performance, these are split into arrays of the primitives.
      * <br>
      * For example, given:
      *     counts = [100, 50, 10]
@@ -1983,7 +1987,7 @@ abstract public class Plan
         /**
          * Array of skip distances for each access pattern.
          * Each element represents the skip distance for a particular access pattern.
-         * A distance of 1.0 indicates sequential access.  Smaller distances than 1.0 do not makes sense.
+         * A distance of 1.0 indicates sequential access.  Smaller distances than 1.0 do not make sense.
          */
         final double[] distances;
 
@@ -2086,11 +2090,11 @@ abstract public class Plan
             assert !Double.isNaN(count) : "Count must not be NaN";
             assert !Double.isNaN(skipDistance) : "Skip distance must not be NaN";
 
-            double[] counts = Arrays.copyOf(this.counts, this.counts.length + 1);
-            double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length + 1);
-
             if (count <= 1.0)
                 return scaleCount(count);
+
+            double[] counts = Arrays.copyOf(this.counts, this.counts.length + 1);
+            double[] skipDistances = Arrays.copyOf(this.distances, this.distances.length + 1);
 
             counts[counts.length - 1] = (count - 1) * totalCount;
             skipDistances[skipDistances.length - 1] = skipDistance;

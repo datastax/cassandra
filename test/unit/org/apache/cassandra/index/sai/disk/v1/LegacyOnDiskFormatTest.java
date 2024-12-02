@@ -97,7 +97,7 @@ public class LegacyOnDiskFormatTest
                                      .addRegularColumn("text_value", UTF8Type.instance)
                                      .build();
         sstable = TrieIndexFormat.instance.getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(tableMetadata));
-        indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(Set.of(intContext, textContext));
+        indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(tableMetadata, Set.of(intContext, textContext));
         pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
     }
 
@@ -144,7 +144,7 @@ public class LegacyOnDiskFormatTest
     public void canCreateAndUsePrimaryKeyMapWithLegacyFormat() throws Throwable
     {
         var perSSTableComponents = indexDescriptor.perSSTableComponents();
-        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.version().onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
 
         long countFromFactory = primaryKeyMapFactory.count();
 

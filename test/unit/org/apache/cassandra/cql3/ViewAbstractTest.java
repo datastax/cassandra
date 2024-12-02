@@ -102,7 +102,7 @@ public abstract class ViewAbstractTest extends CQLTester
     {
         Awaitility.await()
                   .atMost(5, TimeUnit.MINUTES)
-                  .until(() -> Stage.VIEW_MUTATION.executor().getPendingTaskCount() == 0
-                               && Stage.VIEW_MUTATION.executor().getActiveTaskCount() == 0);
+                  .until(() -> Stage.VIEW_MUTATION.getPendingTaskCount() == 0
+                               && Stage.VIEW_MUTATION.getActiveTaskCount() == 0);
     }
 }
