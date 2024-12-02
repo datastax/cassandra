@@ -122,7 +122,8 @@ public class UpdateStatement extends ModificationStatement
     {
         ResultMessage result = super.execute(state, options, queryStartNanoTime);
 
-        if (result == null) result = new ResultMessage.Void();
+        if (result == null)
+            result = new ResultMessage.Void();
 
         RequestSensors sensors = RequestTracker.instance.get();
         Context context = Context.from(this.metadata());
