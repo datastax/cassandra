@@ -37,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
@@ -94,9 +95,12 @@ import org.apache.cassandra.utils.Throwables;
 
 import static java.lang.Math.max;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL;
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
+    public static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. " +
+                                                             StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
     /**
@@ -395,7 +399,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (orderer != null)
             keysIterationPlan = planFactory.sort(keysIterationPlan, orderer);
 
-        assert keysIterationPlan != planFactory.everything; // This would mean we have no WHERE nor ANN clauses at all
+        // This would mean we have no WHERE nor ANN clauses at all; this can happen in case an index was dropped after the
+        // query was initiated
+        if (keysIterationPlan == planFactory.everything)
+            throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
+
         return keysIterationPlan;
     }
 
