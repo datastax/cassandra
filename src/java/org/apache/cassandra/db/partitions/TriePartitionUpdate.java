@@ -304,6 +304,18 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     }
 
     /**
+     * The accumulated BTree size of the data contained in this update.
+     *
+     * @return the accumulated BTree size of the data contained in this update.
+     */
+    @VisibleForTesting
+    @Override
+    public long accumulatedDataSize()
+    {
+        return dataSize;
+    }
+
+    /**
      * The size of the data contained in this update.
      *
      * @return the size of the data contained in this update.
