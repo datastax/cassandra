@@ -93,12 +93,23 @@ public interface PartitionUpdate extends Partition
      */
     int operationCount();
 
+    // FIXME review
+    /**
+     * The accumulated BTree size of the data contained in this update.
+     *
+     * @return the accumulated BTree size of the data contained in this update.
+     */
+    long accumulatedDataSize();
+
     /**
      * The size of the data contained in this update.
      *
      * @return the size of the data contained in this update.
      */
     int dataSize();
+
+    // FIXME review
+    long unsharedHeapSize();
 
     @Override
     RegularAndStaticColumns columns();
@@ -188,7 +199,18 @@ public interface PartitionUpdate extends Partition
         return updates.get(0).metadata().partitionUpdateFactory().merge(updates);
     }
 
-    public static SimpleBuilder simpleBuilder(TableMetadata metadata, Object... partitionKeyValues)
+    PartitionUpdate withOnlyPresentColumns();
+
+    /**
+     * Creates a new simple partition update builder.
+     *
+     * @param metadata the metadata for the table this is a partition of.
+     * @param partitionKeyValues the values for partition key columns identifying this partition. The values for each
+     * partition key column can be passed either directly as {@code ByteBuffer} or using a "native" value (int for
+     * Int32Type, string for UTF8Type, ...). It is also allowed to pass a single {@code DecoratedKey} value directly.
+     * @return a newly created builder.
+     */
+    static SimpleBuilder simpleBuilder(TableMetadata metadata, Object... partitionKeyValues)
     {
         return new SimpleBuilders.PartitionUpdateBuilder(metadata, partitionKeyValues);
     }
@@ -238,6 +260,62 @@ public interface PartitionUpdate extends Partition
         {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     *
+     * @return the estimated number of rows affected by this mutation
+     */
+    default int affectedRowCount()
+    {
+        // If there is a partition-level deletion, we intend to delete at least one row.
+        if (!partitionLevelDeletion().isLive())
+            return 1;
+
+        int count = 0;
+
+        // Each range delete should correspond to at least one intended row deletion.
+        if (deletionInfo().hasRanges())
+            count += deletionInfo().rangeCount();
+
+        count += rowCount();
+
+        if (!staticRow().isEmpty())
+            count++;
+
+        return count;
+    }
+
+    /**
+     *
+     * @return the estimated total number of columns that either have live data or are covered by a delete
+     */
+    default int affectedColumnCount()
+    {
+        // If there is a partition-level deletion, we intend to delete at least the columns of one row.
+        if (!partitionLevelDeletion().isLive())
+            return metadata().regularAndStaticColumns().size();
+
+        int count = 0;
+
+        // Each range delete should correspond to at least one intended row deletion, and with it, its regular columns.
+        if (deletionInfo().hasRanges())
+            count += deletionInfo().rangeCount() * metadata().regularColumns().size();
+
+        for (Row row : rows())
+        {
+            if (row.deletion().isLive())
+                // If the row is live, this will include simple tombstones as well as cells w/ actual data.
+                count += row.columnCount();
+            else
+                // We have a row deletion, so account for the columns that might be deleted.
+                count += metadata().regularColumns().size();
+        }
+
+        if (!staticRow().isEmpty())
+            count += staticRow().columnCount();
+
+        return count;
     }
 
     /**
