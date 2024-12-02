@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
+import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -76,22 +77,34 @@ public final class SensorsCustomParams
     }
 
     /**
-     * AIterate over all sensors in the {@link RequestSensors} and encodes each sensor values in the internode response message
-     * as custom parameters.
+     * AIterate over all sensors in the {@link RequestSensors} and encodes each sensor value by applying the given
+     * {@param valueFunction} in the internode response message as custom parameters.
      *
-     * @param sensors  the collection of sensors to encode in the response
+     * @param sensors the collection of sensors to encode in the response
+     * @param valueFunction the function to get the sensor value
      * @param response the response message builder to add the sensors to
-     * @param <T>      the response message builder type
+     * @param <T> the response message builder type
      */
-    public static <T> void addSensorsToInternodeResponse(RequestSensors sensors, Message.Builder<T> response)
+    public static <T> void addSensorsToInternodeResponse(RequestSensors sensors, Function<Sensor, Double> valueFunction, Message.Builder<T> response)
     {
         Preconditions.checkNotNull(sensors);
         Preconditions.checkNotNull(response);
 
         for (Sensor sensor : sensors.getSensors(ignored -> true))
-        {
-            addSensorToInternodeResponse(response, sensor);
-        }
+            addSensorToInternodeResponse(response, sensor, valueFunction);
+    }
+
+    /**
+     * AIterate over all sensors in the {@link RequestSensors} and encodes each sensor values in the internode response
+     * message as custom parameters.
+     *
+     * @param sensors the collection of sensors to encode in the response
+     * @param response the response message builder to add the sensors to
+     * @param <T> the response message builder type
+     */
+    public static <T> void addSensorsToInternodeResponse(RequestSensors sensors, Message.Builder<T> response)
+    {
+        addSensorsToInternodeResponse(sensors, Sensor::getValue, response);
     }
 
     /**
@@ -160,16 +173,16 @@ public final class SensorsCustomParams
         });
     }
 
-    private static <T> void addSensorToInternodeResponse(Message.Builder<T> response, Sensor sensor)
+    private static <T> void addSensorToInternodeResponse(Message.Builder<T> response, Sensor requestSensor, Function<Sensor, Double> valueFunction)
     {
-        byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-        String requestParam = paramForRequestSensor(sensor);
+        byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(valueFunction.apply(requestSensor));
+        String requestParam = paramForRequestSensor(requestSensor);
         response.withCustomParam(requestParam, requestBytes);
 
-        Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(sensor.getContext(), sensor.getType());
-        registrySensor.ifPresent(registry -> {
-            byte[] globalBytes = SensorsCustomParams.sensorValueAsBytes(registry.getValue());
-            String globalParam = paramForGlobalSensor(registry);
+        Optional<Sensor> globalSensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), requestSensor.getType());
+        globalSensor.ifPresent(sensor -> {
+            byte[] globalBytes = SensorsCustomParams.sensorValueAsBytes(valueFunction.apply(sensor));
+            String globalParam = paramForGlobalSensor(sensor);
             response.withCustomParam(globalParam, globalBytes);
         });
     }
