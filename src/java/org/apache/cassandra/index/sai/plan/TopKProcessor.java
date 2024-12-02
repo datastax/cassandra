@@ -31,7 +31,6 @@ import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
 import java.util.concurrent.CompletionException;
 import javax.annotation.Nullable;
 
-import com.google.common.base.Preconditions;
 import org.apache.commons.lang3.tuple.Triple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,6 +72,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.TopKSelector;
 
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+
 /**
  * Processor applied to SAI based ORDER BY queries. This class could likely be refactored into either two filter
  * methods depending on where the processing is happening or into two classes.
@@ -91,6 +92,8 @@ import org.apache.cassandra.utils.TopKSelector;
  */
 public class TopKProcessor
 {
+    public static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. Ordering on non-clustering " +
+                                                             "column requires the column to be indexed";
     protected static final Logger logger = LoggerFactory.getLogger(TopKProcessor.class);
     private static final LocalAwareExecutorPlus PARALLEL_EXECUTOR = getExecutor();
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
@@ -107,7 +110,9 @@ public class TopKProcessor
         this.command = command;
 
         Pair<IndexContext, RowFilter.Expression> annIndexAndExpression = findTopKIndexContext();
-        Preconditions.checkNotNull(annIndexAndExpression);
+        // this can happen in case an index was dropped after the query was initiated
+        if (annIndexAndExpression == null)
+            throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
 
         this.indexContext = annIndexAndExpression.left;
         this.expression = annIndexAndExpression.right;
