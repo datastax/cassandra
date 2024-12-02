@@ -189,14 +189,14 @@ public class LuceneAnalyzerTest
 
     public static List<String> tokenize(String testString, String json) throws Exception
     {
-        Analyzer luceneAnalyzer = JSONAnalyzerParser.parse(json);
-        LuceneAnalyzer analyzer = new LuceneAnalyzer(UTF8Type.instance, luceneAnalyzer, new HashMap<String, String>());
+        Analyzer luceneAnalyzer = JSONAnalyzerParser.parse(json).left;
+        LuceneAnalyzer analyzer = new LuceneAnalyzer(UTF8Type.instance, luceneAnalyzer, new HashMap<>());
 
         ByteBuffer toAnalyze = ByteBuffer.wrap(testString.getBytes(Charsets.UTF_8));
         analyzer.reset(toAnalyze);
         ByteBuffer analyzed = null;
 
-        List<String> list = new ArrayList();
+        List<String> list = new ArrayList<>();
 
         while (analyzer.hasNext())
         {
