@@ -59,24 +59,24 @@ public class WriteBench extends SimpleTableWriter
 
         switch (flush)
         {
-        case FLUSH:
-            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
-            // if we flush we also must truncate to avoid accummulating sstables
-        case TRUNCATE:
-            execute("TRUNCATE TABLE " + table);
-            // note: we turn snapshotting and durable writes (which would have caused a flush) off for this benchmark
-            break;
-        case INMEM:
-            if (!cfs.getLiveSSTables().isEmpty())
-                throw new AssertionError("SSTables created for INMEM test.");
-            // leave unflushed, i.e. next iteration will overwrite data
-        default:
+            case FLUSH:
+                cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
+                // if we flush we also must truncate to avoid accumulating sstables
+            case TRUNCATE:
+                execute("TRUNCATE TABLE " + table);
+                // note: we turn snapshotting and durable writes (which would have caused a flush) off for this benchmark
+                break;
+            case INMEM:
+                if (!cfs.getLiveSSTables().isEmpty())
+                    throw new AssertionError("SSTables created for INMEM test.");
+                // leave unflushed, i.e. next iteration will overwrite data
+            default:
         }
     }
 
     public Object[] writeArguments(long i)
     {
-        return new Object[] { i, i, i };
+        return new Object[] { i % partitions, i, i };
     }
 
     void doExtraChecks()

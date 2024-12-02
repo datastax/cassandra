@@ -94,6 +94,14 @@ public interface PartitionUpdate extends Partition
      */
     int operationCount();
 
+    // FIXME review
+    /**
+     * The accumulated BTree size of the data contained in this update.
+     *
+     * @return the accumulated BTree size of the data contained in this update.
+     */
+    long accumulatedDataSize();
+
     /**
      * The size of the data contained in this update.
      *
@@ -193,7 +201,16 @@ public interface PartitionUpdate extends Partition
 
     PartitionUpdate withOnlyPresentColumns();
 
-    public static SimpleBuilder simpleBuilder(TableMetadata metadata, Object... partitionKeyValues)
+    /**
+     * Creates a new simple partition update builder.
+     *
+     * @param metadata the metadata for the table this is a partition of.
+     * @param partitionKeyValues the values for partition key columns identifying this partition. The values for each
+     * partition key column can be passed either directly as {@code ByteBuffer} or using a "native" value (int for
+     * Int32Type, string for UTF8Type, ...). It is also allowed to pass a single {@code DecoratedKey} value directly.
+     * @return a newly created builder.
+     */
+    static SimpleBuilder simpleBuilder(TableMetadata metadata, Object... partitionKeyValues)
     {
         return new SimpleBuilders.PartitionUpdateBuilder(metadata, partitionKeyValues);
     }
