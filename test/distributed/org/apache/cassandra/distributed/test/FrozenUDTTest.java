@@ -21,7 +21,6 @@ package org.apache.cassandra.distributed.test;
 import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 
-import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.distributed.Cluster;
@@ -125,7 +124,6 @@ public class FrozenUDTTest extends TestBaseImpl
         }
     }
 
-    /* See CASSANDRA-19764 */
     @Test
     public void testDivergentSchemas() throws Throwable
     {
@@ -135,20 +133,11 @@ public class FrozenUDTTest extends TestBaseImpl
             cluster.schemaChange("create table " + KEYSPACE + ".x (id int, ck frozen<a>, i int, primary key (id, ck))");
 
             cluster.get(1).executeInternal("alter type " + KEYSPACE + ".a add bar text");
-            try
-            {
-                cluster.coordinator(1).execute("insert into " + KEYSPACE + ".x (id, ck, i) VALUES (?, " + json(1, 2) + ", ? )", ConsistencyLevel.ALL,
-                                               1, 2);
-                cluster.coordinator(1).execute("insert into " + KEYSPACE + ".x (id, ck, i) VALUES (?, " + json(1, 1) + ", ? )", ConsistencyLevel.ALL,
-                                               1, 1);
-                cluster.get(2).flush(KEYSPACE);
-                Assert.fail("Expected an exception to be thrown.");
-            }
-            catch (Exception e)
-            {
-                // correct path
-                System.out.println(e);
-            }
+            cluster.coordinator(1).execute("insert into " + KEYSPACE + ".x (id, ck, i) VALUES (?, " + json(1, 1) + ", ? )", ConsistencyLevel.ALL,
+                                           1, 1);
+            cluster.coordinator(1).execute("insert into " + KEYSPACE + ".x (id, ck, i) VALUES (?, " + json(1, 2) + ", ? )", ConsistencyLevel.ALL,
+                                           2, 2);
+            cluster.get(2).flush(KEYSPACE);
         }
     }
 
