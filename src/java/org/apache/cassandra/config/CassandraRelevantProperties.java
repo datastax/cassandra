@@ -334,6 +334,11 @@ public enum CassandraRelevantProperties
     CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class"),
 
     /**
+     * Which class to use when notifying about stage task execution
+     */
+    CUSTOM_TASK_EXECUTION_CALLBACK_CLASS("cassandra.custom_task_execution_callback_class"),
+
+    /**
      * Used to support directory creation for different file system and remote/local conversion
      */
     CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
@@ -423,6 +428,12 @@ public enum CassandraRelevantProperties
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
     PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
 
+    // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
+    DYNAMIC_ENDPOINT_SNITCH_QUANTILE("cassandra.dynamic_endpoint_snitch_quantile", "0.5"),
+
+    // whether to quantize the dynamic endpoint snitch score to milliseconds; if set to false the nanosecond measurement
+    // is used
+    DYNAMIC_ENDPOINT_SNITCH_QUANTIZE_TO_MILLIS("cassandra.dynamic_endpoint_snitch_quantize_to_millis", "true"),
     // bloom filter lazy loading
     /**
      * true if non-local table's bloom filter should be deserialized on read instead of when opening sstable
@@ -458,6 +469,7 @@ public enum CassandraRelevantProperties
     CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
 
     LWT_LOCKS_PER_THREAD("cassandra.lwt_locks_per_thread", "1024"),
+    LWT_MAX_BACKOFF_MS("cassandra.lwt_max_backoff_ms", "50"),
     COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
 

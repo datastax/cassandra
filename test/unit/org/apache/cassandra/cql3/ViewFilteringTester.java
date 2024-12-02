@@ -107,8 +107,8 @@ public abstract class ViewFilteringTester extends CQLTester
     protected void updateView(String query, Object... params) throws Throwable
     {
         executeNet(version, query, params);
-        while (!(Stage.VIEW_MUTATION.executor().getPendingTaskCount() == 0
-                 && Stage.VIEW_MUTATION.executor().getActiveTaskCount() == 0))
+        while (!(Stage.VIEW_MUTATION.getPendingTaskCount() == 0
+                 && Stage.VIEW_MUTATION.getActiveTaskCount() == 0))
         {
             Thread.sleep(1);
         }

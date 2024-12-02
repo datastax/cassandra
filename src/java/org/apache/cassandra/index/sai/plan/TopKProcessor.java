@@ -64,7 +64,6 @@ import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.InMemoryPartitionIterator;
 import org.apache.cassandra.index.sai.utils.InMemoryUnfilteredPartitionIterator;
 import org.apache.cassandra.index.sai.utils.PartitionInfo;
-import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -216,23 +215,16 @@ public class TopKProcessor
                     addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
         } else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) {
-            var retriever = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) partitions;
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
             int rowsMatched = 0;
             // Check rowsMatched first to prevent fetching one more partition than needed.
-            while (rowsMatched < limit && retriever.hasNext())
+            while (rowsMatched < limit && partitions.hasNext())
             {
-                // have to close to move to the next partition, otherwise hasNext() fails
-                try (var partitionRowIterator = retriever.next())
+                // Must close to move to the next partition, otherwise hasNext() fails
+                try (var partitionRowIterator = partitions.next())
                 {
-                    var iter = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever.PrimaryKeyIterator) partitionRowIterator;
-                    PartitionResults pr = processPartition(iter, iter.primaryKeyWithSortKey, retriever);
-                    rowsMatched += pr.rows.size();
-                    for (var row : pr.rows)
-                        addUnfiltered(unfilteredByPartition, row.getLeft(), row.getMiddle());
-                    for (var uf : pr.tombstones)
-                        addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
+                    rowsMatched += processSingleRowPartition(unfilteredByPartition, partitionRowIterator);
                 }
             }
         } else {
@@ -322,32 +314,20 @@ public class TopKProcessor
     }
 
     /**
-     * Processes a single partition, calculating scores for rows and extracting tombstones.
+     * Processes a single partition, without scoring it.
      */
-    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, PrimaryKeyWithSortKey key,
-                                              StorageAttachedIndexSearcher.ScoreOrderedResultRetriever retriever) {
-        PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
-        var pr = new PartitionResults(partitionInfo);
-
+    private int processSingleRowPartition(TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition,
+                                          BaseRowIterator<?> partitionRowIterator) {
         if (!partitionRowIterator.hasNext())
-            return pr;
+            return 0;
 
         Unfiltered unfiltered = partitionRowIterator.next();
         assert !partitionRowIterator.hasNext() : "Only one row should be returned";
         // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
         // TombstoneOverwhelmingException to prevent OOM.
-        if (unfiltered.isRangeTombstoneMarker())
-        {
-            pr.addTombstone(unfiltered);
-            return pr;
-        }
-
-        Row row = (Row) unfiltered;
-        if (retriever.shouldInclude(key, row))
-            // TODO figure out better way to organize this data, score doesn't matter to us here.
-            pr.addRow(Triple.of(partitionInfo, row, 0f));
-
-        return pr;
+        PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
+        addUnfiltered(unfilteredByPartition, partitionInfo, unfiltered);
+        return unfiltered.isRangeTombstoneMarker() ? 0 : 1;
     }
 
     private void addUnfiltered(SortedMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition, PartitionInfo partitionInfo, Unfiltered unfiltered)

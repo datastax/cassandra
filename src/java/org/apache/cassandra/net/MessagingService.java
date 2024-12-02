@@ -499,7 +499,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
         isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
         // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
-        assert !MUTATION.executor().isShutdown();
+        assert !MUTATION.isShutdown();
 
         if (shutdownGracefully)
         {
@@ -567,7 +567,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
         isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
         // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
-        assert !MUTATION.executor().isShutdown();
+        assert !MUTATION.isShutdown();
 
         callbacks.shutdownNow(false);
         inboundSockets.close();

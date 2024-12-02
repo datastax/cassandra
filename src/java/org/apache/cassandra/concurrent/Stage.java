@@ -25,6 +25,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionHandler;
@@ -32,14 +33,18 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ExecutorUtils;
@@ -141,26 +146,27 @@ public enum Stage
     }
 
     // Convenience functions to execute on this stage
-    public void execute(Runnable command) { executor().execute(command); }
-    public void execute(Runnable command, ExecutorLocals locals) { executor().execute(command, locals); }
-    public void maybeExecuteImmediately(Runnable command) { executor().maybeExecuteImmediately(command); }
+    public void execute(Runnable command) { executor().execute(withTimeMeasurement(command)); }
+
+    public void execute(Runnable command, ExecutorLocals locals) { executor().execute(withTimeMeasurement(command), locals); }
+    public void maybeExecuteImmediately(Runnable command) { executor().maybeExecuteImmediately(withTimeMeasurement(command)); }
     public <T> CompletableFuture<T> submit(Callable<T> task) { return CompletableFuture.supplyAsync(() -> {
         try
         {
-            return task.call();
+            return withTimeMeasurement(task).call();
         }
         catch (Exception e)
         {
             throw Throwables.unchecked(e);
         }
     }, executor()); }
-    public CompletableFuture<Void> submit(Runnable task) { return CompletableFuture.runAsync(task, executor()); }
+    public CompletableFuture<Void> submit(Runnable task) { return CompletableFuture.runAsync(withTimeMeasurement(task), executor()); }
     public <T> CompletableFuture<T> submit(Runnable task, T result) { return CompletableFuture.supplyAsync(() -> {
-        task.run();
+        withTimeMeasurement(task).run();
         return result;
     }, executor()); }
 
-    public LocalAwareExecutorService executor()
+    private LocalAwareExecutorService executor()
     {
         if (executor == null)
         {
@@ -266,6 +272,42 @@ public enum Stage
         return customStageExecutorFactory.init(jmxName, jmxType, numThreads, onSetMaximumPoolSize);
     }
 
+    public int getPendingTaskCount()
+    {
+        return executor().getPendingTaskCount();
+    }
+
+    public int getActiveTaskCount()
+    {
+        return executor().getActiveTaskCount();
+    }
+
+    /**
+     * return additional, executor-related ThreadPoolMetrics for the executor
+     * @param metricsExtractor function to extract metrics from the executor
+     * @return ThreadPoolMetrics or null if the extractor was not able to extract metrics
+     */
+    public @Nullable ThreadPoolMetrics getExecutorMetrics(Function<Executor, ThreadPoolMetrics> metricsExtractor)
+    {
+        return metricsExtractor.apply(executor());
+    }
+
+    public boolean isShutdown()
+    {
+        return executor().isShutdown();
+    }
+
+    public boolean runsInSingleThread(Thread thread)
+    {
+        return (executor() instanceof JMXEnabledSingleThreadExecutor) &&
+            ((JMXEnabledSingleThreadExecutor) executor()).isExecutedBy(thread);
+    }
+
+    public boolean isTerminated()
+    {
+        return executor().isTerminated();
+    }
+
     @FunctionalInterface
     public interface ExecutorServiceInitialiser
     {
@@ -337,4 +379,37 @@ public enum Stage
             return getQueue().size();
         }
     }
+
+    private Runnable withTimeMeasurement(Runnable command)
+    {
+        long queueStartTime = System.nanoTime();
+        return () -> {
+            long executionStartTime = System.nanoTime();
+            try
+            {
+                TaskExecutionCallback.instance.onDequeue(this, executionStartTime - queueStartTime);
+                command.run();
+            }
+            finally
+            {
+                TaskExecutionCallback.instance.onCompleted(this, System.nanoTime() - executionStartTime);
+            }
+        };
+    }
+
+    private <T> Callable<T> withTimeMeasurement(Callable<T> command)
+    {
+        return () -> {
+            long startTime = System.nanoTime();
+            try
+            {
+                return command.call();
+            }
+            finally
+            {
+                TaskExecutionCallback.instance.onCompleted(this, System.nanoTime() - startTime);
+            }
+        };
+    }
+
 }

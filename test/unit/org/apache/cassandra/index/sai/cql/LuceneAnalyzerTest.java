@@ -35,6 +35,7 @@ import org.assertj.core.api.Assertions;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class LuceneAnalyzerTest extends SAITester
 {
@@ -782,5 +783,45 @@ public class LuceneAnalyzerTest extends SAITester
                                              "    {\"name\" : \"lowercase\"}]}'}"))
         .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Error configuring analyzer's filter 'synonym': Unknown parameters: {extraParam=xyz}");
+    }
+
+    @Test
+    public void testHighNumberOfMatchPredicates()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': '{" +
+                    "    \"tokenizer\" : {\n" +
+                    "          \"name\" : \"ngram\",\n" +
+                    "          \"args\" : {\n" +
+                    "            \"minGramSize\":\"2\",\n" +
+                    "            \"maxGramSize\":\"3\"\n" +
+                    "          }\n" +
+                    "    }," +
+                    "    \"filters\" : [ {\"name\" : \"lowercase\"}] \n" +
+                    "  }'}");
+
+        // Long enough to generate several tens of thousands of ngrams:
+        String longParam = "The quick brown fox jumps over the lazy DOG.".repeat(250);
+
+        // Generally we expect this query to run in < 25 ms each on reasonably performant
+        // hardware, but because CI performance can have a lot of variability,
+        // we take the minimum, and we allow a large margin to avoid random failures.
+        var count = 5;
+        var minElapsed = Long.MAX_VALUE;
+        for (int i = 0; i < count; i++)
+        {
+            var startTime = System.currentTimeMillis();
+            execute("SELECT * FROM %s WHERE val : '" + longParam + '\'');
+            var elapsed = System.currentTimeMillis() - startTime;
+            if (elapsed < minElapsed)
+                minElapsed = elapsed;
+            // In extreme case we just want to bail out after the first iteration
+            if (elapsed > 10000)
+                break;
+        }
+        assertTrue("Query too slow: " + minElapsed + " ms", minElapsed < 1000);
     }
 }
