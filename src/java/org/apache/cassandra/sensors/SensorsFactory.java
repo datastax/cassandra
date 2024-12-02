@@ -24,10 +24,11 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SENSORS_FACTORY;
 
 /**
- * Provides a factory to customize the behaviour of sensors tracking in CNDB by providing to factory methods:
- * <li> {@link SensorsFactory#createRequestSensors} provides {@link RequestSensors} implementation to active or deactivate sensors per keyspace</li>
- * <li> {@link SensorsFactory#createSensorEncoder} provides {@link SensorEncoder} implementations control how a sensors are encoded as string on the wire</li>
- * <p>
+ * Provides a factory to customize the behaviour of sensors tracking in CNDB by providing two factory methods:
+ * <ul>
+ *   <li> {@link SensorsFactory#createRequestSensors} provides a {@link RequestSensors} implementation to track sensors per keyspace.</li>
+ *   <li> {@link SensorsFactory#createSensorEncoder} provides a {@link SensorEncoder} implementation to control how sensors are encoded as string on the wire.</li>
+ * </ul>
  * The concrete implementation of this factory is configured by the {@link CassandraRelevantProperties#SENSORS_FACTORY} system property.
  */
 public interface SensorsFactory
@@ -52,7 +53,7 @@ public interface SensorsFactory
     };
 
     /**
-     * Creates a {@link RequestSensors} for the given keyspace. Implementations should be very efficient because this method is potentially invoked on each verb handler serving a user request.
+     * Creates {@link RequestSensors} for the given keyspaces. Implementations should be very efficient because this method is potentially invoked on each verb handler serving a user request.
      *
      * @param keyspaces the keyspaces associated with the request.
      * @return a {@link RequestSensors} instance. The default implementation returns a singleton no-op instance.
@@ -63,7 +64,7 @@ public interface SensorsFactory
     }
 
     /**
-     * Create a {@link SensorEncoder} that will be invoked when encoding the sensor on the wire. The default implementation returns an encode that always return an empty string.
+     * Create a {@link SensorEncoder} that will be invoked when encoding the sensor on the wire. The default implementation returns an empty string.
      */
     default SensorEncoder createSensorEncoder()
     {
