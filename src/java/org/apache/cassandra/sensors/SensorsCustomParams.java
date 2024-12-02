@@ -133,7 +133,7 @@ public final class SensorsCustomParams
                                               Context context,
                                               Type type)
     {
-        if (!CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.getBoolean())
+        if (!CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.getBoolean())
         {
             return;
         }

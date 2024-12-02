@@ -514,9 +514,9 @@ public enum CassandraRelevantProperties
     CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
 
     /**
-     * If true, the coordinator will propagate request sensors via the native protocol custom payload bytes map.
+     * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
      */
-    REQUEST_SENSORS_VIA_NATIVE_PROTOCOL("cassandra.request_sensors_via_native_protocol", "false");
+    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

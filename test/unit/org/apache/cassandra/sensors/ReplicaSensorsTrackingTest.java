@@ -109,7 +109,7 @@ public class ReplicaSensorsTrackingTest
     {
 
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
-        CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
+        CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
 
         SchemaLoader.loadSchema();
         SchemaLoader.createKeyspace("Foo", KeyspaceParams.simple(3), SchemaLoader.standardCFMD("Foo", "Bar"));

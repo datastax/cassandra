@@ -47,7 +47,7 @@ import org.assertj.core.api.Assertions;
 
 /**
  * Test to verify that the sensors are propagated via the native protocol in the custom payload respecting
- * the configuration set in {@link CassandraRelevantProperties#REQUEST_SENSORS_VIA_NATIVE_PROTOCOL}
+ * the configuration set in {@link CassandraRelevantProperties#SENSORS_VIA_NATIVE_PROTOCOL}
  */
 @RunWith(Parameterized.class)
 public class SensorsTest extends TestBaseImpl
@@ -153,7 +153,7 @@ public class SensorsTest extends TestBaseImpl
      */
     private Map<String, ByteBuffer> executeTest(boolean propagateViaNativeProtocol) throws Throwable
     {
-        CassandraRelevantProperties.REQUEST_SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(propagateViaNativeProtocol);
+        CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(propagateViaNativeProtocol);
         AtomicReference<Map<String, ByteBuffer>> customPayload = new AtomicReference<>();
         try (Cluster cluster = init(Cluster.build(NODES_COUNT).start()))
         {
