@@ -80,7 +80,7 @@ public class ResponseVerbHandler implements IVerbHandler
         if (callbackInfo instanceof RequestCallbacks.WriteCallbackInfo)
         {
             RequestCallbacks.WriteCallbackInfo writerInfo = (RequestCallbacks.WriteCallbackInfo) callbackInfo;
-            IMutation mutation = writerInfo.getIMutation();
+            IMutation mutation = writerInfo.iMutation();
             if (mutation == null)
                 return;
 

@@ -359,9 +359,9 @@ public class RequestCallbacks implements OutboundMessageCallbacks
          * Used for sensors tracking. A safe alternative to {@link #mutation()} to access counter mutations without
          * changing existing assert behavior.
          */
-        public IMutation getIMutation()
+        public IMutation iMutation()
         {
-            return getIMutation(mutation);
+            return iMutation(mutation);
         }
 
         private static Mutation getMutation(Object object)
@@ -371,7 +371,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
                                             : (Mutation) object;
         }
 
-        private static IMutation getIMutation(Object object)
+        private static IMutation iMutation(Object object)
         {
             assert object instanceof Commit || object instanceof IMutation : object;
             return object instanceof Commit ? ((Commit) object).makeMutation()

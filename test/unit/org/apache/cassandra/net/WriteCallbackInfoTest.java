@@ -60,12 +60,12 @@ public class WriteCallbackInfoTest
     }
 
     @Test
-    public void testGetIMutation() throws Exception
+    public void testIMutation() throws Exception
     {
         for (Verb verb : new Verb[]{ Verb.PAXOS_COMMIT_REQ, Verb.MUTATION_REQ })
         {
-            testGetIMutation(verb, true);
-            testGetIMutation(verb, false);
+            testIMutation(verb, true);
+            testIMutation(verb, false);
         }
     }
 
@@ -81,7 +81,7 @@ public class WriteCallbackInfoTest
         Assert.assertNotNull(wcbi.mutation());
     }
 
-    private void testGetIMutation(Verb verb, boolean allowHints) throws Exception
+    private void testIMutation(Verb verb, boolean allowHints) throws Exception
     {
         TableMetadata metadata = MockSchema.newTableMetadata("", "");
         Object payload;
@@ -100,6 +100,6 @@ public class WriteCallbackInfoTest
             payload = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
 
         RequestCallbacks.WriteCallbackInfo wcbi = new RequestCallbacks.WriteCallbackInfo(Message.out(verb, payload), full(InetAddressAndPort.getByName("192.168.1.1")), null, ConsistencyLevel.ALL, allowHints);
-        Assert.assertNotNull(wcbi.getIMutation());
+        Assert.assertNotNull(wcbi.iMutation());
     }
 }
