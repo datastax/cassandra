@@ -171,6 +171,26 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
         }
     }
 
+    @Override
+    public void trackNewWritten(SSTable table)
+    {
+        throwIfAborted();
+        synchronized (mainTransaction)
+        {
+            mainTransaction.trackNewWritten(table);
+        }
+    }
+
+    @Override
+    public void trackNewAttachedIndexFiles(SSTable table)
+    {
+        throwIfAborted();
+        synchronized (mainTransaction)
+        {
+            mainTransaction.trackNewAttachedIndexFiles(table);
+        }
+    }
+
     public void untrackNew(SSTable table)
     {
         synchronized (mainTransaction)
