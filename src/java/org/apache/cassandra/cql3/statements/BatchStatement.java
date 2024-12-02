@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.HashMultiset;
@@ -447,11 +448,12 @@ public class BatchStatement implements CQLStatement
 
         ResultMessage<ResultMessage.Void> result = new ResultMessage.Void();
         RequestSensors sensors = RequestTracker.instance.get();
-        for (ModificationStatement statement : statements)
-        {
-            Context context = Context.from(statement.metadata());
+        Set<Context> uniqueContexts = statements.stream()
+                                                .map(ModificationStatement::metadata)
+                                                .map(Context::from)
+                                                .collect(Collectors.toSet());
+        for (Context context : uniqueContexts)
             SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_BYTES);
-        }
 
         return result;
     }

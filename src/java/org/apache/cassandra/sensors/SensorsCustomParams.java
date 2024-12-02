@@ -119,7 +119,8 @@ public final class SensorsCustomParams
     }
 
     /**
-     * Adds a sensor of a given type and context to the native protocol response message encoded in the custom payload bytes map
+     * Adds a sensor of a given type and context to the native protocol response message encoded in the custom payload bytes map.
+     * If the sensor is already present in the custom payload, it will be overwritten.
      *
      * @param response        the response message to add the sensors to
      * @param protocolVersion the protocol version specified in query options to determine if custom payload is supported (should be V4 or later).
