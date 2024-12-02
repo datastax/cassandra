@@ -19,8 +19,10 @@ package org.apache.cassandra.db.partitions;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
@@ -46,6 +48,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -300,6 +303,19 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
              + (deletionInfo().getPartitionDeletion().isLive() ? 0 : 1);
     }
 
+    // FIXME review
+    /**
+     * The accumulated BTree size of the data contained in this update.
+     *
+     * @return the accumulated BTree size of the data contained in this update.
+     */
+    @VisibleForTesting
+    @Override
+    public long accumulatedDataSize()
+    {
+        return dataSize;
+    }
+
     /**
      * The size of the data contained in this update.
      *
@@ -307,6 +323,18 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     @Override
     public int dataSize()
+    {
+        return dataSize;
+    }
+
+    // FIXME review
+    /**
+     * The size of the data contained in this update.
+     *
+     * @return the size of the data contained in this update.
+     */
+    @Override
+    public long unsharedHeapSize()
     {
         return dataSize;
     }
@@ -362,6 +390,19 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             addMarksForRow(row, marks);
         }
         return marks;
+    }
+
+    // FIXME review
+    public PartitionUpdate withOnlyPresentColumns()
+    {
+        Set<ColumnMetadata> columnSet = new HashSet<>();
+
+        for (Row row : rows())
+            for (ColumnData column : row)
+                columnSet.add(column.column());
+
+        RegularAndStaticColumns columns = RegularAndStaticColumns.builder().addAll(columnSet).build();
+        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, dataSize, trie, false);
     }
 
     private static void addMarksForRow(Row row, List<CounterMark> marks)
