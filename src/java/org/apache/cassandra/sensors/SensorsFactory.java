@@ -26,8 +26,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SENSORS_FA
 /**
  * Provides a factory to customize the behaviour of sensors tracking in CNDB by providing two factory methods:
  * <ul>
- *   <li> {@link SensorsFactory#createRequestSensors} provides a {@link RequestSensors} implementation to track sensors per keyspace.</li>
- *   <li> {@link SensorsFactory#createSensorEncoder} provides a {@link SensorEncoder} implementation to control how sensors are encoded as string on the wire.</li>
+ *   <li>{@link SensorsFactory#createRequestSensors} provides a {@link RequestSensors} implementation to track sensors per keyspace.</li>
+ *   <li>{@link SensorsFactory#createSensorEncoder} provides a {@link SensorEncoder} implementation to control how sensors are encoded as string on the wire.</li>
  * </ul>
  * The concrete implementation of this factory is configured by the {@link CassandraRelevantProperties#SENSORS_FACTORY} system property.
  */
