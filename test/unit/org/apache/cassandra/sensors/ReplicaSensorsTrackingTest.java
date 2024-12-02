@@ -165,7 +165,7 @@ public class ReplicaSensorsTrackingTest
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(command);
         requestSensors.registerSensor(context, Type.READ_BYTES);
-        Sensor acutalReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
+        Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -179,7 +179,7 @@ public class ReplicaSensorsTrackingTest
         Sensor mockingReadSensor = new mockingSensor(context, Type.READ_BYTES);
         mockingReadSensor.increment(11.0);
 
-        assertReplicaSensorsTracked(readRequest, callback, Pair.create(acutalReadSensor, mockingReadSensor));
+        assertReplicaSensorsTracked(readRequest, callback, Pair.create(actualReadSensor, mockingReadSensor));
     }
 
     @Test
@@ -269,8 +269,8 @@ public class ReplicaSensorsTrackingTest
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.READ_BYTES);
-        Sensor acutalWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
-        Sensor acutalReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
+        Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -282,8 +282,8 @@ public class ReplicaSensorsTrackingTest
         mockingPrepareWriteSensor.increment(13.0);
         Sensor mockingPrepareReadSensor = new mockingSensor(context, Type.READ_BYTES);
         mockingPrepareReadSensor.increment(14.0);
-        Pair<Sensor, Sensor> prepareWriterSensors = Pair.create(acutalWriteSensor, mockingPrepareWriteSensor);
-        Pair<Sensor, Sensor> prepareReadSensors = Pair.create(acutalReadSensor, mockingPrepareReadSensor);
+        Pair<Sensor, Sensor> prepareWriterSensors = Pair.create(actualWriteSensor, mockingPrepareWriteSensor);
+        Pair<Sensor, Sensor> prepareReadSensors = Pair.create(actualReadSensor, mockingPrepareReadSensor);
 
         assertReplicaSensorsTracked(prepare, callback, prepareWriterSensors, prepareReadSensors);
     }
@@ -304,8 +304,8 @@ public class ReplicaSensorsTrackingTest
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.READ_BYTES);
-        Sensor acutalWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
-        Sensor acutalReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
+        Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -316,8 +316,8 @@ public class ReplicaSensorsTrackingTest
         mockingProposeWriteSensor.increment(15.0);
         Sensor mockingProposeReadSensor = new mockingSensor(context, Type.READ_BYTES);
         mockingProposeReadSensor.increment(16.0);
-        Pair<Sensor, Sensor> proposeWriterSensors = Pair.create(acutalWriteSensor, mockingProposeWriteSensor);
-        Pair<Sensor, Sensor> proposeReadSensors = Pair.create(acutalReadSensor, mockingProposeReadSensor);
+        Pair<Sensor, Sensor> proposeWriterSensors = Pair.create(actualWriteSensor, mockingProposeWriteSensor);
+        Pair<Sensor, Sensor> proposeReadSensors = Pair.create(actualReadSensor, mockingProposeReadSensor);
 
         assertReplicaSensorsTracked(propose, callback, proposeWriterSensors, proposeReadSensors);
     }
@@ -340,7 +340,7 @@ public class ReplicaSensorsTrackingTest
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
-        Sensor acutalWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -351,7 +351,7 @@ public class ReplicaSensorsTrackingTest
         Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingWriteSensor.increment(13.0);
 
-        assertReplicaSensorsTracked(writeRequest, callback, allowHints, Pair.create(acutalWriteSensor, mockingWriteSensor));
+        assertReplicaSensorsTracked(writeRequest, callback, allowHints, Pair.create(actualWriteSensor, mockingWriteSensor));
     }
 
     @SafeVarargs
