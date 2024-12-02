@@ -42,6 +42,7 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.analysis.Analyzer;
 
 public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
@@ -111,6 +112,15 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
             return true;
         }
 
+        /**
+         * @return {@link true} if this analyzer configuration has a n-gram tokenizer or any of its filters is n-gram.
+         */
+        default boolean isNGram()
+        {
+            return false;
+        }
+
+        @Override
         default void close()
         {
         }
@@ -132,7 +142,10 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
 
         try
         {
-            final Analyzer analyzer = JSONAnalyzerParser.parse(json);
+            Pair<Analyzer, LuceneCustomAnalyzerConfig> analyzerAndConfig = JSONAnalyzerParser.parse(json);
+            final Analyzer analyzer = analyzerAndConfig.left;
+            final boolean isNGram = analyzerAndConfig.right != null && analyzerAndConfig.right.isNGram();
+
             return new AnalyzerFactory()
             {
                 @Override
@@ -141,9 +154,16 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
                     analyzer.close();
                 }
 
+                @Override
                 public AbstractAnalyzer create()
                 {
                     return new LuceneAnalyzer(type, analyzer, options);
+                }
+
+                @Override
+                public boolean isNGram()
+                {
+                    return isNGram;
                 }
 
                 @Override
