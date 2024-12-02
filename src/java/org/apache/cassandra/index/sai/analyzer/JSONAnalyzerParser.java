@@ -24,6 +24,7 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
+import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.CharFilterFactory;
 import org.apache.lucene.analysis.TokenFilterFactory;
@@ -35,12 +36,12 @@ import static org.apache.cassandra.utils.JsonUtils.JSON_OBJECT_MAPPER;
 
 public class JSONAnalyzerParser
 {
-    public static Analyzer parse(String json) throws IOException
+    public static Pair<Analyzer, LuceneCustomAnalyzerConfig> parse(String json) throws IOException
     {
         Analyzer analyzer = matchBuiltInAnalzyer(json.toUpperCase());
         if (analyzer != null)
         {
-            return analyzer;
+            return Pair.create(analyzer, null);
         }
 
         LuceneCustomAnalyzerConfig analyzerModel;
@@ -146,12 +147,15 @@ public class JSONAnalyzerParser
                 throw new InvalidRequestException("Error configuring analyzer's charFilter '" + charFilter.getName() + "': " + e.getMessage());
             }
         }
-        return builder.build();
+        return Pair.create(builder.build(), analyzerModel);
     }
 
-    private static Analyzer matchBuiltInAnalzyer(String maybeAnalyzer) {
-        for (BuiltInAnalyzers analyzer : BuiltInAnalyzers.values()) {
-            if (analyzer.name().equals(maybeAnalyzer)) {
+    private static Analyzer matchBuiltInAnalzyer(String maybeAnalyzer)
+    {
+        for (BuiltInAnalyzers analyzer : BuiltInAnalyzers.values())
+        {
+            if (analyzer.name().equals(maybeAnalyzer))
+            {
                 return analyzer.getNewAnalyzer();
             }
         }
