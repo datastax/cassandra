@@ -70,9 +70,7 @@ public final class SensorsCustomParams
 
     public static double sensorValueFromBytes(byte[] bytes)
     {
-        ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
-        buffer.put(bytes);
-        buffer.flip();
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
         return buffer.getDouble();
     }
 
