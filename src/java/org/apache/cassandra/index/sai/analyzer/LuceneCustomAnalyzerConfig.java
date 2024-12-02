@@ -51,4 +51,21 @@ public class LuceneCustomAnalyzerConfig
     {
         return charFilters;
     }
+
+    /**
+     * @return {@link true} if this analyzer configuration has a n-gram tokenizer or any of its filters is n-gram.
+     */
+    public boolean isNGram()
+    {
+        if (getTokenizer().getName().equals("ngram"))
+            return true;
+
+        for (LuceneClassNameAndArgs filter : getFilters())
+        {
+            if (filter.getName().equals("ngram"))
+                return true;
+        }
+
+        return false;
+    }
 }
