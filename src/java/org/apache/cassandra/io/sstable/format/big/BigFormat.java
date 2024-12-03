@@ -552,7 +552,7 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         @Override
         public ByteComparable.Version getByteComparableVersion()
         {
-            return ByteComparable.Version.OSS50;
+            return ByteComparable.Version.OSS41;
         }
 
         @Override
