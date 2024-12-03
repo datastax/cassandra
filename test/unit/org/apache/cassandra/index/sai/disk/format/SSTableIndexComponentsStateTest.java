@@ -147,7 +147,10 @@ public class SSTableIndexComponentsStateTest
         assertEquals(1, diff.perIndexesRemoved.size());
         assertTrue(diff.perIndexesRemoved.contains("index4"));
 
+        assertTrue(diff.createsUnusedComponents());
+
         assertEquals(after, before.tryApplyDiff(diff));
+
     }
 
     @Test
@@ -177,6 +180,8 @@ public class SSTableIndexComponentsStateTest
         assertTrue(diff.perIndexesUpdated.contains("index1"));
         assertTrue(diff.perIndexesUpdated.contains("index3"));
         assertEquals(0, diff.perIndexesRemoved.size());
+
+        assertTrue(diff.createsUnusedComponents());
 
         // The current state has modification compared to `current`, namely: "index2" has been removed and
         // "index4" has been updated.
@@ -213,7 +218,10 @@ public class SSTableIndexComponentsStateTest
 
         SSTableIndexComponentsState.Diff diff = state.diff(state);
         assertTrue(diff.isEmpty());
+        assertFalse(diff.createsUnusedComponents());
+
         assertEquals(state, state.tryApplyDiff(diff));
+
     }
 
     @Test
@@ -261,6 +269,7 @@ public class SSTableIndexComponentsStateTest
                                                .build();
 
         SSTableIndexComponentsState.Diff diff = after.diff(before);
+        assertTrue(diff.createsUnusedComponents());
 
         // Concurrent modification that modifides drop "index2"
         var current = SSTableIndexComponentsState.builder()
@@ -289,6 +298,34 @@ public class SSTableIndexComponentsStateTest
                                                 .build();
 
         SSTableIndexComponentsState.Diff diff = after.diff(before);
+        assertFalse(diff.createsUnusedComponents());
+
+        assertEquals(after, before.tryApplyDiff(diff));
+    }
+
+    @Test
+    public void diffWithOnlyRemove()
+    {
+        var before = SSTableIndexComponentsState.builder()
+                                               .addPerSSTable(Version.EB, 0, 1)
+                                               .addPerIndex("index1", Version.EB, 0, 1)
+                                               .addPerIndex("index2", Version.EB, 0, 1)
+                                               .build();
+
+        // Same but for the drop of index1
+        var after = SSTableIndexComponentsState.builder()
+                                                .addPerSSTable(Version.EB, 0, 1)
+                                                .addPerIndex("index2", Version.EB, 0, 1)
+                                                .build();
+
+        SSTableIndexComponentsState.Diff diff = after.diff(before);
+        assertTrue(diff.createsUnusedComponents());
+
+        assertFalse(diff.perSSTableUpdated);
+        assertTrue(diff.perIndexesUpdated.isEmpty());
+        assertEquals(1, diff.perIndexesRemoved.size());
+        assertTrue(diff.perIndexesRemoved.contains("index1"));
+
         assertEquals(after, before.tryApplyDiff(diff));
     }
 
