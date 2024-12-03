@@ -21,6 +21,7 @@ package org.apache.cassandra.sensors;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
@@ -261,22 +262,27 @@ public class SensorsInternodeTest
             assertThat(internodeBytes).isBetween(requestSizePerTable * 1.0, total * 1.0);
 
             // assert internode headers are added to the response messages
-            Supplier<String> requestParamSupplier = () -> SensorsCustomParams.paramForRequestSensor(internodeBytesSensor);
-            Supplier<String> globalParamSupplier = () -> SensorsCustomParams.paramForGlobalSensor(internodeBytesSensor);
+            Supplier<Optional<String>> requestParamSupplier = () -> SensorsCustomParams.paramForRequestSensor(internodeBytesSensor);
+            Supplier<Optional<String>> globalParamSupplier = () -> SensorsCustomParams.paramForGlobalSensor(internodeBytesSensor);
             assertResponseSensors(response, total, total, requestParamSupplier, globalParamSupplier);
         }
     }
 
-    private void assertResponseSensors(Message message, double requestValue, double registryValue, Supplier<String> requestParamSupplier, Supplier<String> globalParamSupplier)
+    private void assertResponseSensors(Message message, double requestValue, double registryValue, Supplier<Optional<String>> requestParamSupplier, Supplier<Optional<String>> globalParamSupplier)
     {
+        Optional<String> expectedRequestParam = requestParamSupplier.get();
+        Optional<String> expectedGlobalParam = globalParamSupplier.get();
         assertThat(message.header.customParams()).isNotNull();
-        String expectedRequestParam = requestParamSupplier.get();
-        String expectedGlobalParam = globalParamSupplier.get();
+        assertThat(expectedRequestParam).isPresent();
+        assertThat(expectedGlobalParam).isPresent();
 
-        assertThat(message.header.customParams()).containsKey(expectedRequestParam);
-        assertThat(message.header.customParams()).containsKey(expectedGlobalParam);
-        double requestWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
-        double globalWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedGlobalParam));
+        String requestParam = expectedRequestParam.get();
+        String globalParam = expectedGlobalParam.get();
+        assertThat(message.header.customParams()).containsKey(requestParam);
+        assertThat(message.header.customParams()).containsKey(globalParam);
+
+        double requestWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(requestParam));
+        double globalWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(globalParam));
         assertThat(requestWriteBytes).isEqualTo(requestValue);
         assertThat(globalWriteBytes).isEqualTo(registryValue);
     }

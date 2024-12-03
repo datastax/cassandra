@@ -151,8 +151,8 @@ public class SensorsIndexWriteTest
 
         // check global registry is synchronized for Standard table
         assertThat(standardRegistrySensor.getValue()).isEqualTo(standardSensor.getValue());
-        String writeRequestParam = SensorsCustomParams.paramForRequestSensor(standardSensor);
-        String writeGlobalParam = SensorsCustomParams.paramForRequestSensor(standardRegistrySensor);
+        String writeRequestParam = SensorsCustomParams.paramForRequestSensor(standardSensor).get();
+        String writeGlobalParam = SensorsCustomParams.paramForRequestSensor(standardRegistrySensor).get();
         assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), writeRequestParam, writeGlobalParam);
 
         Mutation saiMutation = new RowUpdateBuilder(saiStore.metadata(), 0, partitionKey)
@@ -168,8 +168,8 @@ public class SensorsIndexWriteTest
 
         // check global registry is synchronized for SAI table
         assertThat(saiRegistrySensor.getValue()).isEqualTo(saiSensor.getValue());
-        String requestParam = SensorsCustomParams.paramForRequestSensor(saiSensor);
-        String globalParam = SensorsCustomParams.paramForGlobalSensor(saiRegistrySensor);
+        String requestParam = SensorsCustomParams.paramForRequestSensor(saiSensor).get();
+        String globalParam = SensorsCustomParams.paramForGlobalSensor(saiRegistrySensor).get();
         assertResponseSensors(saiSensor.getValue(), saiRegistrySensor.getValue(), requestParam, globalParam);
     }
 
@@ -195,8 +195,8 @@ public class SensorsIndexWriteTest
 
         // check global registry is synchronized for Standard table
         assertThat(standardRegistrySensor.getValue()).isEqualTo(standardSensor.getValue());
-        String writeRequestParam = SensorsCustomParams.paramForRequestSensor(standardSensor);
-        String writeGlobalParam = SensorsCustomParams.paramForGlobalSensor(standardRegistrySensor);
+        String writeRequestParam = SensorsCustomParams.paramForRequestSensor(standardSensor).get();
+        String writeGlobalParam = SensorsCustomParams.paramForGlobalSensor(standardRegistrySensor).get();
         assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), writeRequestParam, writeGlobalParam);
 
         Mutation secondaryIndexMutation = new RowUpdateBuilder(secondaryIndexStore.metadata(), 0, partitionKey)
@@ -216,8 +216,8 @@ public class SensorsIndexWriteTest
 
         // check global registry is synchronized for Secondary Index table
         assertThat(secondaryIndexRegistrySensor.getValue()).isEqualTo(secondaryIndexSensor.getValue());
-        String indexRequestParam = SensorsCustomParams.paramForRequestSensor(secondaryIndexSensor);
-        String indexGlobalParam = SensorsCustomParams.paramForGlobalSensor(secondaryIndexRegistrySensor);
+        String indexRequestParam = SensorsCustomParams.paramForRequestSensor(secondaryIndexSensor).get();
+        String indexGlobalParam = SensorsCustomParams.paramForGlobalSensor(secondaryIndexRegistrySensor).get();
         assertResponseSensors(secondaryIndexSensor.getValue(), secondaryIndexRegistrySensor.getValue(), indexRequestParam, indexGlobalParam);
     }
 

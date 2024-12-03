@@ -113,10 +113,14 @@ public class ResponseVerbHandler implements IVerbHandler
     private void incrementSensor(RequestSensors sensors, Context context, Type type, Message<?> message)
     {
         Optional<Sensor> sensor = sensors.getSensor(context, type);
-        sensor.ifPresent(s -> {
-            String customParam = SensorsCustomParams.paramForRequestSensor(s);
-            double sensorValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam);
-            sensors.incrementSensor(context, type, sensorValue);
-        });
+        if (sensor.isEmpty())
+            return;
+
+        Optional<String> customParam = SensorsCustomParams.paramForRequestSensor(sensor.get());
+        if (customParam.isEmpty())
+            return;
+
+        double sensorValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam.get());
+        sensors.incrementSensor(context, type, sensorValue);
     }
 }

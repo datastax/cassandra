@@ -19,6 +19,7 @@ package org.apache.cassandra.sensors;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.After;
@@ -426,14 +427,19 @@ public class SensorsReadTest
 
     private void assertResponseSensors(Message message, Sensor requestSensor, Sensor registrySensor)
     {
-        String requestHeader = SensorsCustomParams.paramForRequestSensor(registrySensor);
-        String tableHeader = SensorsCustomParams.paramForRequestSensor(registrySensor);
+        Optional<String> expectedRequestParam = SensorsCustomParams.paramForRequestSensor(registrySensor);
+        Optional<String> expectedGlobalParam = SensorsCustomParams.paramForRequestSensor(registrySensor);
         assertThat(message.header.customParams()).isNotNull();
-        assertThat(message.header.customParams()).containsKey(requestHeader);
-        assertThat(message.header.customParams()).containsKey(tableHeader);
+        assertThat(expectedRequestParam).isPresent();
+        assertThat(expectedGlobalParam).isPresent();
 
-        double requestReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(requestHeader));
-        double tableReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(tableHeader));
+        String requestParam = expectedRequestParam.get();
+        String globalParam = expectedGlobalParam.get();
+        assertThat(message.header.customParams()).containsKey(requestParam);
+        assertThat(message.header.customParams()).containsKey(globalParam);
+
+        double requestReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(requestParam));
+        double tableReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(globalParam));
         assertThat(requestReadBytes).isEqualTo(requestSensor.getValue());
         assertThat(tableReadBytes).isEqualTo(requestSensor.getValue());
     }

@@ -18,29 +18,31 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Optional;
+
 /**
- * Encodes sensor as string to be used on the wire (let it be in internode messages as custom params or in native protocol
+ * Encodes sensor name as string to be used on the wire (let it be in internode messages as custom params or in native protocol
  * messages as custom payloads). Note that the sensor value itself will always be encoded as bytes in the big endian order
  * (see {@link SensorsCustomParams#sensorValueAsBytes(double)} and {@link SensorsCustomParams#sensorValueAsByteBuffer(double)}).
- * Implementations should be very efficient as sensors are potentially encoded with each request. They should also encode
+ * Implementations should be very efficient as sensor names are potentially encoded with each request. They should also encode
  * enough information to differentiate between sensors of the same type that belong to the same request but different
  * keyspaces and/or tables.
  */
 public interface SensorEncoder
 {
     /**
-     * Encodes a request sensor as a string to be used on the wire. A request sensor tracks usage per request. See {@link RequestSensors}.
+     * Encodes request sensor name as a string to be used on the wire. A request sensor tracks usage per request. See {@link RequestSensors}.
      *
      * @param sensor the sensor to encode
-     * @return the encoded sensor as a string
+     * @return the encoded sensor as a string. If the optional is empty, the sensor will not be encoded.
      */
-    String encodeRequestSensor(Sensor sensor);
+    Optional<String> encodeRequestSensorName(Sensor sensor);
 
     /**
-     * Encodes a global sensor as a string to be used on the wire. A global sensor tracks usage globally across different requests. See {@link SensorsRegistry}.
+     * Encodes global sensor name as a string to be used on the wire. A global sensor tracks usage globally across different requests. See {@link SensorsRegistry}.
      *
      * @param sensor the sensor to encode
-     * @return the encoded sensor as a string
+     * @return the encoded sensor as a string. If the optional is empty, the sensor will not be encoded.
      */
-    String encodeGlobalSensor(Sensor sensor);
+    Optional<String> encodeGlobalSensorName(Sensor sensor);
 }

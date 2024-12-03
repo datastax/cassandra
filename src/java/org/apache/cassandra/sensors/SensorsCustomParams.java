@@ -150,52 +150,57 @@ public final class SensorsCustomParams
                                               Type type)
     {
         if (!CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.getBoolean())
-        {
             return;
-        }
 
         // Custom payload is not supported for protocol versions < 4
         if (protocolVersion.isSmallerThan(ProtocolVersion.V4))
-        {
             return;
-        }
 
         if (response == null || sensors == null)
-        {
             return;
-        }
 
         Optional<Sensor> requestSensor = sensors.getSensor(context, type);
-        requestSensor.ifPresent(sensor -> {
-            ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(sensor.getValue());
-            String headerName = SENSOR_ENCODER.encodeRequestSensor(sensor);
-            Map<String, ByteBuffer> customPayload = response.getCustomPayload() == null ? new HashMap<>() : response.getCustomPayload();
-            customPayload.put(headerName, bytes);
-            response.setCustomPayload(customPayload);
-        });
+        if (requestSensor.isEmpty())
+            return;
+
+        Optional<String> headerName = SENSOR_ENCODER.encodeRequestSensorName(requestSensor.get());
+        if (headerName.isEmpty())
+            return;
+
+        Map<String, ByteBuffer> customPayload = response.getCustomPayload() == null ? new HashMap<>() : response.getCustomPayload();
+        ByteBuffer bytes = SensorsCustomParams.sensorValueAsByteBuffer(requestSensor.get().getValue());
+        customPayload.put(headerName.get(), bytes);
+        response.setCustomPayload(customPayload);
     }
 
     private static <T> void addSensorToInternodeResponse(Message.Builder<T> response, Sensor requestSensor, Function<Sensor, Double> valueFunction)
     {
+        Optional<String> requestParam = paramForRequestSensor(requestSensor);
+        if (requestParam.isEmpty())
+            return;
+
         byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(valueFunction.apply(requestSensor));
-        String requestParam = paramForRequestSensor(requestSensor);
-        response.withCustomParam(requestParam, requestBytes);
+        response.withCustomParam(requestParam.get(), requestBytes);
 
         Optional<Sensor> globalSensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), requestSensor.getType());
-        globalSensor.ifPresent(sensor -> {
-            byte[] globalBytes = SensorsCustomParams.sensorValueAsBytes(valueFunction.apply(sensor));
-            String globalParam = paramForGlobalSensor(sensor);
-            response.withCustomParam(globalParam, globalBytes);
-        });
+        if (globalSensor.isEmpty())
+            return;
+
+        Optional<String> globalParam = paramForGlobalSensor(globalSensor.get());
+        if (globalParam.isEmpty())
+            return;
+
+        byte[] globalBytes = SensorsCustomParams.sensorValueAsBytes(valueFunction.apply(globalSensor.get()));
+        response.withCustomParam(globalParam.get(), globalBytes);
     }
 
-    public static String paramForRequestSensor(Sensor sensor)
+    public static Optional<String> paramForRequestSensor(Sensor sensor)
     {
-        return SENSOR_ENCODER.encodeRequestSensor(sensor);
+        return SENSOR_ENCODER.encodeRequestSensorName(sensor);
     }
 
-    public static String paramForGlobalSensor(Sensor sensor)
+    public static Optional<String> paramForGlobalSensor(Sensor sensor)
     {
-        return SENSOR_ENCODER.encodeGlobalSensor(sensor);
+        return SENSOR_ENCODER.encodeGlobalSensorName(sensor);
     }
 }

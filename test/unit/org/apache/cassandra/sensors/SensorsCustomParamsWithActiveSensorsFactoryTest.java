@@ -46,7 +46,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-public class SensorsCustomParamsTest
+public class SensorsCustomParamsWithActiveSensorsFactoryTest
 {
     @BeforeClass
     public static void setUpClass() throws Exception
@@ -117,7 +117,7 @@ public class SensorsCustomParamsTest
         assertNotNull(message.getCustomPayload());
 
         Sensor sensor = sensors.getSensor(context, type).get();
-        String expectedHeader = SensorsCustomParams.paramForRequestSensor(sensor);
+        String expectedHeader = SensorsCustomParams.paramForRequestSensor(sensor).get();
         assertTrue(message.getCustomPayload().containsKey(expectedHeader));
         assertEquals(expectedValue, message.getCustomPayload().get(expectedHeader).getDouble(), 0.0);
     }
@@ -146,7 +146,7 @@ public class SensorsCustomParamsTest
         assertEquals( 2, message.getCustomPayload().size());
 
         Sensor sensor = sensors.getSensor(context, type).get();
-        String expectedHeader = SensorsCustomParams.paramForRequestSensor(sensor);
+        String expectedHeader = SensorsCustomParams.paramForRequestSensor(sensor).get();
         assertTrue(message.getCustomPayload().containsKey(expectedHeader));
         assertEquals(expectedValue, message.getCustomPayload().get(expectedHeader).getDouble(), 0.0);
 
@@ -154,7 +154,7 @@ public class SensorsCustomParamsTest
         assertEquals(existingValue, StandardCharsets.UTF_8.decode(message.getCustomPayload().get(existingKey)).toString());
     }
 
-    @Test
+   @Test
     public void testAddSensorsToCQLResponseSkipped()
     {
         String table = "t1";
@@ -202,8 +202,8 @@ public class SensorsCustomParamsTest
         assertNotNull(msg.header.customParams());
         assertEquals(2, msg.header.customParams().size());
         Sensor sensor = sensors.getSensor(context, sensorType).get();
-        String requestParam = SensorsCustomParams.paramForRequestSensor(sensor);
-        String globalParam = SensorsCustomParams.paramForGlobalSensor(sensor);
+        String requestParam = SensorsCustomParams.paramForRequestSensor(sensor).get();
+        String globalParam = SensorsCustomParams.paramForGlobalSensor(sensor).get();
         assertTrue(msg.header.customParams().containsKey(requestParam));
         assertTrue(msg.header.customParams().containsKey(globalParam));
         double epsilon = 0.000001;

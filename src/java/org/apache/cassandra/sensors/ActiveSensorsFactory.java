@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Optional;
+
 /**
  * Implementation of the {@link SensorsFactory} that creates:
  * <ul>
@@ -30,15 +32,15 @@ public class ActiveSensorsFactory implements SensorsFactory
     private static final SensorEncoder SENSOR_ENCODER = new SensorEncoder()
     {
         @Override
-        public String encodeRequestSensor(Sensor sensor)
+        public Optional<String> encodeRequestSensorName(Sensor sensor)
         {
-            return sensor.getType() + "_REQUEST." + sensor.getContext().getTable();
+            return Optional.of(sensor.getType() + "_REQUEST." + sensor.getContext().getTable());
         }
 
         @Override
-        public String encodeGlobalSensor(Sensor sensor)
+        public Optional<String> encodeGlobalSensorName(Sensor sensor)
         {
-            return sensor.getType() + "_GLOBAL." + sensor.getContext().getTable();
+            return Optional.of(sensor.getType() + "_GLOBAL." + sensor.getContext().getTable());
         }
     };
 

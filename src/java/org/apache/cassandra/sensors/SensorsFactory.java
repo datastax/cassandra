@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Optional;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -37,18 +39,18 @@ public interface SensorsFactory
                               new SensorsFactory() {} :
                               FBUtilities.construct(CassandraRelevantProperties.SENSORS_FACTORY.getString(), "sensors factory");
 
-    SensorEncoder DEFAULT_SENSOR_ENCODER = new SensorEncoder()
+    SensorEncoder NOOP_SENSOR_ENCODER = new SensorEncoder()
     {
         @Override
-        public String encodeRequestSensor(Sensor sensor)
+        public Optional<String> encodeRequestSensorName(Sensor sensor)
         {
-            return "";
+            return Optional.empty();
         }
 
         @Override
-        public String encodeGlobalSensor(Sensor sensor)
+        public Optional<String> encodeGlobalSensorName(Sensor sensor)
         {
-            return "";
+            return Optional.empty();
         }
     };
 
@@ -64,10 +66,10 @@ public interface SensorsFactory
     }
 
     /**
-     * Create a {@link SensorEncoder} that will be invoked when encoding the sensor on the wire. The default implementation returns an empty string.
+     * Create a {@link SensorEncoder} that will be invoked when encoding the sensor on the wire. The default implementation returns a noop encoder.
      */
     default SensorEncoder createSensorEncoder()
     {
-        return DEFAULT_SENSOR_ENCODER;
+        return NOOP_SENSOR_ENCODER;
     }
 }

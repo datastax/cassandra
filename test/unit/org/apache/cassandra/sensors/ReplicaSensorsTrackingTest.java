@@ -481,7 +481,7 @@ public class ReplicaSensorsTrackingTest
         return Message.builder(Verb.READ_RSP, response)
                       .from(from)
                       .withId(id)
-                      .withCustomParam(SensorsCustomParams.paramForRequestSensor(readSensor), SensorsCustomParams.sensorValueAsBytes(readSensor.getValue()))
+                      .withCustomParam(SensorsCustomParams.paramForRequestSensor(readSensor).get(), SensorsCustomParams.sensorValueAsBytes(readSensor.getValue()))
                       .build();
     }
 
@@ -492,7 +492,7 @@ public class ReplicaSensorsTrackingTest
                                             .withId(id);
 
         for (Sensor sensor : sensors)
-            builder.withCustomParam(SensorsCustomParams.paramForRequestSensor(sensor), SensorsCustomParams.sensorValueAsBytes(sensor.getValue()));
+            builder.withCustomParam(SensorsCustomParams.paramForRequestSensor(sensor).get(), SensorsCustomParams.sensorValueAsBytes(sensor.getValue()));
 
         return builder.build();
     }
