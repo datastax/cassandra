@@ -216,7 +216,7 @@ public abstract class CassandraIndex implements Index
     @Override
     public void validate(ReadCommand command) throws InvalidRequestException
     {
-        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter().getExpressions());
+        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter());
 
         if (target.isPresent())
         {
@@ -281,18 +281,22 @@ public abstract class CassandraIndex implements Index
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
-        return getTargetExpression(filter.getExpressions()).map(filter::without)
-                                                           .orElse(filter);
+        return getTargetExpression(filter).map(filter::without).orElse(filter);
     }
 
-    private Optional<RowFilter.Expression> getTargetExpression(List<RowFilter.Expression> expressions)
+    private Optional<RowFilter.Expression> getTargetExpression(RowFilter rowFilter)
     {
-        return expressions.stream().filter(this::supportsExpression).findFirst();
+        for (RowFilter.Expression expression : rowFilter.withoutDisjunctions().traversedExpressions())
+        {
+            if (supportsExpression(expression))
+                return Optional.of(expression);
+        }
+        return Optional.empty();
     }
 
     public Index.Searcher searcherFor(ReadCommand command)
     {
-        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter().getExpressions());
+        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter());
 
         if (target.isPresent())
         {
