@@ -93,6 +93,8 @@ public class TrieMemtable extends AbstractShardedMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtable.class);
 
+    public static final Factory FACTORY = new TrieMemtable.Factory(null);
+
     /** Buffer type to use for memtable tries (on- vs off-heap) */
     public static final BufferType BUFFER_TYPE = DatabaseDescriptor.getMemtableAllocationType().toBufferType();
 
@@ -779,6 +781,13 @@ public class TrieMemtable extends AbstractShardedMemtable
 
             return filter.getUnfilteredRowIterator(columnFilter, partition);
         }
+    }
+
+    public static Factory factory(Map<String, String> optionsCopy)
+    {
+        String shardsString = optionsCopy.remove(SHARDS_OPTION);
+        Integer shardCount = shardsString != null ? Integer.parseInt(shardsString) : null;
+        return new Factory(shardCount);
     }
 
     static class Factory implements Memtable.Factory
