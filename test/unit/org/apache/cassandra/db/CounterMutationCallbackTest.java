@@ -33,17 +33,19 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.ActiveRequestSensors;
+import org.apache.cassandra.sensors.ActiveSensorsFactory;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
@@ -70,6 +72,8 @@ public class CounterMutationCallbackTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(3),
@@ -163,17 +167,17 @@ public class CounterMutationCallbackTest
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_WRITE_BYTES * expectedSensorValueMultiplier);
                                                    });
-        assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_TABLE.Counter",
+        assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_GLOBAL.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_WRITE_BYTES * expectedSensorValueMultiplier);
                                                    });
-        assertThat(customParam).hasEntrySatisfying("INTERNODE_MSG_BYTES_REQUEST.Counter",
+        assertThat(customParam).hasEntrySatisfying("INTERNODE_BYTES_REQUEST.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES * expectedSensorValueMultiplier);
                                                    });
-        assertThat(customParam).hasEntrySatisfying("INTERNODE_MSG_BYTES_TABLE.Counter",
+        assertThat(customParam).hasEntrySatisfying("INTERNODE_BYTES_GLOBAL.Counter",
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES * expectedSensorValueMultiplier);

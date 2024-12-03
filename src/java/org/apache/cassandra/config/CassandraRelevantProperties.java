@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
 /** A class that extracts system properties for the cassandra node it runs within. */
@@ -514,10 +515,10 @@ public enum CassandraRelevantProperties
     SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
 
     /**
-     * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
+     * Allows custom implementation of {@link SensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+    SENSORS_FACTORY("cassandra.sensors_factory_class"),
 
     /**
      * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
@@ -538,7 +539,12 @@ public enum CassandraRelevantProperties
      * If provided, this custom factory class will be used to create stage executor for a couple of stages.
      * @see Stage for details
      */
-    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class");
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class"),
+
+    /**
+     * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
+     */
+    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

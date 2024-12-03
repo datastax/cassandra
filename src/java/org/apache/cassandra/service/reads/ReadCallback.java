@@ -38,6 +38,8 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
@@ -60,6 +62,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     private volatile int failures = 0;
     private final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final boolean couldSpeculate;
+    private final RequestSensors requestSensors;
 
     public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
     {
@@ -80,6 +83,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
 
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockFor, this.replicaPlan);
+        this.requestSensors = RequestTracker.instance.get();
     }
 
     protected P replicaPlan()
@@ -90,6 +94,12 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public ReadCommand command()
     {
         return command;
+    }
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return requestSensors;
     }
 
     /**

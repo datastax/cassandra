@@ -24,8 +24,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.junit.Assert;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.CounterMutation;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -57,6 +59,16 @@ public class WriteCallbackInfoTest
         }
     }
 
+    @Test
+    public void testIMutation() throws Exception
+    {
+        for (Verb verb : new Verb[]{ Verb.PAXOS_COMMIT_REQ, Verb.MUTATION_REQ })
+        {
+            testIMutation(verb, true);
+            testIMutation(verb, false);
+        }
+    }
+
     private void testShouldHint(Verb verb, ConsistencyLevel cl, boolean allowHints, boolean expectHint) throws Exception
     {
         TableMetadata metadata = MockSchema.newTableMetadata("", "");
@@ -66,22 +78,28 @@ public class WriteCallbackInfoTest
 
         RequestCallbacks.WriteCallbackInfo wcbi = new RequestCallbacks.WriteCallbackInfo(Message.out(verb, payload), full(InetAddressAndPort.getByName("192.168.1.1")), null, cl, allowHints);
         Assert.assertEquals(expectHint, wcbi.shouldHint());
-        if (expectHint)
+        Assert.assertNotNull(wcbi.mutation());
+    }
+
+    private void testIMutation(Verb verb, boolean allowHints) throws Exception
+    {
+        TableMetadata metadata = MockSchema.newTableMetadata("", "");
+        Object payload;
+        if (verb == Verb.PAXOS_COMMIT_REQ)
         {
-            Assert.assertNotNull(wcbi.mutation());
+            UUID uuid = UUID.randomUUID();
+            PartitionUpdate update = PartitionUpdate.builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build();
+            payload = new Commit(uuid, update);
+        }
+        else if (verb == Verb.COUNTER_MUTATION_REQ)
+        {
+            Mutation mutation = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
+            payload = new CounterMutation(mutation, null);
         }
         else
-        {
-            boolean fail = false;
-            try
-            {
-                wcbi.mutation();
-            }
-            catch (Throwable t)
-            {
-                fail = true;
-            }
-            Assert.assertTrue(fail);
-        }
+            payload = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
+
+        RequestCallbacks.WriteCallbackInfo wcbi = new RequestCallbacks.WriteCallbackInfo(Message.out(verb, payload), full(InetAddressAndPort.getByName("192.168.1.1")), null, ConsistencyLevel.ALL, allowHints);
+        Assert.assertNotNull(wcbi.iMutation());
     }
 }

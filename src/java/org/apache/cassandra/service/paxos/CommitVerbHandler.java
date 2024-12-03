@@ -25,10 +25,10 @@ import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
-import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.MutatorProvider;
 import org.apache.cassandra.tracing.Tracing;
@@ -40,7 +40,7 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
     public void doVerb(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.update.metadata().keyspace);
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
         Context context = Context.from(message.payload.update.metadata());
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
@@ -54,7 +54,7 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
 
         // no need to calculate outbound internode bytes because the response is NoPayload
-        SensorsCustomParams.addSensorsToResponse(sensors, reply);
+        SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }
 }
