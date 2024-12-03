@@ -75,7 +75,7 @@ public class QueryController
 
     public Collection<RowFilter.Expression> getExpressions()
     {
-        return command.rowFilter().getExpressions();
+        return command.rowFilter().withoutDisjunctions().traversedExpressions();
     }
 
     public DataRange dataRange()

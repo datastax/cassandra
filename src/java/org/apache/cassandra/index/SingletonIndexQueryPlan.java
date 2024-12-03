@@ -45,7 +45,7 @@ public class SingletonIndexQueryPlan implements Index.QueryPlan
     @Nullable
     protected static SingletonIndexQueryPlan create(Index index, RowFilter rowFilter)
     {
-        for (RowFilter.Expression e : rowFilter.getExpressions())
+        for (RowFilter.Expression e : rowFilter.traversedExpressions())
         {
             if (index.supportsExpression(e.column(), e.operator()))
                 return new SingletonIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
