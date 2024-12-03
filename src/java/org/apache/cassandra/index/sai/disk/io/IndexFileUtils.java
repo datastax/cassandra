@@ -150,6 +150,7 @@ public class IndexFileUtils
      */
     static class IncrementalChecksumSequentialWriter extends SequentialWriter implements ChecksumWriter
     {
+        private final Version version;
         /** Protects the checksum so only one Writer can update it */
         private Guard<FileChecksum> checksumGuard;
         /** Current (running) checksum from the beginning of the file till the current position */
@@ -160,10 +161,11 @@ public class IndexFileUtils
         IncrementalChecksumSequentialWriter(File file, SequentialWriterOption writerOption, Version version, boolean append) throws IOException
         {
             super(file, writerOption);
+            this.version = version;
 
             while (checksum == null)
             {
-                checksumGuard = checksumCache.get(file.path(), s -> new Guard<>(new FileChecksum()));
+                checksumGuard = checksumCache.get(file.path(), s -> new Guard<>(new FileChecksum(version)));
                 checksum = checksumGuard.tryLock();
 
                 if (checksum == null)
@@ -249,7 +251,7 @@ public class IndexFileUtils
          */
         public long calculateFooterChecksum() throws IOException
         {
-            CRC32 footerChecksum = new CRC32();
+            Checksum footerChecksum = getChecksumFactory(version).get();
             try (FileChannel ch = StorageProvider.instance.writeTimeReadFileChannelFor(file))
             {
                 ch.position(Math.max(0, file.length() - CodecUtil.footerLength()));
@@ -477,7 +479,12 @@ public class IndexFileUtils
     {
         long fileLength = 0;
         long footerChecksum = 0;
-        final CRC32 fileChecksum = new CRC32();
+        final Checksum fileChecksum;
+
+        public FileChecksum(Version version)
+        {
+            fileChecksum = getChecksumFactory(version).get();
+        }
 
         public void reset()
         {
