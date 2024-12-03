@@ -491,6 +491,21 @@ public class SSTableIndexComponentsState
             return !perSSTableUpdated && perIndexesUpdated.isEmpty() && perIndexesRemoved.isEmpty();
         }
 
+        /**
+         * Whether the operation that created this diff (meaning, the operation(s) that happened on {@link #before}
+         * to create {@link #after}) left some "unused" components, meaning that new components (new version or
+         * generation) were created where previous one existed.
+         */
+        public boolean createsUnusedComponents()
+        {
+            // Removing any components left them "unused".
+            if (!perIndexesRemoved.isEmpty())
+                return true;
+
+            return (perSSTableUpdated && before.perSSTableState != null)
+                || perIndexesUpdated.stream().anyMatch(index -> before.perIndex(index) != null);
+        }
+
         @Override
         public String toString()
         {
