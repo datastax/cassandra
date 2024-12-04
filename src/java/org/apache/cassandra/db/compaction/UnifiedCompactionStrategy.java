@@ -28,7 +28,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -230,7 +229,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public static List<Set<CompactionSSTable>> splitInNonOverlappingSets(List<CompactionSSTable> sstables)
     {
         List<Set<CompactionSSTable>> overlapSets = Overlaps.constructOverlapSets(sstables,
-                                                                                 UnifiedCompactionStrategy::startsAfter,
+                                                                                 CompactionSSTable.startsAfter,
                                                                                  CompactionSSTable.firstKeyComparator,
                                                                                  CompactionSSTable.lastKeyComparator);
         Set<CompactionSSTable> group = overlapSets.get(0);
@@ -281,8 +280,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         // TODO - we should perhaps consider executing this code less frequently than legacy strategies
         // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
 
-        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables. 
-        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction 
+        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables.
+        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction
         // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
         Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
                                                                      .instance
@@ -925,6 +924,61 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return ret;
     }
 
+    /**
+     * Creates a map of maximum overlap, organized as a map from arena:level to the maximum number of sstables that
+     * overlap in that level, as well as a list showing the per-shard maximum overlap.
+     *
+     * The number of shards to list is calculated based on the maximum density of the sstables in the realm.
+     */
+    @Override
+    public Map<String, String> getMaxOverlapsMap()
+    {
+        final Set<? extends CompactionSSTable> liveSSTables = realm.getLiveSSTables();
+        Map<UnifiedCompactionStrategy.Arena, List<UnifiedCompactionStrategy.Level>> arenas =
+                getLevels(liveSSTables, (i1, i2) -> true); // take all sstables
+
+        // find the sstable with the biggest density to define the global shard count
+        ShardManager shardManager = getShardManager();
+        double maxDensity = 0;
+        for (CompactionSSTable liveSSTable : liveSSTables)
+            maxDensity = Math.max(maxDensity, shardManager.density(liveSSTable));
+        int shardCount = controller.getNumShards(maxDensity);
+
+        Map<String, String> map = new LinkedHashMap<>();
+        // max general overlap (max # of sstables per query)
+        map.put("all", getMaxOverlapsPerShardString(liveSSTables, shardManager, shardCount));
+
+        for (var arena : arenas.entrySet())
+        {
+            final String arenaName = arena.getKey().name();
+            for (var level : arena.getValue())
+                map.put(arenaName + ":" + level.getIndex(), getMaxOverlapsPerShardString(level.getSSTables(), shardManager, controller.getNumShards(level.max)));
+        }
+        return map;
+    }
+
+    private static String getMaxOverlapsPerShardString(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, int shardCount)
+    {
+        int[] overlapsMap = getMaxOverlapsPerShard(sstables, shardManager, shardCount);
+        int max = 0;
+        for (int i : overlapsMap)
+            max = Math.max(max, i);
+        return max + ", per shard: " + Arrays.toString(overlapsMap);
+    }
+
+    public static int[] getMaxOverlapsPerShard(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, int shardCount)
+    {
+        int[] overlapsMap = new int[shardCount];
+        shardManager.assignSSTablesToShardIndexes(sstables, null, shardCount,
+                                                  (shardSSTables, shard) ->
+                                                  overlapsMap[shard] = Overlaps.maxOverlap(shardSSTables,
+                                                                                           CompactionSSTable.startsAfter,
+                                                                                           CompactionSSTable.firstKeyComparator,
+                                                                                           CompactionSSTable.lastKeyComparator));
+        // Indexes that do not have sstables are left with 0 overlaps.
+        return overlapsMap;
+    }
+    
     private static int levelOf(CompactionPick pick)
     {
         return (int) pick.parent();
@@ -933,12 +987,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public TableMetadata getMetadata()
     {
         return realm.metadata();
-    }
-
-    private static boolean startsAfter(CompactionSSTable a, CompactionSSTable b)
-    {
-        // Strict comparison because the span is end-inclusive.
-        return a.getFirst().compareTo(b.getLast()) > 0;
     }
 
     /**
@@ -1089,7 +1137,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
             // Note that adjacent overlap sets may include deduplicated sstable
             List<Set<CompactionSSTable>> overlaps = Overlaps.constructOverlapSets(sstables,
-                                                                                  UnifiedCompactionStrategy::startsAfter,
+                                                                                  CompactionSSTable.startsAfter,
                                                                                   CompactionSSTable.firstKeyComparator,
                                                                                   CompactionSSTable.lastKeyComparator);
             for (Set<CompactionSSTable> overlap : overlaps)
