@@ -1977,14 +1977,20 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       group.queries,
                                                                                       consistencyLevel);
         // Request sensors are utilized to track usages from replicas serving a read request
-        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
         Context context = Context.from(group.metadata());
-        requestSensors.registerSensor(context, Type.READ_BYTES);
-        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.MEMORY_BYTES);
+        for (SinglePartitionReadCommand command : group.queries)
+            sensors.incrementSensor(context, Type.MEMORY_BYTES, ReadCommand.serializer.serializedSize(command, MessagingService.current_version));
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+        return PartitionIterators.doOnClose(partitions, () -> {
+            readTracker.onDone();
+            sensors.syncAllSensors();
+        });
     }
 
     /**
@@ -2354,13 +2360,18 @@ public class StorageProxy implements StorageProxyMBean
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.MEMORY_BYTES);
+        sensors.incrementSensor(context, Type.MEMORY_BYTES, ReadCommand.serializer.serializedSize(command, MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+        return PartitionIterators.doOnClose(partitions, () -> {
+            readTracker.onDone();
+            sensors.syncAllSensors();
+        });
     }
 
     public Map<String, List<String>> getSchemaVersions()

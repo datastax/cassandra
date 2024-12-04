@@ -95,6 +95,7 @@ public class ResponseVerbHandler implements IVerbHandler
         {
             ReadCallback<?, ?> readCallback = (ReadCallback<?, ?>) callbackInfo.callback;
             Context context = Context.from(readCallback.command());
+            sensors.incrementSensor(context, Type.MEMORY_BYTES, message.serializedSize(MessagingService.current_version));
             incrementSensor(sensors, context, Type.READ_BYTES, message);
         }
         // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo

@@ -28,5 +28,6 @@ public enum Type
     READ_BYTES,
 
     WRITE_BYTES,
-    INDEX_WRITE_BYTES
+    INDEX_WRITE_BYTES,
+    MEMORY_BYTES
 }
