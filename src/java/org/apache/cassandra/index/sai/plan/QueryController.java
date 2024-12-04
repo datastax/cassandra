@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -80,6 +81,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -478,6 +480,32 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return Operation.Node.buildTree(this, filterOperation()).analyzeTree(this).filterTree();
     }
 
+    private Plan.KeysIteration buildHalfRange(Expression originPredicate, Operator op)
+    {
+        assert originPredicate.lower.value == originPredicate.upper.value;
+
+        Expression halfRange = new Expression(originPredicate.context);
+        halfRange.add(op, originPredicate.lower.value.raw);
+        long matchingRowCount = Math.min(estimateMatchingRowCount(halfRange), planFactory.tableMetrics.rows);
+        return planFactory.indexScan(halfRange, matchingRowCount);
+    }
+
+    private Plan.KeysIteration buildInequalityPlan(Expression predicate)
+    {
+        assert predicate.getOp()== Expression.Op.NOT_EQ
+               || predicate.getOp() == Expression.Op.NOT_CONTAINS_KEY :
+        "Only inequality predicate is expected";
+
+        if (TypeUtil.supportsRounding(predicate.validator))
+            return planFactory.fullIndexScan(predicate.context);
+        else
+        {
+            Plan.KeysIteration left = buildHalfRange(predicate, Operator.LT);
+            Plan.KeysIteration right = buildHalfRange(predicate, Operator.GT);
+            return planFactory.union(new ArrayList<>(Arrays.asList(left, right)));
+        }
+    }
+
     /**
      * Build a {@link Plan} from the given list of expressions by applying given operation (OR/AND).
      * Building of such builder involves index search, results of which are persisted in the internal resources list
@@ -504,8 +532,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             if (expression.context.isIndexed())
             {
-                long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
-                builder.add(planFactory.indexScan(expression, expectedMatchingRowCount));
+                if ( expression.getOp() == Expression.Op.NOT_EQ
+                     || expression.getOp() == Expression.Op.NOT_CONTAINS_KEY)
+                    builder.add(buildInequalityPlan(expression));
+                else
+                {
+                    long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
+                    builder.add(planFactory.indexScan(expression, expectedMatchingRowCount));
+                }
             }
         }
     }
