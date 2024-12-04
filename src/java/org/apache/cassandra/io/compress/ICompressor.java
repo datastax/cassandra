@@ -83,4 +83,18 @@ public interface ICompressor
     {
         return ImmutableSet.copyOf(EnumSet.allOf(Uses.class));
     }
+
+    /**
+     * Returns the compressor configured for a particular use.
+     * Allows creating a compressor implementation that can handle multiple uses but requires different configurations
+     * adapted to a particular use.
+     * <p>
+     * May return this object.
+     * May not modify this object.
+     * Should return null if the request cannot be satisfied.
+     */
+    default ICompressor forUse(Uses use)
+    {
+        return recommendedUses().contains(use) ? this : null;
+    }
 }
