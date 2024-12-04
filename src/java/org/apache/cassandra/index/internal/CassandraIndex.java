@@ -281,11 +281,13 @@ public abstract class CassandraIndex implements Index
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
-        return getTargetExpression(filter).map(filter::without).orElse(filter);
+        // This index doesn't support disjunctions, so if the query has any, we simply apply the entire filter.
+        return filter.containsDisjunctions() ? filter : getTargetExpression(filter).map(filter::without).orElse(filter);
     }
 
     private Optional<RowFilter.Expression> getTargetExpression(RowFilter rowFilter)
     {
+        // This index doesn't support disjunctions, so we only consider the top-level AND expressions.
         for (RowFilter.Expression expression : rowFilter.withoutDisjunctions().traversedExpressions())
         {
             if (supportsExpression(expression))
