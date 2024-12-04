@@ -530,7 +530,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         // Build encoder and compress vectors
         VectorCompressor<?> compressor; // will be null if we can't compress
-        CompressedVectors cv = null; // byte[][], or long[][]
+        CompressedVectors cv = null;
         boolean containsUnitVectors;
         // limit the PQ computation and encoding to one index at a time -- goal during flush is to
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
