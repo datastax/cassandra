@@ -57,9 +57,6 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.LEGACY;
-import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
-import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS50;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -89,12 +86,10 @@ public class RowIndexTest
     @Parameterized.Parameters()
     public static Collection<Object[]> generateData()
     {
-        return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard, OSS50 },
-                             new Object[]{ Config.DiskAccessMode.mmap, OSS50 },
-                             new Object[]{ Config.DiskAccessMode.standard, OSS41 },
-                             new Object[]{ Config.DiskAccessMode.mmap, OSS41 },
-                             new Object[]{ Config.DiskAccessMode.standard, LEGACY },
-                             new Object[]{ Config.DiskAccessMode.mmap, LEGACY });
+        return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard, latestVersion },
+                             new Object[]{ Config.DiskAccessMode.mmap, latestVersion },
+                             new Object[]{ Config.DiskAccessMode.standard, legacyVersion },
+                             new Object[]{ Config.DiskAccessMode.mmap, legacyVersion });
     }
 
     @Parameterized.Parameter(value = 0)
