@@ -102,6 +102,14 @@ public class RowFilter
     }
 
     /**
+     * @return {@code true} if this filter contains any disjunction, {@code false} otherwise.
+     */
+    public boolean containsDisjunctions()
+    {
+        return root.containsDisjunctions();
+    }
+
+    /**
      * Checks if some of the expressions apply to clustering or regular columns.
      * @return {@code true} if some of the expressions apply to clustering or regular columns, {@code false} otherwise.
      */
@@ -268,7 +276,7 @@ public class RowFilter
     }
 
     /**
-     * @return this filter but pruning all the branches of its expression tree that have a disjunction on top.
+     * @return this filter pruning all its disjunction branches
      */
     public RowFilter withoutDisjunctions()
     {
@@ -505,6 +513,18 @@ public class RowFilter
         public boolean isDisjunction()
         {
             return isDisjunction;
+        }
+
+        private boolean containsDisjunctions()
+        {
+            if (isDisjunction)
+                return true;
+
+            for (FilterElement child : children)
+                if (child.containsDisjunctions())
+                    return true;
+
+            return false;
         }
 
         public List<Expression> expressions()
