@@ -18,6 +18,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -201,4 +202,10 @@ public interface CompactionStrategy extends CompactionObserver
     }
 
     void periodicReport();
+
+    /**
+     * Returns a map of sstable regions (e.g. repaired, unrepaired, possibly combined with level information) to the
+     * maximum overlap between the sstables in the region.
+     */
+    Map<String, String> getMaxOverlapsMap();
 }

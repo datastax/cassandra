@@ -1976,6 +1976,10 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 }
             }
         }
+
+        Mockito.when(controller.getNumShards(anyDouble())).thenReturn(16);  // co-prime with counts to ensure multiple sstables fall in each shard
+        System.out.println(strategy.getMaxOverlapsMap());
+
         dataTracker.removeUnsafe(allSSTables);
     }
 

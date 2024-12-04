@@ -1659,6 +1659,7 @@ public class NodeProbe implements AutoCloseable
                 case "PendingTasksByTableName":
                 case "WriteAmplificationByTableName":
                 case "AggregateCompactions":
+                case "MaxOverlapsMap":
                     return JMX.newMBeanProxy(mbeanServerConn,
                             new ObjectName("org.apache.cassandra.metrics:type=Compaction,name=" + metricName),
                             CassandraMetricsRegistry.JmxGaugeMBean.class).getValue();

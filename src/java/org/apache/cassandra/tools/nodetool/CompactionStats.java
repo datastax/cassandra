@@ -49,6 +49,11 @@ public class CompactionStats extends NodeToolCmd
     description = "Show the compaction aggregates for the compactions in progress, e.g. the levels for LCS or the buckets for STCS and TWCS.")
     private boolean aggregate = false;
 
+    @Option(title = "overlap",
+    name = {"-O", "--overlap"},
+    description = "Show a map of the maximum sstable overlap per compaction region.")
+    private boolean overlap = false;
+
     @Override
     public void execute(NodeProbe probe)
     {
@@ -94,6 +99,9 @@ public class CompactionStats extends NodeToolCmd
         {
             reportAggregateCompactions(probe);
         }
+
+        if (overlap)
+            reportOverlap((Map<String, Map<String, Map<String, String>>>) probe.getCompactionMetric("MaxOverlapsMap"));
     }
 
     public static void reportCompactionTable(List<Map<String,String>> compactions, int compactionThroughput, boolean humanReadable, PrintStream out)
@@ -141,5 +149,25 @@ public class CompactionStats extends NodeToolCmd
         System.out.println("Aggregated view:");
         for (CompactionStrategyStatistics stat : statistics)
             System.out.println(stat.toString());
+    }
+
+    private static void reportOverlap(Map<String, Map<String, Map<String, String>>> maxOverlap)
+    {
+        if (maxOverlap == null)
+            System.out.println("Overlap map is not available.");
+
+        for (Map.Entry<String, Map<String, Map<String, String>>> ksEntry : maxOverlap.entrySet())
+        {
+            String ksName = ksEntry.getKey();
+            for (Map.Entry<String, Map<String, String>> tableEntry : ksEntry.getValue().entrySet())
+            {
+                String tableName = tableEntry.getKey();
+                System.out.println("Max overlap map for " + ksName + "." + tableName + ":");
+                for (Map.Entry<String, String> compactionEntry : tableEntry.getValue().entrySet())
+                {
+                    System.out.println("  " + compactionEntry.getKey() + ": " + compactionEntry.getValue());
+                }
+            }
+        }
     }
 }
