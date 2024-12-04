@@ -101,6 +101,8 @@ public class CompactionMetrics
     /** Total number compactions that consisted of only expired SSTables */
     public final Meter deleteOnlyCompactions;
 
+    public final Gauge<Map<String, Map<String, Map<String, String>>>> overlapsMap;
+
     public CompactionMetrics(final ThreadPoolExecutor... collectors)
     {
         pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), () -> {
@@ -219,6 +221,26 @@ public class CompactionMetrics
                                                         return ret;
                                                     }
                                                 });
+
+        overlapsMap = Metrics.register(factory.createMetricName("MaxOverlapsMap"),
+                                    new CachedGauge<Map<String, Map<String, Map<String, String>>>>(50, TimeUnit.MILLISECONDS)
+                                    {
+                                        public Map<String, Map<String, Map<String, String>>> loadValue()
+                                        {
+                                            Map<String, Map<String, Map<String, String>>> ret = new HashMap<>();
+                                            for (String keyspaceName : Schema.instance.getKeyspaces())
+                                            {
+                                                Map<String, Map<String, String>> ksMap = new HashMap<>();
+                                                ret.put(keyspaceName, ksMap);
+                                                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                                                {
+                                                    Map<String, String> overlaps = cfs.getCompactionStrategy().getMaxOverlapsMap();
+                                                    ksMap.put(cfs.getTableName(), overlaps);
+                                                }
+                                            }
+                                            return ret;
+                                        }
+                                    });
 
         runningCompactions = Metrics.register(factory.createMetricName("RunningCompactions"),
                                               new DerivativeGauge<List<CompactionStrategyStatistics>, Integer>(aggregateCompactions)
