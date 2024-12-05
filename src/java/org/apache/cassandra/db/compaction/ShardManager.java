@@ -18,8 +18,12 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
@@ -28,6 +32,8 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.SortingIterator;
 
 public interface ShardManager
 {
@@ -136,6 +142,11 @@ public interface ShardManager
             span = rangeSpanned(rdr.getFirst(), rdr.getLast());
 
         long partitionCount = rdr.estimatedKeys();
+        return adjustSmallSpans(span, partitionCount);
+    }
+
+    private double adjustSmallSpans(double span, long partitionCount)
+    {
         if (partitionCount >= PER_PARTITION_SPAN_THRESHOLD && span >= MINIMUM_TOKEN_COVERAGE)
             return span;
 
@@ -143,7 +154,7 @@ public interface ShardManager
         // or falling outside the local token ranges. In these cases we apply a per-partition minimum calculated from
         // the number of partitions in the table.
         double perPartitionMinimum = Math.min(partitionCount * minimumPerPartitionSpan(), 1.0);
-        return span > perPartitionMinimum ? span : perPartitionMinimum; // The latter will be chosen if span is NaN too.
+        return span > perPartitionMinimum ? span : perPartitionMinimum;
     }
 
     default double rangeSpanned(PartitionPosition first, PartitionPosition last)
@@ -171,7 +182,7 @@ public interface ShardManager
     /**
      * Estimate the density of the sstable that will be the result of compacting the given sources.
      */
-    default double calculateCombinedDensity(Set<? extends CompactionSSTable> sstables)
+    default double calculateCombinedDensity(Collection<? extends CompactionSSTable> sstables, long approximatePartitionCount)
     {
         if (sstables.isEmpty())
             return 0;
@@ -184,10 +195,129 @@ public interface ShardManager
             min = min == null || min.compareTo(sstable.getFirst()) > 0 ? sstable.getFirst() : min;
             max = max == null || max.compareTo(sstable.getLast()) < 0 ? sstable.getLast() : max;
         }
+        return density(onDiskLength, min, max, approximatePartitionCount);
+    }
+
+    default double density(long onDiskLength, PartitionPosition min, PartitionPosition max, long approximatePartitionCount)
+    {
         double span = rangeSpanned(min, max);
-        if (span >= MINIMUM_TOKEN_COVERAGE)
-            return onDiskLength / span;
-        else
-            return onDiskLength;
+        return onDiskLength / adjustSmallSpans(span, approximatePartitionCount);
+    }
+
+    /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+    /// the given function on the combination of each shard range and the intersecting sstable set.
+    default <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
+                                                                           int numShardsForDensity,
+                                                                           BiFunction<? super Set<R>, Range<Token>, T> maker)
+    {
+        var boundaries = boundaries(numShardsForDensity);
+        List<T> tasks = new ArrayList<>();
+        SortingIterator<R> firsts = SortingIterator.create(CompactionSSTable.firstKeyComparator, sstables);
+        SortingIterator<R> lasts = SortingIterator.create(CompactionSSTable.lastKeyComparator, sstables);
+        Set<R> current = new HashSet<>(sstables.size());
+        while (lasts.hasNext())
+        {
+            if (current.isEmpty())
+            {
+                boundaries.advanceTo(firsts.peek().getFirst().getToken());
+                current.add(firsts.next());
+            }
+            Token shardEnd = boundaries.shardEnd();
+
+            while (firsts.hasNext() && (shardEnd == null || firsts.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
+                current.add(firsts.next());
+
+            final T result = maker.apply(current, boundaries.shardSpan());
+            if (result != null)
+                tasks.add(result);
+
+            while (lasts.hasNext() && (shardEnd == null || lasts.peek().getLast().getToken().compareTo(shardEnd) <= 0))
+                current.remove(lasts.next());
+
+            if (!current.isEmpty()) // shardEnd must be non-null (otherwise the line above exhausts all)
+                boundaries.advanceTo(shardEnd.nextValidToken());
+        }
+        return tasks;
+    }
+
+    /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+    /// the given function on the combination of each shard range and the intersecting sstable set.
+    ///
+    /// This version accepts a parallelism limit and will group shards together to fit within that limit.
+    default <T, R extends CompactionSSTable> List<T> splitSSTablesInShardsLimited(Collection<R> sstables,
+                                                                                  int numShardsForDensity,
+                                                                                  int coveredShards,
+                                                                                  int maxParallelism,
+                                                                                  BiFunction<? super Set<R>, Range<Token>, T> maker)
+    {
+        if (coveredShards <= maxParallelism)
+            return splitSSTablesInShards(sstables, numShardsForDensity, maker);
+        // We may be in a simple case where we can reduce the number of shards by some power of 2.
+        int multiple = Integer.highestOneBit(coveredShards / maxParallelism);
+        if (maxParallelism * multiple == coveredShards)
+            return splitSSTablesInShards(sstables, numShardsForDensity / multiple, maker);
+
+        var shards = splitSSTablesInShards(sstables,
+                                           numShardsForDensity,
+                                           (rangeSSTables, range) -> Pair.create(Set.copyOf(rangeSSTables), range));
+        int actualParallelism = shards.size();
+        if (maxParallelism >= actualParallelism)
+        {
+            // We can fit within the parallelism limit without grouping, because some ranges are empty.
+            // This is not expected to happen often, but if it does, take advantage.
+            List<T> tasks = new ArrayList<>();
+            for (Pair<Set<R>, Range<Token>> pair : shards)
+                tasks.add(maker.apply(pair.left, pair.right));
+            return tasks;
+        }
+
+        // Otherwise we have to group shards together. Define a target token span per task and greedily group
+        // to be as close to it as possible.
+        double spanPerTask = shards.stream().map(Pair::right).mapToDouble(t -> t.left.size(t.right)).sum() / maxParallelism;
+        double currentSpan = 0;
+        Set<R> currentSSTables = new HashSet<>();
+        Token rangeStart = null;
+        Token prevEnd = null;
+        List<T> tasks = new ArrayList<>(maxParallelism);
+        for (var pair : shards)
+        {
+            final Token currentEnd = pair.right.right;
+            final Token currentStart = pair.right.left;
+            double span = currentStart.size(currentEnd);
+            if (rangeStart == null)
+                rangeStart = currentStart;
+            if (currentSpan + span >= spanPerTask - 0.001) // rounding error safety
+            {
+                boolean includeCurrent = currentSpan + span - spanPerTask <= spanPerTask - currentSpan;
+                if (includeCurrent)
+                    currentSSTables.addAll(pair.left);
+                tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, includeCurrent ? currentEnd : prevEnd)));
+                currentSpan -= spanPerTask;
+                rangeStart = null;
+                currentSSTables.clear();
+                if (!includeCurrent)
+                {
+                    currentSSTables.addAll(pair.left);
+                    rangeStart = currentStart;
+                }
+            }
+            else
+                currentSSTables.addAll(pair.left);
+
+            currentSpan += span;
+            prevEnd = currentEnd;
+        }
+        assert currentSSTables.isEmpty();
+        return tasks;
+    }
+
+    default int coveredShardCount(PartitionPosition first, PartitionPosition last, int numShardsForDensity)
+    {
+        var boundaries = boundaries(numShardsForDensity);
+        boundaries.advanceTo(first.getToken());
+        int firstShard = boundaries.shardIndex();
+        boundaries.advanceTo(last.getToken());
+        int lastShard = boundaries.shardIndex();
+        return lastShard - firstShard + 1;
     }
 }

@@ -345,9 +345,12 @@ public class BackgroundCompactionRunner implements Runnable
         if (!compactionTasks.isEmpty())
         {
             logger.debug("Running compaction tasks: {}", compactionTasks);
-            return compactionTasks.stream()
-                                  .map(task -> startTask(cfs, task))
-                                  .toArray(CompletableFuture<?>[]::new);
+            CompletableFuture<Void>[] arr = new CompletableFuture[compactionTasks.size()];
+            int index = 0;
+            for (AbstractCompactionTask task : compactionTasks)
+                arr[index++] = startTask(cfs, task);
+
+            return arr;
         }
         else
         {
@@ -381,8 +384,9 @@ public class BackgroundCompactionRunner implements Runnable
         catch (RejectedExecutionException ex)
         {
             ongoingCompactions.decrementAndGet();
-            logger.debug("Background compaction task for {} was rejected", cfs);
-            return CompletableFuture.completedFuture(null);
+            logger.debug("Background compaction task for {} was rejected", cfs, ex);
+            Throwable t = task.rejected(ex);
+            return CompletableFuture.failedFuture(t);
         }
     }
 

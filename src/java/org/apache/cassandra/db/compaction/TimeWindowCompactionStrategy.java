@@ -106,9 +106,7 @@ public class TimeWindowCompactionStrategy extends LegacyAbstractCompactionStrate
             logger.debug("TWCS expired check sufficiently far in the past, checking for fully expired SSTables");
             expired = CompactionController.getFullyExpiredSSTables(realm,
                                                                    noncompacting,
-                                                                   twcsOptions.ignoreOverlaps
-                                                                       ? Collections.emptySet()
-                                                                       : realm.getOverlappingLiveSSTables(noncompacting),
+                                                                   realm::getOverlappingLiveSSTables,
                                                                    gcBefore,
                                                                    twcsOptions.ignoreOverlaps);
             lastExpiredCheck = System.currentTimeMillis();

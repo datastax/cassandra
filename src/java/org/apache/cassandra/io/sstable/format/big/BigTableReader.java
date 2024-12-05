@@ -117,42 +117,6 @@ public class BigTableReader extends SSTableReader
         return BigTableScanner.getScanner(this, columns, dataRange, listener);
     }
 
-    /**
-     * Direct I/O SSTableScanner over an iterator of bounds.
-     *
-     * @param boundsIterator the keys to cover
-     * @return A Scanner for seeking over the rows of the SSTable.
-     */
-    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> boundsIterator)
-    {
-        return BigTableScanner.getScanner(this, boundsIterator);
-    }
-
-    /**
-     * Direct I/O SSTableScanner over the full sstable.
-     *
-     * @return A Scanner for reading the full SSTable.
-     */
-    public ISSTableScanner getScanner()
-    {
-        return BigTableScanner.getScanner(this);
-    }
-
-    /**
-     * Direct I/O SSTableScanner over a defined collection of ranges of tokens.
-     *
-     * @param ranges the range of keys to cover
-     * @return A Scanner for seeking over the rows of the SSTable.
-     */
-    public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
-    {
-        if (ranges != null)
-            return BigTableScanner.getScanner(this, ranges);
-        else
-            return getScanner();
-    }
-
-
     @SuppressWarnings("resource") // caller to close
     @Override
     public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
