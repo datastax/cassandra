@@ -38,7 +38,10 @@ public interface IndexComponent
 
     String fileNamePart();
     Component asCustomComponent();
+
     File file();
+
+    File compressionMetaFile();
 
     default boolean isCompletionMarker()
     {
