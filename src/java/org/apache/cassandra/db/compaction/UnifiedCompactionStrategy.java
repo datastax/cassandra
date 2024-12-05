@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -28,7 +29,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -873,14 +873,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         for (Arena arena : arenas)
         {
             List<Level> levels = new ArrayList<>(MAX_LEVELS);
-            arena.sstables.sort(currentShardManager::compareByDensity);
+            // Use a cache to avoid recomputing the density of the same sstable multiple times
+            Map<CompactionSSTable, Double> sstableDensityCache = new HashMap<>();
+
+            // Sort the list in place based on the expensive key
+            arena.sstables.sort(Comparator.comparing(sstable -> sstableDensityCache.computeIfAbsent(sstable, currentShardManager::density)));
 
             double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / currentShardManager.localSpaceCoverage());
             int index = 0;
             Level level = new Level(controller, index, 0, maxSize);
             for (CompactionSSTable candidate : arena.sstables)
             {
-                final double size = currentShardManager.density(candidate);
+                final double size = sstableDensityCache.computeIfAbsent(candidate, currentShardManager::density);
                 if (size < level.max)
                 {
                     level.add(candidate);
