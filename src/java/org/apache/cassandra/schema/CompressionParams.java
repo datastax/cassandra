@@ -20,7 +20,6 @@ package org.apache.cassandra.schema;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -252,6 +251,14 @@ public final class CompressionParams
     }
 
     public CompressionParams copy()
+    {
+        return new CompressionParams(sstableCompressor, chunkLength, maxCompressedLength, minCompressRatio, otherOptions);
+    }
+
+    /**
+     * Returns a copy of CompressionParams with a modified chunk length
+     */
+    public CompressionParams withChunkLength(int chunkLength)
     {
         return new CompressionParams(sstableCompressor, chunkLength, maxCompressedLength, minCompressRatio, otherOptions);
     }

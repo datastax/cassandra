@@ -29,6 +29,7 @@ import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
@@ -161,7 +162,12 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         Map<String, String> options = attrs.isCustom ? attrs.getOptions() : Collections.emptyMap();
 
-        IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options);
+        Map<String, String> compressionOptions = attrs.getMap("compression");
+        CompressionParams compression = compressionOptions != null
+                                        ? CompressionParams.fromMap(compressionOptions)
+                                        : CompressionParams.noCompression();
+
+        IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options, compression);
 
         String className = index.getIndexClassName();
         IndexGuardrails guardRails = IndexGuardrails.forClassName(className);
