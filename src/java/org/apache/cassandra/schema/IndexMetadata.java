@@ -84,11 +84,11 @@ public final class IndexMetadata
     public final UUID id;
     public final String name;
     public final Kind kind;
+
+    /** Other index-specific options */
     public final Map<String, String> options;
 
-    private IndexMetadata(String name,
-                          Map<String, String> options,
-                          Kind kind)
+    private IndexMetadata(String name, Map<String, String> options, Kind kind)
     {
         this.id = UUID.nameUUIDFromBytes(name.getBytes());
         this.name = name;
@@ -322,11 +322,8 @@ public final class IndexMetadata
                    .append(" (")
                    .append(copyOptions.remove(IndexTarget.TARGET_OPTION_NAME))
                    .append(") USING ")
-                   .appendWithSingleQuotes(copyOptions.remove(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
-
-            if (!copyOptions.isEmpty())
-                builder.append(" WITH OPTIONS = ")
-                       .append(copyOptions);
+                   .appendWithSingleQuotes(copyOptions.remove(IndexTarget.CUSTOM_INDEX_OPTION_NAME))
+                   .appendOptions(b -> b.append("options", copyOptions));
         }
         else
         {
