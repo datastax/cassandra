@@ -121,7 +121,7 @@ public class SAICodecUtils
         validateFooter(in, false);
         long actualChecksum = in.getChecksum();
         long expectedChecksum = readCRC(in);
-        if (expectedChecksum != actualChecksum)
+        if (expectedChecksum != -1 && expectedChecksum != actualChecksum)
         {
             throw new CorruptIndexException("checksum failed (hardware problem?) : expected=" + Long.toHexString(expectedChecksum) +
                                             " actual=" + Long.toHexString(actualChecksum), in);
@@ -172,6 +172,11 @@ public class SAICodecUtils
     {
         long position = input.getFilePointer();
         long expected = CodecUtil.retrieveChecksum(input);
+
+        // -1 checksum means the original file hasn't been checksummed
+        // this is possible if the file has been e.g. compressed and has its own internal checksum validation
+        if (expected == -1)
+            return;
 
         input.seek(position);
         long actual = CodecUtil.checksumEntireFile(input);
@@ -226,6 +231,7 @@ public class SAICodecUtils
 
     /**
      * Reads CRC32 value as a 64-bit long from the input.
+     * Can return -1 if CRC was not computed when creating the file.
      *
      * @throws CorruptIndexException if CRC is formatted incorrectly (wrong bits set)
      * @throws IOException if an i/o error occurs
@@ -233,7 +239,7 @@ public class SAICodecUtils
     static long readCRC(IndexInput input) throws IOException
     {
         long value = readBELong(input);
-        if ((value & 0xFFFFFFFF00000000L) != 0)
+        if (value != -1 && (value & 0xFFFFFFFF00000000L) != 0)
         {
             throw new CorruptIndexException("Illegal CRC-32 checksum: " + value, input);
         }
@@ -249,7 +255,7 @@ public class SAICodecUtils
     static void writeCRC(IndexOutput output) throws IOException
     {
         long value = output.getChecksum();
-        if ((value & 0xFFFFFFFF00000000L) != 0)
+        if (value != -1 && (value & 0xFFFFFFFF00000000L) != 0)
         {
             throw new IllegalStateException(
             "Illegal CRC-32 checksum: " + value + " (resource=" + output + ")");

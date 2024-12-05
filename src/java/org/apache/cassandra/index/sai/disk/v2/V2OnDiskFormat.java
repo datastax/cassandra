@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.CompressionParams;
 
 /**
  * Updates SAI OnDiskFormat to include full PK -> offset mapping, and adds vector components.
@@ -122,9 +123,9 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
+    public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor, CompressionParams compression) throws IOException
     {
-        return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
+        return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite(), compression);
     }
 
     @Override

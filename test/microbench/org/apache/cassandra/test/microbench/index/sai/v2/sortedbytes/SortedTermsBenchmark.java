@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsReader;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.test.microbench.index.sai.v1.AbstractOnDiskBenchmark;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -122,7 +123,8 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
              SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                               metadataWriter,
                                                               blockFPWriter,
-                                                              components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
+                                                              components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE),
+                                                              CompressionParams.noCompression()))
         {
             for (int x = 0; x < NUM_ROWS; x++)
             {
