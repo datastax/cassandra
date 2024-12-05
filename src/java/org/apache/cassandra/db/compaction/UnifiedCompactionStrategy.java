@@ -940,33 +940,35 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Map<UnifiedCompactionStrategy.Arena, List<UnifiedCompactionStrategy.Level>> arenas =
                 getLevels(liveSSTables, (i1, i2) -> true); // take all sstables
 
-        // find the sstable with the biggest density to define the global shard count
         ShardManager shardManager = getShardManager();
-        double maxDensity = 0;
-        for (CompactionSSTable liveSSTable : liveSSTables)
-            maxDensity = Math.max(maxDensity, shardManager.density(liveSSTable));
-        int shardCount = controller.getNumShards(maxDensity);
-
         Map<String, String> map = new LinkedHashMap<>();
+
         // max general overlap (max # of sstables per query)
-        map.put("all", getMaxOverlapsPerShardString(liveSSTables, shardManager, shardCount));
+        map.put("all", getMaxOverlapsPerShardString(liveSSTables, shardManager));
 
         for (var arena : arenas.entrySet())
         {
             final String arenaName = arena.getKey().name();
             for (var level : arena.getValue())
-                map.put(arenaName + ":" + level.getIndex(), getMaxOverlapsPerShardString(level.getSSTables(), shardManager, controller.getNumShards(level.max)));
+                map.put(arenaName + "-L" + level.getIndex(), getMaxOverlapsPerShardString(level.getSSTables(), shardManager));
         }
         return map;
     }
 
-    private static String getMaxOverlapsPerShardString(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, int shardCount)
+    private String getMaxOverlapsPerShardString(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager)
     {
+        // Find the sstable with the biggest density to define the shard count.
+        // This is better than using a level's max bound as that will show more shards than there actually are.
+        double maxDensity = 0;
+        for (CompactionSSTable liveSSTable : sstables)
+            maxDensity = Math.max(maxDensity, shardManager.density(liveSSTable));
+        int shardCount = controller.getNumShards(maxDensity);
+
         int[] overlapsMap = getMaxOverlapsPerShard(sstables, shardManager, shardCount);
         int max = 0;
         for (int i : overlapsMap)
             max = Math.max(max, i);
-        return max + ", per shard: " + Arrays.toString(overlapsMap);
+        return max + " (per shard: " + Arrays.toString(overlapsMap) + ")";
     }
 
     public static int[] getMaxOverlapsPerShard(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, int shardCount)
