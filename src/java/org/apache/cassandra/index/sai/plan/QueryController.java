@@ -532,8 +532,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             if (expression.context.isIndexed())
             {
-                if ( expression.getOp() == Expression.Op.NOT_EQ
-                     || expression.getOp() == Expression.Op.NOT_CONTAINS_KEY)
+                if ( expression.getOp() == Expression.Op.NOT_EQ)
                     builder.add(buildInequalityPlan(expression));
                 else
                 {
