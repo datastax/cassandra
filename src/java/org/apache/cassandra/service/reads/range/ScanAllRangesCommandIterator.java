@@ -36,6 +36,7 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.reads.DataResolver;
 import org.apache.cassandra.service.reads.ReadCallback;
@@ -96,6 +97,7 @@ public class ScanAllRangesCommandIterator extends RangeCommandIterator
             Tracing.trace("Enqueuing request to {}", endpoint);
             Message<ReadCommand> message = command.createMessage(false);
             MessagingService.instance().sendWithCallback(message, endpoint, handler);
+            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.serializedSize(MessagingService.current_version));
             nodes++;
         }
 
