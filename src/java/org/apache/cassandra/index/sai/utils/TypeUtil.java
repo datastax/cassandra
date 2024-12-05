@@ -76,7 +76,7 @@ public class TypeUtil
      * Byte comparable version currently used for all SAI files and structures, with the exception of terms data in
      * the early AA on-disk format.
      */
-    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS50;
+    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
 
     private TypeUtil() {}
 
