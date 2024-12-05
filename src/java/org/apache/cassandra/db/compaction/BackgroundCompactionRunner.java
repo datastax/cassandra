@@ -385,8 +385,8 @@ public class BackgroundCompactionRunner implements Runnable
         {
             ongoingCompactions.decrementAndGet();
             logger.debug("Background compaction task for {} was rejected", cfs, ex);
-            Throwable t = task.rejected(null);
-            return t == null ? CompletableFuture.completedFuture(null) : CompletableFuture.failedFuture(t);
+            Throwable t = task.rejected(ex);
+            return CompletableFuture.failedFuture(t);
         }
     }
 
