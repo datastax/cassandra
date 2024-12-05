@@ -37,6 +37,7 @@ import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.CassandraIndex;
@@ -79,21 +80,30 @@ public final class IndexMetadata
     public final UUID id;
     public final String name;
     public final Kind kind;
+
+    public final CompressionParams compression;
     public final Map<String, String> options;
 
     private IndexMetadata(String name,
                           Map<String, String> options,
-                          Kind kind)
+                          Kind kind,
+                          CompressionParams compression)
     {
         this.id = UUID.nameUUIDFromBytes(name.getBytes());
         this.name = name;
         this.options = options == null ? ImmutableMap.of() : ImmutableMap.copyOf(options);
         this.kind = kind;
+        this.compression = compression;
     }
 
     public static IndexMetadata fromSchemaMetadata(String name, Kind kind, Map<String, String> options)
     {
-        return new IndexMetadata(name, options, kind);
+        return new IndexMetadata(name, options, kind, CompressionParams.NOOP);
+    }
+
+    public static IndexMetadata fromSchemaMetadata(String name, Kind kind, Map<String, String> options, CompressionParams compression)
+    {
+        return new IndexMetadata(name, options, kind, compression);
     }
 
     public static IndexMetadata fromIndexTargets(List<IndexTarget> targets,
@@ -101,11 +111,20 @@ public final class IndexMetadata
                                                  Kind kind,
                                                  Map<String, String> options)
     {
+        return fromIndexTargets(targets, name, kind, options, CompressionParams.noCompression());
+    }
+
+    public static IndexMetadata fromIndexTargets(List<IndexTarget> targets,
+                                                 String name,
+                                                 Kind kind,
+                                                 Map<String, String> options,
+                                                 CompressionParams compression)
+    {
         Map<String, String> newOptions = new HashMap<>(options);
         newOptions.put(IndexTarget.TARGET_OPTION_NAME, targets.stream()
                                                               .map(target -> target.asCqlString())
                                                               .collect(Collectors.joining(", ")));
-        return new IndexMetadata(name, newOptions, kind);
+        return new IndexMetadata(name, newOptions, kind, compression);
     }
 
     public static boolean isNameValid(String name)
@@ -289,9 +308,10 @@ public final class IndexMetadata
                    .append(") USING ")
                    .appendWithSingleQuotes(copyOptions.remove(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
 
-            if (!copyOptions.isEmpty())
-                builder.append(" WITH OPTIONS = ")
-                       .append(copyOptions);
+            builder.append(" WITH compression = ")
+                   .append(compression.asMap())
+                   .append(" AND options = ")
+                   .append(copyOptions);
         }
         else
         {
