@@ -30,7 +30,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class PrimaryKeyWithSource implements PrimaryKey
 {
     private final PrimaryKey primaryKey;
-    private final Object source;
+    private final SSTableId<?> source;
     private final long sourceRowId;
     private final long ssTableMinTimestamp;
     private final long ssTableMaxTimestamp;
@@ -39,7 +39,9 @@ public class PrimaryKeyWithSource implements PrimaryKey
     {
         assert primaryKey != null : "Cannot construct a PrimaryKeyWithSource with a null primaryKey";
         this.primaryKey = primaryKey;
-        this.source = memtable;
+        // We don't need to store the source for memtables because their lookups are generally cheap.
+        // We use the memtable to get the min timestamp for the relevant min timestamp.
+        this.source = null;
         this.sourceRowId = -1; // memtables don't have row ids
         this.ssTableMinTimestamp = memtable.getMinTimestamp();
         this.ssTableMaxTimestamp = Long.MAX_VALUE; // memtables don't have max timestamps
@@ -63,7 +65,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
 
     public boolean matchesSource(SSTableId<?> sstableId)
     {
-        return source.equals(sstableId);
+        return sstableId.equals(source);
     }
 
     public boolean isInTimestampWindow(long minTimestamp, long maxTimestamp)
@@ -116,7 +118,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public int compareTo(PrimaryKey o)
     {
-        if (o instanceof PrimaryKeyWithSource)
+        if (source != null && o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;
             if (source.equals(other.source))
@@ -128,7 +130,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public boolean equals(Object o)
     {
-        if (o instanceof PrimaryKeyWithSource)
+        if (source != null && o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;
             if (source.equals(other.source))
