@@ -408,8 +408,11 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    @VisibleForTesting
-    ShardManager getShardManager()
+    /**
+     * Get the current shard manager.
+     * Used internally, in tests and by CNDB.
+     */
+    public ShardManager getShardManager()
     {
         maybeUpdateSelector();
         return shardManager;
