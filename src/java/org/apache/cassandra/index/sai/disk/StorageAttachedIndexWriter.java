@@ -36,6 +36,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -44,6 +45,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.Throwables;
@@ -107,11 +109,14 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                                       .filter(Objects::nonNull) // a null here means the column had no data to flush
                                       .collect(Collectors.toList());
 
+        CompressionParams keyCompression = StorageAttachedIndex.getCompressionOptionUnchecked(indices.iterator().next().getIndexMetadata().options,
+                                                                                              IndexContext.KEY_COMPRESSION_OPTION_NAME);
+
         // If the SSTable components are already being built by another index build then we don't want
         // to build them again so use a NO-OP writer
         this.perSSTableWriter = perIndexComponentsOnly
                                 ? PerSSTableWriter.NONE
-                                : onDiskFormat.newPerSSTableWriter(indexDescriptor);
+                                : onDiskFormat.newPerSSTableWriter(indexDescriptor, keyCompression);
         this.tableMetrics = tableMetrics;
     }
 

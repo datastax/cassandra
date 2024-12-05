@@ -58,6 +58,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -186,7 +187,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
+    public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor, CompressionParams compression) throws IOException
     {
         return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
     }
