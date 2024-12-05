@@ -48,6 +48,11 @@ public interface IndexFeatureSet
     boolean hasTermsHistogram();
 
     /**
+     * @return true if the index has an index of null valued primary keys
+     */
+    boolean hasNullIndex();
+
+    /**
      * The {@code Accumulator} is used to accumulate the {@link IndexFeatureSet} responses from
      * multiple sources. This will include all the SSTables included in a query and all the indexes
      * attached to those SSTables, added using {@link Accumulator#accumulate}.
@@ -66,6 +71,7 @@ public interface IndexFeatureSet
         boolean isRowAware = true;
         boolean hasVectorIndexChecksum = true;
         boolean hasTermsHistogram = true;
+        boolean hasNullIndex = true;
         boolean complete = false;
 
         public Accumulator()
@@ -87,6 +93,8 @@ public interface IndexFeatureSet
                 hasVectorIndexChecksum = false;
             if (!indexFeatureSet.hasTermsHistogram())
                 hasTermsHistogram = false;
+            if (!indexFeatureSet.hasNullIndex())
+                hasNullIndex = false;
         }
 
         /**
@@ -116,6 +124,12 @@ public interface IndexFeatureSet
                 public boolean hasTermsHistogram()
                 {
                     return hasTermsHistogram;
+                }
+
+                @Override
+                public boolean hasNullIndex()
+                {
+                    return hasNullIndex;
                 }
             };
         }

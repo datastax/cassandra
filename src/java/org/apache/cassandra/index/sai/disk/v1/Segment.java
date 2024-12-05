@@ -147,6 +147,11 @@ public class Segment implements Closeable
         return index.search(expression, keyRange, context, defer, limit);
     }
 
+    public KeyRangeIterator searchNulls(QueryContext context) throws IOException
+    {
+        return index.searchNulls(context);
+    }
+
     /**
      * Order the on-disk index synchronously and produce an iterator in score order
      *
@@ -181,9 +186,9 @@ public class Segment implements Closeable
         return Objects.hashCode(metadata);
     }
 
-    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, boolean canSkipOutOfWindowPKs) throws IOException
     {
-        return index.orderResultsBy(sstableContext.sstable, context, keys, orderer, limit);
+        return index.orderResultsBy(sstableContext.sstable, context, keys, orderer, limit, canSkipOutOfWindowPKs);
     }
 
     @Override

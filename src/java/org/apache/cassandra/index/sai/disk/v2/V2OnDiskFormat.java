@@ -85,6 +85,12 @@ public class V2OnDiskFormat extends V1OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean hasNullIndex()
+        {
+            return false;
+        }
     };
 
     protected V2OnDiskFormat()

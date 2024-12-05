@@ -126,10 +126,15 @@ public abstract class KeyRangeIterator extends AbstractGuavaIterator<PrimaryKey>
         @VisibleForTesting
         protected final Statistics statistics;
 
+        protected final boolean isNonReducing;
 
-        public Builder(IteratorType type)
+        public Builder(IteratorType type, boolean isNonReducing)
         {
+            if (type == IteratorType.CONCAT && !isNonReducing)
+                throw new IllegalArgumentException("Concat is always non-reducing");
+
             statistics = new Statistics(type);
+            this.isNonReducing = isNonReducing;
         }
 
         public PrimaryKey getMinimum()

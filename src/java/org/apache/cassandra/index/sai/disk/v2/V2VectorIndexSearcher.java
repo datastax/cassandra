@@ -464,17 +464,18 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     @Override
     public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader,
-                                                                             QueryContext context,
-                                                                             List<PrimaryKey> keys,
-                                                                             Orderer orderer,
-                                                                             int limit) throws IOException
+                                                                   QueryContext context,
+                                                                   List<PrimaryKey> keys,
+                                                                   Orderer orderer,
+                                                                   int limit,
+                                                                   boolean canSkipOutOfWindowPKs) throws IOException
     {
         if (keys.isEmpty())
             return CloseableIterator.emptyIterator();
 
         int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
         // Convert PKs to segment row ids and map to ordinals, skipping any that don't exist in this segment
-        var segmentOrdinalPairs = flatmapPrimaryKeysToBitsAndRows(keys);
+        var segmentOrdinalPairs = flatmapPrimaryKeysToBitsAndRows(keys, canSkipOutOfWindowPKs);
         var numRows = segmentOrdinalPairs.size();
         final CostEstimate cost = estimateCost(rerankK, numRows);
         Tracing.logAndTrace(logger, "{} relevant rows out of {} in range in index of {} nodes; estimate for LIMIT {} is {}",
@@ -502,10 +503,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      * Build a mapping of segment row id to ordinal for the given primary keys, skipping any that don't exist in this
      * segment.
      * @param keysInRange the primary keys to map
+     * @param canSkipOutOfWindowPKs whether to skip primary keys that are out of the timestamp window
      * @return a mapping of segment row id to ordinal
      * @throws IOException
      */
-    private IntIntPairArray flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
+    private IntIntPairArray flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange, boolean canSkipOutOfWindowPKs) throws IOException
     {
         var segmentOrdinalPairs = new IntIntPairArray(keysInRange.size());
         int lastSegmentRowId = -1;
@@ -536,7 +538,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     {
                         sstableRowId = pkms.getSourceRowId();
                     }
-                    else if (pkms.isInTimestampWindow(minTimestamp, maxTimestamp))
+                    else if (!canSkipOutOfWindowPKs || pkms.isInTimestampWindow(minTimestamp, maxTimestamp))
                     {
                         sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
                     }
@@ -615,9 +617,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 // This requirement is required by the ordinals view. There are cases where we have broken this
                 // requirement, and in order to make future debugging easier, we check here and throw an exception
                 // with additional detail.
-                if (segmentRowId <= lastSegmentRowId)
+                if (segmentRowId < lastSegmentRowId)
                     throw new IllegalStateException("Row ids must ascend monotonically. Got " + segmentRowId + " after " + lastSegmentRowId
                                                     + " for " + primaryKey + " on sstable " + primaryKeyMap.getSSTableId());
+                if (segmentRowId == lastSegmentRowId)
+                    continue;
                 lastSegmentRowId = segmentRowId;
                 int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
                 if (ordinal >= 0)

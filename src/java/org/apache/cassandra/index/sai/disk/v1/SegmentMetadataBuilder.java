@@ -70,6 +70,7 @@ public class SegmentMetadataBuilder
     private ByteBuffer maxTerm;
 
     private long numRows;
+    private int nullValuedRows;
 
     private final TermsDistribution.Builder termsDistributionBuilder;
 
@@ -99,6 +100,11 @@ public class SegmentMetadataBuilder
         this.maxRowId = maxRowId;
     }
 
+    public void setNullValuedRows(int nullValuedRows)
+    {
+        this.nullValuedRows = nullValuedRows;
+    }
+
     /**
      * Sets the term range of the data indexed by this segment.
      * We need this method because we cannot automatically record min and max term. We need exact
@@ -115,6 +121,14 @@ public class SegmentMetadataBuilder
     public void setComponentsMetadata(SegmentMetadata.ComponentMetadataMap metadataMap)
     {
         this.metadataMap = metadataMap;
+    }
+
+    public void addComponentsMetadata(SegmentMetadata.ComponentMetadataMap metadataMap)
+    {
+        if (this.metadataMap == null)
+            this.metadataMap = metadataMap;
+        else
+            this.metadataMap.addAll(metadataMap);
     }
 
     /**
@@ -148,6 +162,7 @@ public class SegmentMetadataBuilder
                                    numRows,
                                    minRowId,
                                    maxRowId,
+                                   nullValuedRows,
                                    minKey,
                                    maxKey,
                                    minTerm,

@@ -53,14 +53,17 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
+import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
@@ -92,12 +95,14 @@ public class VectorMemtableIndex implements MemtableIndex
     private PrimaryKey maximumKey;
 
     private final NavigableSet<PrimaryKey> primaryKeys = new ConcurrentSkipListSet<>();
+    private final PrimaryKeys EMPTY_PRIMARY_KEYS;
     private final Memtable mt;
 
     public VectorMemtableIndex(IndexContext indexContext, Memtable mt)
     {
         this.indexContext = indexContext;
         this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
+        this.EMPTY_PRIMARY_KEYS = Version.latest().onDiskFormat().indexFeatureSet().hasNullIndex() ? new PrimaryKeys() : null;
         this.mt = mt;
     }
 
@@ -111,7 +116,14 @@ public class VectorMemtableIndex implements MemtableIndex
     public void index(DecoratedKey key, Clustering clustering, ByteBuffer value, Memtable memtable, OpOrder.Group opGroup)
     {
         if (value == null || value.remaining() == 0)
+        {
+            if (EMPTY_PRIMARY_KEYS != null)
+            {
+                long bytes = EMPTY_PRIMARY_KEYS.add(indexContext.keyFactory().create(key, clustering));
+                memtable.markExtraOnHeapUsed(bytes, opGroup);
+            }
             return;
+        }
 
         var primaryKey = indexContext.keyFactory().create(key, clustering);
         long allocatedBytes = index(primaryKey, value);
@@ -133,6 +145,7 @@ public class VectorMemtableIndex implements MemtableIndex
     @Override
     public void update(DecoratedKey key, Clustering clustering, ByteBuffer oldValue, ByteBuffer newValue, Memtable memtable, OpOrder.Group opGroup)
     {
+        //todo handle EMPTY_PRIMARY_KEYS
         int oldRemaining = oldValue == null ? 0 : oldValue.remaining();
         int newRemaining = newValue == null ? 0 : newValue.remaining();
         if (oldRemaining == 0 && newRemaining == 0)
@@ -185,9 +198,15 @@ public class VectorMemtableIndex implements MemtableIndex
             maximumKey = primaryKey;
     }
 
+    // todo test bounded ann for the latest change too
     @Override
     public KeyRangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
+        if (expr.getOp() == Expression.Op.IS_NULL)
+            return EMPTY_PRIMARY_KEYS.isEmpty()
+                   ? KeyRangeIterator.empty()
+                   : new TrieMemoryIndex.SortedSetKeyRangeIterator(EMPTY_PRIMARY_KEYS.keys(), mt);
+
         if (expr.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Only BOUNDED_ANN is supported, received: " + expr));
         var qv = vts.createFloatVector(expr.lower.value.vector);
@@ -279,7 +298,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
 
     @Override
-    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, boolean canSkipOutOfWindowPKs)
     {
         if (minimumKey == null)
             // This case implies maximumKey is empty too.
@@ -297,8 +316,9 @@ public class VectorMemtableIndex implements MemtableIndex
             // We use max value for the upper bound of the timestamp window because memtables are constantly written to.
             // TODO do we have multiple memtables? Is it valid to check the source here? The graph lookup should
             // be pretty cheap, so leaving it as is for now.
-            if (k instanceof PrimaryKeyWithSource &&
-                !((PrimaryKeyWithSource) k).isInTimestampWindow(mt.getMinTimestamp(), Long.MAX_VALUE))
+            if (canSkipOutOfWindowPKs
+                && k instanceof PrimaryKeyWithSource
+                && !((PrimaryKeyWithSource) k).isInTimestampWindow(mt.getMinTimestamp(), Long.MAX_VALUE))
                 return;
             var v = graph.vectorForKey(k);
             if (v == null)
@@ -436,6 +456,12 @@ public class VectorMemtableIndex implements MemtableIndex
         throw new UnsupportedOperationException();
     }
 
+    @Override
+    public Iterator<PrimaryKey> nullValuedPrimaryKeys()
+    {
+        return EMPTY_PRIMARY_KEYS != null ? EMPTY_PRIMARY_KEYS.iterator() : Collections.emptyIterator();
+    }
+
     /** returns true if the index is non-empty and should be flushed */
     public boolean preFlush(ToIntFunction<PrimaryKey> ordinalMapper)
     {
@@ -477,7 +503,7 @@ public class VectorMemtableIndex implements MemtableIndex
     @Override
     public boolean isEmpty()
     {
-        return graph.isEmpty();
+        return graph.isEmpty() && (EMPTY_PRIMARY_KEYS == null || EMPTY_PRIMARY_KEYS.isEmpty());
     }
 
     @Nullable

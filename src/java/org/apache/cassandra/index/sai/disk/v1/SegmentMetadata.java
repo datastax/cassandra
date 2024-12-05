@@ -77,6 +77,11 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     public final long numRows;
 
     /**
+     * number of rows with null values in current segment. -1 indicates that this information is not available.
+     */
+    public final int nullValuedRows;
+
+    /**
      * Ordered by their token position in current segment
      */
     public final PrimaryKey minKey;
@@ -105,6 +110,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                     long numRows,
                     long minSSTableRowId,
                     long maxSSTableRowId,
+                    int nullValuedRows,
                     PrimaryKey minKey,
                     PrimaryKey maxKey,
                     ByteBuffer minTerm,
@@ -123,6 +129,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.minSSTableRowId = minSSTableRowId;
         this.maxSSTableRowId = maxSSTableRowId;
         this.numRows = numRows;
+        this.nullValuedRows = nullValuedRows;
         this.minKey = minKey;
         this.maxKey = maxKey;
         this.minTerm = minTerm;
@@ -160,6 +167,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             }
         }
         this.termsDistribution = td;
+        this.nullValuedRows = version.onOrAfter(Version.FA) ? input.readInt() : -1;
         this.componentMetadatas = new SegmentMetadata.ComponentMetadataMap(input);
     }
 
@@ -216,6 +224,12 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                         // some indexes, e.g. vector may have no terms distribution
                         output.writeInt(0);
                     }
+                }
+
+                if (writer.version().onOrAfter(Version.FA))
+                {
+                    assert metadata.nullValuedRows >= 0;
+                    output.writeInt(metadata.nullValuedRows);
                 }
 
                 metadata.componentMetadatas.write(output);
@@ -392,6 +406,11 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             }
 
             return metaAttributes;
+        }
+
+        public void addAll(ComponentMetadataMap other)
+        {
+            metas.putAll(other.metas);
         }
 
         @Override

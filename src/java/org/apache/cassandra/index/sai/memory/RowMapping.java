@@ -134,6 +134,26 @@ public class RowMapping
         };
     }
 
+    // todo minkey/maxkey not used here, should it be?
+    public IntArrayList convertToPostings(Iterator<PrimaryKey> primaryKeyIterator)
+    {
+        if (!primaryKeyIterator.hasNext())
+            return new IntArrayList(0);
+
+        IntArrayList postings = new IntArrayList();
+        do
+        {
+            PrimaryKey primaryKey = primaryKeyIterator.next();
+            Integer segmentRowId = rowMapping.get(primaryKey::asComparableBytes);
+
+            if (segmentRowId != null)
+                postings.add(segmentRowId);
+        }
+        while (primaryKeyIterator.hasNext());
+
+        return postings;
+    }
+
     /**
      * Complete building in memory RowMapping, mark it as immutable.
      */

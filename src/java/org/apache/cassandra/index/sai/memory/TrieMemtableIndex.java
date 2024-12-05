@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.memory;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -46,6 +47,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeLazyIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -75,6 +77,7 @@ public class TrieMemtableIndex implements MemtableIndex
     private final LongAdder writeCount = new LongAdder();
     private final LongAdder estimatedOnHeapMemoryUsed = new LongAdder();
     private final LongAdder estimatedOffHeapMemoryUsed = new LongAdder();
+    private final PrimaryKeys EMPTY_PRIMARY_KEYS;
 
     private final Memtable memtable;
     private final Context sensorContext;
@@ -93,6 +96,7 @@ public class TrieMemtableIndex implements MemtableIndex
         }
         this.sensorContext = Context.from(indexContext);
         this.requestTracker = RequestTracker.instance;
+        this.EMPTY_PRIMARY_KEYS = Version.latest().onDiskFormat().indexFeatureSet().hasNullIndex() ? new PrimaryKeys() : null;
     }
 
     @Override
@@ -128,7 +132,7 @@ public class TrieMemtableIndex implements MemtableIndex
     @Override
     public boolean isEmpty()
     {
-        return getMinTerm() == null;
+        return getMinTerm() == null && (EMPTY_PRIMARY_KEYS == null || EMPTY_PRIMARY_KEYS.isEmpty());
     }
 
     // Returns the minimum indexed term in the combined memory indexes.
@@ -168,12 +172,25 @@ public class TrieMemtableIndex implements MemtableIndex
     @Override
     public void index(DecoratedKey key, Clustering clustering, ByteBuffer value, Memtable memtable, OpOrder.Group opGroup)
     {
-        if (value == null || (value.remaining() == 0 && !validator.allowsEmpty()))
-            return;
-
+        writeCount.increment();
         RequestSensors sensors = requestTracker.get();
         if (sensors != null)
             sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+
+        if (value == null || (value.remaining() == 0 && !validator.allowsEmpty()))
+        {
+            if (EMPTY_PRIMARY_KEYS == null)
+                return;
+            // TODO handle updates?? or at least test them since we don't do them here
+            var bytes = EMPTY_PRIMARY_KEYS.add(indexContext.keyFactory().create(key, clustering));
+            memtable.markExtraOnHeapUsed(bytes, opGroup);
+            estimatedOnHeapMemoryUsed.add(bytes);
+            if (sensors != null)
+                sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, bytes);
+            return;
+        }
+        // todo handle column tombstones
+
         rangeIndexes[boundaries.getShardForKey(key)].add(key,
                                                          clustering,
                                                          value,
@@ -189,12 +206,16 @@ public class TrieMemtableIndex implements MemtableIndex
                                                              if (sensors != null)
                                                                  sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
                                                          });
-        writeCount.increment();
     }
 
     @Override
     public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
+        if (expression.getOp() == Expression.Op.IS_NULL)
+            return EMPTY_PRIMARY_KEYS.isEmpty()
+                   ? KeyRangeIterator.empty()
+                   : new TrieMemoryIndex.SortedSetKeyRangeIterator(EMPTY_PRIMARY_KEYS.keys(), memtable);
+
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
 
@@ -257,7 +278,7 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, boolean canSkipOutOfWindowPKs)
     {
         if (keys.isEmpty())
             return CloseableIterator.emptyIterator();
@@ -314,6 +335,12 @@ public class TrieMemtableIndex implements MemtableIndex
 
         return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, TypeUtil.BYTE_COMPARABLE_VERSION),
                                  new PrimaryKeysMergeReducer(rangeIterators.size()));
+    }
+
+    @Override
+    public Iterator<PrimaryKey> nullValuedPrimaryKeys()
+    {
+        return EMPTY_PRIMARY_KEYS != null ? EMPTY_PRIMARY_KEYS.iterator() : Collections.emptyIterator();
     }
 
     // The PrimaryKeysMergeReducer receives the range iterators from each of the range indexes selected based on the

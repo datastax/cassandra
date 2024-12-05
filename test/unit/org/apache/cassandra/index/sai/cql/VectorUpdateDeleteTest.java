@@ -1028,16 +1028,21 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testSplitRowWithNoQueryOptimizer() throws Throwable
     {
         QueryController.QUERY_OPT_LEVEL = 0;
-        createTable("CREATE TABLE %s (pk int primary key, str1 text, str2 text, val vector<float, 3>)");
+        createTable("CREATE TABLE %s (pk int primary key, str1 text, str2 text, int1 int, int2 int, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str2) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(int1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(int2) USING 'StorageAttachedIndex'");
         disableCompaction();
 
-        execute("INSERT INTO %s (pk, str1) VALUES (0, 'A')");
+        execute("INSERT INTO %s (pk, str1, int1) VALUES (0, 'A', 10)");
+        execute("INSERT INTO %s (pk, str1, str2, int1, int2, val) VALUES (1, 'B', 'C', 20, 30, [1.0, 2.0, 3.0])");
         flush();
-        execute("INSERT INTO %s (pk, str2) VALUES (0, 'B')");
+        compact();
+        execute("INSERT INTO %s (pk, str2, int2) VALUES (0, 'B', 40)");
         flush();
+        // Write the vector by itself
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0, 3.0])");
 
         beforeAndAfterFlush(() -> {
@@ -1045,6 +1050,20 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
             assertRows(execute("SELECT pk FROM %s WHERE str1 = 'A' OR str2 = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(0));
             assertRows(execute("SELECT pk FROM %s WHERE str1 = 'A' AND str2 = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"));
             assertRows(execute("SELECT pk FROM %s WHERE str1 = 'A' AND str2 = 'B' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(0));
+
+            // Additional assertions for numeric columns
+            assertRows(execute("SELECT pk FROM %s WHERE int1 = 10 ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(0));
+            assertRows(execute("SELECT pk FROM %s WHERE int1 = 20 OR int2 = 30 ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(1));
+            assertRows(execute("SELECT pk FROM %s WHERE int1 = 10 AND int2 = 40 ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(0));
+            assertRows(execute("SELECT pk FROM %s WHERE int1 = 10 AND int2 = 40 ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(0));
+
+            // Mixed queries involving text and integer columns
+            assertRows(execute("SELECT pk FROM %s WHERE str1 = 'A' AND int1 = 10 ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(0));
+            assertRows(execute("SELECT pk FROM %s WHERE str2 = 'B' AND int2 = 40 ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(0));
+            assertRows(execute("SELECT pk FROM %s WHERE str1 = 'B' AND int1 = 20 AND int2 = 30 ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(1));
+            assertRows(execute("SELECT pk FROM %s WHERE (str1 = 'A' OR str2 = 'B') AND int1 = 10 ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(0));
+            assertRows(execute("SELECT pk FROM %s WHERE (int1 = 20 OR int2 = 40) AND str1 = 'B' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 10"), row(1));
         });
     }
+
 }

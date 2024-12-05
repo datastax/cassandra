@@ -27,6 +27,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -38,6 +39,13 @@ import org.apache.cassandra.utils.CloseableIterator;
 
 public class EmptyIndex implements SearchableIndex
 {
+    private final SSTableContext sstableContext;
+
+    public EmptyIndex(SSTableContext sstableContext)
+    {
+        this.sstableContext = sstableContext;
+    }
+
     @Override
     public long indexFileCacheSize()
     {
@@ -97,6 +105,15 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
+    public KeyRangeIterator searchNulls(AbstractBounds<PartitionPosition> keyRange, QueryContext context) throws IOException
+    {
+        // If an index is empty, then all the rows were null.
+        // TODO test the pathological case where we have a large sstable with an empty column.
+        // In that case, we might have a performance regression here.
+        return PrimaryKeyMapIterator.create(sstableContext, keyRange);
+    }
+
+    @Override
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
                                                                   Expression slice,
                                                                   AbstractBounds<PartitionPosition> keyRange,
@@ -136,7 +153,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows, boolean canSkipOutOfWindowPKs) throws IOException
     {
         return List.of();
     }

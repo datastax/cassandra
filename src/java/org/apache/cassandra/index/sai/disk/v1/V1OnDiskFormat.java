@@ -141,6 +141,12 @@ public class V1OnDiskFormat implements OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean hasNullIndex()
+        {
+            return false;
+        }
     };
 
     protected V1OnDiskFormat()
@@ -168,7 +174,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
         return perIndexComponents.isEmpty()
-               ? new EmptyIndex()
+               ? new EmptyIndex(sstableContext)
                : new V1SearchableIndex(sstableContext, perIndexComponents);
     }
 

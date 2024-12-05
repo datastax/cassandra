@@ -34,11 +34,13 @@ import org.apache.cassandra.io.util.FileUtils;
 public class KeyRangeUnionIterator extends KeyRangeIterator
 {
     public final List<KeyRangeIterator> ranges;
+    private final boolean isNonReducing;
 
-    private KeyRangeUnionIterator(Builder.Statistics statistics, List<KeyRangeIterator> ranges)
+    private KeyRangeUnionIterator(Builder.Statistics statistics, List<KeyRangeIterator> ranges, boolean isNonReducing)
     {
         super(statistics);
-        this.ranges = new ArrayList<>(ranges);
+        this.ranges = ranges;
+        this.isNonReducing = isNonReducing;
     }
 
     public PrimaryKey computeNext()
@@ -58,10 +60,10 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
             else
             {
                 int cmp = candidate.peek().compareTo(range.peek());
-                if (cmp == 0)
-                    range.next();
-                else if (cmp > 0)
+                if (cmp > 0)
                     candidate = range;
+                else if (!isNonReducing && cmp == 0)
+                    range.next();
             }
         }
         if (candidate == null)
@@ -84,28 +86,34 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
         ranges.forEach(FileUtils::closeQuietly);
     }
 
-    public static Builder builder(int size)
+    public static Builder builder(int size, boolean isNonReducing)
     {
-        return new Builder(size);
+        return new Builder(size, isNonReducing);
     }
 
     public static Builder builder()
     {
-        return builder(10);
+        return builder(false);
     }
 
-    public static KeyRangeIterator build(Iterable<KeyRangeIterator> tokens)
+    public static Builder builder(boolean isNonReducing)
     {
-        return KeyRangeUnionIterator.builder(Iterables.size(tokens)).add(tokens).build();
+        return builder(10, isNonReducing);
+    }
+
+
+    public static KeyRangeIterator build(Iterable<KeyRangeIterator> tokens, boolean isNonReducing)
+    {
+        return KeyRangeUnionIterator.builder(Iterables.size(tokens), isNonReducing).add(tokens).build();
     }
 
     public static class Builder extends KeyRangeIterator.Builder
     {
         protected List<KeyRangeIterator> rangeIterators;
 
-        public Builder(int size)
+        public Builder(int size, boolean isNonReducing)
         {
-            super(IteratorType.UNION);
+            super(IteratorType.UNION, isNonReducing);
             this.rangeIterators = new ArrayList<>(size);
         }
 
@@ -164,7 +172,7 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
 
                 default:
                     //TODO Need to test whether an initial sort improves things
-                    return new KeyRangeUnionIterator(statistics, rangeIterators);
+                    return new KeyRangeUnionIterator(statistics, rangeIterators, isNonReducing);
             }
         }
     }

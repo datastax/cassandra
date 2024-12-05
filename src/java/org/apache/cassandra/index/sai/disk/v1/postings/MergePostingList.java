@@ -59,6 +59,11 @@ public class MergePostingList extends IntMerger<PostingList> implements PostingL
         return new MergePostingList(postings);
     }
 
+    public static PostingList merge(PostingList... postings)
+    {
+        return merge(List.of(postings));
+    }
+
     @Override
     public int nextPosting() throws IOException
     {

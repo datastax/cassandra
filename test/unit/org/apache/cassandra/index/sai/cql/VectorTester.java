@@ -185,7 +185,7 @@ public class VectorTester extends SAITester
         @Parameterized.Parameters(name = "{0}")
         public static Collection<Object[]> data()
         {
-            return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v }).collect(Collectors.toList());
+            return Stream.of(Version.CA, Version.DC, Version.FA).map(v -> new Object[]{ v }).collect(Collectors.toList());
         }
 
         @Before

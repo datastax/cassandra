@@ -618,7 +618,7 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    static class SortedSetKeyRangeIterator extends KeyRangeIterator
+    public static class SortedSetKeyRangeIterator extends KeyRangeIterator
     {
         private SortedSet<PrimaryKey> primaryKeySet;
         private Iterator<PrimaryKey> iterator;

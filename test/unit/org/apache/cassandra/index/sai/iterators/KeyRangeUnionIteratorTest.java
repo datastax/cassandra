@@ -199,7 +199,7 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
         {{
             add(new LongIterator(new long[]{1L, 2L, 4L}));
             add(new LongIterator(new long[]{3L, 5L, 6L}));
-        }});
+        }}, false);
 
         Assert.assertEquals(convert(1L, 2L, 3L, 4L, 5L, 6L), convert(tokens));
 
@@ -253,7 +253,7 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
         builderB.add(new LongIterator(new long[] { 7L, 9L, 11L }));
         builderB.add(new LongIterator(new long[] { 2L, 4L, 6L }));
 
-        KeyRangeIterator union = KeyRangeUnionIterator.build(Arrays.asList(builderA.build(), builderB.build()));
+        KeyRangeIterator union = KeyRangeUnionIterator.build(Arrays.asList(builderA.build(), builderB.build()), false);
         Assert.assertEquals(convert(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 11L, 12L), convert(union));
     }
 

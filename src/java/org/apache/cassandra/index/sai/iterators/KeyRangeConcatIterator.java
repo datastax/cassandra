@@ -113,7 +113,7 @@ public class KeyRangeConcatIterator extends KeyRangeIterator
         private final List<KeyRangeIterator> rangeIterators;
         public Builder(int size)
         {
-            super(IteratorType.CONCAT);
+            super(IteratorType.CONCAT, true);
             this.rangeIterators = new ArrayList<>(size);
         }
 
