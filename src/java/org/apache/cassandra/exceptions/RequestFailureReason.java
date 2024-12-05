@@ -18,10 +18,13 @@
 package org.apache.cassandra.exceptions;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -37,10 +40,12 @@ public enum RequestFailureReason
     READ_TOO_MANY_TOMBSTONES (1),
     TIMEOUT                  (2),
     INCOMPATIBLE_SCHEMA      (3),
-    INDEX_NOT_AVAILABLE      (4),
-    UNKNOWN_COLUMN           (5),
-    UNKNOWN_TABLE            (6),
-    REMOTE_STORAGE_FAILURE   (7);
+    INDEX_NOT_AVAILABLE      (6), // We match it to Apache Cassandra's INDEX_NOT_AVAILABLE code introduced in 5.0
+    // The following codes are not present in Apache Cassandra's RequestFailureReason
+    // We should add new codes in HCD (which do not exist in Apache Cassandra) only with big numbers, to avoid conflicts
+    UNKNOWN_COLUMN           (500),
+    UNKNOWN_TABLE            (501),
+    REMOTE_STORAGE_FAILURE   (502);
 
     public static final Serializer serializer = new Serializer();
 
@@ -58,26 +63,28 @@ public enum RequestFailureReason
         return code;
     }
 
-    private static final RequestFailureReason[] codeToReasonMap;
+    private static final Map<Integer, RequestFailureReason> codeToReasonMap = new HashMap<>();
+    private static final Map<Class<? extends Throwable>, RequestFailureReason> exceptionToReasonMap = new HashMap<>();
 
     static
     {
         RequestFailureReason[] reasons = values();
 
-        int max = -1;
-        for (RequestFailureReason r : reasons)
-            max = max(r.code, max);
-
-        RequestFailureReason[] codeMap = new RequestFailureReason[max + 1];
-
         for (RequestFailureReason reason : reasons)
         {
-            if (codeMap[reason.code] != null)
+            if (codeToReasonMap.put(reason.code, reason) != null)
                 throw new RuntimeException("Two RequestFailureReason-s that map to the same code: " + reason.code);
-            codeMap[reason.code] = reason;
         }
 
-        codeToReasonMap = codeMap;
+        exceptionToReasonMap.put(TombstoneOverwhelmingException.class, READ_TOO_MANY_TOMBSTONES);
+        exceptionToReasonMap.put(IncompatibleSchemaException.class, INCOMPATIBLE_SCHEMA);
+        exceptionToReasonMap.put(AbortedOperationException.class, TIMEOUT);
+        exceptionToReasonMap.put(IndexNotAvailableException.class, INDEX_NOT_AVAILABLE);
+        exceptionToReasonMap.put(UnknownColumnException.class, UNKNOWN_COLUMN);
+        exceptionToReasonMap.put(UnknownTableException.class, UNKNOWN_TABLE);
+
+        if (exceptionToReasonMap.size() != reasons.length-2)
+            throw new RuntimeException("A new RequestFailureReasons was probably added and you may need to update the exceptionToReasonMap");
     }
 
     public static RequestFailureReason fromCode(int code)
@@ -86,21 +93,12 @@ public enum RequestFailureReason
             throw new IllegalArgumentException("RequestFailureReason code must be non-negative (got " + code + ')');
 
         // be forgiving and return UNKNOWN if we aren't aware of the code - for forward compatibility
-        return code < codeToReasonMap.length ? codeToReasonMap[code] : UNKNOWN;
+        return codeToReasonMap.getOrDefault(code, UNKNOWN);
     }
 
     public static RequestFailureReason forException(Throwable t)
     {
-        if (t instanceof TombstoneOverwhelmingException)
-            return READ_TOO_MANY_TOMBSTONES;
-
-        if (t instanceof IncompatibleSchemaException)
-            return INCOMPATIBLE_SCHEMA;
-
-        if (t instanceof AbortedOperationException)
-            return TIMEOUT;
-
-        return UNKNOWN;
+        return exceptionToReasonMap.getOrDefault(t.getClass(), UNKNOWN);
     }
 
     public static final class Serializer implements IVersionedSerializer<RequestFailureReason>
