@@ -1229,9 +1229,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                     orderingComparator = orderingComparator.reverse();
             }
 
-            checkDisjunctionIsSupported(table, restrictions);
-
             checkNeedsFiltering(table, restrictions);
+
+            checkDisjunctionIsSupported(table, restrictions);
 
             return new SelectStatement(rawCQLStatement,
                                        table,
@@ -1531,9 +1531,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
          */
         private void checkDisjunctionIsSupported(TableMetadata table, StatementRestrictions restrictions) throws InvalidRequestException
         {
-            if (restrictions.usesSecondaryIndexing())
-                if (restrictions.needsDisjunctionSupport(table))
-                    restrictions.throwsRequiresIndexSupportingDisjunctionError();
+            if (!parameters.allowFiltering &&
+                restrictions.usesSecondaryIndexing() &&
+                restrictions.needsDisjunctionSupport(table))
+            {
+                restrictions.throwsRequiresIndexSupportingDisjunctionError();
+            }
         }
 
         /** If ALLOW FILTERING was not specified, this verifies that it is not needed */

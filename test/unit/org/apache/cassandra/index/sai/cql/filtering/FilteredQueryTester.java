@@ -111,10 +111,7 @@ public abstract class FilteredQueryTester extends SAITester
         assertRowsIgnoringOrder(execute(query), expectedRows);
 
         // verify whether indexes are used or skipped
-        String formattedQuery = formatQuery(query);
-        SelectStatement select = (SelectStatement) QueryProcessor.parseStatement(formattedQuery, ClientState.forInternalCalls());
-        ReadCommand cmd = (ReadCommand) select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
-        org.apache.cassandra.index.Index.QueryPlan plan = cmd.indexQueryPlan();
+        org.apache.cassandra.index.Index.QueryPlan plan = parseReadCommand(query).indexQueryPlan();
         assertEquals(shouldUseIndexes, plan != null);
 
         // if we are using indexes, verify that we are using the expected ones
