@@ -24,6 +24,8 @@ import io.netty.buffer.ByteBuf;
 
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.*;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class RegisterMessage extends Message.Request
 {
@@ -63,7 +65,12 @@ public class RegisterMessage extends Message.Request
     }
 
     @Override
-    protected Response execute(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    protected Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    {
+        return ImmediateFuture.success(executeSync(queryState, requestTime, traceRequest));
+    }
+
+    private Response executeSync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
     {
         assert connection instanceof ServerConnection;
         Connection.Tracker tracker = connection.getTracker();
