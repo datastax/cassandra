@@ -19,6 +19,7 @@
 package org.apache.cassandra.distributed.test;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Collection;
 import java.util.concurrent.*;
@@ -34,17 +35,20 @@ import org.junit.Test;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.implementation.MethodDelegation;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.*;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.IClusterVersionProvider;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamPlan;
 import org.apache.cassandra.streaming.StreamResultFuture;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
@@ -57,12 +61,87 @@ import static org.apache.cassandra.distributed.impl.DistributedTestSnitch.toCass
 import static org.apache.cassandra.distributed.shared.ClusterUtils.getLocalToken;
 import static org.apache.cassandra.distributed.shared.ClusterUtils.runAndWaitForLogs;
 import static org.apache.cassandra.distributed.shared.NetworkTopology.singleDcNetworkTopology;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class GossipTest extends TestBaseImpl
 {
+    public static class CustomClusterVersionProvider implements IClusterVersionProvider
+    {
+        public static volatile CassandraVersion version = CassandraVersion.NULL_VERSION;
+        public static volatile boolean initialized = false;
+        public static volatile long lastReset = 0;
+        public static volatile boolean upgradeInProgress = true;
+
+        public CustomClusterVersionProvider()
+        {
+            initialized = true;
+        }
+
+        @Override
+        public CassandraVersion getMinClusterVersion()
+        {
+            return version;
+        }
+
+        @Override
+        public void reset()
+        {
+            lastReset = System.currentTimeMillis();
+        }
+
+        @Override
+        public boolean isUpgradeInProgress()
+        {
+            return upgradeInProgress;
+        }
+    }
+
+    @Test
+    public void testCustomMinClusterVersionProvider() throws IOException
+    {
+        System.setProperty("cassandra.cluster_version_provider.class_name", CustomClusterVersionProvider.class.getName());
+
+        try (Cluster cluster = Cluster.build(1).withConfig(config -> config.with(GOSSIP)).start())
+        {
+            IInvokableInstance i = cluster.get(1);
+            assertThat(i.callOnInstance(() -> CustomClusterVersionProvider.initialized)).isTrue();
+
+            i.runOnInstance(() -> CustomClusterVersionProvider.version = CassandraVersion.NULL_VERSION);
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_3_4))).isTrue();
+
+            i.runOnInstance(() -> CustomClusterVersionProvider.version = CassandraVersion.CASSANDRA_3_4);
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_3_4))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0_RC2))).isTrue();
+
+            i.runOnInstance(() -> CustomClusterVersionProvider.version = CassandraVersion.CASSANDRA_4_0);
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_3_4))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0_RC2))).isTrue();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(SystemKeyspace.CURRENT_VERSION))).isTrue();
+
+            i.runOnInstance(() -> CustomClusterVersionProvider.version = CassandraVersion.CASSANDRA_4_0_RC2);
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_3_4))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0_RC2))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(SystemKeyspace.CURRENT_VERSION))).isTrue();
+
+            i.runOnInstance(() -> CustomClusterVersionProvider.version = SystemKeyspace.CURRENT_VERSION);
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_3_4))).isTrue();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0))).isTrue();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0_RC2))).isTrue();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(SystemKeyspace.CURRENT_VERSION))).isTrue();
+
+            i.runOnInstance(() -> CustomClusterVersionProvider.upgradeInProgress = false);
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_3_4))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0_RC2))).isFalse();
+            assertThat(i.callOnInstance(() -> Gossiper.instance.isUpgradingFromVersionLowerThan(SystemKeyspace.CURRENT_VERSION))).isFalse();
+        }
+    }
+
     @Test
     public void nodeDownDuringMove() throws Throwable
     {
