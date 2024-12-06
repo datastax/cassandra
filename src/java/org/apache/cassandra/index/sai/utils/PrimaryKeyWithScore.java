@@ -20,7 +20,9 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.io.sstable.SSTableId;
 
 /**
  * A {@link PrimaryKey} that includes a score from a source index.
@@ -30,7 +32,13 @@ public class PrimaryKeyWithScore extends PrimaryKeyWithSortKey
 {
     public final float indexScore;
 
-    public PrimaryKeyWithScore(IndexContext context, Object source, PrimaryKey primaryKey, float indexScore)
+    public PrimaryKeyWithScore(IndexContext context, Memtable source, PrimaryKey primaryKey, float indexScore)
+    {
+        super(context, source, primaryKey);
+        this.indexScore = indexScore;
+    }
+
+    public PrimaryKeyWithScore(IndexContext context, SSTableId source, PrimaryKey primaryKey, float indexScore)
     {
         super(context, source, primaryKey);
         this.indexScore = indexScore;

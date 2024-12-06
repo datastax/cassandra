@@ -683,7 +683,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
     {
-        // For now, only support ANN
+        // TODO remove this with SelectStatement.ANN_USE_SYNTHETIC_SCORE.
         assert restriction instanceof SingleColumnRestriction.AnnRestriction;
 
         Preconditions.checkState(indexContext.isVector());

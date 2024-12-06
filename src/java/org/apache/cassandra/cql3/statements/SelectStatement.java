@@ -41,6 +41,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -100,6 +101,10 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
  */
 public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 {
+    // TODO remove this when we no longer need to downgrade to replicas that don't know about synthetic columns
+    // (And don't forget to remove the related hacks in Columns.Serializer.encodeBitmap and UnfilteredSerializer.serializeRowBody)
+    public static final boolean ANN_USE_SYNTHETIC_SCORE = Boolean.parseBoolean(System.getProperty("cassandra.sai.ann_use_synthetic_score", "false"));
+
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
     public static final String TOPK_CONSISTENCY_LEVEL_ERROR = "Top-K queries can only be run with consistency level ONE/LOCAL_ONE. Consistency level %s was used.";
@@ -993,7 +998,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         ProtocolVersion protocolVersion = options.getProtocolVersion();
         GroupMaker groupMaker = aggregationSpec == null ? null : aggregationSpec.newGroupMaker();
-        SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset == NO_OFFSET ? 0 : userOffset);
+        SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset == NO_OFFSET ? 0 : userOffset, options);
         ResultSetBuilder result = new ResultSetBuilder(protocolVersion, getResultMetadata(), selectors, groupMaker, rows);
 
         while (partitions.hasNext())
@@ -1112,11 +1117,24 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     /**
      * Orders results when multiple keys are selected (using IN)
      */
-    public SortedRowsBuilder sortedRowsBuilder(int limit, int offset)
+    public SortedRowsBuilder sortedRowsBuilder(int limit, int offset, QueryOptions options)
     {
         if (orderingComparator == null)
             return SortedRowsBuilder.create(limit, offset);
 
+        if (orderingComparator instanceof IndexColumnComparator)
+        {
+            SingleRestriction restriction = ((IndexColumnComparator) orderingComparator).restriction;
+            int columnIndex = ((IndexColumnComparator) orderingComparator).columnIndex;
+
+            Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
+            assert index != null;
+
+            Index.Scorer scorer = index.postQueryScorer(restriction, columnIndex, options);
+            return SortedRowsBuilder.create(limit, offset, scorer);
+        }
+
+        // else
         return SortedRowsBuilder.create(limit, offset, orderingComparator);
     }
 
@@ -1474,7 +1492,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 assert orderingColumns.size() == 1 : orderingColumns.keySet();
                 var e = orderingColumns.entrySet().iterator().next();
                 var column = e.getKey();
-                return new SingleColumnComparator(selection.getOrderingIndex(column), column.type, false);
+                var ordering = e.getValue();
+                if (ordering.expression instanceof Ordering.Ann && !ANN_USE_SYNTHETIC_SCORE)
+                    return new IndexColumnComparator(ordering.expression.toRestriction(), selection.getOrderingIndex(column));
+                else
+                    return new SingleColumnComparator(selection.getOrderingIndex(column), column.type, false);
             }
 
             if (!restrictions.keyIsInRelation())
@@ -1691,6 +1713,32 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         public boolean isClustered()
         {
             return clustered;
+        }
+    }
+
+    // see usage in sortedRowsBuilder
+    private static class IndexColumnComparator extends ColumnComparator<List<ByteBuffer>>
+    {
+        private final SingleRestriction restriction;
+        private final int columnIndex;
+
+        // VSTODO maybe cache in prepared statement
+        public IndexColumnComparator(SingleRestriction restriction, int columnIndex)
+        {
+            this.restriction = restriction;
+            this.columnIndex = columnIndex;
+        }
+
+        @Override
+        public boolean isClustered()
+        {
+            return false;
+        }
+
+        @Override
+        public int compare(List<ByteBuffer> o1, List<ByteBuffer> o2)
+        {
+            throw new UnsupportedOperationException();
         }
     }
 

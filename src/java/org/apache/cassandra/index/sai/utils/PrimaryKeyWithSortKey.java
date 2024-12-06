@@ -22,9 +22,11 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -41,7 +43,14 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
     // Either a Memtable reference or an SSTableId reference
     private final Object sourceTable;
 
-    protected PrimaryKeyWithSortKey(IndexContext context, Object sourceTable, PrimaryKey primaryKey)
+    protected PrimaryKeyWithSortKey(IndexContext context, Memtable sourceTable, PrimaryKey primaryKey)
+    {
+        this.context = context;
+        this.sourceTable = sourceTable;
+        this.primaryKey = primaryKey;
+    }
+
+    protected PrimaryKeyWithSortKey(IndexContext context, SSTableId sourceTable, PrimaryKey primaryKey)
     {
         this.context = context;
         this.sourceTable = sourceTable;

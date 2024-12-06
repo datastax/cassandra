@@ -1191,6 +1191,74 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
     }
 
+    public static final class Bm25Restriction extends SingleColumnRestriction
+    {
+        private final Term value;
+
+        public Bm25Restriction(ColumnMetadata columnDef, Term value)
+        {
+            super(columnDef);
+            this.value = value;
+        }
+
+        public ByteBuffer value(QueryOptions options)
+        {
+            return value.bindAndGet(options);
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            value.addFunctionsTo(functions);
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options)
+        {
+            filter.add(columnDef, Operator.BM25, value.bindAndGet(options));
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("BM25(%s)", value);
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            if (otherRestriction.isIndexBasedOrdering())
+                throw invalidRequest("%s cannot be restricted by multiple BM25 restrictions", columnDef.name);
+            throw invalidRequest("%s cannot be restricted by both BM25 and %s", columnDef.name, otherRestriction.toString());
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return index.supportsExpression(columnDef, Operator.BM25);
+        }
+
+        @Override
+        public boolean isIndexBasedOrdering()
+        {
+            return true;
+        }
+    }
+
     /**
      * A Bounded ANN Restriction is one that uses a similarity score as the limiting factor for ANN instead of a number
      * of results.

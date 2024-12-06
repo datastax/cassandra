@@ -334,6 +334,14 @@ public final class SingleColumnRelation extends Relation
     }
 
     @Override
+    protected Restriction newBm25Restriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        ColumnMetadata columnDef = table.getExistingColumn(entity);
+        Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+        return new SingleColumnRestriction.AnnRestriction(columnDef, term);
+    }
+
+    @Override
     protected Restriction newAnalyzerMatchesRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         if (mapKey != null)

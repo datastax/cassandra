@@ -662,6 +662,13 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
+    /**
+     * Iterator that provides ordered access to all indexed terms and their associated primary keys
+     * in the TrieMemoryIndex. For each term in the index, yields PrimaryKeyWithSortKey objects that
+     * combine a primary key with its associated term.
+     * <p>
+     * A more verbose name could be KeysMatchingTermsByTermIterator.
+     */
     private class AllTermsIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
         private final Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator;

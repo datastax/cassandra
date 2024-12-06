@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -32,22 +33,30 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.Runnables;
 
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.iterators.KeyRangeLazyIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeLazyIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
@@ -237,15 +246,45 @@ public class TrieMemtableIndex implements MemtableIndex
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
 
-        var iterators = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(endShard - startShard + 1);
-
-        for (int shard  = startShard; shard <= endShard; ++shard)
+        if (!orderer.isBM25())
         {
-            assert rangeIndexes[shard] != null;
-            iterators.add(rangeIndexes[shard].orderBy(orderer, slice));
+            var iterators = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(endShard - startShard + 1);
+            for (int shard = startShard; shard <= endShard; ++shard)
+            {
+                assert rangeIndexes[shard] != null;
+                iterators.add(rangeIndexes[shard].orderBy(orderer, slice));
+            }
+            return iterators;
         }
 
-        return iterators;
+        // BM25
+        var queryTerms = orderer.extractQueryTerms();
+
+        // Intersect iterators to find documents containing all terms
+        var termIterators = keyIteratorsPerTerm(queryContext, keyRange, queryTerms);
+        var intersectedIterator = KeyRangeIntersectionIterator.builder(termIterators).build();
+
+        // Compute BM25 scores
+        var docStats = computeDocumentFrequencies(queryContext, queryTerms);
+        return List.of(BM25Utils.computeScores(intersectedIterator,
+                                               queryTerms,
+                                               docStats,
+                                               indexContext,
+                                               memtable,
+                                               this::getCellForKey));
+    }
+
+    private List<KeyRangeIterator> keyIteratorsPerTerm(QueryContext queryContext, AbstractBounds<PartitionPosition> keyRange, List<ByteBuffer> queryTerms)
+    {
+        List<KeyRangeIterator> termIterators = new ArrayList<>(queryTerms.size());
+        for (ByteBuffer term : queryTerms)
+        {
+            Expression expr = new Expression(indexContext);
+            expr.add(Operator.ANALYZER_MATCHES, term);
+            KeyRangeIterator iterator = search(queryContext, expr, keyRange, Integer.MAX_VALUE);
+            termIterators.add(iterator);
+        }
+        return termIterators;
     }
 
     @Override
@@ -257,32 +296,98 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext queryContext, List<PrimaryKey> keys, Orderer orderer, int limit)
     {
         if (keys.isEmpty())
             return CloseableIterator.emptyIterator();
-        return SortingIterator.createCloseable(
-            orderer.getComparator(),
-            keys,
-            key ->
-            {
-                var partition = memtable.getPartition(key.partitionKey());
-                if (partition == null)
-                    return null;
-                var row = partition.getRow(key.clustering());
-                if (row == null)
-                    return null;
-                var cell = row.getCell(indexContext.getDefinition());
-                if (cell == null)
-                    return null;
 
-                // We do two kinds of encoding... it'd be great to make this more straight forward, but this is what
-                // we have for now. I leave it to the reader to inspect the two methods to see the nuanced differences.
-                var encoding = encode(TypeUtil.encode(cell.buffer(), validator));
-                return new PrimaryKeyWithByteComparable(indexContext, memtable, key, encoding);
-            },
-            Runnables.doNothing()
-        );
+        if (!orderer.isBM25())
+        {
+            return SortingIterator.createCloseable(
+                orderer.getComparator(),
+                keys,
+                key ->
+                {
+                    var partition = memtable.getPartition(key.partitionKey());
+                    if (partition == null)
+                        return null;
+                    var row = partition.getRow(key.clustering());
+                    if (row == null)
+                        return null;
+                    var cell = row.getCell(indexContext.getDefinition());
+                    if (cell == null)
+                        return null;
+
+                    // We do two kinds of encoding... it'd be great to make this more straight forward, but this is what
+                    // we have for now. I leave it to the reader to inspect the two methods to see the nuanced differences.
+                    var encoding = encode(TypeUtil.encode(cell.buffer(), validator));
+                    return new PrimaryKeyWithByteComparable(indexContext, memtable, key, encoding);
+                },
+                Runnables.doNothing()
+            );
+        }
+
+        // BM25
+        var queryTerms = orderer.extractQueryTerms();
+        var docStats = computeDocumentFrequencies(queryContext, queryTerms);
+        return BM25Utils.computeScores(keys.iterator(),
+                                       queryTerms,
+                                       docStats,
+                                       indexContext,
+                                       memtable,
+                                       this::getCellForKey);
+    }
+
+    /**
+     * Count document frequencies for each term using brute force
+     */
+    private BM25Utils.DocStats computeDocumentFrequencies(QueryContext queryContext, List<ByteBuffer> queryTerms)
+    {
+        var termIterators = keyIteratorsPerTerm(queryContext, Bounds.unbounded(indexContext.getPartitioner()), queryTerms);
+        var documentFrequencies = new HashMap<ByteBuffer, Long>();
+        for (int i = 0; i < queryTerms.size(); i++)
+        {
+            // KeyRangeIterator.getMaxKeys is not accurate enough, we have to count them
+            long keys = 0;
+            for (var it = termIterators.get(i); it.hasNext(); it.next())
+                keys++;
+            documentFrequencies.put(queryTerms.get(i), keys);
+        }
+        long docCount = 0;
+
+        try (var it = memtable.makePartitionIterator(ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition())),
+                                                     DataRange.allData(memtable.metadata().partitioner)))
+        {
+            while (it.hasNext())
+            {
+                var partitions = it.next();
+                while (partitions.hasNext())
+                {
+                    var unfiltered = partitions.next();
+                    if (!unfiltered.isRow())
+                        continue;
+                    var row = (Row) unfiltered;
+                    var cell = row.getCell(indexContext.getDefinition());
+                    if (cell == null)
+                        continue;
+
+                    docCount++;
+                }
+            }
+        }
+        return new BM25Utils.DocStats(documentFrequencies, docCount);
+    }
+
+    @Nullable
+    private org.apache.cassandra.db.rows.Cell<?> getCellForKey(PrimaryKey key)
+    {
+        var partition = memtable.getPartition(key.partitionKey());
+        if (partition == null)
+            return null;
+        var row = partition.getRow(key.clustering());
+        if (row == null)
+            return null;
+        return row.getCell(indexContext.getDefinition());
     }
 
     private ByteComparable encode(ByteBuffer input)

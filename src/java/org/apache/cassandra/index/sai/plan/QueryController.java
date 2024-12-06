@@ -809,6 +809,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         switch (predicate.getOp())
         {
             case EQ:
+            case MATCH:
             case CONTAINS_KEY:
             case CONTAINS_VALUE:
             case NOT_EQ:

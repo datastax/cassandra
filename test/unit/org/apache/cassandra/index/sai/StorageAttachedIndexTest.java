@@ -135,12 +135,20 @@ public class StorageAttachedIndexTest
 
     @Test
     public void testOrderResults() {
+        QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ONE,
+                                                        byteBufferList,
+                                                        false,
+                                                        PageSize.inRows(1),
+                                                        null,
+                                                        null,
+                                                        ProtocolVersion.CURRENT,
+                                                        KEYSPACE);
         List<List<ByteBuffer>> rows = new ArrayList<>();
         rows.add(byteBufferList);
 
         SelectStatement selectStatementInstance = (SelectStatement) QueryProcessor.prepareInternal("SELECT key, value FROM " + KEYSPACE + '.' + TABLE).statement;
 
-        SortedRowsBuilder builder = selectStatementInstance.sortedRowsBuilder(Integer.MAX_VALUE, 0);
+        SortedRowsBuilder builder = selectStatementInstance.sortedRowsBuilder(Integer.MAX_VALUE, 0, queryOptions);
         rows.forEach(builder::add);
         List<List<ByteBuffer>> sortedRows = builder.build();
 

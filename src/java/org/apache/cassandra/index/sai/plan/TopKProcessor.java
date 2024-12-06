@@ -49,11 +49,14 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
 import org.apache.cassandra.db.partitions.ParallelCommandProcessor;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.Index;
@@ -96,6 +99,7 @@ public class TopKProcessor
     private final IndexContext indexContext;
     private final RowFilter.Expression expression;
     private final VectorFloat<?> queryVector;
+    private final ColumnMetadata scoreColumn;
 
     private final int limit;
 
@@ -103,16 +107,17 @@ public class TopKProcessor
     {
         this.command = command;
 
-        Pair<IndexContext, RowFilter.Expression> annIndexAndExpression = findTopKIndexContext();
-        Preconditions.checkNotNull(annIndexAndExpression);
+        Pair<IndexContext, RowFilter.Expression> indexAndExpression = findTopKIndexContext();
+        Preconditions.checkNotNull(indexAndExpression);
 
-        this.indexContext = annIndexAndExpression.left;
-        this.expression = annIndexAndExpression.right;
+        this.indexContext = indexAndExpression.left;
+        this.expression = indexAndExpression.right;
         if (expression.operator() == Operator.ANN)
             this.queryVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, expression.getIndexValue().duplicate()));
         else
             this.queryVector = null;
         this.limit = command.limits().count();
+        this.scoreColumn = ColumnMetadata.syntheticColumn(indexContext.getKeyspace(), indexContext.getTable(), ColumnMetadata.SYNTHETIC_SCORE_ID, FloatType.instance);
     }
 
     /**
@@ -158,8 +163,11 @@ public class TopKProcessor
     {
         // priority queue ordered by score in descending order
         Comparator<Triple<PartitionInfo, Row, ?>> comparator;
-        if (queryVector != null)
+        // TODO does this work for complex expressions?
+        if (expression.operator() == Operator.ANN || expression.operator() == Operator.BM25)
+        {
             comparator = Comparator.comparing((Triple<PartitionInfo, Row, ?> t) -> (Float) t.getRight()).reversed();
+        }
         else
         {
             comparator = Comparator.comparing(t -> (ByteBuffer) t.getRight(), indexContext.getValidator());
@@ -187,7 +195,7 @@ public class TopKProcessor
                 executor.maybeExecuteImmediately(() -> {
                     try (var partitionRowIterator = pIter.commandToIterator(command.left(), command.right()))
                     {
-                        future.complete(partitionRowIterator == null ? null : processPartition(partitionRowIterator));
+                        future.complete(partitionRowIterator == null ? null : processScoredPartition(partitionRowIterator));
                     }
                     catch (Throwable t)
                     {
@@ -235,9 +243,9 @@ public class TopKProcessor
                 // have to close to move to the next partition, otherwise hasNext() fails
                 try (var partitionRowIterator = partitions.next())
                 {
-                    if (queryVector != null)
+                    if (expression.operator() == Operator.ANN || expression.operator() == Operator.BM25)
                     {
-                        PartitionResults pr = processPartition(partitionRowIterator);
+                        PartitionResults pr = processScoredPartition(partitionRowIterator);
                         topK.addAll(pr.rows);
                         for (var uf: pr.tombstones)
                             addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
@@ -250,7 +258,6 @@ public class TopKProcessor
                             topK.add(Triple.of(PartitionInfo.create(partitionRowIterator), row, row.getCell(expression.column()).buffer()));
                         }
                     }
-
                 }
             }
         }
@@ -286,7 +293,7 @@ public class TopKProcessor
     /**
      * Processes a single partition, calculating scores for rows and extracting tombstones.
      */
-    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator) {
+    private PartitionResults processScoredPartition(BaseRowIterator<?> partitionRowIterator) {
         // Compute key and static row score once per partition
         DecoratedKey key = partitionRowIterator.partitionKey();
         Row staticRow = partitionRowIterator.staticRow();
@@ -352,6 +359,14 @@ public class TopKProcessor
         if ((column.isClusteringColumn() || column.isRegular()) && row.isStatic())
             return 0;
 
+        var scoreData = row.getColumnData(scoreColumn);
+        if (scoreData != null)
+        {
+            var cell = (Cell) scoreData;
+            return FloatType.instance.compose(cell.buffer());
+        }
+
+        // TODO remove this once we enable the scored path for vector queries
         ByteBuffer value = indexContext.getValueOf(key, row, FBUtilities.nowInSeconds());
         if (value != null)
         {
@@ -368,21 +383,24 @@ public class TopKProcessor
 
         for (RowFilter.Expression expression : command.rowFilter().getExpressions())
         {
-            StorageAttachedIndex sai = findVectorIndexFor(cfs.indexManager, expression);
+            StorageAttachedIndex sai = findOrderingIndexFor(cfs.indexManager, expression);
             if (sai != null)
-            {
                 return Pair.create(sai.getIndexContext(), expression);
-            }
         }
 
         return null;
     }
 
     @Nullable
-    private StorageAttachedIndex findVectorIndexFor(SecondaryIndexManager sim, RowFilter.Expression e)
+    private StorageAttachedIndex findOrderingIndexFor(SecondaryIndexManager sim, RowFilter.Expression e)
     {
-        if (e.operator() != Operator.ANN && e.operator() != Operator.ORDER_BY_ASC && e.operator() != Operator.ORDER_BY_DESC)
+        if (e.operator() != Operator.ANN
+            && e.operator() != Operator.BM25
+            && e.operator() != Operator.ORDER_BY_ASC
+            && e.operator() != Operator.ORDER_BY_DESC)
+        {
             return null;
+        }
 
         Optional<Index> index = sim.getBestIndexFor(e);
         return (StorageAttachedIndex) index.filter(i -> i instanceof StorageAttachedIndex).orElse(null);

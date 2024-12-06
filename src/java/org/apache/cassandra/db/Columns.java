@@ -716,7 +716,15 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
             for (ColumnMetadata column : columns)
             {
                 if (iter.next(column) == null)
+                {
+                    // We can't know for sure whether to add the synthetic score column because WildcardColumnFilter
+                    // just says "yes" to everything; instead, we just skip it here.
+                    // TODO remove this with SelectStatement.ANN_USE_SYNTHETIC_SCORE.
+                    if (column.isSynthetic())
+                        continue;
+
                     throw new IllegalStateException(columns + " is not a subset of " + superset);
+                }
 
                 int currentIndex = iter.indexOfCurrent();
                 int count = currentIndex - expectIndex;
