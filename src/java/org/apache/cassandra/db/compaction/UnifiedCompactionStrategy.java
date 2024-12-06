@@ -874,14 +874,20 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         for (Arena arena : arenas)
         {
             List<Level> levels = new ArrayList<>(MAX_LEVELS);
-            arena.sstables.sort(currentShardManager::compareByDensity);
+
+            // Precompute the density, then sort.
+            List<SSTableWithDensity> ssTableWithDensityList = new ArrayList<>(arena.sstables.size());
+            for (CompactionSSTable sstable : arena.sstables)
+                ssTableWithDensityList.add(new SSTableWithDensity(sstable, currentShardManager.density(sstable)));
+            Collections.sort(ssTableWithDensityList);
 
             double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / currentShardManager.localSpaceCoverage());
             int index = 0;
             Level level = new Level(controller, index, 0, maxSize);
-            for (CompactionSSTable candidate : arena.sstables)
+            for (SSTableWithDensity candidateWithDensity : ssTableWithDensityList)
             {
-                final double size = currentShardManager.density(candidate);
+                final CompactionSSTable candidate = candidateWithDensity.sstable;
+                final double size = candidateWithDensity.density;
                 if (size < level.max)
                 {
                     level.add(candidate);
@@ -1444,6 +1450,27 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return String.format("Current limits: running=%d, max=%d, maxConcurrent=%d, perLevel=%s, levelCount=%d, spaceAvailable=%s, rateLimitLog=%s, remainingAdaptiveCompactions=%d",
                                  runningCompactions, maxCompactions, maxConcurrentCompactions, Arrays.toString(perLevel), levelCount,
                                  FBUtilities.prettyPrintMemory(spaceAvailable), rateLimitLog, remainingAdaptiveCompactions);
+        }
+    }
+
+    /**
+     * Utility wrapper to efficiently store the density of an SSTable with the SSTable itself.
+     */
+    private static class SSTableWithDensity implements Comparable<SSTableWithDensity>
+    {
+        final CompactionSSTable sstable;
+        final double density;
+
+        SSTableWithDensity(CompactionSSTable sstable, double density)
+        {
+            this.sstable = sstable;
+            this.density = density;
+        }
+
+        @Override
+        public int compareTo(SSTableWithDensity o)
+        {
+            return Double.compare(density, o.density);
         }
     }
 }
