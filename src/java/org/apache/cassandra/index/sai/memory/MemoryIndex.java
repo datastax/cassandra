@@ -45,7 +45,7 @@ public abstract class MemoryIndex
         this.indexContext = indexContext;
     }
 
-    public abstract long add(DecoratedKey key,
+    public abstract void add(DecoratedKey key,
                              Clustering clustering,
                              ByteBuffer value,
                              LongConsumer onHeapAllocationsTracker,
@@ -54,6 +54,8 @@ public abstract class MemoryIndex
     public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice);
 
     public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
+
+    public abstract long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
     public abstract ByteBuffer getMinTerm();
 

@@ -44,7 +44,6 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.FilteredPartition;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -186,7 +185,7 @@ public class RangeTombstoneTest
 
         new RowUpdateBuilder(cfs.metadata(), 2, key).addRangeTombstone(15, 20).build().applyUnsafe();
 
-        ImmutableBTreePartition partition;
+        Partition partition;
 
         partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(11).toIncl(14).build());
         Collection<RangeTombstone> rt = rangeTombstones(partition);
@@ -257,10 +256,23 @@ public class RangeTombstoneTest
         assertEquals(2, rt.size());
     }
 
-    private Collection<RangeTombstone> rangeTombstones(ImmutableBTreePartition partition)
+    private Collection<RangeTombstone> rangeTombstones(Partition partition)
     {
         List<RangeTombstone> tombstones = new ArrayList<>();
-        Iterators.addAll(tombstones, partition.deletionInfo().rangeIterator(false));
+        MutableDeletionInfo.Builder deletionInfoBuilder = MutableDeletionInfo.builder(partition.partitionLevelDeletion(),
+                                                                                      partition.metadata().comparator,
+                                                                                      false);
+        try (UnfilteredRowIterator iter = partition.unfilteredIterator())
+        {
+            while (iter.hasNext())
+            {
+                Unfiltered unfiltered = iter.next();
+                if (unfiltered.isRangeTombstoneMarker())
+                    deletionInfoBuilder.add((RangeTombstoneMarker) unfiltered);
+            }
+        }
+        DeletionInfo deletionInfo = deletionInfoBuilder.build();
+        Iterators.addAll(tombstones, deletionInfo.rangeIterator(false));
         return tombstones;
     }
 

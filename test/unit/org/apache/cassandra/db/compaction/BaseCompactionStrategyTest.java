@@ -259,6 +259,8 @@ public class BaseCompactionStrategyTest
         when(ret.getMinTTL()).thenReturn(ttl);
         when(ret.getMaxTTL()).thenReturn(ttl);
 
+        when(ret.estimatedKeys()).thenReturn(ShardManager.PER_PARTITION_SPAN_THRESHOLD * 2);
+
         diskIndexMap.put(ret, diskIndex);
         if (diskIndex >= diskIndexes)
             diskIndexes = diskIndex + 1;

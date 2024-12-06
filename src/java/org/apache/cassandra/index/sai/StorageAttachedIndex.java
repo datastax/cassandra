@@ -742,7 +742,7 @@ public class StorageAttachedIndex implements Index
             return;
 
         DecoratedKey key = update.partitionKey();
-        for (Row row : update)
+        for (Row row : update.rows())
             indexContext.validate(key, row);
     }
     /**

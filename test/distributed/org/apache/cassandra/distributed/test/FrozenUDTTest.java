@@ -124,6 +124,8 @@ public class FrozenUDTTest extends TestBaseImpl
         }
     }
 
+    // FIXME this ticket is not completed: https://issues.apache.org/jira/browse/CASSANDRA-19764
+//    /* See CASSANDRA-19764 */
     @Test
     public void testDivergentSchemas() throws Throwable
     {
@@ -133,11 +135,27 @@ public class FrozenUDTTest extends TestBaseImpl
             cluster.schemaChange("create table " + KEYSPACE + ".x (id int, ck frozen<a>, i int, primary key (id, ck))");
 
             cluster.get(1).executeInternal("alter type " + KEYSPACE + ".a add bar text");
+            // FIXME this is original below
             cluster.coordinator(1).execute("insert into " + KEYSPACE + ".x (id, ck, i) VALUES (?, " + json(1, 1) + ", ? )", ConsistencyLevel.ALL,
                                            1, 1);
             cluster.coordinator(1).execute("insert into " + KEYSPACE + ".x (id, ck, i) VALUES (?, " + json(1, 2) + ", ? )", ConsistencyLevel.ALL,
                                            2, 2);
             cluster.get(2).flush(KEYSPACE);
+            // FIXME this is original above
+//            try
+//            {
+//                cluster.coordinator(1).execute("insert into " + KEYSPACE + ".x (id, ck, i) VALUES (?, " + json(1, 2) + ", ? )", ConsistencyLevel.ALL,
+//                                               1, 2);
+//                cluster.coordinator(1).execute("insert into " + KEYSPACE + ".x (id, ck, i) VALUES (?, " + json(1, 1) + ", ? )", ConsistencyLevel.ALL,
+//                                               1, 1);
+//                cluster.get(2).flush(KEYSPACE);
+//                Assert.fail("Expected an exception to be thrown.");
+//            }
+//            catch (Exception e)
+//            {
+//                // correct path
+//                System.out.println(e);
+//            }
         }
     }
 

@@ -1305,7 +1305,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                             result.add(partition.staticRow().getColumnData(def), nowInSec);
                             break;
                         default:
-                            result.add((ByteBuffer)null);
+                            result.add(null);
                     }
                 }
             }

@@ -59,6 +59,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
@@ -143,7 +144,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             contextManager.clear();
 
             contexts.forEach(context -> {
-                context.usedPerSSTableComponents().forWrite().forceDeleteAllComponents();
+                SSTableWatcher.instance.onIndexDropped(context.usedPerSSTableComponents().forWrite());
             });
         }
     }
@@ -162,12 +163,12 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Override
     public void unload()
     {
-        contextManager.clear();
+        baseCfs.getTracker().unsubscribe(this);
 
+        contextManager.clear();
         queryMetrics.release();
         groupMetrics.release();
         stateMetrics.release();
-        baseCfs.getTracker().unsubscribe(this);
     }
 
     @Override
@@ -242,7 +243,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
         try
         {
-            return new StorageAttachedIndexWriter(indexDescriptor, tableMetadata, indices, tracker, keyCount);
+            return new StorageAttachedIndexWriter(indexDescriptor, tableMetadata, indices, tracker, keyCount, baseCfs.metric);
         }
         catch (Throwable t)
         {

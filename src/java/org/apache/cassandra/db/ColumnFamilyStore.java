@@ -96,6 +96,8 @@ import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
+import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -175,6 +177,7 @@ import org.apache.cassandra.service.snapshot.SnapshotManifest;
 import org.apache.cassandra.service.snapshot.TableSnapshot;
 import org.apache.cassandra.streaming.TableStreamManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.DefaultValue;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -734,6 +737,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     }
 
     @Override
+    public Environment makeUCSEnvironment()
+    {
+        return new RealEnvironment(this);
+    }
+
     public TableMetadata metadata()
     {
         return metadata.get();
@@ -1462,7 +1470,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 reclaim(memtable);
                 return Collections.emptyList();
             }
-
+            long start = Clock.Global.nanoTime();
             List<Future<SSTableMultiWriter>> futures = new ArrayList<>();
             long totalBytesOnDisk = 0;
             long maxBytesOnDisk = 0;
@@ -1573,6 +1581,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         }
                     }
                 }
+                metric.memTableFlushCompleted(Clock.Global.nanoTime() - start);
 
                 cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }
@@ -2057,6 +2066,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public Iterable<Memtable> getAllMemtables()
     {
         return data.getView().getAllMemtables();
+    }
+
+    @Override
+    public OpOrder readOrdering()
+    {
+        return readOrdering;
     }
 
     public Map<TimeUUID, PendingStat> getPendingRepairStats()

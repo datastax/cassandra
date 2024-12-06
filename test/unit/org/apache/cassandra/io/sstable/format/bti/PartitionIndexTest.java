@@ -68,6 +68,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.LEGACY;
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS50;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -96,6 +97,8 @@ public class PartitionIndexTest
     {
         return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard, OSS50 },
                              new Object[]{ Config.DiskAccessMode.mmap, OSS50 },
+                             new Object[]{ Config.DiskAccessMode.standard, OSS41 },
+                             new Object[]{ Config.DiskAccessMode.mmap, OSS41 },
                              new Object[]{ Config.DiskAccessMode.standard, LEGACY },
                              new Object[]{ Config.DiskAccessMode.mmap, LEGACY });
     }

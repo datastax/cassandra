@@ -28,7 +28,6 @@ public class AnalyzerTest extends VectorTester
         createTable("CREATE TABLE %s (pk1 int, pk2 text, val int, val2 int, PRIMARY KEY((pk1, pk2)))");
         createIndex("CREATE CUSTOM INDEX ON %s(pk1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(pk2) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (-1, 'b', 1)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (0, 'b', 2)");
@@ -41,7 +40,6 @@ public class AnalyzerTest extends VectorTester
         flush();
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer': 'standard'};");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (-1, 'd', 1)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (0, 'd', 2)");
