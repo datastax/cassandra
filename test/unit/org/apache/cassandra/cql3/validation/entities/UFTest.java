@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.validation.entities;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
@@ -37,6 +38,7 @@ import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.JavaBasedUDFunction;
 import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -1067,5 +1069,24 @@ public class UFTest extends CQLTester
             .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
                                   "For more information - CASSANDRA-18252");
         }
+    }
+
+    @Test
+    public void testFunctionsAreNonMonotonicAndNonDeterministicByDefault() throws Throwable
+    {
+        String name = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                      "CALLED ON NULL INPUT " +
+                                                      "RETURNS int " +
+                                                      "LANGUAGE java " +
+                                                      "AS 'return x / 2;'");
+
+        UntypedResultSet functions = execute("SELECT * FROM system_schema.functions " +
+                                             "WHERE keyspace_name=? AND function_name=?",
+                                             KEYSPACE, shortFunctionName(name));
+
+        Assert.assertEquals(1, functions.size());
+        Assert.assertFalse(functions.one().getBoolean("monotonic"));
+        Assert.assertFalse(functions.one().getBoolean("deterministic"));
+        Assert.assertEquals(Collections.emptyList(), functions.one().getList("monotonic_on", UTF8Type.instance));
     }
 }
