@@ -17,9 +17,12 @@
  */
 package org.apache.cassandra.transport.messages;
 
+import java.util.Optional;
+
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryEvents;
 import org.apache.cassandra.cql3.QueryHandler;
@@ -34,9 +37,10 @@ import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-
-import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 /**
  * A CQL query
@@ -99,7 +103,7 @@ public class QueryMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    protected Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
     {
         CQLStatement statement = null;
         try
@@ -110,26 +114,52 @@ public class QueryMessage extends Message.Request
             if (traceRequest)
                 traceQuery(state);
 
-            long queryStartTime = currentTimeMillis();
+            long requestStartMillisTime = Clock.Global.currentTimeMillis();
 
             QueryHandler queryHandler = ClientState.getCQLQueryHandler();
             statement = queryHandler.parse(query, state, options);
-            Message.Response response = queryHandler.process(statement, state, options, getCustomPayload(), requestTime);
-            QueryEvents.instance.notifyQuerySuccess(statement, query, options, state, queryStartTime, response);
+
+            Optional<Stage> asyncStage = Stage.fromStatement(statement);
+            if (asyncStage.isPresent())
+            {
+                CQLStatement finalStatement = statement;
+                return asyncStage.get().submit(() -> handleRequest(state, queryHandler, requestTime, finalStatement, requestStartMillisTime));
+            }
+            else
+                return ImmediateFuture.success(handleRequest(state, queryHandler, requestTime, statement, requestStartMillisTime));
+        }
+        catch (Exception exception)
+        {
+            return ImmediateFuture.success(handleException(state, statement, exception));
+        }
+    }
+
+    private Response handleRequest(QueryState queryState, QueryHandler queryHandler, Dispatcher.RequestTime requestTime, CQLStatement statement, long requestStartMillisTime)
+    {
+        try
+        {
+            Response response = queryHandler.process(statement, queryState, options, getCustomPayload(), requestTime);
+            QueryEvents.instance.notifyQuerySuccess(statement, query, options, queryState, requestStartMillisTime, response);
 
             if (options.skipMetadata() && response instanceof ResultMessage.Rows)
-                ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
+                ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
 
             return response;
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            QueryEvents.instance.notifyQueryFailure(statement, query, options, state, e);
-            JVMStabilityInspector.inspectThrowable(e);
-            if (!((e instanceof RequestValidationException) || (e instanceof RequestExecutionException)))
-                logger.error("Unexpected error during query", e);
-            return ErrorMessage.fromException(e);
+            return handleException(queryState, statement, ex);
         }
+    }
+
+    private ErrorMessage handleException(QueryState queryState, CQLStatement statement, Exception exception)
+    {
+        QueryEvents.instance.notifyQueryFailure(statement, query, options, queryState, exception);
+        JVMStabilityInspector.inspectThrowable(exception);
+        if (!((exception instanceof RequestValidationException) || (exception instanceof RequestExecutionException)))
+            logger.error("Unexpected error during query", exception);
+
+        return ErrorMessage.fromException(exception);
     }
 
     private void traceQuery(QueryState state)
