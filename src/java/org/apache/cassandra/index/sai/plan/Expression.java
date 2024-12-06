@@ -60,7 +60,7 @@ public class Expression
         EQ, MATCH, PREFIX, NOT_EQ, RANGE,
         CONTAINS_KEY, CONTAINS_VALUE,
         NOT_CONTAINS_VALUE, NOT_CONTAINS_KEY,
-        IN, ORDER_BY, BOUNDED_ANN;
+        IN, ORDER_BY, BOUNDED_ANN, IS_NULL;
 
         public static Op valueOf(Operator operator)
         {
@@ -148,13 +148,20 @@ public class Expression
     public Bound lower, upper;
     private float boundedAnnEuclideanDistanceThreshold = 0;
     private float searchRadiusMeters = 0;
-    private float searchRadiusDegreesSquared = 0;
     public int topK;
     // These variables are only meant to be used for final validation of the range search. They are not
     // meant to be used when searching the index. See the 'add' method below for additional explanation.
     private boolean upperInclusive, lowerInclusive;
 
     final List<ByteBuffer> exclusions = new ArrayList<>();
+
+    public Expression(IndexContext indexContext, Op operation)
+    {
+        this.context = indexContext;
+        this.analyzerFactory = indexContext.getAnalyzerFactory();
+        this.validator = indexContext.getValidator();
+        this.operation = operation;
+    }
 
     public Expression(IndexContext indexContext)
     {
