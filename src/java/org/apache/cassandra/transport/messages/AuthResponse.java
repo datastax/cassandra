@@ -27,6 +27,8 @@ import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.*;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 /**
  * A SASL token message sent from client to server. Some SASL
@@ -69,7 +71,12 @@ public class AuthResponse extends Message.Request
     }
 
     @Override
-    protected Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    protected Future<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    {
+        return ImmediateFuture.success(executeSync(queryState, queryStartNanoTime, traceRequest));
+    }
+
+    private Response executeSync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
     {
         try
         {

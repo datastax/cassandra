@@ -38,6 +38,7 @@ import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.Future;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
@@ -228,9 +229,9 @@ public abstract class Message
             return false;
         }
 
-        protected abstract Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
+        protected abstract Future<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
 
-        public final Response execute(QueryState queryState, long queryStartNanoTime)
+        public final Future<Response> execute(QueryState queryState, long queryStartNanoTime)
         {
             boolean shouldTrace = false;
             TimeUUID tracingSessionId = null;
@@ -250,21 +251,16 @@ public abstract class Message
                 }
             }
 
-            Response response;
-            try
-            {
-                response = execute(queryState, queryStartNanoTime, shouldTrace);
-            }
-            finally
-            {
-                if (shouldTrace)
-                    Tracing.instance.stopSession();
-            }
+            boolean finalShouldTrace = shouldTrace;
+            TimeUUID finalTracingSessionId = tracingSessionId;
+            return maybeExecuteAsync(queryState, queryStartNanoTime, shouldTrace)
+                   .addCallback((result, ignored) -> {
+                       if (finalShouldTrace)
+                           Tracing.instance.stopSession();
 
-            if (isTraceable() && isTracingRequested())
-                response.setTracingId(tracingSessionId);
-
-            return response;
+                       if (isTraceable() && isTracingRequested())
+                           result.setTracingId(finalTracingSessionId);
+                   });
         }
 
         public void setTracingRequested()
