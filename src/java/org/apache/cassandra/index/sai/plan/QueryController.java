@@ -480,9 +480,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return Operation.Node.buildTree(this, filterOperation()).analyzeTree(this).filterTree();
     }
 
-    private Plan.KeysIteration buildHalfRange(Expression originPredicate, Operator op)
+    private Plan.KeysIteration buildHalfRangeFromInEq(Expression originPredicate, Operator op)
     {
-        assert originPredicate.lower.value == originPredicate.upper.value;
+        assert originPredicate.getOp() == Expression.Op.NOT_EQ : "assumes inequality";
+        assert originPredicate.lower.value == originPredicate.upper.value : "assumes lower and upper are the same in inequality";
 
         Expression halfRange = new Expression(originPredicate.context);
         halfRange.add(op, originPredicate.lower.value.raw);
@@ -492,16 +493,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private Plan.KeysIteration buildInequalityPlan(Expression predicate)
     {
-        assert predicate.getOp()== Expression.Op.NOT_EQ
-               || predicate.getOp() == Expression.Op.NOT_CONTAINS_KEY :
-        "Only inequality predicate is expected";
+        assert predicate.getOp()== Expression.Op.NOT_EQ : "Only inequality predicate is expected";
 
         if (TypeUtil.supportsRounding(predicate.validator))
             return planFactory.fullIndexScan(predicate.context);
         else
         {
-            Plan.KeysIteration left = buildHalfRange(predicate, Operator.LT);
-            Plan.KeysIteration right = buildHalfRange(predicate, Operator.GT);
+            Plan.KeysIteration left = buildHalfRangeFromInEq(predicate, Operator.LT);
+            Plan.KeysIteration right = buildHalfRangeFromInEq(predicate, Operator.GT);
             return planFactory.union(new ArrayList<>(Arrays.asList(left, right)));
         }
     }
