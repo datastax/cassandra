@@ -36,6 +36,8 @@ import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
@@ -115,7 +117,12 @@ public class PrepareMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    protected Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    {
+        return ImmediateFuture.success(executeSync(queryState, requestTime, traceRequest));
+    }
+
+    private Message.Response executeSync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
     {
         try
         {
