@@ -19,11 +19,13 @@ package org.apache.cassandra.transport.messages;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryEvents;
@@ -41,11 +43,12 @@ import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.NoSpamLogger;
-
-import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class ExecuteMessage extends Message.Request
 {
@@ -128,7 +131,7 @@ public class ExecuteMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    protected Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
     {
         QueryHandler.Prepared prepared = null;
         try
@@ -139,15 +142,14 @@ public class ExecuteMessage extends Message.Request
                 throw new PreparedQueryNotFoundException(statementId);
 
             if (!prepared.fullyQualified
-                && !Objects.equals(state.getClientState().getRawKeyspace(), prepared.keyspace)
+                && !Objects.equals(queryState.getClientState().getRawKeyspace(), prepared.keyspace)
                 // We can not reliably detect inconsistencies for batches yet
-                && !(prepared.statement instanceof BatchStatement)
-            )
+                && !(prepared.statement instanceof BatchStatement))
             {
-                state.getClientState().warnAboutUseWithPreparedStatements(statementId, prepared.keyspace);
+                queryState.getClientState().warnAboutUseWithPreparedStatements(statementId, prepared.keyspace);
                 String msg = String.format("Tried to execute a prepared unqalified statement on a keyspace it was not prepared on. " +
                                            "Executing the resulting prepared statement will return unexpected results: %s (on keyspace %s, previously prepared on %s)",
-                                           statementId, state.getClientState().getRawKeyspace(), prepared.keyspace);
+                                           statementId, queryState.getClientState().getRawKeyspace(), prepared.keyspace);
                 nospam.error(msg);
             }
 
@@ -158,18 +160,36 @@ public class ExecuteMessage extends Message.Request
                 throw new ProtocolException("The page size cannot be 0");
 
             if (traceRequest)
-                traceQuery(state, prepared);
+                traceQuery(queryState, prepared);
 
-            // Some custom QueryHandlers are interested by the bound names. We provide them this information
+            // Some custom QueryHandlers are interested in the bound names. We provide them this information
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.statement.getBindVariables());
 
-            long requestStartTime = currentTimeMillis();
+            long requestStartMillisTime = Clock.Global.currentTimeMillis();
+            Optional<Stage> asyncStage = Stage.fromStatement(statement);
+            if (asyncStage.isPresent())
+            {
+                QueryHandler.Prepared finalPrepared = prepared;
+                return asyncStage.get().submit(() -> handleRequest(queryState, requestTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime));
+            }
+            else
+                return ImmediateFuture.success(handleRequest(queryState, requestTime, handler, queryOptions, statement, prepared, requestStartMillisTime));
+        }
+        catch (Exception e)
+        {
+            return ImmediateFuture.success(handleException(queryState, prepared, e));
+        }
+    }
 
-            Message.Response response = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), requestTime);
+    private Response handleRequest(QueryState queryState, Dispatcher.RequestTime requestTime, QueryHandler queryHandler, QueryOptions queryOptions, CQLStatement statement, QueryHandler.Prepared prepared, long requestStartMillisTime)
+    {
+        try
+        {
+            Response response = queryHandler.processPrepared(statement, queryState, queryOptions, getCustomPayload(), requestTime);
 
-            QueryEvents.instance.notifyExecuteSuccess(prepared.statement, options, state,
-                                                      requestStartTime, response);
+            QueryEvents.instance.notifyExecuteSuccess(prepared.statement, options, queryState,
+                                                      requestStartMillisTime, response);
 
             if (response instanceof ResultMessage.Rows)
             {
@@ -205,10 +225,15 @@ public class ExecuteMessage extends Message.Request
         }
         catch (Exception e)
         {
-            QueryEvents.instance.notifyExecuteFailure(prepared, options, state, e);
-            JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
+            return handleException(queryState, prepared, e);
         }
+    }
+
+    private ErrorMessage handleException(QueryState queryState, QueryHandler.Prepared prepared, Exception e)
+    {
+        QueryEvents.instance.notifyExecuteFailure(prepared, options, queryState, e);
+        JVMStabilityInspector.inspectThrowable(e);
+        return ErrorMessage.fromException(e);
     }
 
     private void traceQuery(QueryState state, QueryHandler.Prepared prepared)
