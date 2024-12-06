@@ -41,6 +41,10 @@ import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.metrics.ReadCoordinationMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy.LocalReadRunnable;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
@@ -74,6 +78,8 @@ public abstract class AbstractReadExecutor
     private   final int initialDataRequestCount;
     protected volatile PartitionIterator result = null;
     protected final QueryInfoTracker.ReadTracker readTracker;
+    protected final RequestSensors sensors;
+    protected final Context context;
     static
     {
         MessagingService.instance().latencySubscribers.subscribe(ReadCoordinationMetrics::updateReplicaLatency);
@@ -97,6 +103,8 @@ public abstract class AbstractReadExecutor
         this.traceState = Tracing.instance.get();
         this.queryStartNanoTime = queryStartNanoTime;
         this.readTracker = readTracker;
+        this.sensors = RequestTracker.instance.get();
+        this.context = Context.from(command);
 
         // Set the digest version (if we request some digests). This is the smallest version amongst all our target replicas since new nodes
         // knows how to produce older digest but the reverse is not true.
@@ -163,6 +171,7 @@ public abstract class AbstractReadExecutor
                 message = readCommand.createMessage(false);
 
             MessagingService.instance().sendWithCallback(message, endpoint, handler);
+            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.serializedSize(MessagingService.current_version));
         }
 
         // We delay the local (potentially blocking) read till the end to avoid stalling remote requests.
@@ -337,7 +346,9 @@ public abstract class AbstractReadExecutor
                 if (traceState != null)
                     traceState.trace("speculating read retry on {}", extraReplica);
                 logger.trace("speculating read retry on {}", extraReplica);
-                MessagingService.instance().sendWithCallback(retryCommand.createMessage(false), extraReplica.endpoint(), handler);
+                Message<ReadCommand> message = retryCommand.createMessage(false);
+                MessagingService.instance().sendWithCallback(message, extraReplica.endpoint(), handler);
+                sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.serializedSize(MessagingService.current_version));
             }
         }
 

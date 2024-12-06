@@ -31,6 +31,7 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.reads.DataResolver;
@@ -127,6 +128,7 @@ public class NonGroupingRangeCommandIterator extends RangeCommandIterator
                 ReadCommand command = replica.isFull() ? rangeCommand : rangeCommand.copyAsTransientQuery(replica);
                 Message<ReadCommand> message = command.createMessage(trackRepairData && replica.isFull());
                 MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
+                sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.serializedSize(MessagingService.current_version));
             }
         }
 
