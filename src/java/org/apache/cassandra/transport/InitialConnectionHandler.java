@@ -25,8 +25,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.cassandra.transport.ClientResourceLimits.Overload;
-import org.apache.cassandra.utils.MonotonicClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -149,12 +147,21 @@ public class InitialConnectionHandler extends ByteToMessageDecoder
                         promise = new VoidChannelPromise(ctx.channel(), false);
                     }
 
-                    long approxStartTimeNanos = MonotonicClock.Global.approxTime.now();
-                    final Message.Response response = Dispatcher.processRequest(ctx.channel(), startup, Overload.NONE, approxStartTimeNanos);
-
-                    outbound = response.encode(inbound.header.version);
-                    ctx.writeAndFlush(outbound, promise);
-                    logger.trace("Configured pipeline: {}", ctx.pipeline());
+                    ProtocolVersion version = inbound.header.version;
+                    Dispatcher.processInit((ServerConnection) connection, startup).addCallback((response, error) -> {
+                        if (error == null)
+                        {
+                            Envelope encoded = response.encode(version);
+                            ctx.writeAndFlush(encoded, promise);
+                            logger.debug("Configured pipeline: {}", ctx.pipeline());
+                        }
+                        else
+                        {
+                            ErrorMessage message = ErrorMessage.fromException(new ProtocolException(String.format("Unexpected error %s", error.getMessage())));
+                            Envelope encoded = message.encode(version);
+                            ctx.writeAndFlush(encoded);
+                        }
+                    });
                     break;
 
                 default:
