@@ -212,14 +212,6 @@ public class CustomCassandraIndex implements Index
         return indexCfs.getMeanEstimatedCellPerPartitionCount();
     }
 
-    /**
-     * No post processing of query results, just return them unchanged
-     */
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
-    {
-        return (partitionIterator, readCommand) -> partitionIterator;
-    }
-
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
         return getTargetExpression(filter.getExpressions()).map(filter::without)

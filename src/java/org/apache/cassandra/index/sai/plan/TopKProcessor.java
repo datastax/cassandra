@@ -48,9 +48,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.partitions.BasePartitionIterator;
 import org.apache.cassandra.db.partitions.ParallelCommandProcessor;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.Row;
@@ -60,7 +58,6 @@ import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.InMemoryPartitionIterator;
 import org.apache.cassandra.index.sai.utils.InMemoryUnfilteredPartitionIterator;
 import org.apache.cassandra.index.sai.utils.PartitionInfo;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -74,18 +71,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
 /**
  * Processor applied to SAI based ORDER BY queries. This class could likely be refactored into either two filter
  * methods depending on where the processing is happening or into two classes.
- *
- * This processor performs the following steps on a replica:
- * - collect LIMIT rows from partition iterator, making sure that all are valid.
- * - return rows in Primary Key order
- *
- * This processor performs the following steps on a coordinator:
- * - consume all rows from the provided partition iterator and sort them according to the specified order.
- *   For vectors, that is similarit score and for all others, that is the ordering defined by their
- *   {@link org.apache.cassandra.db.marshal.AbstractType}. If there are multiple vector indexes,
- *   the final score is the sum of all vector index scores.
- * - remove rows with the lowest scores from PQ if PQ size exceeds limit
- * - return rows from PQ in primary key order to caller
+ * Ordering on the coordinator is delegated to CQL.
  */
 public class TopKProcessor
 {
@@ -123,7 +109,7 @@ public class TopKProcessor
     /**
      * Executor to use for parallel index reads.
      * Defined by -Dcassandra.index_read.parallele=true/false, true by default.
-     *
+     * </p>
      * INDEX_READ uses 2 * cpus threads by default but can be overridden with -Dcassandra.index_read.parallel_thread_num=<value>
      *
      * @return stage to use, default INDEX_READ
@@ -147,7 +133,7 @@ public class TopKProcessor
      * Filter given partitions and keep the rows with highest scores. In case of {@link UnfilteredPartitionIterator},
      * all tombstones will be kept. Caller must close the supplied iterator.
      */
-    public <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filter(P partitions)
+    public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator partitions)
     {
         // filterInternal consumes the partitions iterator and creates a new one. Use a try-with-resources block
         // to ensure the original iterator is closed. We do not expect exceptions from filterInternal, but if they
@@ -159,12 +145,14 @@ public class TopKProcessor
         }
     }
 
-    private <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filterInternal(P partitions)
+    private UnfilteredPartitionIterator filterInternal(UnfilteredPartitionIterator partitions)
     {
         // priority queue ordered by score in descending order
         Comparator<Triple<PartitionInfo, Row, ?>> comparator;
         if (queryVector != null)
+        {
             comparator = Comparator.comparing((Triple<PartitionInfo, Row, ?> t) -> (Float) t.getRight()).reversed();
+        }
         else
         {
             comparator = Comparator.comparing(t -> (ByteBuffer) t.getRight(), indexContext.getValidator());
@@ -175,13 +163,15 @@ public class TopKProcessor
         // to store top-k results in primary key order
         TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition = new TreeMap<>(Comparator.comparing(p -> p.key));
 
-        if (PARALLEL_EXECUTOR != ImmediateExecutor.INSTANCE && partitions instanceof ParallelCommandProcessor) {
+        if (PARALLEL_EXECUTOR != ImmediateExecutor.INSTANCE && partitions instanceof ParallelCommandProcessor)
+        {
             ParallelCommandProcessor pIter = (ParallelCommandProcessor) partitions;
             var commands = pIter.getUninitializedCommands();
             List<CompletableFuture<PartitionResults>> results = new ArrayList<>(commands.size());
 
             int count = commands.size();
-            for (var command: commands) {
+            for (var command : commands)
+            {
                 CompletableFuture<PartitionResults> future = new CompletableFuture<>();
                 results.add(future);
 
@@ -201,7 +191,8 @@ public class TopKProcessor
                 });
             }
 
-            for (CompletableFuture<PartitionResults> triplesFuture: results) {
+            for (CompletableFuture<PartitionResults> triplesFuture : results)
+            {
                 PartitionResults pr;
                 try
                 {
@@ -216,10 +207,12 @@ public class TopKProcessor
                 if (pr == null)
                     continue;
                 topK.addAll(pr.rows);
-                for (var uf: pr.tombstones)
+                for (var uf : pr.tombstones)
                     addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
-        } else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) {
+        }
+        else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever)
+        {
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
             int rowsMatched = 0;
@@ -232,7 +225,9 @@ public class TopKProcessor
                     rowsMatched += processSingleRowPartition(unfilteredByPartition, partitionRowIterator);
                 }
             }
-        } else {
+        }
+        else
+        {
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
             while (partitions.hasNext())
@@ -244,7 +239,7 @@ public class TopKProcessor
                     {
                         PartitionResults pr = processPartition(partitionRowIterator);
                         topK.addAll(pr.rows);
-                        for (var uf: pr.tombstones)
+                        for (var uf : pr.tombstones)
                             addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
                     }
                     else
@@ -255,7 +250,6 @@ public class TopKProcessor
                             topK.add(Triple.of(PartitionInfo.create(partitionRowIterator), row, row.getCell(expression.column()).buffer()));
                         }
                     }
-
                 }
             }
         }
@@ -264,17 +258,17 @@ public class TopKProcessor
         for (var triple : topK.getUnsortedShared())
             addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
 
-        if (partitions instanceof PartitionIterator)
-            return new InMemoryPartitionIterator(command, unfilteredByPartition);
         return new InMemoryUnfilteredPartitionIterator(command, unfilteredByPartition);
     }
 
-    private class PartitionResults {
+    private class PartitionResults
+    {
         final PartitionInfo partitionInfo;
         final SortedSet<Unfiltered> tombstones = new TreeSet<>(command.metadata().comparator);
         final List<Triple<PartitionInfo, Row, Float>> rows = new ArrayList<>();
 
-        PartitionResults(PartitionInfo partitionInfo) {
+        PartitionResults(PartitionInfo partitionInfo)
+        {
             this.partitionInfo = partitionInfo;
         }
 
@@ -283,7 +277,8 @@ public class TopKProcessor
             tombstones.add(uf);
         }
 
-        void addRow(Triple<PartitionInfo, Row, Float> triple) {
+        void addRow(Triple<PartitionInfo, Row, Float> triple)
+        {
             rows.add(triple);
         }
     }
@@ -291,7 +286,8 @@ public class TopKProcessor
     /**
      * Processes a single partition, calculating scores for rows and extracting tombstones.
      */
-    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator) {
+    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator)
+    {
         // Compute key and static row score once per partition
         DecoratedKey key = partitionRowIterator.partitionKey();
         Row staticRow = partitionRowIterator.staticRow();
@@ -322,7 +318,8 @@ public class TopKProcessor
      * Processes a single partition, without scoring it.
      */
     private int processSingleRowPartition(TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition,
-                                          BaseRowIterator<?> partitionRowIterator) {
+                                          BaseRowIterator<?> partitionRowIterator)
+    {
         if (!partitionRowIterator.hasNext())
             return 0;
 
