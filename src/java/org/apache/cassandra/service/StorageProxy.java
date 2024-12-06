@@ -1989,8 +1989,14 @@ public class StorageProxy implements StorageProxyMBean
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
         return PartitionIterators.doOnClose(partitions, () -> {
-            readTracker.onDone();
-            sensors.syncAllSensors();
+            try
+            {
+                readTracker.onDone();
+            }
+            finally
+            {
+                sensors.syncAllSensors();
+            }
         });
     }
 
@@ -2371,8 +2377,14 @@ public class StorageProxy implements StorageProxyMBean
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
         return PartitionIterators.doOnClose(partitions, () -> {
-            readTracker.onDone();
-            sensors.syncAllSensors();
+            try
+            {
+                readTracker.onDone();
+            }
+            finally
+            {
+                sensors.syncAllSensors();
+            }
         });
     }
 
