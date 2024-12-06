@@ -19,8 +19,14 @@
 package org.apache.cassandra.transport;
 
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
@@ -31,7 +37,12 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.datastax.driver.core.*;
+import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ProtocolOptions;
+import com.datastax.driver.core.ResultSetFuture;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.Session;
+import com.datastax.driver.core.SimpleStatement;
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.service.NativeTransportService;
@@ -39,6 +50,8 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.AssertUtil;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import static org.apache.cassandra.config.EncryptionOptions.TlsEncryptionPolicy.UNENCRYPTED;
 import static org.apache.cassandra.transport.BurnTestUtil.SizeCaps;
@@ -78,18 +91,20 @@ public class DriverBurnTest extends CQLTester
             {
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options) {
-                    protected Message.Response execute(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+
+                    @Override
+                    protected Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
                     {
                         try
                         {
                             int idx = Integer.parseInt(queryMessage.query);
                             SizeCaps caps = idx % largeMessageFrequency == 0 ? largeMessageCap : smallMessageCap;
-                            return generateRows(idx, caps);
+                            return ImmediateFuture.success(generateRows(idx, caps));
                         }
                         catch (NumberFormatException e)
                         {
                             // for the requests driver issues under the hood
-                            return super.execute(state, requestTime, traceRequest);
+                            return super.maybeExecuteAsync(state, requestTime, traceRequest);
                         }
                     }
                 };
@@ -338,17 +353,19 @@ public class DriverBurnTest extends CQLTester
             {
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options) {
-                    protected Message.Response execute(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+
+                    @Override
+                    protected Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
                     {
                         try
                         {
                             int idx = Integer.parseInt(queryMessage.query); // unused
-                            return generateRows(idx, responseCaps);
+                            return ImmediateFuture.success(generateRows(idx, responseCaps));
                         }
                         catch (NumberFormatException e)
                         {
                             // for the requests driver issues under the hood
-                            return super.execute(state, requestTime, traceRequest);
+                            return super.maybeExecuteAsync(state, requestTime, traceRequest);
                         }
                     }
                 };

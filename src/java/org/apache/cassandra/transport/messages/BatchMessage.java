@@ -20,10 +20,12 @@ package org.apache.cassandra.transport.messages;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.cql3.Attributes;
 import org.apache.cassandra.cql3.BatchQueryOptions;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -46,8 +48,9 @@ import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
-
-import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class BatchMessage extends Message.Request
 {
@@ -170,7 +173,7 @@ public class BatchMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    public Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
     {
         List<QueryHandler.Prepared> prepared = null;
         try
@@ -227,18 +230,43 @@ public class BatchMessage extends Message.Request
             BatchStatement batch = new BatchStatement(null, batchType,
                                                       VariableSpecifications.empty(), statements, Attributes.none());
 
-            long queryTime = currentTimeMillis();
-            Message.Response response = handler.processBatch(batch, state, batchOptions, getCustomPayload(), requestTime);
-            if (queries != null)
-                QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, state, queryTime, response);
-            return response;
+            long requestStartMillisTime = MonotonicClock.Global.approxTime.now();
+            Optional<Stage> asyncStage = Stage.fromStatement(batch);
+            if (asyncStage.isPresent())
+            {
+                List<QueryHandler.Prepared> finalPrepared = prepared;
+                return asyncStage.get().submit(() -> handleRequest(state, requestTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime));
+            }
+            else
+                return ImmediateFuture.success(handleRequest(state, requestTime, handler, batch, batchOptions, queries, statements, prepared, requestStartMillisTime));
         }
         catch (Exception e)
         {
-            QueryEvents.instance.notifyBatchFailure(prepared, batchType, queryOrIdList, values, options, state, e);
-            JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
+            return ImmediateFuture.success(handleException(state, prepared, e));
         }
+    }
+
+    private Response handleRequest(QueryState queryState, Dispatcher.RequestTime requestTime, QueryHandler queryHandler, BatchStatement batch, BatchQueryOptions batchOptions, List<String> queries, List<ModificationStatement> statements, List<QueryHandler.Prepared> preparedList, long requestStartMillisTime)
+    {
+        try
+        {
+            Response response = queryHandler.processBatch(batch, queryState, batchOptions, getCustomPayload(), requestTime);
+            if (queries != null)
+                QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, queryState, requestStartMillisTime, response);
+
+            return response;
+        }
+        catch (Exception exception)
+        {
+            return handleException(queryState, preparedList, exception);
+        }
+    }
+
+    private ErrorMessage handleException(QueryState state, List<QueryHandler.Prepared> prepared, Exception e)
+    {
+        QueryEvents.instance.notifyBatchFailure(prepared, batchType, queryOrIdList, values, options, state, e);
+        JVMStabilityInspector.inspectThrowable(e);
+        return ErrorMessage.fromException(e);
     }
 
     private void traceQuery(QueryState state)

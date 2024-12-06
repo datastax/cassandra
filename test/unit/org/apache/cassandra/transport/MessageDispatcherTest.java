@@ -34,6 +34,8 @@ import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.AuthResponse;
 import org.mockito.Mockito;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class MessageDispatcherTest
 {
@@ -46,7 +48,7 @@ public class MessageDispatcherTest
         }
 
         @Override
-        public Response execute(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
+        public Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
         {
             return null;
         }
@@ -105,10 +107,9 @@ public class MessageDispatcherTest
                     return connectionMock();
                 }
 
-                @Override
-                public Response execute(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
+                public Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
                 {
-                    return null;
+                    return ImmediateFuture.success(null);
                 }
             });
             Assert.assertEquals(requests, 1);
