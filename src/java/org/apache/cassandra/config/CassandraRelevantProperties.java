@@ -519,6 +519,13 @@ public enum CassandraRelevantProperties
     MX4JPORT("mx4jport"),
     NANOTIMETOMILLIS_TIMESTAMP_UPDATE_INTERVAL("cassandra.NANOTIMETOMILLIS_TIMESTAMP_UPDATE_INTERVAL", "10000"),
     NATIVE_EPOLL_ENABLED("cassandra.native.epoll.enabled", "true"),
+    /**
+     * If true, makes read and write CQL statements async, splitting them from the {@link org.apache.cassandra.concurrent.Stage#NATIVE_TRANSPORT_REQUESTS}
+     * stage and into the {@link org.apache.cassandra.concurrent.Stage#COORDINATE_READ} and {@link org.apache.cassandra.concurrent.Stage#COORDINATE_MUTATION}
+     * stages respectively; in other words, the native transport stage will not block, offloading request processing
+     * (and any related blocking behaviour) to the specific read and write stages.
+     */
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false"),
     /** This is the port used with RPC address for the native protocol to communicate with clients. Now that thrift RPC is no longer in use there is no RPC port. */
     NATIVE_TRANSPORT_PORT("cassandra.native_transport_port"),
     NEVER_PURGE_TOMBSTONES("cassandra.never_purge_tombstones"),
