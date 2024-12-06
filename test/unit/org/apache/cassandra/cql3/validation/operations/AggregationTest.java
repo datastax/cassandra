@@ -2180,10 +2180,15 @@ public class AggregationTest extends CQLTester
     @Test
     public void testAggregatesAreNonDeterministicByDefault() throws Throwable
     {
-        String fName = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s(i int, j int) RETURNS NULL ON NULL INPUT RETURNS int LANGUAGE java AS 'return i + j;'");
-        createAggregate(KEYSPACE, "int", String.format("CREATE AGGREGATE %%s (int) SFUNC %s STYPE int INITCOND 1;", shortFunctionName(fName)));
+        String fName = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s(i int, j int) RETURNS NULL ON NULL INPUT " +
+                                                       "RETURNS int " +
+                                                       "LANGUAGE java " +
+                                                       "AS 'return i + j;'");
+        String aName = createAggregate(KEYSPACE, "int", String.format("CREATE AGGREGATE %%s (int) SFUNC %s STYPE int INITCOND 1;", shortFunctionName(fName)));
 
-        UntypedResultSet aggregates = execute("SELECT * FROM system_schema.aggregates");
+        UntypedResultSet aggregates = execute("SELECT * FROM system_schema.aggregates " +
+                                             "WHERE keyspace_name=? AND aggregate_name=?;",
+                                             KEYSPACE, shortFunctionName(aName));
 
         Assert.assertEquals(1, aggregates.size());
         Assert.assertFalse(aggregates.one().getBoolean("deterministic"));

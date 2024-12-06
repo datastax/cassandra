@@ -1074,22 +1074,19 @@ public class UFTest extends CQLTester
     @Test
     public void testFunctionsAreNonMonotonicAndNonDeterministicByDefault() throws Throwable
     {
-        createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
-                "CALLED ON NULL INPUT " +
-                "RETURNS int " +
-                "LANGUAGE java " +
-                "AS 'return x / 2;'");
+        String name = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                      "CALLED ON NULL INPUT " +
+                                                      "RETURNS int " +
+                                                      "LANGUAGE java " +
+                                                      "AS 'return x / 2;'");
 
-        UntypedResultSet functions = execute("SELECT * FROM system_schema.functions");
+        UntypedResultSet functions = execute("SELECT * FROM system_schema.functions " +
+                                             "WHERE keyspace_name=? AND function_name=?",
+                                             KEYSPACE, shortFunctionName(name));
 
         Assert.assertEquals(1, functions.size());
         Assert.assertFalse(functions.one().getBoolean("monotonic"));
         Assert.assertFalse(functions.one().getBoolean("deterministic"));
         Assert.assertEquals(Collections.emptyList(), functions.one().getList("monotonic_on", UTF8Type.instance));
-
-        UntypedResultSet aggregates = execute("SELECT * FROM system_schema.aggregates");
-
-        Assert.assertEquals(1, aggregates.size());
-        Assert.assertFalse(aggregates.one().getBoolean("deterministic"));
     }
 }
