@@ -28,6 +28,8 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 /**
  * The initial message of the protocol.
@@ -73,7 +75,12 @@ public class StartupMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    protected Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
+    {
+        return ImmediateFuture.success(executeSync(queryState, requestTime, traceRequest));
+    }
+
+    private Message.Response executeSync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
     {
         String cqlVersion = options.get(CQL_VERSION);
         if (cqlVersion == null)
