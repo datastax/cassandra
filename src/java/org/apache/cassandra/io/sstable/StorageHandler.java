@@ -27,11 +27,11 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STORAGE_HANDLER;
+import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STORAGE_HANDLER_FACTORY;
 
 /**
  * The handler of the storage of sstables, and possibly other files such as txn logs.
@@ -49,6 +49,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STO
 public abstract class StorageHandler
 {
     private final static String remoteStorageHandler = REMOTE_STORAGE_HANDLER.getString();
+    private final static String remoteStorageHandlerFactory = REMOTE_STORAGE_HANDLER_FACTORY.getString();
 
     public enum ReloadReason
     {
@@ -122,11 +123,11 @@ public abstract class StorageHandler
     public abstract Collection<SSTableReader> reloadSSTables(ReloadReason reason);
 
     /**
-     * This method determines if the backing storage handles is remote storage
+     * This method determines if the backing storage handler allows auto compaction
      * <p/>
-     * @return true if storage handler is remote
+     * @return true if auto compaction should be enabled
      */
-    public abstract boolean isRemote();
+    public abstract boolean enableAutoCompaction();
 
     /**
      * This method will run the operation specified by the {@link Runnable} passed it
@@ -146,20 +147,43 @@ public abstract class StorageHandler
 
     public static StorageHandler create(TableMetadataRef metadata, Directories directories, Tracker dataTracker)
     {
-        // local keyspaces are always local so don't use the remote handler even if it has been configured
-        if (remoteStorageHandler == null || Schema.isKeyspaceWithLocalStrategy(metadata.keyspace))
-            return new DefaultStorageHandler(metadata, directories, dataTracker);
+        // if legacy config is present, use it
+        if (remoteStorageHandler != null)
+            return createRemoteHandler(metadata, directories, dataTracker, remoteStorageHandler);
 
-        Class<StorageHandler> factoryClass =  FBUtilities.classForName(remoteStorageHandler, "Remote storage handler");
+        return remoteStorageHandlerFactory == null
+               ? StorageHandlerFactory.INSTANCE.create(metadata, directories, dataTracker)
+               : createRemoteHandlerWithFactory(metadata, directories, dataTracker, remoteStorageHandlerFactory);
+    }
+
+    @Deprecated
+    private static StorageHandler createRemoteHandler(TableMetadataRef metadata, Directories directories, Tracker dataTracker, String handler)
+    {
+        Class<StorageHandler> factoryClass =  FBUtilities.classForName(handler, "Remote storage handler");
 
         try
         {
             return factoryClass.getConstructor(TableMetadataRef.class, Directories.class, Tracker.class)
-                    .newInstance(metadata, directories, dataTracker);
+                               .newInstance(metadata, directories, dataTracker);
         }
         catch (NoSuchMethodException | IllegalAccessException | InstantiationException | InvocationTargetException e)
         {
-            throw new ConfigurationException("Unable to find correct constructor for " + remoteStorageHandler, e);
+            throw new ConfigurationException("Unable to find correct constructor for " + handler, e);
+        }
+    }
+
+    private static StorageHandler createRemoteHandlerWithFactory(TableMetadataRef metadata, Directories directories, Tracker dataTracker, String handlerFactory)
+    {
+        Class<StorageHandlerFactory> factoryClass =  FBUtilities.classForName(handlerFactory, "Remote storage handler factory");
+
+        try
+        {
+            StorageHandlerFactory factory = factoryClass.getConstructor().newInstance();
+            return factory.create(metadata, directories, dataTracker);
+        }
+        catch (NoSuchMethodException | IllegalAccessException | InstantiationException | InvocationTargetException e)
+        {
+            throw new ConfigurationException("Unable to find correct constructor for " + handlerFactory, e);
         }
     }
 }

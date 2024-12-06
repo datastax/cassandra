@@ -216,7 +216,13 @@ public enum CassandraRelevantProperties
     /**
      * The handler of the storage of sstables, and possibly other files such as txn logs.
      */
+    @Deprecated
     REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+
+    /**
+     * The factory for handler of the storage of sstables
+     */
+    REMOTE_STORAGE_HANDLER_FACTORY("cassandra.remote_storage_handler_factory"),
 
     /**
      * To provide a provider to a different implementation of the truncate statement.
