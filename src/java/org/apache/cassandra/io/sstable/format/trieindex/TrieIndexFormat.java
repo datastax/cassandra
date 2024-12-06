@@ -348,7 +348,7 @@ public class TrieIndexFormat implements SSTableFormat
             hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
             hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
             correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_SG_10 : MessagingService.VERSION_3014;
-            hasImplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include implicitly frozen tuples
+            hasImplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // `da` is found in C* 5.0 and CC `main-5.0`, and both have implicitly frozen tuples
             byteComparableVersion = version.compareTo("ca") >= 0 ? ByteComparable.Version.OSS41 : ByteComparable.Version.LEGACY;
         }
 

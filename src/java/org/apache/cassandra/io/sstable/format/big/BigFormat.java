@@ -197,13 +197,16 @@ public class BigFormat implements SSTableFormat
     static class BigVersion extends Version
     {
         public static final String current_version = "nb";
-        public static final String earliest_supported_version = "ma";
+        public static final String earliest_supported_version = "me";
 
         // ma (3.0.0): swap bf hash order
         //             store rows natively
         // mb (3.0.7, 3.7): commit log lower bound included
         // mc (3.0.8, 3.9): commit log intervals included
         // md (3.0.18, 3.11.4): corrected sstable min/max clustering
+
+        // only `me` and above, and upgrades from 3.0.25, 3.11.11, and dse-5.1 are supported (see CassandraDaemon.checkForCompatibleUpgrades())
+
         // me (3.0.25, 3.11.11): added hostId of the node from which the sstable originated
 
         // na (4.0-rc1): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
@@ -368,7 +371,7 @@ public class BigFormat implements SSTableFormat
         @Override
         public boolean hasImplicitlyFrozenTuples()
         {
-            return version.compareTo("me") <= 0;
+            return true;
         }
 
         @Override

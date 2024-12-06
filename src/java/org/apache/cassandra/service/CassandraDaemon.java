@@ -34,6 +34,7 @@ import javax.management.remote.JMXConnectorServer;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import org.apache.cassandra.utils.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,7 +65,6 @@ import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.io.sstable.SSTableHeaderFix;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.PathUtils;
@@ -80,13 +80,6 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.ThreadAwareSecurityManager;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JMXServerUtils;
-import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.MBeanWrapper;
-import org.apache.cassandra.utils.Mx4jTool;
-import org.apache.cassandra.utils.INativeLibrary;
-import org.apache.cassandra.utils.WindowsTimer;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_FOREGROUND;
@@ -291,8 +284,6 @@ public class CassandraDaemon
         setupVirtualKeyspaces();
 
         LegacySystemKeyspaceToNodes.convertToNodesFilesIfNecessary();
-
-        SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
 
         // clean up debris in the rest of the keyspaces
         for (String keyspaceName : Schema.instance.getKeyspaces())

@@ -96,7 +96,7 @@ public class LegacySSTableTest
      * See {@link #testGenerateSstables()} to generate sstables.
      * Take care on commit as you need to add the sstable files using {@code git add -f}
      */
-    public static final String[] legacyVersions = {"nc", "nb", "na", "me", "md", "mc", "mb", "ma", "aa", "ac", "ad", "ba", "bb", "ca", "cb", "cc"};
+    public static final String[] legacyVersions = {"me", "na", "nb", "nc", "aa", "ac", "ad", "ba", "bb", "ca", "cb", "cc"};
 
     // 1200 chars
     static final String longString = StringUtils.repeat("0123456789", 120);
@@ -293,27 +293,6 @@ public class LegacySSTableTest
             streamLegacyTables(legacyVersion);
             verifyReads(legacyVersion);
         }
-    }
-
-    @Test
-    public void testInaccurateSSTableMinMax() throws Exception
-    {
-        QueryProcessor.executeInternal("CREATE TABLE legacy_tables.legacy_mc_inaccurate_min_max (k int, c1 int, c2 int, c3 int, v int, primary key (k, c1, c2, c3))");
-        loadLegacyTable("mc", "inaccurate_min_max");
-
-        /*
-         sstable has the following mutations:
-            INSERT INTO legacy_tables.legacy_mc_inaccurate_min_max (k, c1, c2, c3, v) VALUES (100, 4, 4, 4, 4)
-            DELETE FROM legacy_tables.legacy_mc_inaccurate_min_max WHERE k=100 AND c1<3
-         */
-
-        String query = "SELECT * FROM legacy_tables.legacy_mc_inaccurate_min_max WHERE k=100 AND c1=1 AND c2=1";
-        List<Unfiltered> unfiltereds = SinglePartitionSliceCommandTest.getUnfilteredsFromSinglePartition(query);
-        Assert.assertEquals(2, unfiltereds.size());
-        Assert.assertTrue(unfiltereds.get(0).isRangeTombstoneMarker());
-        Assert.assertTrue(((RangeTombstoneMarker) unfiltereds.get(0)).isOpen(false));
-        Assert.assertTrue(unfiltereds.get(1).isRangeTombstoneMarker());
-        Assert.assertTrue(((RangeTombstoneMarker) unfiltereds.get(1)).isClose(false));
     }
 
     @Test
@@ -659,13 +638,6 @@ public class LegacySSTableTest
                 throw new AssertionError(e);
             }
         }
-
-        // if reading mc or lower format sstables, behave like upgrading from a CassandraVersion 3.0
-        if (legacyVersion.compareTo("mc") <= 0)
-            FBUtilities.setPreviousReleaseVersionString("3.0.8");
-
-        // mimic what StorageService does
-        //FIXME – SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
 
         int s0 = cfs.getLiveSSTables().size();
         cfs.loadNewSSTables();
