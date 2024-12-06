@@ -101,8 +101,11 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
  */
 public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 {
-    // TODO remove this when we no longer need to downgrade to replicas that don't know about synthetic columns
-    // (And don't forget to remove the related hacks in Columns.Serializer.encodeBitmap and UnfilteredSerializer.serializeRowBody)
+    // TODO remove this when we no longer need to downgrade to replicas that don't know about synthetic columns,
+    // and the related code in
+    //  - Columns.Serializer.encodeBitmap
+    //  - UnfilteredSerializer.serializeRowBody)
+    //  - StatementRestrictions.addOrderingRestrictions
     public static final boolean ANN_USE_SYNTHETIC_SCORE = Boolean.parseBoolean(System.getProperty("cassandra.sai.ann_use_synthetic_score", "false"));
 
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
