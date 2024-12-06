@@ -34,6 +34,7 @@ import com.google.common.base.Strings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.openhft.chronicle.core.io.BackgroundResourceReleaser;
 import net.openhft.chronicle.queue.ChronicleQueue;
 import net.openhft.chronicle.queue.impl.single.SingleChronicleQueue;
 import net.openhft.chronicle.queue.ExcerptAppender;
@@ -41,6 +42,7 @@ import net.openhft.chronicle.queue.RollCycles;
 import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder;
 import net.openhft.chronicle.wire.WireOut;
 import net.openhft.chronicle.wire.WriteMarshallable;
+import net.openhft.posix.PosixAPI;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.util.File;
@@ -74,6 +76,13 @@ public class BinLog implements Runnable
 
     public static final String VERSION = "version";
     public static final String TYPE = "type";
+
+    static
+    {
+        // Avoid the chronicle announcement which is commercial advertisement, and debug info we already print at startup
+        // https://github.com/OpenHFT/Chronicle-Core/blob/chronicle-core-2.23.36/src/main/java/net/openhft/chronicle/core/announcer/Announcer.java#L32-L33
+        System.setProperty("chronicle.announcer.disable", "true");
+    }
 
     private ChronicleQueue queue;
     private ExcerptAppender appender;
@@ -122,6 +131,7 @@ public class BinLog implements Runnable
 
     private BinLog(Path path, BinLogOptions options, BinLogArchiver archiver)
     {
+        Preconditions.checkNotNull(PosixAPI.posix(), "Cannot initialize OpenHFT Posix");
         Preconditions.checkNotNull(path, "path was null");
         Preconditions.checkNotNull(options.roll_cycle, "roll_cycle was null");
         Preconditions.checkArgument(options.max_queue_weight > 0, "max_queue_weight must be > 0");
@@ -170,6 +180,7 @@ public class BinLog implements Runnable
 
         shouldContinue = false;
         sampleQueue.put(NO_OP);
+        BackgroundResourceReleaser.stop();
         binLogThread.join();
         appender.close();
         appender = null;

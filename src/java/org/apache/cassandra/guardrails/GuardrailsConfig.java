@@ -145,6 +145,10 @@ public class GuardrailsConfig
     public volatile Integer offset_rows_warn_threshold;
     public volatile Integer offset_rows_failure_threshold;
 
+    // Limit the number of column value filters per SELECT query (after applying analyzers, in case they are used)
+    public volatile Integer query_filters_warn_threshold;
+    public volatile Integer query_filters_fail_threshold;
+
     /**
      * If {@link DatabaseDescriptor#isEmulateDbaasDefaults()} is true, apply cloud defaults to guardrails settings that
      * are not specified in yaml; otherwise, apply on-prem defaults to guardrails settings that are not specified in yaml;
@@ -234,6 +238,9 @@ public class GuardrailsConfig
 
         enforceDefault(offset_rows_warn_threshold, v -> offset_rows_warn_threshold = v, 10000, 10000);
         enforceDefault(offset_rows_failure_threshold, v -> offset_rows_failure_threshold = v, 20000, 20000);
+
+        enforceDefault(query_filters_warn_threshold, v -> query_filters_warn_threshold = v, -1, -1);
+        enforceDefault(query_filters_fail_threshold, v -> query_filters_fail_threshold = v, -1, -1);
     }
 
     /**
@@ -300,6 +307,10 @@ public class GuardrailsConfig
         validateStrictlyPositiveInteger(offset_rows_warn_threshold, "offset_rows_warn_threshold");
         validateStrictlyPositiveInteger(offset_rows_failure_threshold, "offset_rows_failure_threshold");
         validateWarnLowerThanFail(offset_rows_warn_threshold, offset_rows_failure_threshold, "offset_rows_threshold");
+
+        validateStrictlyPositiveInteger(query_filters_warn_threshold, "query_filters_warn_threshold");
+        validateStrictlyPositiveInteger(query_filters_fail_threshold, "query_filters_fail_threshold");
+        validateWarnLowerThanFail(query_filters_warn_threshold, query_filters_fail_threshold, "query_filters_threshold");
     }
 
     /**

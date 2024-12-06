@@ -164,7 +164,12 @@ public interface OnDiskFormat
      * @param indexContext The {@link IndexContext} for the index
      * @return The set of {@link IndexComponentType} for the per-index index
      */
-    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext);
+    default public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
+    {
+        return perIndexComponentTypes(indexContext.getValidator());
+    }
+
+    public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator);
 
     /**
      * Return the number of open per-SSTable files that can be open during a query.

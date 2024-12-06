@@ -144,13 +144,26 @@ public class Version
     }
 
 
-    public static interface FileNameFormatter
+    public interface FileNameFormatter
     {
         /**
          * Format filename for given index component, context and generation.  Only the "component" part of the
          * filename is returned (so the suffix of the full filename), not a full path.
          */
-        public String format(IndexComponentType indexComponentType, IndexContext indexContext, int generation);
+        default String format(IndexComponentType indexComponentType, IndexContext indexContext, int generation)
+        {
+            return  format(indexComponentType, indexContext == null ? null : indexContext.getIndexName(), generation);
+        }
+
+        /**
+         * Format filename for given index component, index and generation.  Only the "component" part of the
+         * filename is returned (so the suffix of the full filename), not a full path.
+         *
+         * @param indexComponentType the type of the index component.
+         * @param indexName the name of the index, or {@code null} for a per-sstable component.
+         * @param generation the generation of the build of the component.
+         */
+        String format(IndexComponentType indexComponentType, @Nullable String indexName, int generation);
     }
 
     /**
@@ -183,17 +196,15 @@ public class Version
 
     public static class ParsedFileName
     {
-        public final Version version;
+        public final ComponentsBuildId buildId;
         public final IndexComponentType component;
         public final @Nullable String indexName;
-        public final int generation;
 
-        private ParsedFileName(Version version, IndexComponentType component, @Nullable String indexName, int generation)
+        private ParsedFileName(ComponentsBuildId buildId, IndexComponentType component, @Nullable String indexName)
         {
-            this.version = version;
+            this.buildId = buildId;
             this.component = component;
             this.indexName = indexName;
-            this.generation = generation;
         }
     }
 
@@ -205,20 +216,19 @@ public class Version
     private static final String VERSION_AA_PER_SSTABLE_FORMAT = "SAI_%s.db";
     private static final String VERSION_AA_PER_INDEX_FORMAT = "SAI_%s_%s.db";
 
-    private static String aaFileNameFormat(IndexComponentType indexComponentType, IndexContext indexContext, int generation)
+    private static String aaFileNameFormat(IndexComponentType indexComponentType, @Nullable String indexName, int generation)
     {
         Preconditions.checkArgument(generation == 0, "Generation is not supported for AA version");
         StringBuilder stringBuilder = new StringBuilder();
 
-        stringBuilder.append(indexContext == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponentType.representation)
-                                                  : String.format(VERSION_AA_PER_INDEX_FORMAT, indexContext.getIndexName(), indexComponentType.representation));
+        stringBuilder.append(indexName == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponentType.representation)
+                                                  : String.format(VERSION_AA_PER_INDEX_FORMAT, indexName, indexComponentType.representation));
 
         return stringBuilder.toString();
     }
 
     private static Optional<ParsedFileName> tryParseAAFileName(String componentStr)
     {
-        int generation = 0;
         int lastSepIdx = componentStr.lastIndexOf('_');
         if (lastSepIdx == -1)
             return Optional.empty();
@@ -231,7 +241,7 @@ public class Version
         if (firstSepIdx != -1 && firstSepIdx != lastSepIdx)
             indexName = componentStr.substring(firstSepIdx + 1, lastSepIdx);
 
-        return Optional.of(new ParsedFileName(AA, indexComponentType, indexName, generation));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(AA, 0), indexComponentType, indexName));
     }
 
     //
@@ -243,7 +253,7 @@ public class Version
     private static final String SAI_SEPARATOR = "+";
     private static final String EXTENSION = ".db";
 
-    private static String stargazerFileNameFormat(IndexComponentType indexComponentType, IndexContext indexContext, int generation, String version)
+    private static String stargazerFileNameFormat(IndexComponentType indexComponentType, @Nullable String indexName, int generation, String version)
     {
         StringBuilder stringBuilder = new StringBuilder();
 
@@ -251,8 +261,8 @@ public class Version
         stringBuilder.append(SAI_SEPARATOR).append(version);
         if (generation > 0)
             stringBuilder.append(SAI_SEPARATOR).append(generation);
-        if (indexContext != null)
-            stringBuilder.append(SAI_SEPARATOR).append(indexContext.getIndexName());
+        if (indexName != null)
+            stringBuilder.append(SAI_SEPARATOR).append(indexName);
         stringBuilder.append(SAI_SEPARATOR).append(indexComponentType.representation);
         stringBuilder.append(EXTENSION);
 
@@ -291,6 +301,6 @@ public class Version
                 indexName = splits[splits.length - 2];
         }
 
-        return Optional.of(new ParsedFileName(version, indexComponentType, indexName, generation));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(version, generation), indexComponentType, indexName));
     }
 }

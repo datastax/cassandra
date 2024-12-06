@@ -29,12 +29,15 @@ import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
+import org.apache.cassandra.service.ClientWarn;
 import org.assertj.core.api.Assertions;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class LuceneAnalyzerTest extends SAITester
 {
@@ -654,14 +657,12 @@ public class LuceneAnalyzerTest extends SAITester
         Assertions.assertThatThrownBy(() -> execute(disjunctionQueryMatchEq))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
-        // TODO: this last test is affected by CNDB-10731. We should enable it once that is fixed.
-        // assertRows(execute(disjunctionQueryMatchEq + "ALLOW FILTERING"), row("1"));
+         assertRows(execute(disjunctionQueryMatchEq + "ALLOW FILTERING"), row("1"));
 
         Assertions.assertThatThrownBy(() -> execute(disjunctionQueryEqMatch))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
-        // TODO: this last test is affected by CNDB-10731. We should enable it once that is fixed.
-        // assertRows(execute(disjunctionQueryEqMatch + "ALLOW FILTERING"), row("1"));
+         assertRows(execute(disjunctionQueryEqMatch + "ALLOW FILTERING"));
     }
 
     @Test
@@ -784,5 +785,102 @@ public class LuceneAnalyzerTest extends SAITester
                                              "    {\"name\" : \"lowercase\"}]}'}"))
         .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Error configuring analyzer's filter 'synonym': Unknown parameters: {extraParam=xyz}");
+    }
+
+    @Test
+    public void testHighNumberOfMatchPredicates()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': '{" +
+                    "    \"tokenizer\" : {\n" +
+                    "          \"name\" : \"ngram\",\n" +
+                    "          \"args\" : {\n" +
+                    "            \"minGramSize\":\"2\",\n" +
+                    "            \"maxGramSize\":\"3\"\n" +
+                    "          }\n" +
+                    "    }," +
+                    "    \"filters\" : [ {\"name\" : \"lowercase\"}] \n" +
+                    "  }'}");
+
+        // Long enough to generate several tens of thousands of ngrams:
+        String longParam = "The quick brown fox jumps over the lazy DOG.".repeat(250);
+
+        // Generally we expect this query to run in < 25 ms each on reasonably performant
+        // hardware, but because CI performance can have a lot of variability,
+        // we take the minimum, and we allow a large margin to avoid random failures.
+        var count = 5;
+        var minElapsed = Long.MAX_VALUE;
+        for (int i = 0; i < count; i++)
+        {
+            var startTime = System.currentTimeMillis();
+            execute("SELECT * FROM %s WHERE val : '" + longParam + '\'');
+            var elapsed = System.currentTimeMillis() - startTime;
+            if (elapsed < minElapsed)
+                minElapsed = elapsed;
+            // In extreme case we just want to bail out after the first iteration
+            if (elapsed > 10000)
+                break;
+        }
+        assertTrue("Query too slow: " + minElapsed + " ms", minElapsed < 1000);
+    }
+
+    @Test
+    public void testClientWarningOnNGram()
+    {
+        // no explicit analyzer
+        assertNoWarning("{}");
+        assertNoWarning("{'ascii': 'true', 'case_sensitive': 'false', 'normalize': 'true'}");
+
+        // standard analyzer
+        assertNoWarning("{'index_analyzer': 'standard'}");
+        assertNoWarning("{'index_analyzer': 'whitespace'}");
+
+        // custom non-ngram analyzer
+
+        // ngram analyzer without query_analyzer
+        assertClientWarningOnNGram("{'index_analyzer': '{" +
+                                   "   \"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                                   "   \"filters\":[{\"name\":\"lowercase\"}]}'}");
+        assertClientWarningOnNGram("{'index_analyzer': '{" +
+                                   "   \"tokenizer\":{\"name\":\"whitespace\"}," +
+                                   "   \"filters\":[{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}]}'}");
+
+        // ngram analyzer with ngram query_analyzer
+        assertNoWarning("{'index_analyzer': '{" +
+                        "   \"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}}'," +
+                        "'query_analyzer': '{" +
+                        "   \"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}}'}");
+
+        // ngram analyzer with non-ngram query_analyzer
+        assertNoWarning("{'index_analyzer': '{" +
+                        "   \"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                        "   \"filters\":[{\"name\":\"lowercase\"}]}'," +
+                        "'query_analyzer': '{" +
+                        "   \"tokenizer\":{\"name\":\"whitespace\"}," +
+                        "   \"filters\":[{\"name\":\"porterstem\"}]}'}");
+    }
+
+    private void assertClientWarningOnNGram(String indexOptions)
+    {
+        createIndexFromOptions(indexOptions);
+        Assertions.assertThat(ClientWarn.instance.getWarnings())
+                  .hasSize(1)
+                  .allMatch(w -> w.contains(StorageAttachedIndex.NGRAM_WITHOUT_QUERY_ANALYZER_WARNING));
+    }
+
+    private void assertNoWarning(String indexOptions)
+    {
+        createIndexFromOptions(indexOptions);
+        Assertions.assertThat(ClientWarn.instance.getWarnings()).isNull();
+    }
+
+    private void createIndexFromOptions(String options)
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        ClientWarn.instance.captureWarnings();
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = " + options);
     }
 }

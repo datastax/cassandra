@@ -106,6 +106,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -115,6 +116,13 @@ import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K
 
 public class StorageAttachedIndex implements Index
 {
+    public static final String NGRAM_WITHOUT_QUERY_ANALYZER_WARNING =
+    "Using an ngram analyzer without defining a query_analyzer. " +
+    "This means that the same ngram analyzer will be applied to both indexed and queried column values. " +
+    "Applying ngram analysis to the queried values usually produces too many search tokens to be useful. " +
+    "The large number of tokens can also have a negative impact in performance. " +
+    "In most cases it's better to use a simpler query_analyzer such as the standard one.";
+
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
@@ -320,9 +328,16 @@ public class StorageAttachedIndex implements Index
         }
 
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
-        AbstractAnalyzer.fromOptions(type, options); // will throw if invalid
-        if (AbstractAnalyzer.hasQueryAnalyzer(options))
-            AbstractAnalyzer.fromOptionsQueryAnalyzer(type, options); // will throw if invalid
+
+        // Validate analyzers by building them
+        try (AbstractAnalyzer.AnalyzerFactory analyzerFactory = AbstractAnalyzer.fromOptions(type, options))
+        {
+            if (AbstractAnalyzer.hasQueryAnalyzer(options))
+                AbstractAnalyzer.fromOptionsQueryAnalyzer(type, options).close();
+            else if (analyzerFactory.isNGram())
+                ClientWarn.instance.warn(NGRAM_WITHOUT_QUERY_ANALYZER_WARNING);
+        }
+
         var config = IndexWriterConfig.fromOptions(null, type, options);
 
         // If we are indexing map entries we need to validate the sub-types
@@ -411,6 +426,12 @@ public class StorageAttachedIndex implements Index
             // In case of offline scrub, there is no live memtables.
             if (!baseCfs.getTracker().getView().liveMemtables.isEmpty())
                 baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_BUILD_STARTED);
+
+            // even though we're skipping the index build, we still want to add any initial sstables that have indexes into SAI.
+            // Index will be queryable if all existing sstables have index files; otherwise non-queryable
+            Set<SSTableReader> sstables = baseCfs.getLiveSSTables();
+            StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
+            indexGroup.onSSTableChanged(Collections.emptyList(), sstables, Collections.singleton(this), validate);
 
             // From now on, all memtable will have attached memtable index. It is now safe to flush indexes directly from flushing Memtables.
             canFlushFromMemtableIndex = true;
@@ -642,6 +663,29 @@ public class StorageAttachedIndex implements Index
     public AbstractType<?> customExpressionValueType()
     {
         return null;
+    }
+
+    @Override
+    public Optional<Analyzer> getAnalyzer()
+    {
+        if (!indexContext.isAnalyzed())
+            return Optional.empty();
+
+        return Optional.of(value -> {
+            List<ByteBuffer> tokens = new ArrayList<>();
+            AbstractAnalyzer analyzer = indexContext.getQueryAnalyzerFactory().create();
+            try
+            {
+                analyzer.reset(value);
+                while (analyzer.hasNext())
+                    tokens.add(analyzer.next());
+            }
+            finally
+            {
+                analyzer.end();
+            }
+            return tokens;
+        });
     }
 
     @Override

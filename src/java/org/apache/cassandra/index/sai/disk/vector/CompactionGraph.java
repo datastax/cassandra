@@ -98,7 +98,6 @@ public class CompactionGraph implements Closeable, Accountable
     private final VectorSimilarityFunction similarityFunction;
     private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
     private final PQVectors pqVectors;
-    private final ArrayList<ByteSequence<?>> pqVectorsList;
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext context;
     private final boolean unitVectors;
@@ -111,8 +110,6 @@ public class CompactionGraph implements Closeable, Accountable
     private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
     private int lastRowId = -1;
-    // placeholder value that won't confuse code (like serialization) that expects non-null vectors
-    private final ByteSequence<?> encodedOmittedVector;
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
@@ -143,7 +140,6 @@ public class CompactionGraph implements Closeable, Accountable
         similarityFunction = indexConfig.getSimilarityFunction();
         postingsStructure = Structure.ONE_TO_ONE; // until proven otherwise
         this.compressor = compressor;
-        this.encodedOmittedVector = vts.createByteSequence(compressor.compressedVectorSize());
         // `allRowsHaveVectors` only tells us about data for which we have already built indexes; if we
         // are adding previously unindexed data then we could still encounter rows with null vectors,
         // so this is just a best guess.  If the guess is wrong then the penalty is that we end up
@@ -164,8 +160,7 @@ public class CompactionGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         // VSTODO add LVQ
-        pqVectorsList = new ArrayList<>(postingsEntriesAllocated);
-        pqVectors = new PQVectors(compressor, pqVectorsList);
+        pqVectors = new PQVectors(compressor, postingsEntriesAllocated);
         builder = new GraphIndexBuilder(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, pqVectors),
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
@@ -256,12 +251,11 @@ public class CompactionGraph implements Closeable, Accountable
             postings = new CompactionVectorPostings(ordinal, segmentRowId);
             postingsMap.put(vector, postings);
             writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
-            var encoded = (ArrayByteSequence) compressor.encode(vector);
-            while (pqVectorsList.size() < ordinal)
-                pqVectorsList.add(encodedOmittedVector);
-            pqVectorsList.add(encoded);
+            // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
+            while (pqVectors.count() < ordinal)
+                pqVectors.setZero(pqVectors.count());
+            pqVectors.encodeAndSet(ordinal, vector);
 
-            bytesUsed += encoded.ramBytesUsed();
             bytesUsed += postings.ramBytesUsed();
             return new InsertionResult(bytesUsed, ordinal, vector);
         }

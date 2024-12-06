@@ -288,4 +288,10 @@ public class ListType<T> extends CollectionType<List<T>>
     {
         return true;
     }
+
+    @Override
+    public boolean contains(ByteBuffer list, ByteBuffer element)
+    {
+        return CollectionSerializer.contains(getElementsType(), list, element, false, false, ProtocolVersion.V3);
+    }
 }

@@ -54,6 +54,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
 
     private volatile SSTableReader finalReader;
     private final Map<Component.Type, SequentialWriter> componentWriters;
+    private final LifecycleNewTracker lifecycleNewTracker;
 
     private static final SequentialWriterOption WRITER_OPTION =
         SequentialWriterOption.newBuilder()
@@ -68,6 +69,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
                                  final Collection<Component> components)
     {
         super(descriptor, ImmutableSet.copyOf(components), metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
+        this.lifecycleNewTracker = lifecycleNewTracker;
 
         lifecycleNewTracker.trackNew(this);
         this.componentWriters = new EnumMap<>(Component.Type.class);
@@ -127,6 +129,8 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
             writer.finish();
 
         SSTable.appendTOC(descriptor, components());
+
+        lifecycleNewTracker.trackNewWritten(this);
         return finished();
     }
 
@@ -190,6 +194,8 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     {
         for (SequentialWriter writer : componentWriters.values())
             writer.prepareToCommit();
+
+        lifecycleNewTracker.trackNewWritten(this);
     }
 
     @Override

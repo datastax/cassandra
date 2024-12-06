@@ -236,7 +236,7 @@ public class V1OnDiskFormat implements OnDiskFormat
         // starting with v3, vector components include proper headers and checksum; skip for earlier versions
         IndexContext context = component.parent().context();
         if (isVectorDataComponent(context, component.componentType())
-            && !component.parent().version().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
+            && !component.parent().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
         {
             return true;
         }
@@ -271,9 +271,9 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator)
     {
-        if (TypeUtil.isLiteral(indexContext.getValidator()))
+        if (TypeUtil.isLiteral(validator))
             return LITERAL_COMPONENTS;
         return NUMERIC_COMPONENTS;
     }

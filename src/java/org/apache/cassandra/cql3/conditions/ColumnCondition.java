@@ -41,6 +41,8 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.*;
  */
 public abstract class ColumnCondition
 {
+    public static final String ANALYZER_MATCHES_ERROR = "LWT Conditions do not support the : operator";
+
     public final ColumnMetadata column;
     public final Operator operator;
     private final Terms terms;
@@ -255,7 +257,7 @@ public abstract class ColumnCondition
                 // the condition value is not null, so only NEQ can return true
                 return operator == Operator.NEQ;
             }
-            return operator.isSatisfiedBy(type, otherValue, value);
+            return operator.isSatisfiedBy(type, otherValue, value, null); // We don't use any analyzers in LWT, see CNDB-11658
         }
     }
 
@@ -783,7 +785,7 @@ public abstract class ColumnCondition
 
             // Analyzer matches operator is only supported on SAI indexes for now
             if (operator == Operator.ANALYZER_MATCHES)
-                throw invalidRequest("LWT Conditions do not support the : operator");
+                throw invalidRequest(ANALYZER_MATCHES_ERROR);
 
             if (collectionElement != null)
             {
