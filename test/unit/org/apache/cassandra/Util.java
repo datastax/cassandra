@@ -157,8 +157,6 @@ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -1159,7 +1157,7 @@ public class Util
         {
             throw new RuntimeException(e);
         }
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
     }
 
     public static Supplier<SequenceBasedSSTableId> newSeqGen(int ... existing)

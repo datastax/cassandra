@@ -112,14 +112,13 @@ public class GossiperTest
     public void testHasVersion3Nodes() throws Exception
     {
         Gossiper.instance.start(0);
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
 
         VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
         EndpointState es = new EndpointState((HeartBeatState) null);
         es.addApplicationState(ApplicationState.RELEASE_VERSION, factory.releaseVersion(SystemKeyspace.CURRENT_VERSION.toString()));
         Gossiper.instance.endpointStateMap.put(InetAddressAndPort.getByName("127.0.0.1"), es);
         Gossiper.instance.liveEndpoints.add(InetAddressAndPort.getByName("127.0.0.1"));
-
 
         es = new EndpointState((HeartBeatState) null);
         es.addApplicationState(ApplicationState.RELEASE_VERSION, factory.releaseVersion("3.11.3"));
@@ -130,23 +129,26 @@ public class GossiperTest
         es.addApplicationState(ApplicationState.RELEASE_VERSION, factory.releaseVersion("3.0.0"));
         Gossiper.instance.endpointStateMap.put(InetAddressAndPort.getByName("127.0.0.3"), es);
         Gossiper.instance.liveEndpoints.add(InetAddressAndPort.getByName("127.0.0.3"));
+        Gossiper.instance.clusterVersionProvider.reset();
 
-        assertFalse(Gossiper.instance.upgradeFromVersionSupplier.get().value().compareTo(new CassandraVersion("3.0")) < 0);
-        assertTrue(Gossiper.instance.upgradeFromVersionSupplier.get().value().compareTo(new CassandraVersion("3.1")) < 0);
+        assertFalse(Gossiper.instance.clusterVersionProvider.getMinClusterVersion().compareTo(new CassandraVersion("3.0")) < 0);
+        assertTrue(Gossiper.instance.clusterVersionProvider.getMinClusterVersion().compareTo(new CassandraVersion("3.1")) < 0);
         assertTrue(Gossiper.instance.hasMajorVersion3Nodes());
 
         Gossiper.instance.endpointStateMap.remove(InetAddressAndPort.getByName("127.0.0.3"));
         Gossiper.instance.liveEndpoints.remove(InetAddressAndPort.getByName("127.0.0.3"));
+        Gossiper.instance.clusterVersionProvider.reset();
 
-        assertFalse(Gossiper.instance.upgradeFromVersionSupplier.get().value().compareTo(new CassandraVersion("3.0")) < 0);
-        assertFalse(Gossiper.instance.upgradeFromVersionSupplier.get().value().compareTo(new CassandraVersion("3.1")) < 0);
-        assertTrue(Gossiper.instance.upgradeFromVersionSupplier.get().value().compareTo(new CassandraVersion("3.12")) < 0);
+        assertFalse(Gossiper.instance.clusterVersionProvider.getMinClusterVersion().compareTo(new CassandraVersion("3.0")) < 0);
+        assertFalse(Gossiper.instance.clusterVersionProvider.getMinClusterVersion().compareTo(new CassandraVersion("3.1")) < 0);
+        assertTrue(Gossiper.instance.clusterVersionProvider.getMinClusterVersion().compareTo(new CassandraVersion("3.12")) < 0);
         assertTrue(Gossiper.instance.hasMajorVersion3Nodes());
 
         Gossiper.instance.endpointStateMap.remove(InetAddressAndPort.getByName("127.0.0.2"));
         Gossiper.instance.liveEndpoints.remove(InetAddressAndPort.getByName("127.0.0.2"));
+        Gossiper.instance.clusterVersionProvider.reset();
 
-        assertEquals(SystemKeyspace.CURRENT_VERSION, Gossiper.instance.upgradeFromVersionSupplier.get().value());
+        assertEquals(SystemKeyspace.CURRENT_VERSION, Gossiper.instance.clusterVersionProvider.getMinClusterVersion());
     }
 
     @Test
