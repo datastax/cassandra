@@ -225,7 +225,7 @@ public abstract class OfflineToolUtils
     public static File copySSTables() throws IOException
     {
         File dataDir = new File("build/test/cassandra/data");
-        File srcDir = new File("test/data/legacy-sstables/ma");
+        File srcDir = new File("test/data/legacy-sstables/me");
         FileUtils.copyDirectory(new File(srcDir, "legacy_tables").toJavaIOFile(), new File(dataDir, "legacy_sstables").toJavaIOFile());
         return dataDir;
     }

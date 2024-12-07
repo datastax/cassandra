@@ -50,7 +50,7 @@ public class BulkLoaderTest extends OfflineToolUtils
         ToolResult tool = ToolRunner.invokeClass(BulkLoader.class,
                                                  "-d",
                                                  "127.9.9.1",
-                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_ma_simple"));
+                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_me_simple"));
 
         assertEquals(-1, tool.getExitCode());
         if (!(tool.getException().getCause() instanceof BulkLoadException))
@@ -74,7 +74,7 @@ public class BulkLoaderTest extends OfflineToolUtils
                                                  "127.9.9.1",
                                                  "--port",
                                                  "9042",
-                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_ma_simple"));
+                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_me_simple"));
 
         assertEquals(-1, tool.getExitCode());
         if (!(tool.getException().getCause() instanceof BulkLoadException))
@@ -98,7 +98,7 @@ public class BulkLoaderTest extends OfflineToolUtils
                                                  "127.9.9.1:9042",
                                                  "--port",
                                                  "9041",
-                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_ma_simple"));
+                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_me_simple"));
 
         assertEquals(-1, tool.getExitCode());
         if (!(tool.getException().getCause() instanceof BulkLoadException))
@@ -122,7 +122,7 @@ public class BulkLoaderTest extends OfflineToolUtils
                                                  "127.9.9.1",
                                                  "--port",
                                                  "9041",
-                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_ma_simple"));
+                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_me_simple"));
         assertEquals(-1, tool.getExitCode());
         throw tool.getException().getCause().getCause().getCause();
     }
@@ -133,7 +133,7 @@ public class BulkLoaderTest extends OfflineToolUtils
         ToolResult tool = ToolRunner.invokeClass(BulkLoader.class,
                                                  "-d",
                                                  "127.9.9.1:9041",
-                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_ma_simple"));
+                                                 OfflineToolUtils.sstableDirName("legacy_sstables", "legacy_me_simple"));
         assertEquals(-1, tool.getExitCode());
         throw tool.getException().getCause().getCause().getCause();
     }

@@ -189,7 +189,7 @@ public class ScrubToolTest
         assertOrderedAll(cfs, 1);
 
         ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "validate_only", ksName, CF);
-        Assertions.assertThat(tool.getStdout()).contains("Not continuing with scrub, since '--header-fix validate-only' was specified.");
+        Assertions.assertThat(tool.getStdout()).contains("The option header-fix is deprecated (and does nothing)");
         tool.assertOnCleanExit();
         assertOrderedAll(cfs, 1);
     }
@@ -218,7 +218,7 @@ public class ScrubToolTest
         assertOrderedAll(cfs, 1);
 
         ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "fix-only", ksName, CF);
-        Assertions.assertThat(tool.getStdout()).contains("Not continuing with scrub, since '--header-fix fix-only' was specified.");
+        Assertions.assertThat(tool.getStdout()).contains("The option header-fix is deprecated (and does nothing)");
         tool.assertOnCleanExit();
         assertOrderedAll(cfs, 1);
     }
