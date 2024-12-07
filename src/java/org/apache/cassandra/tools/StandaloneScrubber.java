@@ -46,7 +46,6 @@ import org.apache.cassandra.db.compaction.Scrubber;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.SSTableHeaderFix;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.Schema;
@@ -128,66 +127,6 @@ public class StandaloneScrubber
                 SSTableReader.createLinks(descriptor, components, snapshotDirectory.path());
             }
             System.out.println(String.format("Pre-scrub sstables snapshotted into snapshot %s", snapshotName));
-
-            if (options.headerFixMode != Options.HeaderFixMode.OFF)
-            {
-                // Run the frozen-UDT checks _before_ the sstables are opened
-
-                List<String> logOutput = new ArrayList<>();
-
-                SSTableHeaderFix.Builder headerFixBuilder = SSTableHeaderFix.builder()
-                                                                            .logToList(logOutput)
-                                                                            .schemaCallback(() -> Schema.instance::getTableMetadata);
-                if (options.headerFixMode == Options.HeaderFixMode.VALIDATE)
-                    headerFixBuilder = headerFixBuilder.dryRun();
-
-                for (Pair<Descriptor, Set<Component>> p : listResult)
-                    headerFixBuilder.withPath(p.left.fileFor(Component.DATA).toPath());
-
-                SSTableHeaderFix headerFix = headerFixBuilder.build();
-                try
-                {
-                    headerFix.execute();
-                }
-                catch (Exception e)
-                {
-                    JVMStabilityInspector.inspectThrowable(e);
-                    if (options.debug)
-                        e.printStackTrace(System.err);
-                }
-
-                if (headerFix.hasChanges() || headerFix.hasError())
-                    logOutput.forEach(System.out::println);
-
-                if (headerFix.hasError())
-                {
-                    System.err.println("Errors in serialization-header detected, aborting.");
-                    System.exit(1);
-                }
-
-                switch (options.headerFixMode)
-                {
-                    case VALIDATE_ONLY:
-                    case FIX_ONLY:
-                        System.out.printf("Not continuing with scrub, since '--%s %s' was specified.%n",
-                                          HEADERFIX_OPTION,
-                                          options.headerFixMode.asCommandLineOption());
-                        System.exit(0);
-                    case VALIDATE:
-                        if (headerFix.hasChanges())
-                        {
-                            System.err.printf("Unfixed, but fixable errors in serialization-header detected, aborting. " +
-                                              "Use a non-validating mode ('-e %s' or '-e %s') for --%s%n",
-                                              Options.HeaderFixMode.FIX.asCommandLineOption(),
-                                              Options.HeaderFixMode.FIX_ONLY.asCommandLineOption(),
-                                              HEADERFIX_OPTION);
-                            System.exit(2);
-                        }
-                        break;
-                    case FIX:
-                        break;
-                }
-            }
 
             List<SSTableReader> sstables = new ArrayList<>();
 
@@ -286,9 +225,9 @@ public class StandaloneScrubber
         public boolean skipCorrupted;
         public boolean noValidate;
         public boolean reinserOverflowedTTL;
-        public HeaderFixMode headerFixMode = HeaderFixMode.VALIDATE;
 
-        enum HeaderFixMode
+        @Deprecated // sstables that need the fix are no longer supported.  kept for cmdline compatibility (can remove in 6.0)
+        private enum HeaderFixMode
         {
             VALIDATE_ONLY,
             VALIDATE,
@@ -299,11 +238,6 @@ public class StandaloneScrubber
             static HeaderFixMode fromCommandLine(String value)
             {
                 return valueOf(value.replace('-', '_').toUpperCase().trim());
-            }
-
-            String asCommandLineOption()
-            {
-                return name().toLowerCase().replace('_', '-');
             }
         }
 
@@ -347,11 +281,11 @@ public class StandaloneScrubber
                 opts.skipCorrupted = cmd.hasOption(SKIP_CORRUPTED_OPTION);
                 opts.noValidate = cmd.hasOption(NO_VALIDATE_OPTION);
                 opts.reinserOverflowedTTL = cmd.hasOption(REINSERT_OVERFLOWED_TTL_OPTION);
-                if (cmd.hasOption(HEADERFIX_OPTION))
-                {
+                if (cmd.hasOption(HEADERFIX_OPTION)) {
                     try
                     {
-                        opts.headerFixMode = HeaderFixMode.fromCommandLine(cmd.getOptionValue(HEADERFIX_OPTION));
+                        HeaderFixMode.fromCommandLine(cmd.getOptionValue(HEADERFIX_OPTION));
+                        System.out.println(String.format("The option %s is deprecated (and does nothing)", HEADERFIX_OPTION));
                     }
                     catch (Exception e)
                     {
@@ -384,22 +318,7 @@ public class StandaloneScrubber
             options.addOption("m",  MANIFEST_CHECK_OPTION, "only check and repair the leveled manifest, without actually scrubbing the sstables");
             options.addOption("s",  SKIP_CORRUPTED_OPTION, "skip corrupt rows in counter tables");
             options.addOption("n",  NO_VALIDATE_OPTION,    "do not validate columns using column validator");
-            options.addOption("e",  HEADERFIX_OPTION,      true, "Option whether and how to perform a " +
-                                                                 "check of the sstable serialization-headers and fix known, " +
-                                                                 "fixable issues.\n" +
-                                                                 "Possible argument values:\n" +
-                                                                 "- validate-only: validate the serialization-headers, " +
-                                                                 "but do not fix those. Do not continue with scrub - " +
-                                                                 "i.e. only validate the header (dry-run of fix-only).\n" +
-                                                                 "- validate: (default) validate the serialization-headers, " +
-                                                                 "but do not fix those and only continue with scrub if no " +
-                                                                 "error were detected.\n" +
-                                                                 "- fix-only: validate and fix the serialization-headers, " +
-                                                                 "don't continue with scrub.\n" +
-                                                                 "- fix: validate and fix the serialization-headers, do not " +
-                                                                 "fix and do not continue with scrub if the serialization-header " +
-                                                                 "check encountered errors.\n" +
-                                                                 "- off: don't perform the serialization-header checks.");
+            options.addOption("e",  HEADERFIX_OPTION,      true, "Deprecated Option.");
             options.addOption("r", REINSERT_OVERFLOWED_TTL_OPTION, REINSERT_OVERFLOWED_TTL_OPTION_DESCRIPTION);
             return options;
         }

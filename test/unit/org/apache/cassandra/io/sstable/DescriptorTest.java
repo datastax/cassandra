@@ -129,9 +129,9 @@ public class DescriptorTest
     public void validateNames()
     {
         String[] names = {
-             "ma-1-big-Data.db",
+             "me-1-big-Data.db",
              // 2ndary index
-             ".idx1" + File.pathSeparator() + "ma-1-big-Data.db",
+             ".idx1" + File.pathSeparator() + "me-1-big-Data.db",
         };
 
         for (String name : names)

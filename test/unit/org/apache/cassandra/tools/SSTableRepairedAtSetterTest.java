@@ -65,7 +65,7 @@ public class SSTableRepairedAtSetterTest extends OfflineToolUtils
     {
         ToolResult tool = ToolRunner.invokeClass(SSTableRepairedAtSetter.class,
                                                        "--debugwrong",
-                                                       findOneSSTable("legacy_sstables", "legacy_ma_simple"));
+                                                       findOneSSTable("legacy_sstables", "legacy_me_simple"));
         assertThat(tool.getStdout(), CoreMatchers.containsStringIgnoringCase("usage:"));
         Assertions.assertThat(tool.getCleanedStderr()).isEmpty();
         assertEquals(1, tool.getExitCode());
@@ -77,7 +77,7 @@ public class SSTableRepairedAtSetterTest extends OfflineToolUtils
         ToolResult tool = ToolRunner.invokeClass(SSTableRepairedAtSetter.class,
                                                        "--really-set",
                                                        "--is-repaired",
-                                                       findOneSSTable("legacy_sstables", "legacy_ma_simple"));
+                                                       findOneSSTable("legacy_sstables", "legacy_me_simple"));
         tool.assertOnCleanExit();
         assertNoUnexpectedThreadsStarted(null, OPTIONAL_THREADS_WITH_SCHEMA);
         assertSchemaNotLoaded();
@@ -93,7 +93,7 @@ public class SSTableRepairedAtSetterTest extends OfflineToolUtils
         ToolResult tool = ToolRunner.invokeClass(SSTableRepairedAtSetter.class,
                                                  "--really-set",
                                                  "--is-unrepaired",
-                                                 findOneSSTable("legacy_sstables", "legacy_ma_simple"));
+                                                 findOneSSTable("legacy_sstables", "legacy_me_simple"));
         tool.assertOnCleanExit();
         assertNoUnexpectedThreadsStarted(null, OPTIONAL_THREADS_WITH_SCHEMA);
         assertSchemaNotLoaded();
@@ -108,7 +108,7 @@ public class SSTableRepairedAtSetterTest extends OfflineToolUtils
     {
         File tmpFile = FileUtils.createTempFile("sstablelist.txt", "tmp");
         tmpFile.deleteOnExit();
-        Files.write(tmpFile.toPath(), findOneSSTable("legacy_sstables", "legacy_ma_simple").getBytes());
+        Files.write(tmpFile.toPath(), findOneSSTable("legacy_sstables", "legacy_me_simple").getBytes());
         
         String file = tmpFile.absolutePath();
         ToolResult tool = ToolRunner.invokeClass(SSTableRepairedAtSetter.class, "--really-set", "--is-repaired", "-f", file);

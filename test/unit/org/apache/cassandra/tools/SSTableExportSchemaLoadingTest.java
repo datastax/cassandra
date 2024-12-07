@@ -51,7 +51,7 @@ public class SSTableExportSchemaLoadingTest extends OfflineToolUtils
     @BeforeClass
     public static void setupTest() throws IOException
     {
-        sstable = findOneSSTable("legacy_sstables", "legacy_ma_simple");
+        sstable = findOneSSTable("legacy_sstables", "legacy_me_simple");
     }
 
     @Test
@@ -139,7 +139,7 @@ public class SSTableExportSchemaLoadingTest extends OfflineToolUtils
         ToolRunner.ToolResult tool = ToolRunner.invokeClass(SSTableExport.class, sstable, "-t");
         List<Map<String, Object>> parsed = mapper.readValue(tool.getStdout(), jacksonListOfMapsType);
         assertEquals(tool.getStdout(),
-                     "1445008632854000",
+                     "1619005346715000",
                      ((Map) ((List<Map>) parsed.get(0).get("rows")).get(0).get("liveness_info")).get("tstamp"));
         Assertions.assertThat(tool.getCleanedStderr()).isEmpty();
         tool.assertOnExitCode();

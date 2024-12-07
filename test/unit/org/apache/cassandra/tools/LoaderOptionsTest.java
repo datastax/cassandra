@@ -39,14 +39,14 @@ public class LoaderOptionsTest
     public void testNativePort() throws Exception {
         //Default Cassandra config
         File config = new File(Paths.get(".", "test", "conf", "cassandra.yaml").normalize());
-        String[] args = { "-d", "127.9.9.1", "-f", config.absolutePath(), sstableDirName("legacy_sstables", "legacy_ma_simple")};
+        String[] args = { "-d", "127.9.9.1", "-f", config.absolutePath(), sstableDirName("legacy_sstables", "legacy_me_simple")};
         LoaderOptions options = LoaderOptions.builder().parseArgs(args).build();
         assertEquals(9042, options.nativePort);
 
 
         // SSL Enabled Cassandra config
         config = new File(Paths.get(".", "test", "conf", "unit-test-conf/test-native-port.yaml").normalize());
-        String[] args2 = { "-d", "127.9.9.1", "-f", config.absolutePath(), sstableDirName("legacy_sstables", "legacy_ma_simple")};
+        String[] args2 = { "-d", "127.9.9.1", "-f", config.absolutePath(), sstableDirName("legacy_sstables", "legacy_me_simple")};
         options = LoaderOptions.builder().parseArgs(args2).build();
         assertEquals(9142, options.nativePort);
 
@@ -57,7 +57,7 @@ public class LoaderOptionsTest
         // test native port set from command line
 
         config = new File(Paths.get(".", "test", "conf", "unit-test-conf/test-native-port.yaml").normalize());
-        String[] args3 = {"-d", "127.9.9.1", "-p", "9300", "-f", config.absolutePath(), sstableDirName("legacy_sstables", "legacy_ma_simple")};
+        String[] args3 = {"-d", "127.9.9.1", "-p", "9300", "-f", config.absolutePath(), sstableDirName("legacy_sstables", "legacy_me_simple")};
         options = LoaderOptions.builder().parseArgs(args3).build();
         assertEquals(9300, options.nativePort);
 
@@ -78,7 +78,7 @@ public class LoaderOptionsTest
         String[] args = { "-d", "127.9.9.1", "-ts", "test.jks", "-tspw", "truststorePass1", "-ks", "test.jks", "-kspw",
                 "testdata1", "--ssl-ciphers", "TLS_RSA_WITH_AES_256_CBC_SHA",
                 "--ssl-alg", "SunX509", "--store-type", "JKS", "--ssl-protocol", "TLS",
-                sstableDirName("legacy_sstables", "legacy_ma_simple") };
+                sstableDirName("legacy_sstables", "legacy_me_simple") };
         LoaderOptions options = LoaderOptions.builder().parseArgs(args).build();
         assertEquals("test.jks", options.clientEncOptions.keystore);
     }

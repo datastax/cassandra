@@ -72,7 +72,6 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
@@ -961,55 +960,4 @@ public class ScrubTest
         {}
     }
 
-    /**
-     * Tests with invalid sstables (containing duplicate entries in 2.0 and 3.0 storage format),
-     * that were caused by upgrading from 2.x with duplicate range tombstones.
-     *
-     * See CASSANDRA-12144 for details.
-     */
-    @Test
-    public void testFilterOutDuplicates() throws Exception
-    {
-        IPartitioner oldPart = DatabaseDescriptor.getPartitioner();
-        try
-        {
-            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-            QueryProcessor.process(String.format("CREATE TABLE \"%s\".cf_with_duplicates_3_0 (a int, b int, c int, PRIMARY KEY (a, b))", ksName), ConsistencyLevel.ONE);
-
-            ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("cf_with_duplicates_3_0");
-
-            Path legacySSTableRoot = Paths.get(System.getProperty(INVALID_LEGACY_SSTABLE_ROOT_PROP),
-                                               "Keyspace1",
-                                               "cf_with_duplicates_3_0");
-
-            for (String filename : new String[]{ "mb-3-big-CompressionInfo.db",
-                                                 "mb-3-big-Digest.crc32",
-                                                 "mb-3-big-Index.db",
-                                                 "mb-3-big-Summary.db",
-                                                 "mb-3-big-Data.db",
-                                                 "mb-3-big-Filter.db",
-                                                 "mb-3-big-Statistics.db",
-                                                 "mb-3-big-TOC.txt" })
-            {
-                Files.copy(Paths.get(legacySSTableRoot.toString(), filename), cfs.getDirectories().getDirectoryForNewSSTables().toPath().resolve(filename));
-            }
-
-            cfs.loadNewSSTables();
-
-            cfs.scrub(true, true, false, false, false, 1);
-
-            UntypedResultSet rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
-            assertNotNull(rs);
-            assertEquals(1, rs.size());
-
-            QueryProcessor.executeInternal(String.format("DELETE FROM \"%s\".cf_with_duplicates_3_0 WHERE a=1 AND b =2", ksName));
-            rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
-            assertNotNull(rs);
-            assertEquals(0, rs.size());
-        }
-        finally
-        {
-            DatabaseDescriptor.setPartitionerUnsafe(oldPart);
-        }
-    }
 }

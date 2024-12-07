@@ -50,7 +50,6 @@ import static org.junit.Assert.fail;
 
 public class TTLTest extends CQLTester
 {
-    public static String NEGATIVE_LOCAL_EXPIRATION_TEST_DIR = "test/data/negative-local-expiration-test/%s";
 
     public static int MAX_TTL = Attributes.MAX_TTL;
 
@@ -204,20 +203,6 @@ public class TTLTest extends CQLTester
         }
     }
 
-    @Test
-    public void testRecoverOverflowedExpirationWithScrub() throws Throwable
-    {
-        // this tests writes corrupt tombstones on purpose, disable the strategy:
-        DatabaseDescriptor.setCorruptedTombstoneStrategy(Config.CorruptedTombstoneStrategy.disabled);
-        baseTestRecoverOverflowedExpiration(false, false, false);
-        baseTestRecoverOverflowedExpiration(true, false, false);
-        baseTestRecoverOverflowedExpiration(true, false, true);
-
-        baseTestRecoverOverflowedExpiration(false, true, false);
-        baseTestRecoverOverflowedExpiration(false, true, true);
-        // we reset the corrupted ts strategy after each test in @After above
-    }
-
     public void testCapExpirationDateOverflowPolicy(ExpirationDateOverflowHandling.ExpirationDateOverflowPolicy policy) throws Throwable
     {
         ExpirationDateOverflowHandling.policy = policy;
@@ -285,18 +270,6 @@ public class TTLTest extends CQLTester
         }
     }
 
-    public void baseTestRecoverOverflowedExpiration(boolean runScrub, boolean runSStableScrub, boolean reinsertOverflowedTTL) throws Throwable
-    {
-        // simple column, clustering
-        testRecoverOverflowedExpirationWithScrub(true, true, runScrub, runSStableScrub, reinsertOverflowedTTL);
-        // simple column, noclustering
-        testRecoverOverflowedExpirationWithScrub(true, false, runScrub, runSStableScrub, reinsertOverflowedTTL);
-        // complex column, clustering
-        testRecoverOverflowedExpirationWithScrub(false, true, runScrub, runSStableScrub, reinsertOverflowedTTL);
-        // complex column, noclustering
-        testRecoverOverflowedExpirationWithScrub(false, false, runScrub, runSStableScrub, reinsertOverflowedTTL);
-    }
-
     private void createTable(boolean simple, boolean clustering)
     {
         if (simple)
@@ -357,100 +330,6 @@ public class TTLTest extends CQLTester
     {
         int nowInSecs = (int) (System.currentTimeMillis() / 1000);
         return AbstractCell.MAX_DELETION_TIME - nowInSecs;
-    }
-
-    public void testRecoverOverflowedExpirationWithScrub(boolean simple, boolean clustering, boolean runScrub, boolean runSStableScrub,  boolean reinsertOverflowedTTL) throws Throwable
-    {
-        if (reinsertOverflowedTTL)
-        {
-            assert runScrub || runSStableScrub;
-        }
-
-        createTable(simple, clustering);
-
-        Keyspace keyspace = Keyspace.open(KEYSPACE);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(currentTable());
-
-        assertEquals(0, cfs.getLiveSSTables().size());
-
-        copySSTablesToTableDir(currentTable(), simple, clustering);
-
-        cfs.loadNewSSTables();
-
-        if (runScrub)
-        {
-            cfs.scrub(true, false, true, reinsertOverflowedTTL, 1);
-
-            if (reinsertOverflowedTTL)
-            {
-                if (simple)
-                    assertRows(execute("SELECT * from %s"), row(1, 1, 1), row(2, 2, null));
-                else
-                    assertRows(execute("SELECT * from %s"), row(1, 1, set("v11", "v12", "v13", "v14")), row(2, 2, set("v21", "v22", "v23", "v24")));
-
-                cfs.forceMajorCompaction();
-
-                if (simple)
-                    assertRows(execute("SELECT * from %s"), row(1, 1, 1), row(2, 2, null));
-                else
-                    assertRows(execute("SELECT * from %s"), row(1, 1, set("v11", "v12", "v13", "v14")), row(2, 2, set("v21", "v22", "v23", "v24")));
-            }
-            else
-            {
-                assertEmpty(execute("SELECT * from %s"));
-            }
-        }
-        if (runSStableScrub)
-        {
-            System.setProperty(org.apache.cassandra.tools.Util.ALLOW_TOOL_REINIT_FOR_TEST, "true"); // Necessary for testing
-
-            try
-            {
-                ToolResult tool;
-                if (reinsertOverflowedTTL)
-                    tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-r", KEYSPACE, cfs.name);
-                else
-                    tool = ToolRunner.invokeClass(StandaloneScrubber.class, KEYSPACE, cfs.name);
-
-                tool.assertOnCleanExit();
-                Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
-                if (reinsertOverflowedTTL)
-                    Assertions.assertThat(tool.getStdout()).contains("Fixed 2 rows with overflowed local deletion time.");
-                else
-                    Assertions.assertThat(tool.getStdout()).contains("No valid partitions found while scrubbing");
-            }
-            finally
-            {
-                System.clearProperty(org.apache.cassandra.tools.Util.ALLOW_TOOL_REINIT_FOR_TEST);
-            }
-        }
-
-        try
-        {
-            cfs.truncateBlocking();
-            dropTable("DROP TABLE %s");
-        }
-        catch (Throwable e)
-        {
-            // StandaloneScrubber.class should be ran as a tool with a stable env. In a test env there are things moving
-            // under its feet such as the async CQLTester.afterTest() operations. We try to sync cleanup of tables here
-            // but we need to catch any exceptions we might run into bc of the hack. See CASSANDRA-16546
-        }
-    }
-
-    private void copySSTablesToTableDir(String table, boolean simple, boolean clustering) throws IOException
-    {
-        File destDir = Keyspace.open(keyspace()).getColumnFamilyStore(table).getDirectories().getCFDirectories().iterator().next();
-        File sourceDir = getTableDir(table, simple, clustering);
-        for (File file : sourceDir.tryList())
-        {
-            copyFile(file, destDir);
-        }
-    }
-
-    private static File getTableDir(String table, boolean simple, boolean clustering)
-    {
-        return new File(String.format(NEGATIVE_LOCAL_EXPIRATION_TEST_DIR, getTableName(simple, clustering)));
     }
 
     private static void copyFile(File src, File dest) throws IOException
