@@ -51,6 +51,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -276,7 +278,7 @@ public class CompactionLogger
         }
     }
 
-    public void compaction(long startTime, Collection<SSTableReader> input, long endTime, Collection<SSTableReader> output)
+    public void compaction(long startTime, Collection<SSTableReader> input, Range<Token> tokenRange, long endTime, Collection<SSTableReader> output)
     {
         if (enabled.get())
         {
@@ -287,6 +289,8 @@ public class CompactionLogger
             node.put("end", String.valueOf(endTime));
             node.set("input", sstableMap(input));
             node.set("output", sstableMap(output));
+            if (tokenRange != null)
+                node.put("range", tokenRange.toString());
             jsonWriter.write(node, this::getEventJsonNode, this);
         }
     }

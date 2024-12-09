@@ -118,6 +118,7 @@ public class AdaptiveController extends Controller
                               int reservedThreadsPerLevel,
                               Reservations.Type reservationsType,
                               Overlaps.InclusionMethod overlapInclusionMethod,
+                              boolean parallelizeOutputShards,
                               boolean hasVectorType,
                               int intervalSec,
                               int minScalingParameter,
@@ -146,6 +147,7 @@ public class AdaptiveController extends Controller
               reservedThreadsPerLevel,
               reservationsType,
               overlapInclusionMethod,
+              parallelizeOutputShards,
               hasVectorType);
 
         this.scalingParameters = scalingParameters;
@@ -176,6 +178,7 @@ public class AdaptiveController extends Controller
                                   int reservedThreadsPerLevel,
                                   Reservations.Type reservationsType,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
+                                  boolean parallelizeOutputShards,
                                   boolean hasVectorType,
                                   String keyspaceName,
                                   String tableName,
@@ -275,6 +278,7 @@ public class AdaptiveController extends Controller
                                       reservedThreadsPerLevel,
                                       reservationsType,
                                       overlapInclusionMethod,
+                                      parallelizeOutputShards,
                                       hasVectorType,
                                       intervalSec,
                                       minScalingParameter,

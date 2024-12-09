@@ -24,6 +24,7 @@ import java.io.EOFException;
 import java.io.IOError;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.math.BigInteger;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -59,6 +60,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.StringUtils;
+import org.junit.Assume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1319,4 +1321,23 @@ public class Util
         }
         return new UserType(ks, UTF8Type.instance.decompose(name), fieldNames, fieldTypes, multicell);
     }
+
+    public static void assumeAssertsEnabled()
+    {
+        Assume.assumeTrue("Asserts must be enabled for this test", assertsEnabled());
+    }
+
+    public static boolean assertsEnabled()
+    {
+        try
+        {
+            assert false;
+            return false;
+        }
+        catch (AssertionError e)
+        {
+            return true;
+        }
+    }
+
 }

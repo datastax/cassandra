@@ -47,6 +47,12 @@ public class Compact extends NodeToolCmd
     @Option(title = "end_token", name = {"-et", "--end-token"}, description = "Use -et to specify a token at which compaction range ends (inclusive)")
     private String endToken = EMPTY;
 
+    @Option(title = "jobs",
+            name = {"-j", "--jobs"},
+            description = "Use -j to specify the maximum number of threads to use for parallel compaction. " +
+                          "If not set, up to half the compaction threads will be used. " +
+                          "If set to 0, the major compaction will use all threads and will not permit other compactions to run until it completes (use with caution).")
+    private Integer parallelism = null;
 
     @Override
     public void execute(NodeProbe probe)
@@ -86,7 +92,10 @@ public class Compact extends NodeToolCmd
                 }
                 else
                 {
-                    probe.forceKeyspaceCompaction(splitOutput, keyspace, tableNames);
+                    if (parallelism != null)
+                        probe.forceKeyspaceCompaction(splitOutput, parallelism, keyspace, tableNames);
+                    else // avoid referring to the new method to work with older versions
+                        probe.forceKeyspaceCompaction(splitOutput, keyspace, tableNames);
                 }
             } catch (Exception e)
             {
