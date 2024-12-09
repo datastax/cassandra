@@ -235,7 +235,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             {
                 aggregates.add(CompactionAggregate.createUnified(group,
                                                                  Overlaps.maxOverlap(group,
-                                                                                      UnifiedCompactionStrategy::startsAfter,
+                                                                                      CompactionSSTable.startsAfter,
                                                                                       CompactionSSTable.firstKeyComparator,
                                                                                       CompactionSSTable.lastKeyComparator),
                                                                  CompactionPick.create(nextTimeUUID(), LEVEL_MAXIMAL.index, group),
@@ -1288,13 +1288,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return realm.metadata();
     }
 
-    // used by CNDB
-    public static boolean startsAfter(CompactionSSTable a, CompactionSSTable b)
-    {
-        // Strict comparison because the span is end-inclusive.
-        return a.getFirst().compareTo(b.getLast()) > 0;
-    }
-
     /// A compaction arena contains the list of sstables that belong to this arena as well as the arena
     /// selector used for comparison.
     public static class Arena implements Comparable<Arena>
@@ -1417,7 +1410,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
             // Note that adjacent overlap sets may include deduplicated sstable
             List<Set<CompactionSSTable>> overlaps = Overlaps.constructOverlapSets(sstables,
-                                                                                  UnifiedCompactionStrategy::startsAfter,
+                                                                                  CompactionSSTable.startsAfter,
                                                                                   CompactionSSTable.firstKeyComparator,
                                                                                   CompactionSSTable.lastKeyComparator);
             for (Set<CompactionSSTable> overlap : overlaps)
