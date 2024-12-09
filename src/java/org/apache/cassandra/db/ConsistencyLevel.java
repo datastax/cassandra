@@ -286,7 +286,7 @@ public enum ConsistencyLevel
     }
 
     /**
-     * With a replication factor greater than one, reads that contact more than one replica will require 
+     * With a replication factor greater than one, reads that contact more than one replica will require
      * reconciliation of the individual replica results at the coordinator.
      *
      * @return true if reads at this consistency level require merging at the coordinator
