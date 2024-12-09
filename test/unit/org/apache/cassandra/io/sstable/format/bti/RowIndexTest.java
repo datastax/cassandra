@@ -87,9 +87,9 @@ public class RowIndexTest
     public static Collection<Object[]> generateData()
     {
         return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard, latestVersion },
-                                         new Object[]{ Config.DiskAccessMode.mmap, latestVersion },
-                                         new Object[]{ Config.DiskAccessMode.standard, legacyVersion },
-                                         new Object[]{ Config.DiskAccessMode.mmap, legacyVersion });
+                             new Object[]{ Config.DiskAccessMode.mmap, latestVersion },
+                             new Object[]{ Config.DiskAccessMode.standard, legacyVersion },
+                             new Object[]{ Config.DiskAccessMode.mmap, legacyVersion });
     }
 
     @Parameterized.Parameter(value = 0)

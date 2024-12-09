@@ -92,9 +92,9 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.snapshot.TableSnapshot;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
-import org.awaitility.Awaitility;
 
 import static org.apache.cassandra.inject.ActionBuilder.newActionBuilder;
 import static org.apache.cassandra.inject.Expression.expr;
@@ -333,44 +333,6 @@ public class SAITester extends CQLTester
             File file = loadDescriptor(sstable, cfs).perIndexComponents(indexContext).get(indexComponentType).file();
             corruptionType.corrupt(file);
         }
-    }
-
-    protected void waitForAssert(Runnable runnableAssert, long timeout, TimeUnit unit)
-    {
-        Awaitility.await().dontCatchUncaughtExceptions().atMost(timeout, unit).untilAsserted(runnableAssert::run);
-    }
-
-    protected void waitForAssert(Runnable assertion)
-    {
-        waitForAssert(() -> assertion.run(), ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-    }
-
-    protected boolean indexNeedsFullRebuild(String index)
-    {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        return cfs.indexManager.needsFullRebuild(index);
-    }
-
-    protected boolean isIndexQueryable()
-    {
-        return isIndexQueryableByTable(KEYSPACE, currentTable());
-    }
-
-    protected boolean isIndexQueryableByTable(String keyspace, String table)
-    {
-        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
-        for (Index index : cfs.indexManager.listIndexes())
-        {
-            if (!cfs.indexManager.isIndexQueryable(index))
-                return false;
-        }
-        return true;
-    }
-
-    protected void verifyInitialIndexFailed(String indexName)
-    {
-        // Verify that the initial index build fails...
-        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
     }
 
     protected boolean verifyChecksum(IndexContext context)
@@ -898,7 +860,7 @@ public class SAITester extends CQLTester
         NamedMemoryLimiter limiter = (NamedMemoryLimiter) V1OnDiskFormat.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMITER").get(null);
         Field limitBytes = limiter.getClass().getDeclaredField("limitBytes");
         limitBytes.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
+        Field modifiersField = ReflectionUtils.getModifiersField();
         modifiersField.setAccessible(true);
         modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
         limitBytes.set(limiter, segmentSize);

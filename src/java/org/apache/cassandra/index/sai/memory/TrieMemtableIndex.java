@@ -53,16 +53,17 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.SortingIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class TrieMemtableIndex implements MemtableIndex
@@ -81,7 +82,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
-        this.boundaries = indexContext.owner().localRangeSplits(AbstractShardedMemtable.getDefaultShardCount());
+        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(AbstractShardedMemtable.getDefaultShardCount());
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.indexContext = indexContext;
         this.validator = indexContext.getValidator();
@@ -248,6 +249,14 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        int startShard = boundaries.getShardForToken(keyRange.left.getToken());
+        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+        return rangeIndexes[startShard].estimateMatchingRowsCount(expression, keyRange) * (endShard - startShard + 1);
+    }
+
+    @Override
     public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
     {
         if (keys.isEmpty())
@@ -278,7 +287,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return indexContext.isLiteral() ? ByteComparable.fixedLength(input)
+        return indexContext.isLiteral() ? v -> ByteSource.preencoded(input)
                                         : v -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), v);
     }
 
@@ -303,7 +312,7 @@ public class TrieMemtableIndex implements MemtableIndex
         for (int i = minSubrange; i <= maxSubrange; i++)
             rangeIterators.add(rangeIndexes[i].iterator());
 
-        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, ByteComparable.Version.OSS50),
+        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, TypeUtil.BYTE_COMPARABLE_VERSION),
                                  new PrimaryKeysMergeReducer(rangeIterators.size()));
     }
 
@@ -359,5 +368,11 @@ public class TrieMemtableIndex implements MemtableIndex
             Arrays.fill(rangeIndexEntriesToMerge, null);
             term = null;
         }
+    }
+
+    @VisibleForTesting
+    public MemoryIndex[] getRangeIndexes()
+    {
+        return rangeIndexes;
     }
 }
