@@ -68,33 +68,12 @@ public class BigTableScanner implements ISSTableScanner
 
     protected Iterator<UnfilteredRowIterator> iterator;
 
-    // Full scan of the sstables
-    public static ISSTableScanner getScanner(BigTableReader sstable)
-    {
-        return getScanner(sstable, Iterators.singletonIterator(fullRange(sstable)));
-    }
-
     public static ISSTableScanner getScanner(BigTableReader sstable,
                                              ColumnFilter columns,
                                              DataRange dataRange,
                                              SSTableReadsListener listener)
     {
         return new BigTableScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator(), listener);
-    }
-
-    public static ISSTableScanner getScanner(BigTableReader sstable, Collection<Range<Token>> tokenRanges)
-    {
-        // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
-        List<SSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
-        if (positions.isEmpty())
-            return new EmptySSTableScanner(sstable);
-
-        return getScanner(sstable, makeBounds(sstable, tokenRanges).iterator());
-    }
-
-    public static ISSTableScanner getScanner(BigTableReader sstable, Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
-    {
-        return new BigTableScanner(sstable, ColumnFilter.all(sstable.metadata()), null, rangeIterator, SSTableReadsListener.NOOP_LISTENER);
     }
 
     private BigTableScanner(BigTableReader sstable,
@@ -127,24 +106,11 @@ public class BigTableScanner implements ISSTableScanner
         this.ifile = ifile;
     }
 
-    private static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
-    {
-        List<AbstractBounds<PartitionPosition>> boundsList = new ArrayList<>(tokenRanges.size());
-        for (Range<Token> range : Range.normalize(tokenRanges))
-            addRange(sstable, Range.makeRowRange(range), boundsList);
-        return boundsList;
-    }
-
     private static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, DataRange dataRange)
     {
         List<AbstractBounds<PartitionPosition>> boundsList = new ArrayList<>(2);
         addRange(sstable, dataRange.keyRange(), boundsList);
         return boundsList;
-    }
-
-    private static AbstractBounds<PartitionPosition> fullRange(SSTableReader sstable)
-    {
-        return new Bounds<PartitionPosition>(sstable.first, sstable.last);
     }
 
     private static void addRange(SSTableReader sstable, AbstractBounds<PartitionPosition> requested, List<AbstractBounds<PartitionPosition>> boundsList)

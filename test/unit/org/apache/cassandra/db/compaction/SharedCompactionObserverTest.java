@@ -38,7 +38,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.mockito.Mockito.*;
 
-/// Tests mostly written by Copilot.
 public class SharedCompactionObserverTest
 {
     private SharedCompactionObserver sharedCompactionObserver;

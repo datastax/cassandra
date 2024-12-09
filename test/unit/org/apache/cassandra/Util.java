@@ -1322,22 +1322,6 @@ public class Util
         return new UserType(ks, UTF8Type.instance.decompose(name), fieldNames, fieldTypes, multicell);
     }
 
-    public static void modifyStaticFinalField(Class<?> clazz, String fieldName, Object newValue) throws Exception
-    {
-        Field field = clazz.getDeclaredField(fieldName);
-
-        // Make the field accessible to bypass private visibility
-        field.setAccessible(true);
-
-        // Remove the 'final' modifier using reflection
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL | Modifier.VOLATILE);
-
-        // Set the new value for the static field
-        field.set(null, newValue); // Use null for static fields
-    }
-
     public static void assumeAssertsEnabled()
     {
         Assume.assumeTrue("Asserts must be enabled for this test", assertsEnabled());
