@@ -155,6 +155,7 @@ public class ExecuteMessage extends Message.Request
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.statement.getBindVariables());
 
+            Tracing.trace("Executing prepared message started");
             long requestStartMillisTime = System.currentTimeMillis();
             Optional<Stage> asyncStage = Stage.fromStatement(statement);
             if (asyncStage.isPresent())
@@ -215,6 +216,10 @@ public class ExecuteMessage extends Message.Request
         catch (Exception e)
         {
             return handleException(queryState, prepared, e);
+        }
+        finally
+        {
+            Tracing.trace("Executing prepared message completed");
         }
     }
 

@@ -106,6 +106,7 @@ public class QueryMessage extends Message.Request
                 traceQuery(state);
 
             long requestStartMillisTime = System.currentTimeMillis();
+            Tracing.trace("Executing query started");
 
             QueryHandler queryHandler = ClientState.getCQLQueryHandler();
             statement = queryHandler.parse(query, state, options);
@@ -140,6 +141,10 @@ public class QueryMessage extends Message.Request
         catch (Exception ex)
         {
             return handleException(queryState, statement, ex);
+        }
+        finally
+        {
+            Tracing.trace("Executing query completed");
         }
     }
 
