@@ -205,8 +205,10 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         return compObservers;
     }
 
-    @VisibleForTesting
-    ILifecycleTransaction getTransaction()
+    /**
+     * Return the transaction that this task is working on. Used by CNDB as well as tests.
+     */
+    public ILifecycleTransaction getTransaction()
     {
         return transaction;
     }

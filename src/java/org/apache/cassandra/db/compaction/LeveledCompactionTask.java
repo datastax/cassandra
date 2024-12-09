@@ -76,7 +76,7 @@ public class LeveledCompactionTask extends CompactionTask
     @Override
     public boolean reduceScopeForLimitedSpace(Set<SSTableReader> nonExpiredSSTables, long expectedSize)
     {
-        if (transaction.originals().size() > 1 && level <= 1)
+        if (nonExpiredSSTables.size() > 1 && level <= 1)
         {
             // Try again w/o the largest one.
             logger.warn("insufficient space to do L0 -> L{} compaction. {}MiB required, {} for compaction {}",
@@ -109,6 +109,7 @@ public class LeveledCompactionTask extends CompactionTask
                             largestL0SSTable.onDiskLength(),
                             transaction.opIdString());
                 transaction.cancel(largestL0SSTable);
+                nonExpiredSSTables.remove(largestL0SSTable);
                 return true;
             }
         }

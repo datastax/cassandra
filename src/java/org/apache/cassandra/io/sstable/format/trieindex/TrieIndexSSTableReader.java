@@ -482,7 +482,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
     {
         Iterator<IndexPosIterator> partitionKeyIterators = TrieIndexScanner.makeBounds(this,
-                                                                                       Collections.singleton(range))
+                                                                                       Range.makeRowRange(range))
                                                                            .stream()
                                                                            .map(this::indexPosIteratorForRange)
                                                                            .iterator();

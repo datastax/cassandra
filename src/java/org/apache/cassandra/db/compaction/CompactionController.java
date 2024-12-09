@@ -136,7 +136,7 @@ public class CompactionController extends AbstractCompactionController
      *
      * @param realm
      * @param compacting we take the drop-candidates from this set, it is usually the sstables included in the compaction
-     * @param overlappingSupplier function used to get the sstables that overlap the ones in compacting.
+     * @param overlappingSupplier called on the compacting sstables to compute the set of sstables that overlap with them if needed
      * @param gcBefore
      * @param ignoreOverlaps don't check if data shadows/overlaps any data in other sstables
      * @return
