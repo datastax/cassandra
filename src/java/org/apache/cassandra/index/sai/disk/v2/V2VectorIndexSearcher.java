@@ -160,7 +160,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), orderer);
 
-        if (orderer.getVectorTerm() == null)
+        if (!orderer.isANN())
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + orderer));
 
         int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());

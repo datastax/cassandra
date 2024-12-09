@@ -77,9 +77,6 @@ public class InvertedIndexSearcher extends IndexSearcher
     private final TermsReader reader;
     private final QueryEventListener.TrieIndexEventListener perColumnEventListener;
     private final Version version;
-    private static final float K1 = 1.2f;  // BM25 term frequency saturation parameter
-    private static final float B = 0.75f;  // BM25 length normalization parameter
-
     private final boolean filterRangeResults;
     private final SSTableReader sstable;
 
@@ -189,6 +186,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         try (var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var merged = IntersectingPostingList.intersect(List.copyOf(postingLists.values())))
         {
+            // construct an Iterator<PrimaryKey>() from our intersected postings
             var it = new AbstractIterator<PrimaryKey>() {
                 @Override
                 protected PrimaryKey computeNext()
@@ -230,6 +228,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             return super.orderResultsBy(reader, queryContext, keys, orderer, limit);
 
         var queryTerms = orderer.extractQueryTerms();
+        // compute documentFrequencies from either histogram or an index search
         var documentFrequencies = new HashMap<ByteBuffer, Long>();
         boolean hasHistograms = metadata.version.onDiskFormat().indexFeatureSet().hasTermsHistogram();
         for (ByteBuffer term : queryTerms)

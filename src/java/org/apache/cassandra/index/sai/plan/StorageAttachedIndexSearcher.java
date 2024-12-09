@@ -629,8 +629,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                         if (sourceKey.isIndexDataValid((Row) row, now))
                         {
                             isRowValid = true;
-                            // We can only count the key as processed once we know it was valid for one of the
-                            // primary keys.
+                            // We can only count the pk as processed once we know it was valid for one of the
+                            // scored keys.
                             processedKeys.add(pk);
                             break;
                         }

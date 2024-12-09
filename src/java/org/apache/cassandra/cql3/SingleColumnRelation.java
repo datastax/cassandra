@@ -338,7 +338,7 @@ public final class SingleColumnRelation extends Relation
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-        return new SingleColumnRestriction.AnnRestriction(columnDef, term);
+        return new SingleColumnRestriction.Bm25Restriction(columnDef, term);
     }
 
     @Override

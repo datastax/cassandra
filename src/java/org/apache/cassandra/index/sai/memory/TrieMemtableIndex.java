@@ -355,6 +355,7 @@ public class TrieMemtableIndex implements MemtableIndex
         }
         long docCount = 0;
 
+        // count all documents in the queried column
         try (var it = memtable.makePartitionIterator(ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition())),
                                                      DataRange.allData(memtable.metadata().partitioner)))
         {

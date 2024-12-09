@@ -1125,10 +1125,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (orderingComparator == null)
             return SortedRowsBuilder.create(limit, offset);
 
-        if (orderingComparator instanceof IndexColumnComparator)
+        if (orderingComparator instanceof VectorColumnComparator)
         {
-            SingleRestriction restriction = ((IndexColumnComparator) orderingComparator).restriction;
-            int columnIndex = ((IndexColumnComparator) orderingComparator).columnIndex;
+            SingleRestriction restriction = ((VectorColumnComparator) orderingComparator).restriction;
+            int columnIndex = ((VectorColumnComparator) orderingComparator).columnIndex;
 
             Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
             assert index != null;
@@ -1497,7 +1497,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 var column = e.getKey();
                 var ordering = e.getValue();
                 if (ordering.expression instanceof Ordering.Ann && !ANN_USE_SYNTHETIC_SCORE)
-                    return new IndexColumnComparator(ordering.expression.toRestriction(), selection.getOrderingIndex(column));
+                    return new VectorColumnComparator(ordering.expression.toRestriction(), selection.getOrderingIndex(column));
                 else
                     return new SingleColumnComparator(selection.getOrderingIndex(column), column.type, false);
             }
@@ -1719,14 +1719,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
     }
 
-    // see usage in sortedRowsBuilder
-    private static class IndexColumnComparator extends ColumnComparator<List<ByteBuffer>>
+    // placeholder for postQueryScorer call; see usage in sortedRowsBuilder
+    private static class VectorColumnComparator extends ColumnComparator<List<ByteBuffer>>
     {
         private final SingleRestriction restriction;
         private final int columnIndex;
 
-        // VSTODO maybe cache in prepared statement
-        public IndexColumnComparator(SingleRestriction restriction, int columnIndex)
+        public VectorColumnComparator(SingleRestriction restriction, int columnIndex)
         {
             this.restriction = restriction;
             this.columnIndex = columnIndex;

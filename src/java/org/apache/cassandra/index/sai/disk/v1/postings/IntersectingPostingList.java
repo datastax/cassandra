@@ -36,7 +36,7 @@ public class IntersectingPostingList implements PostingList
     private final List<PostingList> postingLists;
     private final int size;
 
-    // currentPostings state is effectively local to findNextIntersection, but we keep it
+    // currentRowIds state is effectively local to findNextIntersection, but we keep it
     // around as a field to avoid repeated allocations there
     private final int[] currentRowIds;
 

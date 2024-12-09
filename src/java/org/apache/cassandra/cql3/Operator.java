@@ -259,7 +259,7 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand, @Nullable Index.Analyzer analyzer)
         {
-            return true;
+            throw new UnsupportedOperationException();
         }
     },
     NOT_IN(16)

@@ -56,7 +56,6 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.Index;
@@ -163,7 +162,6 @@ public class TopKProcessor
     {
         // priority queue ordered by score in descending order
         Comparator<Triple<PartitionInfo, Row, ?>> comparator;
-        // TODO does this work for complex expressions?
         if (expression.operator() == Operator.ANN || expression.operator() == Operator.BM25)
         {
             comparator = Comparator.comparing((Triple<PartitionInfo, Row, ?> t) -> (Float) t.getRight()).reversed();

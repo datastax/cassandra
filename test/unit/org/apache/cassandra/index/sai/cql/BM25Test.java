@@ -18,22 +18,12 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.v1.InvertedIndexSearcher;
 import org.apache.cassandra.index.sai.plan.QueryController;
-import org.apache.cassandra.inject.ActionBuilder;
-import org.apache.cassandra.inject.Expression;
-import org.apache.cassandra.inject.Injections;
-import org.apache.cassandra.inject.InvokePointBuilder;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
-import static org.junit.Assert.assertEquals;
 
 public class BM25Test extends SAITester
 {

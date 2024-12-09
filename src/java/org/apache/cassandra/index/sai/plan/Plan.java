@@ -1316,11 +1316,11 @@ abstract public class Plan
      * Base class for index scans that return results in a computed order (ANN, BM25)
      * rather than the natural index order.
      */
-    abstract static class ComputedOrderIndexScan extends Leaf
+    abstract static class ScoredIndexScan extends Leaf
     {
         final Orderer ordering;
 
-        protected ComputedOrderIndexScan(Factory factory, int id, Access access, Orderer ordering)
+        protected ScoredIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access);
             this.ordering = ordering;
@@ -1351,7 +1351,7 @@ abstract public class Plan
      * Returns all keys in ANN order.
      * Contrary to {@link KeysSort}, there is no input node here and the output is generated lazily.
      */
-    final static class AnnIndexScan extends ComputedOrderIndexScan
+    final static class AnnIndexScan extends ScoredIndexScan
     {
         protected AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
@@ -1383,7 +1383,7 @@ abstract public class Plan
      * Returns all keys in BM25 order.
      * Like AnnIndexScan, this generates results lazily without an input node.
      */
-    final static class Bm25IndexScan extends ComputedOrderIndexScan
+    final static class Bm25IndexScan extends ScoredIndexScan
     {
         protected Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
         {

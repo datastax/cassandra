@@ -1241,8 +1241,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            if (otherRestriction.isIndexBasedOrdering())
-                throw invalidRequest("%s cannot be restricted by multiple BM25 restrictions", columnDef.name);
             throw invalidRequest("%s cannot be restricted by both BM25 and %s", columnDef.name, otherRestriction.toString());
         }
 
