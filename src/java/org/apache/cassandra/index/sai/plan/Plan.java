@@ -381,6 +381,13 @@ abstract public class Plan
         return res == ControlFlow.Break;
     }
 
+    /** Returns true if all nodes in the plan match the condition */
+    final boolean allMatch(Function<Plan, Boolean> condition)
+    {
+        ControlFlow res = forEach(node -> (condition.apply(node)) ? ControlFlow.Continue : ControlFlow.Break);
+        return res == ControlFlow.Continue;
+    }
+
     /**
      * Returns a new plan with the given node filtering restriction removed.
      * Searches for the subplan to remove recursively down the tree.
@@ -602,9 +609,22 @@ abstract public class Plan
          * The node itself isn't supposed for doing the actual work, but rather serves as a director which
          * delegates the work to the query controller through the passed Executor.
          *
-         * @param executor does all the hard work like fetching keys from the indexes or ANN sort
+         * @param executor   does all the hard work like fetching keys from the indexes or ANN sort
          */
-        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor);
+        public final Iterator<? extends PrimaryKey> execute(Executor executor)
+        {
+            return execute(executor, false);
+        }
+
+        /**
+         * Executes the operation represented by this node.
+         * The node itself isn't supposed for doing the actual work, but rather serves as a director which
+         * delegates the work to the query controller through the passed Executor.
+         *
+         * @param executor   does all the hard work like fetching keys from the indexes or ANN sort
+         * @param isNonReducing if true, the executor should not reduce the number of keys returned
+         */
+        protected abstract Iterator<? extends PrimaryKey> execute(Executor executor, boolean isNonReducing);
 
         protected abstract KeysIteration withAccess(Access patterns);
 
@@ -643,6 +663,8 @@ abstract public class Plan
             // There are no subplans so it is a noop
             return this;
         }
+
+        protected abstract Expression predicate();
     }
 
     /**
@@ -669,6 +691,13 @@ abstract public class Plan
             return null;
         }
 
+        @Nullable
+        @Override
+        protected Expression predicate()
+        {
+            return null;
+        }
+
         @Override
         protected double estimateSelectivity()
         {
@@ -676,7 +705,7 @@ abstract public class Plan
         }
 
         @Override
-        protected KeyRangeIterator execute(Executor executor)
+        protected KeyRangeIterator execute(Executor executor, boolean isNonReducing)
         {
             return KeyRangeIterator.empty();
         }
@@ -721,6 +750,13 @@ abstract public class Plan
             return null;
         }
 
+        @Nullable
+        @Override
+        protected Expression predicate()
+        {
+            return null;
+        }
+
         @Override
         protected double estimateSelectivity()
         {
@@ -728,7 +764,7 @@ abstract public class Plan
         }
 
         @Override
-        protected KeyRangeIterator execute(Executor executor)
+        protected KeyRangeIterator execute(Executor executor, boolean isNonReducing)
         {
             // Not supported because it doesn't make a lot of sense.
             // A direct scan of table data would be certainly faster.
@@ -803,6 +839,13 @@ abstract public class Plan
             return ordering;
         }
 
+        @Nullable
+        @Override
+        protected Expression predicate()
+        {
+            return predicate;
+        }
+
         @Override
         protected final KeysIterationCost estimateCost()
         {
@@ -875,11 +918,11 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, boolean isNonReducing)
         {
             return (ordering != null)
                 ? executor.getTopKRows(predicate, max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows))))
-                : executor.getKeysFromIndex(predicate);
+                : executor.getKeysFromIndex(predicate, isNonReducing);
         }
 
         public String getIndexName()
@@ -1041,13 +1084,13 @@ abstract public class Plan
         }
 
         @Override
-        protected KeyRangeIterator execute(Executor executor)
+        protected KeyRangeIterator execute(Executor executor, boolean isNonReducing)
         {
-            KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder();
+            KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder(isNonReducing);
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((KeyRangeIterator) plan.execute(executor));
+                    builder.add((KeyRangeIterator) plan.execute(executor, isNonReducing));
                 return builder.build();
             }
             catch (Throwable t)
@@ -1177,13 +1220,13 @@ abstract public class Plan
         }
 
         @Override
-        protected KeyRangeIterator execute(Executor executor)
+        protected KeyRangeIterator execute(Executor executor, boolean isNonReducing)
         {
             KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder();
             try
             {
                 for (KeysIteration plan : subplansSupplier.get())
-                    builder.add((KeyRangeIterator) plan.execute(executor));
+                    builder.add((KeyRangeIterator) plan.execute(executor, isNonReducing));
 
                 return builder.build();
             }
@@ -1279,11 +1322,21 @@ abstract public class Plan
         }
 
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, boolean isNonReducing)
         {
-            KeyRangeIterator sourceIterator = (KeyRangeIterator) source.execute(executor);
+            assert !isNonReducing : "KeysSort does not support non-reducing execution";
+            // If any of the nodes are for plans that do not allow non-reducing execution, we must fetch all of the
+            // relevant keys.
+            boolean canBeNonReducing = allMatch(node -> {
+                if (!(node instanceof Plan.Leaf))
+                    return true;
+                Expression expression = ((Plan.Leaf) node).predicate();
+                return !expression.context.isNonFrozenCollection() && expression.context.indexFeatureSet().hasNullIndex();
+            });
+            // However, we do need a non-reducing execution here, because we need to fetch all keys from the source
+            KeyRangeIterator sourceIterator = (KeyRangeIterator) source.execute(executor, canBeNonReducing);
             int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
-            return executor.getTopKRows(sourceIterator, softLimit);
+            return executor.getTopKRows(sourceIterator, softLimit, canBeNonReducing);
         }
 
         @Override
@@ -1328,9 +1381,17 @@ abstract public class Plan
             return ordering;
         }
 
+        @Nullable
         @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        protected Expression predicate()
         {
+            return null;
+        }
+
+        @Override
+        protected Iterator<? extends PrimaryKey> execute(Executor executor, boolean isNonReducing)
+        {
+            assert !isNonReducing : "AnnIndexScan does not support non-reducing execution";
             int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
             return executor.getTopKRows((Expression) null, softLimit);
         }
@@ -1834,9 +1895,9 @@ abstract public class Plan
      */
     public interface Executor
     {
-        Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
+        Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate, boolean isNonReducing);
         Iterator<? extends PrimaryKey> getTopKRows(Expression predicate, int softLimit);
-        Iterator<? extends PrimaryKey> getTopKRows(KeyRangeIterator keys, int softLimit);
+        Iterator<? extends PrimaryKey> getTopKRows(KeyRangeIterator keys, int softLimit, boolean isNonReducing);
     }
 
     /**

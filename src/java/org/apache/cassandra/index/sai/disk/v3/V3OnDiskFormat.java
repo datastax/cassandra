@@ -81,6 +81,12 @@ public class V3OnDiskFormat extends V2OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean hasNullIndex()
+        {
+            return false;
+        }
     };
 
     @Override

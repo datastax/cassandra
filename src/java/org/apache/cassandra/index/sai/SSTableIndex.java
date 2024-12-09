@@ -93,7 +93,7 @@ public class SSTableIndex
         if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
         {
             logger.info("Creating dummy (empty) index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
-            return new EmptyIndex();
+            return new EmptyIndex(null);
         }
 
         return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
@@ -230,11 +230,11 @@ public class SSTableIndex
                                    int limit) throws IOException
     {
         if (expression.getOp().isNonEquality())
-        {
             return getNonEqIterator(expression, keyRange, context, defer);
-        }
-
-        return searchableIndex.search(expression, keyRange, context, defer, limit);
+        else if (expression.getOp() == Expression.Op.IS_NULL)
+            return searchableIndex.searchNulls(keyRange, context);
+        else
+            return searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
@@ -332,9 +332,9 @@ public class SSTableIndex
         return Objects.hashCode(sstableContext, indexContext);
     }
 
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows, boolean canSkipOutOfWindowPKs) throws IOException
     {
-        return searchableIndex.orderResultsBy(context, keys, orderer, limit, totalRows);
+        return searchableIndex.orderResultsBy(context, keys, orderer, limit, totalRows, canSkipOutOfWindowPKs);
     }
 
     public String toString()
