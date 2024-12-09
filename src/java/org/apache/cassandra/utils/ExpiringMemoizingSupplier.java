@@ -39,7 +39,7 @@ public class ExpiringMemoizingSupplier<T> implements Supplier<T>
     // The special value 0 means "not yet initialized".
     transient volatile long expirationNanos;
 
-    public static <T> Supplier<T> memoizeWithExpiration(Supplier<ReturnValue<T>> delegate, long duration, TimeUnit unit)
+    public static <T> ExpiringMemoizingSupplier<T> memoizeWithExpiration(Supplier<ReturnValue<T>> delegate, long duration, TimeUnit unit)
     {
         return new ExpiringMemoizingSupplier<>(delegate, duration, unit);
     }
