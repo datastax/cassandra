@@ -51,7 +51,7 @@ import static org.junit.Assert.assertEquals;
  */
 public class StandaloneUpgraderOnSStablesTest
 {
-    String legacyId = "ma";
+    String legacyId = "me";
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
