@@ -109,29 +109,11 @@ public class SortedStringTableCursor implements SSTableCursor
             this.staticColumns = toArray(header.columns(true));
             this.columnsReusableArray = new ColumnMetadata[Math.max(regularColumns.length, staticColumns.length)];
 
-            if (tokenRange != null && !tokenRange.right.isMinimum() && tokenRange.right.compareTo(sstable.last.getToken()) < 0)
-            {
-                final RowIndexEntry position = sstable.getPosition(tokenRange.right.maxKeyBound(), SSTableReader.Operator.GT);
-                if (position != null)
-                    this.endPosition = position.position; // 0 if end is before our first key.
-                else
-                    throw new AssertionError("Range " + tokenRange + " end is before last sstable token " + sstable.last.getToken() + " but no position was found");
-            }
-            else
-                this.endPosition = dataFile.length();
-
-            if (tokenRange != null && !tokenRange.left.isMinimum() && tokenRange.left.compareTo(sstable.first.getToken()) >= 0)
-            {
-                RowIndexEntry position = sstable.getPosition(tokenRange.left.maxKeyBound(), SSTableReader.Operator.GT);
-                if (position != null)
-                    this.startPosition = position.position;
-                else
-                    this.startPosition = endPosition;    // Range is outside span. Not normally reachable (don't optimize).
-
-                dataFile.seek(startPosition);
-            }
-            else
-                this.startPosition = 0;
+            SSTableReader.PartitionPositionBounds bounds = tokenRange == null ? sstable.getPositionsForFullRange()
+                                                                              : sstable.getPositionsForBounds(Range.makeRowRange(tokenRange));
+            this.startPosition = bounds.lowerPosition;
+            this.endPosition = bounds.upperPosition;
+            dataFile.seek(this.startPosition);
         }
         catch (Throwable t)
         {

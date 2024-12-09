@@ -121,6 +121,9 @@ public class UnifiedCompactionTask extends CompactionTask
     @Override
     protected boolean shouldReduceScopeForSpace()
     {
+        // Because parallelized tasks share input sstables, we can't reduce the scope of individual tasks
+        // (as doing that will leave some part of an sstable out of the compaction but still drop the whole sstable
+        // when the task set completes).
         return tokenRange() == null;
     }
 

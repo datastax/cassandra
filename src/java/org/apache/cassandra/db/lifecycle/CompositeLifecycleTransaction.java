@@ -24,7 +24,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.UUIDGen;
 
 /// Composite lifecycle transaction. This is a wrapper around a lifecycle transaction that allows for multiple partial
@@ -57,6 +56,13 @@ public class CompositeLifecycleTransaction
     private volatile boolean initializationComplete;
     private volatile int partsCount = 0;
 
+    /// Create a composite transaction wrapper over the given transaction. After construction, the individual parts of
+    /// the operation must be registered using [#register] and the composite sealed by calling [#completeInitialization].
+    /// The composite will then track the state of the parts and commit after all of them have committed (respectively
+    /// abort if one aborts but only after waiting for all the other tasks to complete, successfully or not).
+    ///
+    /// To make it easy to recognize the parts of a composite transaction, the given transaction should have an id with
+    /// sequence number 0, and partial transactions should use the id that [#register] returns.
     public CompositeLifecycleTransaction(LifecycleTransaction mainTransaction)
     {
         this.mainTransaction = mainTransaction;
@@ -80,9 +86,8 @@ public class CompositeLifecycleTransaction
     {
         partsCount = partsToCommitOrAbort.get();
         initializationComplete = true;
-        // TODO: Switch to trace before merging.
-        if (logger.isDebugEnabled())
-            logger.debug("Composite transaction {} initialized with {} parts.", mainTransaction.opIdString(), partsCount);
+        if (logger.isTraceEnabled())
+            logger.trace("Composite transaction {} initialized with {} parts.", mainTransaction.opIdString(), partsCount);
     }
 
     /// Get the number of parts in the composite transaction. 0 if the transaction is not yet initialized.
@@ -131,9 +136,8 @@ public class CompositeLifecycleTransaction
         {
             if (wasAborted)
             {
-                // TODO: Switch to trace before merging.
-                if (logger.isDebugEnabled())
-                    logger.debug("Composite transaction {} with {} parts aborted.",
+                if (logger.isTraceEnabled())
+                    logger.trace("Composite transaction {} with {} parts aborted.",
                                  mainTransaction.opIdString(),
                                  partsCount);
 
@@ -141,9 +145,8 @@ public class CompositeLifecycleTransaction
             }
             else
             {
-                // TODO: Switch to trace before merging.
-                if (logger.isDebugEnabled())
-                    logger.debug("Composite transaction {} with {} parts completed{}.",
+                if (logger.isTraceEnabled())
+                    logger.trace("Composite transaction {} with {} parts completed{}.",
                                  mainTransaction.opIdString(),
                                  partsCount,
                                  obsoleteOriginalsRequested ? " with obsoletion" : "");

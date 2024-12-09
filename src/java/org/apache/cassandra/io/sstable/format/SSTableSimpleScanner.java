@@ -59,6 +59,13 @@ implements ISSTableScanner
     private SSTableIdentityIterator currentIterator;
     private DecoratedKey lastKey;
 
+    /// Create a new simple scanner over the given sstables and the given ranges of uncompressed positions.
+    /// Each range must start and end on a partition boundary, and, to satisfy the contract of [ISSTableScanner], the
+    /// ranges must be non-overlapping and in ascending order. This scanner will throw an [IllegalArgumentException] if
+    /// the latter is not true.
+    ///
+    /// The ranges can be constructed by [SSTableReader#getPositionsForRanges] and similar methods as done by the
+    /// various [SSTableReader#getScanner] variations.
     public SSTableSimpleScanner(SSTableReader sstable,
                                 Collection<PartitionPositionBounds> boundsList)
     {
@@ -153,6 +160,9 @@ implements ISSTableScanner
         bytesScannedInPreviousRanges += currentEndPosition - currentStartPosition;
 
         PartitionPositionBounds nextRange = rangeIterator.next();
+        if (currentEndPosition > nextRange.lowerPosition)
+            throw new IllegalArgumentException("Ranges supplied to SSTableSimpleScanner must be non-overlapping and in ascending order.");
+
         currentEndPosition = nextRange.upperPosition;
         currentStartPosition = nextRange.lowerPosition;
         dfile.seek(currentStartPosition);

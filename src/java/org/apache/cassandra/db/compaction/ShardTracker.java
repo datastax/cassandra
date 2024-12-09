@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 import javax.annotation.Nullable;
 
