@@ -167,7 +167,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
 
     /**
      * @param gcBefore             throw away tombstones older than this
-     * @param permittedParallelism
+     * @param permittedParallelism the maximum permitted parallelism for the operation
      * @return a compaction task that should be run to compact this columnfamilystore
      * as much as possible.  Null if nothing to do.
      * <p>

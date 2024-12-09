@@ -94,7 +94,7 @@ public class Compact extends NodeToolCmd
                 {
                     if (parallelism != null)
                         probe.forceKeyspaceCompaction(splitOutput, parallelism, keyspace, tableNames);
-                    else // avoid referring to the new method to be work with older versions
+                    else // avoid referring to the new method to work with older versions
                         probe.forceKeyspaceCompaction(splitOutput, keyspace, tableNames);
                 }
             } catch (Exception e)

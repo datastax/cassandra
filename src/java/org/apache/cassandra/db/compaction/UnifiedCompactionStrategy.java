@@ -172,9 +172,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return "N";
     }
 
-    /// Generate a time-based UUID for unified compaction tasks. These IDs' sequence numbers are 0 for non-parallellized
-    /// tasks. Parallelized tasks update the transaction ID to put the task's index in the parallel set as the sequence
-    /// number.
+    /// Make a time-based UUID for unified compaction tasks with sequence 0. The reason to do this is to accommodate
+    /// parallelized compactions:
+    /// - Sequence 0 (visible as `-8000-` in the UUID string) denotes single-task (i.e. non-parallelized) compactions.
+    /// - Sequence >0 (`-800n-`) denotes the individual task's index of a parallelized compaction.
+    /// - Parallelized compactions use sequence 0 as the transaction id, and sequences from 1 to the number of tasks
+    ///   for the ids of individual tasks.
     public static UUID nextTimeUUID()
     {
         return UUIDGen.withSequence(UUIDGen.getTimeUUID(), 0);
@@ -208,8 +211,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     {
         maybeUpdateSelector();
         // The tasks are split by repair status and disk, as well as in non-overlapping sections to enable some
-        // parallelism and use of extra space. The result will be split across shards according to its density.
-        // Depending on the parallelism, the operation may require up to 100% extra space to complete.
+        // parallelism and efficient use of extra space. The result will be split across shards according to its
+        // density. Depending on the parallelism, the operation may require up to 100% extra space to complete.
         List<AbstractCompactionTask> tasks = new ArrayList<>();
         if (permittedParallelism <= 0)
             permittedParallelism = Integer.MAX_VALUE;
@@ -222,9 +225,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // for smaller extra space requirements. However, if the sharding configuration has changed, a major
                 // compaction should combine non-overlapping sets if they are split on a boundary that is no longer
                 // in effect.
-
-                // Select desired splitting of the sstables. If we are resharding, according to the sharding boundaries
-                // suitable for the size of the data. Otherwise, start with the overlap groups.
                 List<Set<CompactionSSTable>> groups =
                     getShardManager().splitSSTablesInShards(arena.sstables,
                                                             makeShardingStats(arena.sstables).shardCountForDensity,

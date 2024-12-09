@@ -19,7 +19,9 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
@@ -63,6 +65,13 @@ public class ShardManagerTrivial implements ShardManager
         return onDiskLength;
     }
 
+    @Override
+    public <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
+                                                                          int numShardsForDensity,
+                                                                          BiFunction<Collection<R>, Range<Token>, T> maker)
+    {
+        return List.of(maker.apply(sstables, new Range<>(partitioner.getMinimumToken(), partitioner.getMinimumToken())));
+    }
 
     @Override
     public double localSpaceCoverage()

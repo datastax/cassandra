@@ -2455,6 +2455,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         CompactionManager.instance.performMaximal(this, splitOutput);
     }
 
+    public void forceMajorCompaction(int parallelism)
+    {
+        CompactionManager.instance.performMaximal(this, false, parallelism);
+    }
+
     public void forceMajorCompaction(boolean splitOutput, int parallelism)
     {
         CompactionManager.instance.performMaximal(this, splitOutput, parallelism);

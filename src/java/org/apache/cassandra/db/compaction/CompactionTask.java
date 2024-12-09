@@ -157,13 +157,13 @@ public class CompactionTask extends AbstractCompactionTask
     @VisibleForTesting
     public boolean reduceScopeForLimitedSpace(Set<SSTableReader> nonExpiredSSTables, long expectedSize)
     {
-        if (partialCompactionsAcceptable() && transaction.originals().size() > 1)
+        if (partialCompactionsAcceptable() && nonExpiredSSTables.size() > 1)
         {
             // Try again w/o the largest one.
             SSTableReader removedSSTable = getMaxSizeFile(nonExpiredSSTables);
             logger.warn("insufficient space to compact all requested files. {}MB required, {} for compaction {} - removing largest SSTable: {}",
                         (float) expectedSize / 1024 / 1024,
-                        StringUtils.join(transaction.originals(), ", "),
+                        StringUtils.join(nonExpiredSSTables, ", "),
                         transaction.opIdString(),
                         removedSSTable);
             // Note that we have removed files that are still marked as compacting.
@@ -963,12 +963,14 @@ public class CompactionTask extends AbstractCompactionTask
                 // we end up here if we can't take any more sstables out of the compaction.
                 // usually means we've run out of disk space
 
-                // but we can still compact expired SSTables
-                if(partialCompactionsAcceptable() && containsExpired)
+                // but we can still remove expired SSTables
+                if (partialCompactionsAcceptable() && containsExpired)
                 {
-                    // if all remaining sstables are fully expired, we can still start compaction; otherwise throw
-                    if (nonExpiredSSTables.isEmpty())
-                        break;
+                    for (SSTableReader rdr : nonExpiredSSTables)
+                        transaction.cancel(rdr);
+                    nonExpiredSSTables.clear();
+                    assert transaction.originals().size() > 0;
+                    break;
                 }
 
                 String msg = String.format("Not enough space for compaction, estimated sstables = %d, expected write size = %d", estimatedSSTables, expectedWriteSize);

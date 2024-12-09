@@ -909,7 +909,7 @@ public class CompactionManager implements CompactionManagerMBean
                                          boolean splitOutput,
                                          TableOperationObserver obs)
     {
-        return submitMaximal(cfStore, gcBefore, splitOutput, 0, obs);
+        return submitMaximal(cfStore, gcBefore, splitOutput, -1, obs);
     }
 
     @VisibleForTesting
@@ -917,15 +917,19 @@ public class CompactionManager implements CompactionManagerMBean
     public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore,
                                          final int gcBefore,
                                          boolean splitOutput,
-                                         int parallelism,
+                                         int permittedParallelism,
                                          TableOperationObserver obs)
     {
+        // The default parallelism is half the number of compaction threads to leave enough room for other compactions.
+        if (permittedParallelism < 0)
+            permittedParallelism = getCoreCompactorThreads() / 2;
+        else if (permittedParallelism == 0)
+            permittedParallelism = Integer.MAX_VALUE;
+
         // here we compute the task off the compaction executor, so having that present doesn't
         // confuse runWithCompactionsDisabled -- i.e., we don't want to deadlock ourselves, waiting
         // for ourselves to finish/acknowledge cancellation before continuing.
 
-        // The default parallelism is half the number of compaction threads to leave enough room for other compactions.
-        final int permittedParallelism = parallelism > 0 ? parallelism : executor.getCorePoolSize() / 2;
         CompactionTasks tasks = cfStore.getCompactionStrategy().getMaximalTasks(gcBefore, splitOutput, permittedParallelism);
 
         if (tasks.isEmpty())
@@ -958,7 +962,10 @@ public class CompactionManager implements CompactionManagerMBean
             }
         }
         if (nonEmptyTasks > 1)
-            logger.info("Major compaction will not result in a single sstable.");
+            logger.info("Major compaction of {}.{} will not result in a single sstable - " +
+                        "repaired and unrepaired data is kept separate, compaction runs per data_file_directory, " +
+                        "and some compaction strategies will construct multiple non-overlapping sstables.",
+                        cfStore.getKeyspaceName(), cfStore.getTableName());
 
         return futures;
     }
