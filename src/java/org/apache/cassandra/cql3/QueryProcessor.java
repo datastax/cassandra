@@ -286,7 +286,6 @@ public class QueryProcessor implements QueryHandler
 
         Tracing.trace("Authorizing against client state");
         statement.authorize(clientState);
-        Tracing.trace("Validating against query state");
         statement.validate(queryState);
 
         Tracing.setupTracedKeyspace(statement);
