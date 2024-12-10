@@ -36,6 +36,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -251,6 +252,7 @@ public abstract class Message
                 }
             }
 
+            Tracing.trace("Initialized tracing in execute. Already elapsed {} ns", (Clock.Global.nanoTime() - queryStartNanoTime));
             boolean finalShouldTrace = shouldTrace;
             TimeUUID finalTracingSessionId = tracingSessionId;
             return maybeExecuteAsync(queryState, queryStartNanoTime, shouldTrace)
