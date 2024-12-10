@@ -230,6 +230,7 @@ public class BatchMessage extends Message.Request
             BatchStatement batch = new BatchStatement(null, batchType,
                                                       VariableSpecifications.empty(), statements, Attributes.none());
 
+            Tracing.trace("Processing batch start");
             long requestStartMillisTime = MonotonicClock.Global.approxTime.now();
             Optional<Stage> asyncStage = Stage.fromStatement(batch);
             if (asyncStage.isPresent())
@@ -259,6 +260,10 @@ public class BatchMessage extends Message.Request
         catch (Exception exception)
         {
             return handleException(queryState, preparedList, exception);
+        }
+        finally
+        {
+            Tracing.trace("Processing batch complete");
         }
     }
 
