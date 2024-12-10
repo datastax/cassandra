@@ -815,6 +815,11 @@ public abstract class CompactionAggregate
             return null;
         }
 
+        public boolean keepOriginals()
+        {
+            return false;
+        }
+
         public void setPermittedParallelism(int parallelism)
         {
             this.permittedParallelism = parallelism;
@@ -848,6 +853,12 @@ public abstract class CompactionAggregate
         public Range<Token> operationRange()
         {
             return operationRange;
+        }
+
+        @Override
+        public boolean keepOriginals()
+        {
+            return true; // if an aggregate is partial, the sources cannot be deleted as they are needed for the other parts
         }
     }
 

@@ -410,7 +410,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             // This will ignore the range of the operation, which is fine.
             backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), getShardingStats(aggregate), parallelism, tasks);
+            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), aggregate.keepOriginals(), getShardingStats(aggregate), parallelism, tasks);
         }
         else
         {
@@ -559,28 +559,28 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return new ShardingStats(sstables, getShardManager(), controller);
     }
 
-    @VisibleForTesting
     void createAndAddTasks(int gcBefore,
                            LifecycleTransaction transaction,
                            ShardingStats shardingStats,
                            int parallelism,
                            Collection<? super CompactionTask> tasks)
     {
-        createAndAddTasks(gcBefore, transaction, null, shardingStats, parallelism, tasks);
+        createAndAddTasks(gcBefore, transaction, null, false, shardingStats, parallelism, tasks);
     }
 
     @VisibleForTesting
     void createAndAddTasks(int gcBefore,
                            LifecycleTransaction transaction,
                            Range<Token> operationRange,
+                           boolean keepOriginals,
                            ShardingStats shardingStats,
                            int parallelism,
                            Collection<? super CompactionTask> tasks)
     {
         if (controller.parallelizeOutputShards() && parallelism > 1)
-            tasks.addAll(createParallelCompactionTasks(transaction, operationRange, shardingStats, gcBefore, parallelism));
+            tasks.addAll(createParallelCompactionTasks(transaction, operationRange, keepOriginals, shardingStats, gcBefore, parallelism));
         else
-            tasks.add(createCompactionTask(transaction, operationRange, shardingStats, gcBefore));
+            tasks.add(createCompactionTask(transaction, operationRange, keepOriginals, shardingStats, gcBefore));
     }
 
     /// Create the sstable writer used for flushing.
@@ -627,9 +627,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// where we produce outputs but cannot delete the input sstables until all components of the operation are complete.
     ///
     /// @return a sharded compaction task that in turn will create a sharded compaction writer.
-    private UnifiedCompactionTask createCompactionTask(LifecycleTransaction transaction, Range<Token> operationRange, ShardingStats shardingStats, int gcBefore)
+    private UnifiedCompactionTask createCompactionTask(LifecycleTransaction transaction, Range<Token> operationRange, boolean keepOriginals, ShardingStats shardingStats, int gcBefore)
     {
-        return new UnifiedCompactionTask(realm, this, transaction, gcBefore, true, getShardManager(), shardingStats, operationRange, transaction.originals(), null, null);
+        return new UnifiedCompactionTask(realm, this, transaction, gcBefore, keepOriginals, getShardManager(), shardingStats, operationRange, transaction.originals(), null, null);
     }
 
     @Override
@@ -646,6 +646,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     private Collection<CompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction,
                                                                      Range<Token> operationRange,
+                                                                     boolean keepOriginals,
                                                                      ShardingStats shardingStats,
                                                                      int gcBefore,
                                                                      int parallelism)
@@ -668,7 +669,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                 this,
                                                                 new PartialLifecycleTransaction(compositeTransaction),
                                                                 gcBefore,
-                                                                true,
+                                                                keepOriginals,
                                                                 shardManager,
                                                                 shardingStats,
                                                                 range,
@@ -686,7 +687,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         if (tasks.size() == 1) // if there's just one range, make it a non-ranged task (to apply early open etc.)
         {
             assert tasks.get(0).inputSSTables().equals(sstables);
-            return Collections.singletonList(createCompactionTask(transaction, operationRange, shardingStats, gcBefore));
+            return Collections.singletonList(createCompactionTask(transaction, operationRange, keepOriginals, shardingStats, gcBefore));
         }
         else
             return tasks;
