@@ -22,6 +22,7 @@ package org.apache.cassandra.db.compaction;
 
 
 import java.io.RandomAccessFile;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -224,7 +225,7 @@ public class CorruptedSSTablesCompactionsTest
                 // We want to write something large enough that the corruption cannot get undetected
                 // (even without compression)
                 byte[] corruption = new byte[corruptionSize];
-                random.nextBytes(corruption);
+                Arrays.fill(corruption, (byte) -1); // using 0xFF results in more reliably-detectable corruption than random bytes
                 raf.write(corruption);
                 if (ChunkCache.instance != null)
                     ChunkCache.instance.invalidateFile(sstable.getFilename());
