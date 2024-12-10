@@ -1018,7 +1018,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         ColumnFamilyStore store = cfs();
         if (store != null)
+        {
             store.metric.coordinatorReadSize.update(result.readRowsSize());
+            RequestSensors sensors = RequestTracker.instance.get();
+            // sensors are not initialized for queries executed internally
+            if (sensors != null)
+                sensors.incrementSensor(Context.from(table), Type.MEMORY_BYTES, result.readRowsSize());
+        }
 
         return result.build();
     }
