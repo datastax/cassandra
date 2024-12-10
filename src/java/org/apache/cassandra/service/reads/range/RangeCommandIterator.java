@@ -37,9 +37,6 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
-import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -74,8 +71,6 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
     private int liveReturned;
     int rangesQueried;
     int batchesRequested = 0;
-    protected RequestSensors sensors;
-    protected Context context;
 
     @SuppressWarnings("resource")
     public static RangeCommandIterator create(CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans,
@@ -118,8 +113,6 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
         this.totalRangeCount = totalRangeCount;
         this.queryStartNanoTime = queryStartNanoTime;
         this.readTracker = readTracker;
-        this.sensors = RequestTracker.instance.get();
-        this.context = Context.from(command);
 
         startTime = System.nanoTime();
         enforceStrictLiveness = command.metadata().enforceStrictLiveness();

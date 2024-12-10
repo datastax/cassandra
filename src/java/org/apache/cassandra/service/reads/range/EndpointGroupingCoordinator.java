@@ -48,10 +48,6 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
-import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.reads.DataResolver;
@@ -204,16 +200,12 @@ public class EndpointGroupingCoordinator
         private final DataLimits.Counter singleResultCounter;
 
         private MultiRangeReadCommand multiRangeCommand;
-        private final RequestSensors sensors;
-        private final Context context;
 
         public EndpointQueryContext(InetAddressAndPort endpoint, DataLimits.Counter singleResultCounter)
         {
             this.endpoint = endpoint;
             this.handlers = new ArrayList<>();
             this.singleResultCounter = singleResultCounter;
-            this.sensors = RequestTracker.instance.get();
-            this.context = Context.from(multiRangeCommand);
         }
 
         /**
@@ -236,7 +228,6 @@ public class EndpointGroupingCoordinator
             SingleEndpointCallback proxy = new SingleEndpointCallback();
             Message<ReadCommand> message = multiRangeCommand.createMessage(false);
             MessagingService.instance().sendWithCallback(message, endpoint, proxy);
-            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.serializedSize(MessagingService.current_version));
         }
 
         @VisibleForTesting

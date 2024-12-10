@@ -1981,7 +1981,6 @@ public class StorageProxy implements StorageProxyMBean
         Context context = Context.from(group.metadata());
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.MEMORY_BYTES);
-        sensors.registerSensor(context, Type.INTERNODE_BYTES);
         for (SinglePartitionReadCommand command : group.queries)
             sensors.incrementSensor(context, Type.MEMORY_BYTES, ReadCommand.serializer.serializedSize(command, MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
@@ -2368,7 +2367,6 @@ public class StorageProxy implements StorageProxyMBean
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.MEMORY_BYTES);
-        sensors.registerSensor(context, Type.INTERNODE_BYTES);
         sensors.incrementSensor(context, Type.MEMORY_BYTES, ReadCommand.serializer.serializedSize(command, MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
