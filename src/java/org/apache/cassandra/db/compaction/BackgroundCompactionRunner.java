@@ -384,9 +384,8 @@ public class BackgroundCompactionRunner implements Runnable
         catch (RejectedExecutionException ex)
         {
             ongoingCompactions.decrementAndGet();
-            logger.debug("Background compaction task for {} was rejected", cfs, ex);
-            Throwable t = task.rejected(ex);
-            return CompletableFuture.failedFuture(t);
+            logger.debug("Background compaction task for {} was rejected", cfs);
+            return CompletableFuture.completedFuture(null);
         }
     }
 
