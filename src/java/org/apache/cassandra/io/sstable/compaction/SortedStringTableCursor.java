@@ -111,8 +111,16 @@ public class SortedStringTableCursor implements SSTableCursor
 
             SSTableReader.PartitionPositionBounds bounds = tokenRange == null ? sstable.getPositionsForFullRange()
                                                                               : sstable.getPositionsForBounds(Range.makeRowRange(tokenRange));
-            this.startPosition = bounds.lowerPosition;
-            this.endPosition = bounds.upperPosition;
+            if (bounds != null)
+            {
+                this.startPosition = bounds.lowerPosition;
+                this.endPosition = bounds.upperPosition;
+            }
+            else
+            {
+                // The range is empty. Rather than fail, use 0/0 as bounds which will not return any data.
+                this.endPosition = this.startPosition = 0;
+            }
             dataFile.seek(this.startPosition);
         }
         catch (Throwable t)
