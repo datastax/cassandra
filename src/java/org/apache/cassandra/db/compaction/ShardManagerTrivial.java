@@ -138,7 +138,7 @@ public class ShardManagerTrivial implements ShardManager
         }
 
         @Override
-        public long shardAdjustedKeyCount(Set<SSTableReader> sstables)
+        public long shardAdjustedKeyCount(Set<? extends CompactionSSTable> sstables)
         {
             long shardAdjustedKeyCount = 0;
             for (CompactionSSTable sstable : sstables)
