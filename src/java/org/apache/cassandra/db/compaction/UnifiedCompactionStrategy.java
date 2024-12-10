@@ -235,9 +235,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             {
                 aggregates.add(CompactionAggregate.createUnified(group,
                                                                  Overlaps.maxOverlap(group,
-                                                                                      CompactionSSTable.startsAfter,
-                                                                                      CompactionSSTable.firstKeyComparator,
-                                                                                      CompactionSSTable.lastKeyComparator),
+                                                                                     CompactionSSTable.startsAfter,
+                                                                                     CompactionSSTable.firstKeyComparator,
+                                                                                     CompactionSSTable.lastKeyComparator),
                                                                  CompactionPick.create(nextTimeUUID(), LEVEL_MAXIMAL.index, group),
                                                                  Collections.emptyList(),
                                                                  arena,
@@ -385,10 +385,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         try
         {
             for (CompactionAggregate aggregate : aggregates)
-                if (aggregate instanceof CompactionAggregate.UnifiedWithRange)
-                    createAndAddTasks(gcBefore, (CompactionAggregate.UnifiedWithRange) aggregate, tasks);
-                else
-                    createAndAddTasks(gcBefore, (CompactionAggregate.UnifiedAggregate) aggregate, tasks);
+                createAndAddTasks(gcBefore, (CompactionAggregate.UnifiedAggregate) aggregate, tasks);
 
             return tasks;
         }
@@ -398,30 +395,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedAggregate aggregate, Collection<AbstractCompactionTask> tasks)
-    {
-        CompactionPick selected = aggregate.getSelected();
-        int parallelism = aggregate.getPermittedParallelism();
-        Preconditions.checkNotNull(selected);
-        Preconditions.checkArgument(!selected.isEmpty());
-
-        LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
-                                                           OperationType.COMPACTION,
-                                                           selected.id());
-        if (transaction != null)
-        {
-            backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-            createAndAddTasks(gcBefore, transaction, getShardingStats(aggregate), parallelism, tasks);
-        }
-        else
-        {
-            // This can happen e.g. due to a race with upgrade tasks
-            logger.error("Failed to submit compaction {} because a transaction could not be created. If this happens frequently, it should be reported", aggregate);
-        }
-    }
-
     /// Used by CNDB where compaction aggregates can already be split into subranges of the operation.
-    public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedWithRange aggregate, Collection<AbstractCompactionTask> tasks)
+    public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedAggregate aggregate, Collection<AbstractCompactionTask> tasks)
     {
         CompactionPick selected = aggregate.getSelected();
         int parallelism = aggregate.getPermittedParallelism();
@@ -435,7 +410,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             // This will ignore the range of the operation, which is fine.
             backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), getShardingStats(aggregate, aggregate.operationRange()), parallelism, tasks);
+            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), getShardingStats(aggregate), parallelism, tasks);
         }
         else
         {
@@ -463,11 +438,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         public ShardingStats(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, Controller controller)
         {
-            this(sstables, null, shardManager, controller);
-        }
-
-        public ShardingStats(Collection<? extends CompactionSSTable> sstables, Range<Token> operationRange, ShardManager shardManager, Controller controller)
-        {
             assert !sstables.isEmpty();
             // the partition count aggregation is costly, so we only perform this once when the aggregate is selected for execution.
             long onDiskLength = 0;
@@ -493,18 +463,59 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
             this.totalOnDiskSize = onDiskLength;
             this.uniqueKeyRatio = 1.0 * estimatedPartitionCount / partitionCountSum;
+            this.min = min;
+            this.max = max;
             this.density = shardManager.density(onDiskLength, min, max, estimatedPartitionCount);
             this.shardCountForDensity = controller.getNumShards(this.density * shardManager.shardSetCoverage());
-            if (operationRange == null)
+            this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
+        }
+
+        public ShardingStats(Collection<? extends CompactionSSTable> sstables, Range<Token> operationRange, ShardManager shardManager, Controller controller)
+        {
+            assert !sstables.isEmpty();
+            assert operationRange != null;
+            // the partition count aggregation is costly, so we only perform this once when the aggregate is selected for execution.
+            long onDiskLengthInRange = 0;
+            long partitionCountSum = 0;
+            long partitionCountSumInRange = 0;
+            PartitionPosition min = null;
+            PartitionPosition max = null;
+            boolean hasNonSSTableReaders = false;
+            for (CompactionSSTable sstable : sstables)
             {
-                this.min = min;
-                this.max = max;
+                PartitionPosition left = sstable.getFirst();
+                PartitionPosition right = sstable.getLast();
+                boolean extendsBefore = left.getToken().compareTo(operationRange.left) <= 0;
+                boolean extendsAfter = right.getToken().compareTo(operationRange.right) > 0;
+                if (extendsBefore)
+                    left = operationRange.left.maxKeyBound();
+                if (extendsAfter)
+                    right = operationRange.right.minKeyBound();
+                double fractionInRange = extendsBefore || extendsAfter
+                                         ? shardManager.rangeSpanned(left, right) / shardManager.rangeSpanned(sstable.getFirst(), sstable.getLast())
+                                         : 1;
+
+                onDiskLengthInRange += sstable.onDiskLength() * fractionInRange;
+                partitionCountSumInRange += sstable.estimatedKeys() * fractionInRange;
+                partitionCountSum += sstable.estimatedKeys();
+                min = min == null || min.compareTo(left) > 0 ? sstable.getFirst() : min;
+                max = max == null || max.compareTo(right) < 0 ? sstable.getLast() : max;
+                if (!(sstable instanceof SSTableReader)
+                    || ((SSTableReader) sstable).descriptor == null)    // for tests
+                    hasNonSSTableReaders = true;
             }
+            long estimatedPartitionCount;
+            if (!hasNonSSTableReaders)
+                estimatedPartitionCount = SSTableReader.getApproximateKeyCount(Iterables.filter(sstables, SSTableReader.class));
             else
-            {
-                this.min = Comparables.max(min, operationRange.left.maxKeyBound());
-                this.max = Comparables.min(max, operationRange.right.maxKeyBound());
-            }
+                estimatedPartitionCount = partitionCountSum;
+
+            this.min = min;
+            this.max = max;
+            this.totalOnDiskSize = onDiskLengthInRange;
+            this.uniqueKeyRatio = 1.0 * estimatedPartitionCount / partitionCountSum;
+            this.density = shardManager.density(onDiskLengthInRange, min, max, (long) (partitionCountSumInRange * uniqueKeyRatio));
+            this.shardCountForDensity = controller.getNumShards(this.density * shardManager.shardSetCoverage());
             this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
         }
 
@@ -529,18 +540,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         var shardingStats = aggregate.getShardingStats();
         if (shardingStats == null)
         {
-            shardingStats = makeShardingStats(aggregate.getSelected().sstables());
-            aggregate.setShardingStats(shardingStats);
-        }
-        return shardingStats;
-    }
-
-    ShardingStats getShardingStats(CompactionAggregate.UnifiedWithRange aggregate, Range<Token> operationRange)
-    {
-        var shardingStats = aggregate.getShardingStats();
-        if (shardingStats == null)
-        {
-            shardingStats =  new ShardingStats(aggregate.getSelected().sstables(), operationRange, getShardManager(), controller);
+            final Range<Token> operationRange = aggregate.operationRange();
+            shardingStats = operationRange != null
+                            ? new ShardingStats(aggregate.getSelected().sstables(), operationRange, getShardManager(), controller)
+                            : new ShardingStats(aggregate.getSelected().sstables(), getShardManager(), controller);
             aggregate.setShardingStats(shardingStats);
         }
         return shardingStats;
@@ -563,10 +566,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                            int parallelism,
                            Collection<? super CompactionTask> tasks)
     {
-        if (controller.parallelizeOutputShards() && parallelism > 1)
-            tasks.addAll(createParallelCompactionTasks(transaction, shardingStats, gcBefore, parallelism));
-        else
-            tasks.add(createCompactionTask(transaction, shardingStats, gcBefore));
+        createAndAddTasks(gcBefore, transaction, null, shardingStats, parallelism, tasks);
     }
 
     @VisibleForTesting
@@ -642,52 +642,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public UnifiedCompactionTask createCompactionTask(LifecycleTransaction txn, final int gcBefore, long maxSSTableBytes)
     {
         return createCompactionTask(txn, makeShardingStats(txn), gcBefore);
-    }
-
-    private Collection<CompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction,
-                                                                     ShardingStats shardingStats,
-                                                                     int gcBefore,
-                                                                     int parallelism)
-    {
-        final int coveredShardCount = shardingStats.coveredShardCount;
-        assert parallelism > 1;
-
-        Collection<SSTableReader> sstables = transaction.originals();
-        ShardManager shardManager = getShardManager();
-        CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
-        SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
-        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
-        List<CompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
-            sstables,
-            shardingStats.shardCountForDensity,
-            shardingStats.coveredShardCount,
-            parallelism,
-            (rangeSSTables, range) -> new UnifiedCompactionTask(realm,
-                                                                this,
-                                                                new PartialLifecycleTransaction(compositeTransaction),
-                                                                gcBefore,
-                                                                false,
-                                                                shardManager,
-                                                                shardingStats,
-                                                                range,
-                                                                rangeSSTables,
-                                                                sharedProgress,
-                                                                sharedObserver)
-        );
-        compositeTransaction.completeInitialization();
-        assert tasks.size() <= parallelism;
-        assert tasks.size() <= coveredShardCount;
-
-        if (tasks.isEmpty())
-            transaction.close(); // this should not be reachable normally, close the transaction for safety
-
-        if (tasks.size() == 1) // if there's just one range, make it a non-ranged task (to apply early open etc.)
-        {
-            assert tasks.get(0).inputSSTables().equals(sstables);
-            return Collections.singletonList(createCompactionTask(transaction, shardingStats, gcBefore));
-        }
-        else
-            return tasks;
     }
 
     private Collection<CompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction,
