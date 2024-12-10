@@ -41,6 +41,8 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     // See CNDB-10549
     static final boolean SKIP_REPAIR_STATE_CHECKING =
         CassandraRelevantProperties.COMPACTION_SKIP_REPAIR_STATE_CHECKING.getBoolean();
+    static final boolean SKIP_COMPACTING_STATE_CHECKING =
+    CassandraRelevantProperties.COMPACTION_SKIP_COMPACTING_STATE_CHECKING.getBoolean();
 
     protected final CompactionRealm realm;
     protected ILifecycleTransaction transaction;
@@ -64,7 +66,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
 
         try
         {
-            if (!transaction.isOffline())
+            if (!SKIP_COMPACTING_STATE_CHECKING && !transaction.isOffline())
             {
                 // enforce contract that caller should mark sstables compacting
                 var compacting = realm.getCompactingSSTables();
