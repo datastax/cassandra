@@ -810,6 +810,11 @@ public abstract class CompactionAggregate
             return Objects.hash(sstables, selected, compactions, level, arena);
         }
 
+        public Range<Token> operationRange()
+        {
+            return null;
+        }
+
         public void setPermittedParallelism(int parallelism)
         {
             this.permittedParallelism = parallelism;
@@ -839,6 +844,7 @@ public abstract class CompactionAggregate
             setPermittedParallelism(permittedParallelism);
         }
 
+        @Override
         public Range<Token> operationRange()
         {
             return operationRange;
