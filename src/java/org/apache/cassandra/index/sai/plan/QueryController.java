@@ -429,10 +429,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Creates an iterator over keys of rows that match given WHERE predicate.
      * Does not cache the iterator!
      */
-    private KeyRangeIterator buildIterator(Expression predicate)
+    private KeyRangeIterator buildIterator(Expression predicate, boolean isNonReducing)
     {
         QueryView view = getQueryView(predicate.context);
-        return KeyRangeTermIterator.build(predicate, view.referencedIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE);
+        return KeyRangeTermIterator.build(predicate, view.referencedIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE, isNonReducing);
     }
 
     /**
@@ -511,7 +511,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     @Override
-    public Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate)
+    public Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate, boolean isNonReducing)
     {
         Collection<KeyRangeIterator> rangeIterators = keyIterators.get(predicate);
         // This will be non-empty only if we created the iterator as part of the query planning process.
@@ -522,7 +522,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return iterator;
         }
 
-        return buildIterator(predicate);
+        return buildIterator(predicate, isNonReducing);
     }
 
     /**
@@ -554,7 +554,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Use the configured {@link Orderer} to sort the rows from the given source iterator.
      */
-    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source, int softLimit)
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source, int softLimit, boolean canSkipOutOfWindowPKs)
     {
         try
         {
@@ -564,7 +564,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 FileUtils.closeQuietly(source);
                 return CloseableIterator.emptyIterator();
             }
-            var result = getTopKRows(primaryKeys, softLimit);
+            var result = getTopKRows(primaryKeys, softLimit, canSkipOutOfWindowPKs);
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
             // that might not be needed until a deeper search into the ordering index, which happens after
             // we exit this block.
@@ -603,16 +603,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return primaryKeys;
     }
 
-    private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
+    private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit, boolean canSkipOutOfWindowPKs)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
         QueryView view = getQueryView(orderer.context);
         var memtableResults = view.memtableIndexes.stream()
-                                                               .map(index -> index.orderResultsBy(queryContext,
-                                                                                                  sourceKeys,
-                                                                                                  orderer,
-                                                                                                  softLimit))
-                                                               .collect(Collectors.toList());
+                                                  .map(index -> index.orderResultsBy(queryContext,
+                                                                                     sourceKeys,
+                                                                                     orderer,
+                                                                                     softLimit,
+                                                                                     canSkipOutOfWindowPKs))
+                                                  .collect(Collectors.toList());
         try
         {
             var totalRows = view.getTotalSStableRows();
@@ -620,7 +621,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                                             sourceKeys,
                                                                             orderer,
                                                                             softLimit,
-                                                                            totalRows);
+                                                                            totalRows,
+                                                                            canSkipOutOfWindowPKs);
             var sstableScoredPrimaryKeyIterators = searchSSTables(view, ssTableSearcher);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableScoredPrimaryKeyIterators, orderer.getComparator());
@@ -861,7 +863,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // For older indexes we don't have histograms, so we need to construct the iterator
         // and ask for the posting list size.
-        KeyRangeIterator iterator = buildIterator(predicate);
+        KeyRangeIterator iterator = buildIterator(predicate, false);
 
         // We're not going to consume the iterator here, so memorize it for future uses.
         // It can be used when executing the plan.

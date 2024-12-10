@@ -44,6 +44,12 @@ public class V6OnDiskFormat extends V5OnDiskFormat
         {
             return true;
         }
+
+        @Override
+        public boolean hasNullIndex()
+        {
+            return false;
+        }
     };
 
     @Override

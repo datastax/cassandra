@@ -54,15 +54,19 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
 
     private final PrimaryKeyMap keys;
     private final KeyFilter filter;
+    private final long minTimestamp;
+    private final long maxTimestamp;
     private long currentRowId;
 
 
-    private PrimaryKeyMapIterator(PrimaryKeyMap keys, PrimaryKey min, PrimaryKey max, long startRowId, KeyFilter filter)
+    private PrimaryKeyMapIterator(PrimaryKeyMap keys, PrimaryKey min, PrimaryKey max, long startRowId, KeyFilter filter, long minTimestamp, long maxTimestamp)
     {
         super(min, max, keys.count());
         this.keys = keys;
         this.filter = filter;
         this.currentRowId = startRowId;
+        this.minTimestamp = minTimestamp;
+        this.maxTimestamp = maxTimestamp;
     }
 
     public static KeyRangeIterator create(SSTableContext ctx, AbstractBounds<PartitionPosition> keyRange) throws IOException
@@ -76,16 +80,12 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
         else // the table doesn't consist anything we want to filter out, so let's use the cheap option
             filter = KeyFilter.ALL;
 
-        if (perSSTableComponents.isEmpty())
+        long count = ctx.primaryKeyMapFactory.count();
+        if (count == 0)
             return KeyRangeIterator.empty();
 
         PrimaryKeyMap keys = ctx.primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
-        long count = keys.count();
-        if (keys.count() == 0)
-        {
-            keys.close();
-            return KeyRangeIterator.empty();
-        }
+        assert keys.count() == count : "Expected " + count + " keys, but got " + keys.count();
 
         PrimaryKey.Factory pkFactory = ctx.primaryKeyFactory();
         Token minToken = keyRange.left.getToken();
@@ -96,13 +96,14 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
                             ? minKeyBound
                             : sstableMinKey;
         long startRowId = minToken.isMinimum() ? 0 : keys.ceiling(minKey);
-        return new PrimaryKeyMapIterator(keys, sstableMinKey, sstableMaxKey, startRowId, filter);
+        return new PrimaryKeyMapIterator(keys, sstableMinKey, sstableMaxKey, startRowId, filter, ctx.sstable().getMinTimestamp(), ctx.sstable().getMaxTimestamp());
     }
 
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        this.currentRowId = keys.ceiling(nextKey);
+        long possibleNextRowId = keys.ceiling(nextKey);
+        this.currentRowId = Math.max(possibleNextRowId, currentRowId);
     }
 
     @Override
@@ -110,10 +111,11 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
     {
         while (currentRowId >= 0 && currentRowId < keys.count())
         {
-            PrimaryKey key = keys.primaryKeyFromRowId(currentRowId++);
+            long rowId = currentRowId++;
+            PrimaryKey key = keys.primaryKeyFromRowId(rowId);
             if (filter == KeyFilter.KEYS_WITH_CLUSTERING && key.hasEmptyClustering())
                 continue;
-            return key;
+            return new PrimaryKeyWithSource(key, keys.getSSTableId(), rowId, minTimestamp, maxTimestamp);
         }
         return endOfData();
     }

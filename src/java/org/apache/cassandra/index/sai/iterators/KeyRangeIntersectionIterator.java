@@ -19,11 +19,13 @@ package org.apache.cassandra.index.sai.iterators;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Queue;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,16 +58,23 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
 
     public final List<KeyRangeIterator> ranges;
     private final int[] rangeStats;
+    private final boolean isNonReducing;
+    private final Queue<PrimaryKey> queuedPrimaryKeys;
 
-    private KeyRangeIntersectionIterator(Builder.Statistics statistics, List<KeyRangeIterator> ranges)
+    private KeyRangeIntersectionIterator(Builder.Statistics statistics, List<KeyRangeIterator> ranges, boolean isNonReducing)
     {
         super(statistics);
         this.ranges = ranges;
         this.rangeStats = new int[ranges.size()];
+        this.isNonReducing = isNonReducing;
+        this.queuedPrimaryKeys = isNonReducing ? new ArrayDeque<>() : null;
     }
 
     protected PrimaryKey computeNext()
     {
+        if (isNonReducing && !queuedPrimaryKeys.isEmpty())
+            return queuedPrimaryKeys.poll();
+
         // The highest primary key seen on any range iterator so far.
         // It can become null when we reach the end of the iterator.
         PrimaryKey highestKey = ranges.get(0).hasNext() ? ranges.get(0).next() : null;
@@ -90,6 +99,8 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
                     {
                         // We jumped over the highest key seen so far, so make it the new highest key.
                         highestKey = nextKey;
+                        if (isNonReducing)
+                            queuedPrimaryKeys.clear();
                         // Remember this iterator to avoid advancing it again, because it is already at the highest key
                         alreadyAdvanced = index;
                         // This iterator jumped over, so the other iterators are lagging behind now,
@@ -98,6 +109,8 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
                         // the other iterators except this one to match the new highest key.
                         continue outer;
                     }
+                    if (isNonReducing)
+                        queuedPrimaryKeys.add(nextKey);
                     assert comparisonResult == 0 :
                            String.format("skipTo skipped to an item smaller than the target; " +
                                          "iterator: %s, target key: %s, returned key: %s", range, highestKey, nextKey);
@@ -120,6 +133,16 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
                 int b = rangeStats[idxOfSmallest];
                 rangeStats[0] = b;
                 rangeStats[idxOfSmallest] = a;
+            }
+
+            if (isNonReducing)
+            {
+                // In the non-reducing case, we need to fetch all the keys that satisfy the intersection.
+                for (KeyRangeIterator source : ranges)
+                {
+                    while (source.hasNext() && source.peek().compareTo(highestKey) == 0)
+                        queuedPrimaryKeys.add(source.next());
+                }
             }
 
             return highestKey;
@@ -154,7 +177,7 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
     private PrimaryKey nextOrNull(KeyRangeIterator iterator, PrimaryKey minKey)
     {
         iterator.skipTo(minKey);
-        return iterator.hasNext() ? iterator.next() : null;
+        return iterator.hasNext() ? (isNonReducing ? iterator.peek() : iterator.next()) : null;
     }
 
     public void close() throws IOException
@@ -162,32 +185,36 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
         ranges.forEach(FileUtils::closeQuietly);
     }
 
-    public static Builder builder(List<KeyRangeIterator> ranges)
+    public static Builder builder(int size, boolean isNonReducing)
     {
-        var builder = new Builder(ranges.size());
-        for (var range : ranges)
-            builder.add(range);
-        return builder;
+        return new Builder(size, isNonReducing);
     }
 
     public static Builder builder(int size)
     {
-        return new Builder(size);
+        return new Builder(size, false);
+    }
+
+
+    public static Builder builder(boolean isNonReducing)
+    {
+        return builder(4, isNonReducing);
     }
 
     public static Builder builder()
     {
-        return builder(4);
+        return builder(4, false);
     }
 
     public static class Builder extends KeyRangeIterator.Builder
     {
         protected List<KeyRangeIterator> rangeIterators;
 
-        private Builder(int size)
+        private Builder(int size, boolean isNonReducing)
         {
-            super(IteratorType.INTERSECTION);
+            super(IteratorType.INTERSECTION, isNonReducing);
             rangeIterators = new ArrayList<>(size);
+
         }
 
         public KeyRangeIterator.Builder add(KeyRangeIterator range)
@@ -238,7 +265,7 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
             if (rangeCount() == 1)
                 return rangeIterators.get(0);
 
-            return new KeyRangeIntersectionIterator(statistics, rangeIterators);
+            return new KeyRangeIntersectionIterator(statistics, rangeIterators, isNonReducing);
         }
     }
 }
