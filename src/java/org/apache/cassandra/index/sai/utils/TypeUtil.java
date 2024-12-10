@@ -304,7 +304,7 @@ public class TypeUtil
         if (isInetAddress(type))
             return compareInet(requestedValue.encoded, columnValue.encoded);
         // Override comparisons for frozen collections
-        else if (isFrozen(type))
+        else if (isNonVectorFrozenMultivalued(type))
             return FastByteOperations.compareUnsigned(requestedValue.raw, columnValue.raw);
 
         return type.compare(requestedValue.raw, columnValue.raw);
@@ -345,7 +345,7 @@ public class TypeUtil
         // composite types are compared using their AbstractType.
         return isBigInteger(type)
                || isBigDecimal(type)
-               || (!isComposite(type) && isFrozen(type))
+               || (!isComposite(type) && isNonVectorFrozenMultivalued(type))
                || (isComposite(type) && !version.onOrAfter(Version.DB));
     }
 
@@ -473,7 +473,7 @@ public class TypeUtil
      */
     public static boolean isLiteral(AbstractType<?> type)
     {
-        return isUTF8OrAscii(type) || isCompositeOrFrozen(type) || baseType(type) instanceof BooleanType;
+        return isUTF8OrAscii(type) || isCompositeOrNonVectorFrozenMultivalued(type) || baseType(type) instanceof BooleanType;
     }
 
     /**
@@ -495,21 +495,23 @@ public class TypeUtil
 //    }
 //
     /**
-     * Returns <code>true</code> if given {@link AbstractType} is a Composite(map entry) or frozen.
+     * Returns <code>true</code> if given {@link AbstractType} is a Composite(map entry) or a non-vector frozen
+     * multivalued type (see {@link #isNonVectorFrozenMultivalued(AbstractType)}.
      */
-    public static boolean isCompositeOrFrozen(AbstractType<?> type)
+    public static boolean isCompositeOrNonVectorFrozenMultivalued(AbstractType<?> type)
     {
         type = baseType(type);
-        return type instanceof CompositeType || isFrozen(type);
+        return type instanceof CompositeType || isNonVectorFrozenMultivalued(type);
     }
 
     /**
-     * Returns <code>true</code> if given {@link AbstractType} is frozen.
+     * Returns <code>true</code> if given {@link AbstractType} has subtypes, and it's not multicell nor a vector.
+     * This should include frozen collections, tuples and UDTs.
      */
-    public static boolean isFrozen(AbstractType<?> type)
+    public static boolean isNonVectorFrozenMultivalued(AbstractType<?> type)
     {
         type = baseType(type);
-        return !type.subTypes().isEmpty() && !type.isMultiCell();
+        return !type.isVector() && !type.subTypes().isEmpty() && !type.isMultiCell();
     }
 
     /**
