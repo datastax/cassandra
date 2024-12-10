@@ -21,8 +21,8 @@
     <groupId>org.apache</groupId>
     <version>22</version>
   </parent>
-  <groupId>com.datastax.dse</groupId>
-  <artifactId>dse-db-parent</artifactId>
+  <groupId>com.datastax.db</groupId>
+  <artifactId>db-parent</artifactId>
   <version>@version@</version>
   <packaging>pom</packaging>
   <name>Datastax DB</name>
