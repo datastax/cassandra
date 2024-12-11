@@ -1355,6 +1355,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             index.validate(update);
     }
 
+    @Override
+    public void validate(RowFilter filter)
+    {
+        RowFilterValidator.validate(filter, indexes.values());
+    }
+
     /*
      * IndexRegistry methods
      */

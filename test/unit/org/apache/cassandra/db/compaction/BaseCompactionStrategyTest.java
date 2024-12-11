@@ -34,6 +34,7 @@ import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SortedLocalRanges;
+import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.dht.IPartitioner;
@@ -135,9 +136,11 @@ public class BaseCompactionStrategyTest
         localRanges = SortedLocalRanges.forTestingFull(realm);
 
         when(realm.metadata()).thenReturn(metadata);
+        when(realm.makeUCSEnvironment()).thenAnswer(invocation -> new RealEnvironment(realm));
         when(realm.getKeyspaceName()).thenReturn(keyspace);
         when(realm.getTableName()).thenReturn(table);
         when(realm.getDiskBoundaries()).thenReturn(diskBoundaries);
+        when(realm.buildShardManager()).thenCallRealMethod();
         when(diskBoundaries.getLocalRanges()).thenReturn(localRanges);
         when(diskBoundaries.isOutOfDate()).thenReturn(false);
         when(realm.getLiveSSTables()).thenAnswer(request -> dataTracker.getLiveSSTables());
@@ -258,6 +261,8 @@ public class BaseCompactionStrategyTest
         when(ret.getMaxLocalDeletionTime()).thenReturn(deletionTime);
         when(ret.getMinTTL()).thenReturn(ttl);
         when(ret.getMaxTTL()).thenReturn(ttl);
+
+        when(ret.estimatedKeys()).thenReturn(ShardManager.PER_PARTITION_SPAN_THRESHOLD * 2);
 
         diskIndexMap.put(ret, diskIndex);
         if (diskIndex >= diskIndexes)

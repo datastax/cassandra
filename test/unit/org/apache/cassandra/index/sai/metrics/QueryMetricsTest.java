@@ -240,7 +240,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         int rowsWritten = 50;
 
-
         for (int i = 0; i < rowsWritten; i++)
         {
             execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES (?, ?, ?)", Integer.toString(i), i, Integer.toString(i));
@@ -261,10 +260,10 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForVerifyHistogram(objectNameNoIndex("KDTreePostingsNumPostings", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
 
-        // V2 index is very selective, so it should lead the union merge process, causing V1 index to skip/advance
+        // V2 index is very selective, so it should lead the union merge process, causing V1 index to be not used at all.
         execute("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 >= 0 AND v1 <= 1000 AND v2 = '5' ALLOW FILTERING");
 
-        waitForVerifyHistogram(objectNameNoIndex("KDTreePostingsSkips", keyspace, table, PER_QUERY_METRIC_TYPE), 2);
+        waitForVerifyHistogram(objectNameNoIndex("KDTreePostingsSkips", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
     }
 
     @Test
@@ -294,7 +293,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v2 = '0'");
-
 
         int actualRows = rows.all().size();
         assertEquals(1, actualRows);

@@ -41,8 +41,8 @@ public class RebuildWithoutImmutableComponentsTest extends AbstractRebuildAndImm
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             IndexDescriptor descriptor = IndexDescriptor.load(sstable, Set.of(context));
-            assertEquals(0, descriptor.perSSTableComponents().generation());
-            assertEquals(0, descriptor.perIndexComponents(context).generation());
+            assertEquals(0, descriptor.perSSTableComponents().buildId().generation());
+            assertEquals(0, descriptor.perIndexComponents(context).buildId().generation());
         }
     }
 }

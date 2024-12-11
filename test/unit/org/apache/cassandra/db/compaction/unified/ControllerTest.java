@@ -105,6 +105,7 @@ public abstract class ControllerTest
 
     protected String keyspaceName = "TestKeyspace";
     protected int numDirectories = 1;
+    protected boolean useVector = false;
 
     @BeforeClass
     public static void setUpClass()
@@ -122,15 +123,20 @@ public abstract class ControllerTest
 
         when(metadata.toString()).thenReturn("");
         when(replicationStrategy.getReplicationFactor()).thenReturn(ReplicationFactor.fullOnly(3));
+        when(cfs.makeUCSEnvironment()).thenAnswer(invocation -> new RealEnvironment(cfs));
         when(cfs.getKeyspaceReplicationStrategy()).thenReturn(replicationStrategy);
         when(cfs.getKeyspaceName()).thenAnswer(invocation -> keyspaceName);
         when(cfs.getDiskBoundaries()).thenReturn(boundaries);
+        when(cfs.buildShardManager()).thenCallRealMethod();
+        when(cfs.makeUCSEnvironment()).thenCallRealMethod();
         when(cfs.getTableName()).thenReturn(tableName);
         when(boundaries.getNumBoundaries()).thenAnswer(invocation -> numDirectories);
 
         when(executorService.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class))).thenReturn(fut);
 
         when(env.flushSize()).thenReturn((double) (sstableSizeMB << 20));
+        when(cfs.metadata()).thenReturn(metadata);
+        when(metadata.hasVectorType()).thenAnswer(invocation -> useVector);
     }
 
     Controller testFromOptions(boolean adaptive, Map<String, String> options)
@@ -161,6 +167,25 @@ public abstract class ControllerTest
             assertEquals(numShards, controller.getNumShards(numShards * minSSTableSize));
             assertEquals(numShards, controller.getNumShards(16 * 100 << 20));
         }
+
+        return controller;
+    }
+
+    Controller testFromOptionsVector(boolean adaptive, Map<String, String> options)
+    {
+        useVector = true;
+        addOptions(adaptive, options);
+        Controller.validateOptions(options);
+
+        Controller controller = Controller.fromOptions(cfs, options);
+        assertNotNull(controller);
+        assertNotNull(controller.toString());
+
+        assertEquals(dataSizeGB << 30, controller.getDataSetSizeBytes());
+        assertFalse(controller.isRunning());
+        for (int i = 0; i < 5; i++) // simulate 5 levels
+            assertEquals(Controller.DEFAULT_SURVIVAL_FACTOR, controller.getSurvivalFactor(i), epsilon);
+        assertNull(controller.getCalculator());
 
         return controller;
     }

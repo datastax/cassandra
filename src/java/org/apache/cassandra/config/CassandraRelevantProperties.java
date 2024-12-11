@@ -141,10 +141,16 @@ public enum CassandraRelevantProperties
     CDC_STREAMING_ENABLED("cassandra.cdc.enable_streaming", "true"),
     /** default heartbeating period is 1 minute */
     CHECK_DATA_RESURRECTION_HEARTBEAT_PERIOD("check_data_resurrection_heartbeat_period_milli", "60000"),
+    CHRONICLE_ANALYTICS_DISABLE("chronicle.analytics.disable"),
     CHRONICLE_ANNOUNCER_DISABLE("chronicle.announcer.disable"),
     CHUNKCACHE_ASYNC_CLEANUP("cassandra.chunkcache.async_cleanup", "true"),
     CHUNKCACHE_CLEANER_THREADS("dse.chunk.cache.cleaner.threads","1"),
     CHUNKCACHE_INITIAL_CAPACITY("cassandra.chunkcache_initialcapacity", "16"),
+    /**
+     * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
+     * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
+     */
+    CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),
@@ -581,6 +587,8 @@ public enum CassandraRelevantProperties
 
     // SAI specific properties
 
+    /** Class used to discover/load the proper SAI index components file for a given sstable. */
+    SAI_CUSTOM_COMPONENTS_DISCOVERY_CLASS("cassandra.sai.custom_components_discovery_class"),
     SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
     SAI_ENABLE_GENERAL_ORDER_BY("cassandra.sai.general_order_by", "true"),
     SAI_ENABLE_JVECTOR_DELETES("cassandra.sai.enable_jvector_deletes", "true"),
@@ -604,7 +612,7 @@ public enum CassandraRelevantProperties
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
 
     /** Latest version to be used for SAI index writing */
-    SAI_LATEST_VERSION("cassandra.sai.latest_version", "db"),
+    SAI_LATEST_VERSION("cassandra.sai.latest_version", "dc"),
 
     SAI_MAX_ANALYZED_SIZE("cassandra.sai.max_analyzed_size_kb", "8"),
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),
@@ -794,20 +802,32 @@ public enum CassandraRelevantProperties
      * To provide custom implementation to prioritize compaction tasks in UCS
      */
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
+    /**
+     * whether to include non-data files size into compaction space estimaton in UCS
+     */
+    UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
     UCS_DATASET_SIZE("unified_compaction.dataset_size"),
+    UCS_IS_REPLICA_AWARE("unified_compaction.is_replica_aware"),
     UCS_L0_SHARDS_ENABLED("unified_compaction.l0_shards_enabled", "true"),
     UCS_MAX_ADAPTIVE_COMPACTIONS("unified_compaction.max_adaptive_compactions", "5"),
     UCS_MAX_SPACE_OVERHEAD("unified_compaction.max_space_overhead", "0.2"),
     UCS_MIN_SSTABLE_SIZE("unified_compaction.min_sstable_size", "100MiB"),
     UCS_NUM_SHARDS("unified_compaction.num_shards"),
     UCS_OVERLAP_INCLUSION_METHOD("unified_compaction.overlap_inclusion_method"),
+    UCS_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES("unified_compaction.override_ucs_config_for_vector_tables", "false"),
     UCS_RESERVATIONS_TYPE_OPTION("unified_compaction.reservations_type_option", Reservations.Type.LEVEL_OR_BELOW.name()),
     UCS_RESERVED_THREADS("reserved_threads", "max"),
     UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
-    UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0.5"),
+    UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0.333"),
     UCS_STATIC_SCALING_PARAMETERS("unified_compaction.scaling_parameters", "T4"),
     UCS_SURVIVAL_FACTOR("unified_compaction.survival_factor", "1"),
-    UCS_TARGET_SSTABLE_SIZE("unified_compaction.target_sstable_size", "5GiB"),
+    UCS_TARGET_SSTABLE_SIZE("unified_compaction.target_sstable_size", "1GiB"),
+    UCS_VECTOR_BASE_SHARD_COUNT("unified_compaction.vector_base_shard_count", "1"),
+    UCS_VECTOR_MIN_SSTABLE_SIZE("unified_compaction.vector_min_sstable_size", "1024MiB"),
+    UCS_VECTOR_RESERVED_THREADS("unified_compaction.vector_reserved_threads", "max"),
+    UCS_VECTOR_SCALING_PARAMETERS("unified_compaction.vector_scaling_parameters", "-8"),
+    UCS_VECTOR_SSTABLE_GROWTH("unified_compaction.vector_sstable_growth", "1.0"),
+    UCS_VECTOR_TARGET_SSTABLE_SIZE("unified_compaction.vector_target_sstable_size", "5GiB"),
     UDF_EXECUTOR_THREAD_KEEPALIVE_MS("cassandra.udf_executor_thread_keepalive_ms", "30000"),
     UNSAFE_SYSTEM("cassandra.unsafesystem"),
     /** User's home directory. */

@@ -351,6 +351,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      * @param indexRestrictions the index restrictions to add
      * @return a new {@code SelectStatement} instance with the added index restrictions
      */
+    @SuppressWarnings("unused") // this is used by DSE and CNDB to add authorization restrictions
     public SelectStatement addIndexRestrictions(Restrictions indexRestrictions)
     {
         return new SelectStatement(rawCQLStatement,
@@ -950,7 +951,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
 
         // If there's a secondary index that the command can use, have it validate the request parameters.
-        command.maybeValidateIndex();
+        command.maybeValidateIndexes();
 
         return command;
     }
@@ -1305,7 +1306,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                             result.add(partition.staticRow().getColumnData(def), nowInSec);
                             break;
                         default:
-                            result.add((ByteBuffer)null);
+                            result.add(null);
                     }
                 }
             }

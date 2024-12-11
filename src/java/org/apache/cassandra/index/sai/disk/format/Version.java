@@ -33,6 +33,8 @@ import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -54,10 +56,12 @@ public class Version
     public static final Version DB = new Version("db", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g,"db"));
     // revamps vector postings lists to cause fewer reads from disk
     public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
+    // histograms in index metadata
+    public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
@@ -179,17 +183,15 @@ public class Version
 
     public static class ParsedFileName
     {
-        public final Version version;
+        public final ComponentsBuildId buildId;
         public final IndexComponentType component;
         public final @Nullable String indexName;
-        public final int generation;
 
-        private ParsedFileName(Version version, IndexComponentType component, @Nullable String indexName, int generation)
+        private ParsedFileName(ComponentsBuildId buildId, IndexComponentType component, @Nullable String indexName)
         {
-            this.version = version;
+            this.buildId = buildId;
             this.component = component;
             this.indexName = indexName;
-            this.generation = generation;
         }
     }
 
@@ -214,7 +216,6 @@ public class Version
 
     private static Optional<ParsedFileName> tryParseAAFileName(String componentStr)
     {
-        int generation = 0;
         int lastSepIdx = componentStr.lastIndexOf('_');
         if (lastSepIdx == -1)
             return Optional.empty();
@@ -227,7 +228,7 @@ public class Version
         if (firstSepIdx != -1 && firstSepIdx != lastSepIdx)
             indexName = componentStr.substring(firstSepIdx + 1, lastSepIdx);
 
-        return Optional.of(new ParsedFileName(AA, indexComponentType, indexName, generation));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(AA, 0), indexComponentType, indexName));
     }
 
     //
@@ -259,7 +260,7 @@ public class Version
     {
         return this == AA && component == IndexComponentType.TERMS_DATA
                ? sstableFormatVersion.getByteComparableVersion()
-               : ByteComparable.Version.OSS50;
+               : TypeUtil.BYTE_COMPARABLE_VERSION;
     }
 
     private static Optional<ParsedFileName> tryParseStargazerFileName(String componentStr)
@@ -287,6 +288,6 @@ public class Version
                 indexName = splits[splits.length - 2];
         }
 
-        return Optional.of(new ParsedFileName(version, indexComponentType, indexName, generation));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(version, generation), indexComponentType, indexName));
     }
 }
