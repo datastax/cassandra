@@ -25,8 +25,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.io.util.FileUtils;
 
-import static java.lang.Math.max;
-
 /**
  * Performs intersection operations on multiple PostingLists, returning only postings
  * that appear in all inputs.
@@ -37,10 +35,6 @@ public class IntersectingPostingList implements PostingList
     private final List<PostingList> postingLists;
     private final int size;
 
-    // currentRowIds state is effectively local to findNextIntersection, but we keep it
-    // around as a field to avoid repeated allocations there
-    private final int[] currentRowIds;
-
     private IntersectingPostingList(List<PostingList> postingLists)
     {
         assert !postingLists.isEmpty();
@@ -49,7 +43,6 @@ public class IntersectingPostingList implements PostingList
                                 .mapToInt(PostingList::size)
                                 .min()
                                 .orElse(0);
-        this.currentRowIds = new int[postingLists.size()];
     }
 
     /**
@@ -81,44 +74,35 @@ public class IntersectingPostingList implements PostingList
 
     private int findNextIntersection(int targetRowID, boolean isAdvance) throws IOException
     {
-        // Initialize currentRowIds from the underlying posting lists
+        int maxRowId = targetRowID;
+        int maxRowIdIndex = -1;
+
+        // Scan through all posting lists looking for a common row ID
         for (int i = 0; i < postingLists.size(); i++)
         {
-            currentRowIds[i] = isAdvance
-                               ? postingLists.get(i).advance(targetRowID)
-                               : postingLists.get(i).nextPosting();
+            // don't advance the sublist in which we found our current max
+            if (i == maxRowIdIndex)
+                continue;
 
-            if (currentRowIds[i] == END_OF_STREAM)
+            // Advance this sublist to the current max, special casing the first one as needed
+            PostingList list = postingLists.get(i);
+            int rowId = (isAdvance || maxRowIdIndex >= 0)
+                        ? list.advance(maxRowId)
+                        : list.nextPosting();
+            if (rowId == END_OF_STREAM)
                 return END_OF_STREAM;
-        }
 
-        while (true)
-        {
-            // Find the maximum row ID among all posting lists
-            int maxRowId = targetRowID;
-            for (int rowId : currentRowIds)
-                maxRowId = max(maxRowId, rowId);
-
-            // Advance any posting list that's behind the maximum
-            boolean allMatch = true;
-            for (int i = 0; i < postingLists.size(); i++)
+            // Update maxRowId + index if we find a larger value, or this was the first sublist evaluated
+            if (rowId > maxRowId || maxRowIdIndex < 0)
             {
-                if (currentRowIds[i] < maxRowId)
-                {
-                    currentRowIds[i] = postingLists.get(i).advance(maxRowId);
-                    if (currentRowIds[i] == END_OF_STREAM)
-                        return END_OF_STREAM;
-                    allMatch = false;
-                }
+                maxRowId = rowId;
+                maxRowIdIndex = i;
+                i = -1; // restart the scan with new maxRowId
             }
-
-            // If all posting lists have the same row ID, we've found an intersection
-            if (allMatch)
-                return maxRowId;
-
-            // Otherwise, continue searching with the new maximum as target
-            targetRowID = maxRowId;
         }
+
+        // Once we complete a full scan without finding a larger rowId, we've found an intersection
+        return maxRowId;
     }
 
     @Override
