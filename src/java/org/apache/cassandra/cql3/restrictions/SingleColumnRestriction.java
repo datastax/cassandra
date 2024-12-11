@@ -1237,6 +1237,17 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         {
             return true;
         }
+
+        @Override
+        public boolean shouldMerge(SingleRestriction other)
+        {
+            // we don't want to merge MATCH restrictions with ORDER BY BM25
+            // so shouldMerge = false for that scenario, and true for others
+            // (because even though we can't meaningfully merge with others, we want doMergeWith to be called to throw)
+            //
+            // (Note that because ORDER BY is processed before WHERE, we only need this check in the BM25 class)
+            return !other.isAnalyzerMatches();
+        }
     }
 
     /**

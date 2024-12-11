@@ -427,21 +427,22 @@ public abstract class RestrictionSet implements Restrictions
             {
                 // ANDed together restrictions against the same columns should be merged.
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
-                // Trivial case of no existing restrictions
-                if (existingRestrictions.isEmpty())
+
+                // merge the new restriction into an existing one.  note that there is only ever a single
+                // restriction (per column), UNLESS one is ORDER BY BM25 and the other is MATCH.
+                for (var existing : existingRestrictions)
                 {
-                    addRestrictionForColumns(columnDefs, restriction, null);
-                    return;
+                    // shouldMerge exists for the BM25/MATCH case
+                    if (existing.shouldMerge(restriction))
+                    {
+                        var merged = existing.mergeWith(restriction);
+                        addRestrictionForColumns(merged.getColumnDefs(), merged, Set.of(existing));
+                        return;
+                    }
                 }
-                // Since we merge new restrictions into the existing ones at each pass, there should only be
-                // at most one existing restriction across the same columnDefs
-                assert existingRestrictions.size() == 1 : existingRestrictions;
 
-                // Perform the merge
-                SingleRestriction existing = existingRestrictions.iterator().next();
-                var merged = existing.mergeWith(restriction);
-
-                addRestrictionForColumns(merged.getColumnDefs(), merged, Set.of(existing));
+                // no existing restrictions that we should merge the new one with, add a new one
+                addRestrictionForColumns(columnDefs, restriction, null);
             }
         }
 

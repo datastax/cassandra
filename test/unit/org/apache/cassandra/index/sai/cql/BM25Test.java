@@ -28,6 +28,22 @@ import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 public class BM25Test extends SAITester
 {
     @Test
+    public void testMatchingAllowed() throws Throwable
+    {
+        // match operator should be allowed with BM25 on the same column
+        // (seems obvious but exercises a corner case in the internal RestrictionSet processing)
+        createSimpleTable();
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+
+        beforeAndAfterFlush(() ->
+        {
+            var result = execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
+            assertRows(result, row(1));
+        });
+    }
+
+    @Test
     public void testTermFrequencyOrdering() throws Throwable
     {
         createSimpleTable();

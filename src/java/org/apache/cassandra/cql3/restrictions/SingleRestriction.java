@@ -129,4 +129,16 @@ public interface SingleRestriction extends Restriction
     {
         return appendTo(builder, options);
     }
+
+    /**
+     * @return true if the other restriction should be merged with this one.
+     * This is NOT for preventing illegal combinations of restrictions, e.g.
+     * a=1 AND a=2; that is handled by mergeWith.  Instead, this is for the case
+     * where we want two completely different semantics against the same column.
+     * Currently the only such case is BM25 with MATCH.
+     */
+    default boolean shouldMerge(SingleRestriction other)
+    {
+        return true;
+    }
 }
