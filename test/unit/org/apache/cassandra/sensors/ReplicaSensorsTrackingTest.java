@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.sensors;
 
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +43,8 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
+import org.apache.cassandra.db.ReadResponseTest;
+import org.apache.cassandra.db.RepairedDataInfo;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -61,6 +62,7 @@ import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.ResponseVerbHandler;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
@@ -437,47 +439,10 @@ public class ReplicaSensorsTrackingTest
 
     private Message<ReadResponse> createReadResponseMessage(InetAddressAndPort from, long id, Sensor readSensor)
     {
-        ReadResponse response = new ReadResponse()
-        {
-            @Override
-            public UnfilteredPartitionIterator makeIterator(ReadCommand command)
-            {
-                UnfilteredPartitionIterator iterator = Mockito.mock(UnfilteredPartitionIterator.class);
-                Mockito.when(iterator.metadata()).thenReturn(command.metadata());
-                return iterator;
-            }
-
-            @Override
-            public ByteBuffer digest(ReadCommand command)
-            {
-                return null;
-            }
-
-            @Override
-            public ByteBuffer repairedDataDigest()
-            {
-                return null;
-            }
-
-            @Override
-            public boolean isRepairedDigestConclusive()
-            {
-                return false;
-            }
-
-            @Override
-            public boolean mayIncludeRepairedDigest()
-            {
-                return false;
-            }
-
-            @Override
-            public boolean isDigestResponse()
-            {
-                return false;
-            }
-        };
-
+        UnfilteredPartitionIterator iterator = Mockito.mock(UnfilteredPartitionIterator.class);
+        Mockito.when(iterator.metadata()).thenReturn(Mockito.mock(TableMetadata.class));
+        RepairedDataInfo rdi = new ReadResponseTest.StubRepairedDataInfo(ByteBufferUtil.EMPTY_BYTE_BUFFER, false);
+        ReadResponse response = ReadResponse.createDataResponse(iterator, Mockito.mock(ReadCommand.class), rdi);
         return Message.builder(Verb.READ_RSP, response)
                       .from(from)
                       .withId(id)
