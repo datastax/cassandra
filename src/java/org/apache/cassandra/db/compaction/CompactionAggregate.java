@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -860,6 +861,12 @@ public abstract class CompactionAggregate
         {
             return true; // if an aggregate is partial, the sources cannot be deleted as they are needed for the other parts
         }
+
+        @Override
+        public String toString()
+        {
+            return super.toString() + " range " + operationRange;
+        }
     }
 
     public static UnifiedAggregate createUnified(Collection<? extends CompactionSSTable> sstables,
@@ -873,16 +880,19 @@ public abstract class CompactionAggregate
     }
 
     // used by CNDB
-    public static UnifiedAggregate createUnifiedWithRange(Collection<? extends CompactionSSTable> sstables,
-                                                 int maxOverlap,
-                                                 CompactionPick selected,
-                                                 Iterable<CompactionPick> pending,
-                                                 UnifiedCompactionStrategy.Arena arena,
-                                                 UnifiedCompactionStrategy.Level level,
-                                                 int permisttedParallelism,
-                                                 Range<Token> operationRange)
+    public static UnifiedAggregate createUnifiedWithRange(UnifiedAggregate base,
+                                                          Collection<? extends CompactionSSTable> rangeSSTables,
+                                                          Range<Token> range,
+                                                          int permittedParallelism)
     {
-        return new UnifiedWithRange(sstables, maxOverlap, selected, pending, arena, level, permisttedParallelism, operationRange);
+        return new UnifiedWithRange(rangeSSTables,
+                                    base.maxOverlap,
+                                    CompactionPick.create(base.bucketIndex(), rangeSSTables),
+                                    Collections.emptySet(),
+                                    base.arena,
+                                    base.level,
+                                    permittedParallelism,
+                                    range);
     }
 
 

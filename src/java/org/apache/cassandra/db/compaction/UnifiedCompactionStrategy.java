@@ -64,7 +64,6 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.utils.Comparables;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Throwables;
@@ -486,20 +485,20 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 PartitionPosition left = sstable.getFirst();
                 PartitionPosition right = sstable.getLast();
                 boolean extendsBefore = left.getToken().compareTo(operationRange.left) <= 0;
-                boolean extendsAfter = right.getToken().compareTo(operationRange.right) > 0;
+                boolean extendsAfter = !operationRange.right.isMinimum() && right.getToken().compareTo(operationRange.right) > 0;
                 if (extendsBefore)
-                    left = operationRange.left.maxKeyBound();
+                    left = operationRange.left.nextValidToken().minKeyBound();
                 if (extendsAfter)
-                    right = operationRange.right.minKeyBound();
+                    right = operationRange.right.maxKeyBound();
                 double fractionInRange = extendsBefore || extendsAfter
                                          ? shardManager.rangeSpanned(left, right) / shardManager.rangeSpanned(sstable.getFirst(), sstable.getLast())
                                          : 1;
 
-                onDiskLengthInRange += sstable.onDiskLength() * fractionInRange;
-                partitionCountSumInRange += sstable.estimatedKeys() * fractionInRange;
+                onDiskLengthInRange += (long) (sstable.onDiskLength() * fractionInRange);
+                partitionCountSumInRange += (long) (sstable.estimatedKeys() * fractionInRange);
                 partitionCountSum += sstable.estimatedKeys();
-                min = min == null || min.compareTo(left) > 0 ? sstable.getFirst() : min;
-                max = max == null || max.compareTo(right) < 0 ? sstable.getLast() : max;
+                min = min == null || min.compareTo(left) > 0 ? left : min;
+                max = max == null || max.compareTo(right) < 0 ? right : max;
                 if (!(sstable instanceof SSTableReader)
                     || ((SSTableReader) sstable).descriptor == null)    // for tests
                     hasNonSSTableReaders = true;

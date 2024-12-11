@@ -243,7 +243,7 @@ public interface ShardManager
                 active.add(items.next());
             }
             Token shardEnd = boundaries.shardEnd();
-            if (shardEnd.compareTo(operationRange.right) >= 0)
+            if (!operationRange.right.isMinimum() && shardEnd != null && shardEnd.compareTo(operationRange.right) >= 0)
                 shardEnd = null;    // Take all remaining sstables.
 
             while (items.hasNext() && (shardEnd == null || items.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
