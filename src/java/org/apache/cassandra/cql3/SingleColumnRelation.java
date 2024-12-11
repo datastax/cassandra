@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Objects;
 
 import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.Term.Raw;
@@ -33,6 +35,7 @@ import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.service.ClientWarn;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
@@ -191,7 +194,15 @@ public final class SingleColumnRelation extends Relation
         if (mapKey == null)
         {
             Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-            return new SingleColumnRestriction.EQRestriction(columnDef, term);
+            var analyzedIndex = IndexRegistry.obtain(table).supportsAnalyzedEq(columnDef);
+            if (analyzedIndex == null)
+                return new SingleColumnRestriction.EQRestriction(columnDef, term);
+
+            ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.EQ_RESTRICTION_ON_ANALYZED_WARNING,
+                                                   columnDef.toString(),
+                                                   analyzedIndex.getIndexMetadata().name),
+                                     columnDef);
+            return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, term);
         }
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);

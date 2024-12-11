@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.restrictions;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
-import org.apache.cassandra.index.IndexRegistry;
 
 /**
  * A single restriction/clause on one or multiple column.
@@ -95,17 +94,6 @@ public interface SingleRestriction extends Restriction
     public default boolean isInclusive(Bound b)
     {
         return true;
-    }
-
-    /**
-     * Checks if this restriction shouldn't be merged with other restrictions.
-     *
-     * @param indexRegistry the index registry
-     * @return {@code true} if this shouldn't be merged with other restrictions
-     */
-    default boolean skipMerge(IndexRegistry indexRegistry)
-    {
-        return false;
     }
 
     /**

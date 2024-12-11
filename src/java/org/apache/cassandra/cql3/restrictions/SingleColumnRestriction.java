@@ -199,24 +199,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public boolean skipMerge(IndexRegistry indexRegistry)
-        {
-            // We should skip merging this EQ if there is an analyzed index for this column that supports EQ,
-            // so there can be multiple EQs for the same column.
-
-            if (indexRegistry == null)
-                return false;
-
-            for (Index index : indexRegistry.listIndexes())
-            {
-                if (index.supportsExpression(columnDef, Operator.ANALYZER_MATCHES) &&
-                    index.supportsExpression(columnDef, Operator.EQ))
-                    return true;
-            }
-            return false;
-        }
-
-        @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
             throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
@@ -1402,10 +1384,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            if (!(otherRestriction.isAnalyzerMatches()))
+            if (!otherRestriction.isAnalyzerMatches())
                 throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
 
-            List<Term> otherValues = ((AnalyzerMatchesRestriction) otherRestriction).getValues();
+            List<Term> otherValues = otherRestriction instanceof AnalyzerMatchesRestriction
+                                   ? ((AnalyzerMatchesRestriction) otherRestriction).getValues()
+                                   : List.of(((EQRestriction) otherRestriction).term);
             List<Term> newValues = new ArrayList<>(values.size() + otherValues.size());
             newValues.addAll(values);
             newValues.addAll(otherValues);

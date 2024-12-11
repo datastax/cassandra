@@ -102,12 +102,6 @@ public interface IndexRegistry
         public void validate(PartitionUpdate update)
         {
         }
-
-        @Override
-        public void validate(RowFilter filter)
-        {
-            // no-op since it's an empty registry
-        }
     };
 
     /**
@@ -295,12 +289,6 @@ public interface IndexRegistry
         public void validate(PartitionUpdate update)
         {
         }
-
-        @Override
-        public void validate(RowFilter filter)
-        {
-            // no-op since it's an empty registry
-        }
     };
 
     default void registerIndex(Index index)
@@ -341,8 +329,6 @@ public interface IndexRegistry
      */
     void validate(PartitionUpdate update);
 
-    void validate(RowFilter filter);
-
     /**
      * Returns the {@code IndexRegistry} associated to the specified table.
      *
@@ -355,5 +341,16 @@ public interface IndexRegistry
             return NON_DAEMON;
 
         return table.isVirtual() ? EMPTY : Keyspace.openAndGetStore(table).indexManager;
+    }
+
+    default Index supportsAnalyzedEq(ColumnMetadata cm)
+    {
+        for (Index index : listIndexes())
+        {
+            if (index.supportsExpression(cm, Operator.ANALYZER_MATCHES) &&
+                index.supportsExpression(cm, Operator.EQ))
+                return index;
+        }
+        return null;
     }
 }

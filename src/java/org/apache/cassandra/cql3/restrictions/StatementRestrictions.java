@@ -442,7 +442,7 @@ public class StatementRestrictions
                     }
                     else
                     {
-                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction(), indexRegistry);
+                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction());
                     }
                 }
             }
@@ -699,7 +699,7 @@ public class StatementRestrictions
                     throw new InvalidRequestException(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE,
                                                                     restriction.getFirstColumn()));
                 }
-                receiver.addRestriction(restriction, false, indexRegistry);
+                receiver.addRestriction(restriction, false);
             }
         }
 

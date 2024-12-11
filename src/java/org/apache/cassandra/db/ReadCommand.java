@@ -383,8 +383,6 @@ public abstract class ReadCommand extends AbstractReadQuery
     @Override
     public void maybeValidateIndexes()
     {
-        IndexRegistry.obtain(metadata()).validate(rowFilter());
-
         if (null != indexQueryPlan)
             indexQueryPlan.validate(this);
     }

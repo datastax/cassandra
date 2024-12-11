@@ -413,45 +413,35 @@ public abstract class RestrictionSet implements Restrictions
         {
         }
 
-        public void addRestriction(SingleRestriction restriction, boolean isDisjunction, IndexRegistry indexRegistry)
+        public void addRestriction(SingleRestriction restriction, boolean isDisjunction)
         {
             List<ColumnMetadata> columnDefs = restriction.getColumnDefs();
 
             if (isDisjunction)
             {
                 // If this restriction is part of a disjunction query then we don't want
-                // to merge the restrictions (if that is possible), we just add the
-                // restriction to the set of restrictions for the column.
+                // to merge the restrictions, we just add the new restriction
                 addRestrictionForColumns(columnDefs, restriction, null);
             }
             else
             {
-                // In some special cases such as EQ in analyzed index we need to skip merging the restriction,
-                // so we can send multiple EQ restrictions to the index.
-                if (restriction.skipMerge(indexRegistry))
+                // ANDed together restrictions against the same columns should be merged.
+                Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
+                // Trivial case of no existing restrictions
+                if (existingRestrictions.isEmpty())
                 {
                     addRestrictionForColumns(columnDefs, restriction, null);
                     return;
                 }
+                // Since we merge new restrictions into the existing ones at each pass, there should only be
+                // at most one existing restriction across the same columnDefs
+                assert existingRestrictions.size() == 1 : existingRestrictions;
 
-                // If this restriction isn't part of a disjunction then we need to get
-                // the set of existing restrictions for the column and merge them with the
-                // new restriction
-                Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
+                // Perform the merge
+                SingleRestriction existing = existingRestrictions.iterator().next();
+                var merged = existing.mergeWith(restriction);
 
-                SingleRestriction merged = restriction;
-                Set<SingleRestriction> replacedRestrictions = new HashSet<>();
-
-                for (SingleRestriction existing : existingRestrictions)
-                {
-                    if (!existing.skipMerge(indexRegistry))
-                    {
-                        merged = existing.mergeWith(merged);
-                        replacedRestrictions.add(existing);
-                    }
-                }
-
-                addRestrictionForColumns(merged.getColumnDefs(), merged, replacedRestrictions);
+                addRestrictionForColumns(merged.getColumnDefs(), merged, Set.of(existing));
             }
         }
 
