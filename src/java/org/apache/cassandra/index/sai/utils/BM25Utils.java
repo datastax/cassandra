@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.utils;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -170,8 +171,8 @@ public class BM25Utils
                 throw new IllegalArgumentException("Invalid source " + source.getClass());
         }
 
-        // sort by score
-        scoredDocs.sort(Comparator.comparingDouble((PrimaryKeyWithScore pkws) -> pkws.indexScore).reversed());
+        // sort by score (PKWS implements Comparator correctly for us)
+        Collections.sort(scoredDocs);
 
         return (CloseableIterator<PrimaryKeyWithSortKey>) (CloseableIterator) CloseableIterator.wrap(scoredDocs.iterator());
     }

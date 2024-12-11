@@ -373,20 +373,6 @@ public enum Operator
             return !LIKE.isSatisfiedBy(type, leftOperand, rightOperand, analyzer);
         }
     },
-    BM25(25)
-    {
-        @Override
-        public String toString()
-        {
-            return "BM25";
-        }
-
-        @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand, @Nullable Index.Analyzer analyzer)
-        {
-            throw new UnsupportedOperationException();
-        }
-    },
 
     /**
      * An operator that only performs matching against analyzed columns.
@@ -429,6 +415,7 @@ public enum Operator
             return false;
         }
     },
+
     /**
      * An operator that performs a distance bounded approximate nearest neighbor search against a vector column such
      * that all result vectors are within a given distance of the query vector. The notable difference between this
@@ -471,6 +458,20 @@ public enum Operator
         public String toString()
         {
             return "DESC";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand, @Nullable Index.Analyzer analyzer)
+        {
+            throw new UnsupportedOperationException();
+        }
+    },
+    BM25(104)
+    {
+        @Override
+        public String toString()
+        {
+            return "BM25";
         }
 
         @Override

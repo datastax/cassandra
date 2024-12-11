@@ -258,7 +258,7 @@ public class TrieMemtableIndex implements MemtableIndex
         }
 
         // BM25
-        var queryTerms = orderer.extractQueryTerms();
+        var queryTerms = orderer.getQueryTerms();
 
         // Intersect iterators to find documents containing all terms
         var termIterators = keyIteratorsPerTerm(queryContext, keyRange, queryTerms);
@@ -328,7 +328,7 @@ public class TrieMemtableIndex implements MemtableIndex
         }
 
         // BM25
-        var queryTerms = orderer.extractQueryTerms();
+        var queryTerms = orderer.getQueryTerms();
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
         return BM25Utils.computeScores(keys.iterator(),
                                        queryTerms,

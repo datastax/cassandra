@@ -172,7 +172,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         }
 
         // find documents that match each term
-        var queryTerms = orderer.extractQueryTerms();
+        var queryTerms = orderer.getQueryTerms();
         var postingLists = queryTerms.stream()
                                      .collect(Collectors.toMap(Function.identity(),  term ->
                                      {
@@ -227,7 +227,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         if (!orderer.isBM25())
             return super.orderResultsBy(reader, queryContext, keys, orderer, limit);
 
-        var queryTerms = orderer.extractQueryTerms();
+        var queryTerms = orderer.getQueryTerms();
         // compute documentFrequencies from either histogram or an index search
         var documentFrequencies = new HashMap<ByteBuffer, Long>();
         boolean hasHistograms = metadata.version.onDiskFormat().indexFeatureSet().hasTermsHistogram();

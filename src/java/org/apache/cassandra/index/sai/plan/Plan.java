@@ -1269,7 +1269,7 @@ abstract public class Plan
         {
             double expectedKeys = access.expectedAccessCount(source.expectedKeys());
 
-            int termCount = ordering.extractQueryTerms().size();
+            int termCount = ordering.getQueryTerms().size();
             // all of the cost for BM25 is up front since the index doesn't give us the information we need
             // to return results in order, in isolation.  The big cost is reading the indexed cells out of
             // the sstables.
@@ -1397,7 +1397,7 @@ abstract public class Plan
             double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows);
             int expectedKeysInt = Math.max(1, (int) Math.ceil(expectedKeys));
 
-            int termCount = ordering.extractQueryTerms().size();
+            int termCount = ordering.getQueryTerms().size();
             double initCost = expectedKeysInt * (hrs(ROW_CELL_COST) + ROW_CELL_COST)
                               + termCount * BM25_SCORE_COST;
 

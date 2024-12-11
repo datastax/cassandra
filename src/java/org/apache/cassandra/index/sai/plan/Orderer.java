@@ -50,6 +50,7 @@ public class Orderer
     public final Operator operator;
     public final ByteBuffer term;
     private float[] vector;
+    private ArrayList<ByteBuffer> queryTerms;
 
     /**
      * Create an orderer for the given index context, operator, and term.
@@ -132,11 +133,14 @@ public class Orderer
         return vector;
     }
 
-    public ArrayList<ByteBuffer> extractQueryTerms()
+    public ArrayList<ByteBuffer> getQueryTerms()
     {
+        if (queryTerms != null)
+            return queryTerms;
+
         var queryAnalyzer = context.getQueryAnalyzerFactory().create();
         // Split query into terms
-        var queryTerms = new ArrayList<ByteBuffer>();
+        queryTerms = new ArrayList<ByteBuffer>();
         queryAnalyzer.reset(term);
         try
         {

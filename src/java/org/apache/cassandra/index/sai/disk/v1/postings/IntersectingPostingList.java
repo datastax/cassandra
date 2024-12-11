@@ -23,6 +23,7 @@ import java.util.List;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.io.util.FileUtils;
 
 import static java.lang.Math.max;
 
@@ -51,13 +52,16 @@ public class IntersectingPostingList implements PostingList
         this.currentRowIds = new int[postingLists.size()];
     }
 
+    /**
+     * @return the intersection of the provided posting lists
+     */
     public static PostingList intersect(List<PostingList> postingLists)
     {
         if (postingLists.size() == 1)
             return postingLists.get(0);
 
         if (postingLists.stream().anyMatch(PostingList::isEmpty))
-            return PostingList.EMPTY;
+            return new EmptyIntersectingList(postingLists);
 
         return new IntersectingPostingList(postingLists);
     }
@@ -124,10 +128,27 @@ public class IntersectingPostingList implements PostingList
     }
 
     @Override
-    public void close() throws IOException
+    public void close()
     {
         for (PostingList list : postingLists)
-            list.close();
+            FileUtils.closeQuietly(list);
+    }
+
+    private static class EmptyIntersectingList extends EmptyPostingList
+    {
+        private final List<PostingList> lists;
+
+        public EmptyIntersectingList(List<PostingList> postingLists)
+        {
+            this.lists = postingLists;
+        }
+
+        @Override
+        public void close()
+        {
+            for (PostingList list : lists)
+                FileUtils.closeQuietly(list);
+        }
     }
 }
 

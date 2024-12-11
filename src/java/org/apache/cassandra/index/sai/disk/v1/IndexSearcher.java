@@ -100,7 +100,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
 
     /**
-     * Order the rows by the giving Orderer.  Used for ORDER BY clause when
+     * Order the rows by the given Orderer.  Used for ORDER BY clause when
      * (1) the WHERE predicate is either a partition restriction or a range restriction on the index,
      * (2) there is no WHERE predicate, or
      * (3) the planner determines it is better to post-filter the ordered results by the predicate.
@@ -115,7 +115,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException;
 
     /**
-     * Order the rows by the giving Orderer.  Used for ORDER BY clause when the WHERE predicates
+     * Order the rows by the given Orderer.  Used for ORDER BY clause when the WHERE predicates
      * have been applied first, yielding a list of primary keys.  Again, `limit` is a planner hint for ANN to determine
      * the initial number of results returned, not a maximum.
      */
