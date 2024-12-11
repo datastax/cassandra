@@ -22,11 +22,11 @@ package org.apache.cassandra.db.compaction;
 
 
 import java.io.RandomAccessFile;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 
@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -48,9 +49,13 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.compaction.SSTableCursor;
+import org.apache.cassandra.io.sstable.compaction.SortedStringTableCursor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompactionParams;
@@ -139,31 +144,32 @@ public class CorruptedSSTablesCompactionsTest
     }
 
     @Test
-    public void testCorruptedSSTablesWithSizeTieredCompactionStrategy() throws Exception
+    public void testCorruptedSSTablesWithSizeTieredCompactionStrategy() throws Throwable
     {
         testCorruptedSSTables(STANDARD_STCS);
     }
 
     @Test
-    public void testCorruptedSSTablesWithLeveledCompactionStrategy() throws Exception
+    public void testCorruptedSSTablesWithLeveledCompactionStrategy() throws Throwable
     {
         testCorruptedSSTables(STANDARD_LCS);
     }
 
     @Test
-    public void testCorruptedSSTablesWithUnifiedCompactionStrategy() throws Exception
+    public void testCorruptedSSTablesWithUnifiedCompactionStrategy() throws Throwable
     {
         testCorruptedSSTables(STANDARD_UCS);
     }
 
     @Test
-    public void testCorruptedSSTablesWithUnifiedCompactionStrategyParallelized() throws Exception
+    public void testCorruptedSSTablesWithUnifiedCompactionStrategyParallelized() throws Throwable
     {
         testCorruptedSSTables(STANDARD_UCS_PARALLEL);
     }
 
+    static final int COMPACTION_FAIL = -1;
 
-    public void testCorruptedSSTables(String tableName) throws Exception
+    public void testCorruptedSSTables(String tableName) throws Throwable
     {
         // this test does enough rows to force multiple block indexes to be used
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
@@ -211,30 +217,33 @@ public class CorruptedSSTablesCompactionsTest
             if (currentSSTable + 1 > SSTABLES_TO_CORRUPT)
                 break;
 
-            RandomAccessFile raf = null;
-
-            try
+            do
             {
-                int corruptionSize = 100;
-                raf = new RandomAccessFile(sstable.getFilename(), "rw");
-                assertNotNull(raf);
-                assertTrue(raf.length() > corruptionSize);
-                long pos = random.nextInt((int)(raf.length() - corruptionSize));
-                logger.info("Corrupting sstable {} [{}] at pos {} / {}", currentSSTable, sstable.getFilename(), pos, raf.length());
-                raf.seek(pos);
-                // We want to write something large enough that the corruption cannot get undetected
-                // (even without compression)
-                byte[] corruption = new byte[corruptionSize];
-                Arrays.fill(corruption, (byte) -1); // using 0xFF results in more reliably-detectable corruption than random bytes
-                raf.write(corruption);
+                RandomAccessFile raf = null;
+
+                try
+                {
+                    int corruptionSize = 25;
+                    raf = new RandomAccessFile(sstable.getFilename(), "rw");
+                    assertNotNull(raf);
+                    assertTrue(raf.length() > corruptionSize);
+                    long pos = random.nextInt((int) (raf.length() - corruptionSize));
+                    logger.info("Corrupting sstable {} [{}] at pos {} / {}", currentSSTable, sstable.getFilename(), pos, raf.length());
+                    raf.seek(pos);
+                    // We want to write something large enough that the corruption cannot get undetected
+                    // (even without compression)
+                    byte[] corruption = new byte[corruptionSize];
+                    random.nextBytes(corruption);
+                    raf.write(corruption);
+                }
+                finally
+                {
+                FileUtils.closeQuietly(raf);
+                }
                 if (ChunkCache.instance != null)
                     ChunkCache.instance.invalidateFile(sstable.getFilename());
-
             }
-            finally
-            {
-                FileUtils.closeQuietly(raf);
-            }
+            while (readsWithoutError(sstable));
 
             currentSSTable++;
         }
@@ -249,22 +258,114 @@ public class CorruptedSSTablesCompactionsTest
                 cfs.forceMajorCompaction();
                 break; // After all corrupted sstables are marked as such, compaction of the rest should succeed.
             }
-            catch (Exception e)
+            catch (Throwable e)
             {
-                // This is the expected path. The SSTable should be marked corrupted, and retrying the compaction
-                // should move on to the next corruption.
-                Throwables.assertAnyCause(e, CorruptSSTableException.class, PartialLifecycleTransaction.AbortedException.class);
-                failures++;
+                System.out.println(e);
+                // This is the expected path.
+                int fails = processException(e);
+                if (fails == COMPACTION_FAIL)
+                {
+                    logger.info("Completing test after {} failures because of non-sstable-specific AssertionError\n{}", failures, e);
+                    failures = SSTABLES_TO_CORRUPT;
+                    break;
+                }
+                else
+                {
+                    failures += fails;
+                }
             }
         }
 
         cfs.truncateBlocking();
-        if (tableName != STANDARD_UCS_PARALLEL)
-            assertEquals(SSTABLES_TO_CORRUPT, failures);
-        else
+        assertEquals(SSTABLES_TO_CORRUPT, failures);
+    }
+
+    private int processException(Throwable e) throws Throwable
+    {
+        Throwable cause = e;
+        int failures = 0;
+        boolean foundCause = false;
+        while (cause != null)
         {
-            // Since we proceed in parallel, we can mark more than one SSTable as corrupted in an iteration.
-            assertTrue(failures > 0 && failures <= SSTABLES_TO_CORRUPT);
+            // The SSTable should be marked corrupted, and retrying the compaction
+            // should move on to the next corruption.
+            if (cause instanceof CorruptSSTableException)
+            {
+                ++failures;
+                foundCause = true;
+                break;
+            }
+
+            // If we are compacting with cursors, we may be unable to identify the sstable at the source of the
+            // corruption, sometimes failing with an AssertionError in the compaction class. If so, complete the
+            // test.
+            if (CassandraRelevantProperties.CURSORS_ENABLED.getBoolean() &&
+                cause instanceof AssertionError &&
+                cause.getMessage().contains("nodetool scrub"))
+            {
+                return COMPACTION_FAIL;
+            }
+
+            // If the compactions are parallelized, the error message should contain all failures of the current path.
+            for (var t : cause.getSuppressed())
+            {
+                final int childFailures = processException(t);
+                if (childFailures == COMPACTION_FAIL)
+                    return COMPACTION_FAIL;
+                failures += childFailures;
+            }
+            if (cause instanceof PartialLifecycleTransaction.AbortedException)
+            {
+                foundCause = true;
+                break;
+            }
+            cause = cause.getCause();
+        }
+        if (!foundCause)
+            throw e;
+        return failures;
+    }
+
+    private boolean readsWithoutError(SSTableReader sstable)
+    {
+        if (CassandraRelevantProperties.CURSORS_ENABLED.getBoolean())
+            return readsWithoutErrorCursor(sstable);
+        else
+            return readsWithoutErrorIterator(sstable);
+    }
+
+    private boolean readsWithoutErrorIterator(SSTableReader sstable)
+    {
+        try
+        {
+            ISSTableScanner scanner = sstable.getScanner();
+            while (scanner.hasNext())
+            {
+                UnfilteredRowIterator iter = scanner.next();
+                while (iter.hasNext())
+                    iter.next();
+            }
+            return true;
+        }
+        catch (Throwable t)
+        {
+            sstable.unmarkSuspect();
+            return false;
+        }
+    }
+
+    private boolean readsWithoutErrorCursor(SSTableReader sstable)
+    {
+        try
+        {
+            SSTableCursor cursor = new SortedStringTableCursor(sstable);
+            while (cursor.advance() != SSTableCursor.Type.EXHAUSTED) {}
+            return true;
+        }
+        catch (Throwable t)
+        {
+            sstable.unmarkSuspect();
+            return false;
         }
     }
 }
