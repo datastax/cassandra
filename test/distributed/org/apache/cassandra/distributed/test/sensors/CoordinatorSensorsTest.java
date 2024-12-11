@@ -84,13 +84,13 @@ public class CoordinatorSensorsTest extends TestBaseImpl
                 double requestMemorySensorValue = cluster.get(2).callOnInstance(() -> {
                     TableMetadata table = Keyspace.open(KEYSPACE).getColumnFamilyStore("tbl").metadata();
                     Context context = Context.from(table);
-                    return RequestTracker.instance.get().getSensor(context, Type.MEMORY_BYTES).get().getValue();
+                    return RequestTracker.instance.get().getSensor(context, Type.IN_MEMORY_BYTES).get().getValue();
                 });
                 double globalMemorySensorValue = cluster.get(2).callOnInstance(() -> {
                     {
                         TableMetadata table = Keyspace.open(KEYSPACE).getColumnFamilyStore("tbl").metadata();
                         Context context = Context.from(table);
-                        return SensorsRegistry.instance.getSensor(context, Type.MEMORY_BYTES).get().getValue();
+                        return SensorsRegistry.instance.getSensor(context, Type.IN_MEMORY_BYTES).get().getValue();
                     }
                 });
                 Assertions.assertThat(requestMemorySensorValue).isGreaterThan(prevRequestMemorySensorValue);

@@ -44,12 +44,12 @@ public class CoordinatorSensorsTest extends CQLTester
     {
         createTable("create table %s (pk int, ck int, v text, primary key(pk, ck))");
         Context context = Context.from(currentTableMetadata());
-        Optional<Sensor> memorySensor = SensorsRegistry.instance.getSensor(context, Type.MEMORY_BYTES);
+        Optional<Sensor> memorySensor = SensorsRegistry.instance.getSensor(context, Type.IN_MEMORY_BYTES);
         assertThat(memorySensor).isEmpty();
 
         executeNet("insert into %s (pk, ck, v) values (1, 1, 'v1')");
         executeNet("select * from %s where pk = 1");
-        memorySensor = SensorsRegistry.instance.getSensor(context, Type.MEMORY_BYTES);
+        memorySensor = SensorsRegistry.instance.getSensor(context, Type.IN_MEMORY_BYTES);
         assertThat(memorySensor).isPresent();
         double memoryBytes = memorySensor.get().getValue();
         assertThat(memoryBytes).isGreaterThan(0);
@@ -63,14 +63,14 @@ public class CoordinatorSensorsTest extends CQLTester
     {
         createTable("create table %s (pk int, ck int, v text, primary key(pk, ck))");
         Context context = Context.from(currentTableMetadata());
-        Optional<Sensor> memorySensor = SensorsRegistry.instance.getSensor(context, Type.MEMORY_BYTES);
+        Optional<Sensor> memorySensor = SensorsRegistry.instance.getSensor(context, Type.IN_MEMORY_BYTES);
         assertThat(memorySensor).isEmpty();
 
         executeNet("insert into %s (pk, ck, v) values (1, 1, 'v1')");
         executeNet("insert into %s (pk, ck, v) values (1, 2, 'v2')");
         executeNet("insert into %s (pk, ck, v) values (1, 3, 'v3')");
         executeNet("select * from %s");
-        memorySensor = SensorsRegistry.instance.getSensor(context, Type.MEMORY_BYTES);
+        memorySensor = SensorsRegistry.instance.getSensor(context, Type.IN_MEMORY_BYTES);
         assertThat(memorySensor).isPresent();
         double memoryBytes = memorySensor.get().getValue();
         assertThat(memoryBytes).isGreaterThan(0);

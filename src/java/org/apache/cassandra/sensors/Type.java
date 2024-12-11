@@ -29,5 +29,5 @@ public enum Type
 
     WRITE_BYTES,
     INDEX_WRITE_BYTES,
-    MEMORY_BYTES
+    IN_MEMORY_BYTES
 }

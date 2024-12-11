@@ -38,7 +38,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
@@ -123,9 +122,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.NoOpRequestSensors;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
@@ -1980,9 +1977,9 @@ public class StorageProxy implements StorageProxyMBean
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
         Context context = Context.from(group.metadata());
         sensors.registerSensor(context, Type.READ_BYTES);
-        sensors.registerSensor(context, Type.MEMORY_BYTES);
+        sensors.registerSensor(context, Type.IN_MEMORY_BYTES);
         for (SinglePartitionReadCommand command : group.queries)
-            sensors.incrementSensor(context, Type.MEMORY_BYTES, ReadCommand.serializer.serializedSize(command, MessagingService.current_version));
+            sensors.incrementSensor(context, Type.IN_MEMORY_BYTES, ReadCommand.serializer.serializedSize(command, MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
@@ -2366,8 +2363,8 @@ public class StorageProxy implements StorageProxyMBean
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
-        sensors.registerSensor(context, Type.MEMORY_BYTES);
-        sensors.incrementSensor(context, Type.MEMORY_BYTES, ReadCommand.serializer.serializedSize(command, MessagingService.current_version));
+        sensors.registerSensor(context, Type.IN_MEMORY_BYTES);
+        sensors.incrementSensor(context, Type.IN_MEMORY_BYTES, ReadCommand.serializer.serializedSize(command, MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
