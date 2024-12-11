@@ -216,7 +216,7 @@ public abstract class CassandraIndex implements Index
     @Override
     public void validate(ReadCommand command) throws InvalidRequestException
     {
-        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter().getExpressions());
+        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter());
 
         if (target.isPresent())
         {
@@ -281,18 +281,24 @@ public abstract class CassandraIndex implements Index
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
-        return getTargetExpression(filter.getExpressions()).map(filter::without)
-                                                           .orElse(filter);
+        // This index doesn't support disjunctions, so if the query has any, we simply apply the entire filter.
+        return filter.containsDisjunctions() ? filter : getTargetExpression(filter).map(filter::without).orElse(filter);
     }
 
-    private Optional<RowFilter.Expression> getTargetExpression(List<RowFilter.Expression> expressions)
+    private Optional<RowFilter.Expression> getTargetExpression(RowFilter rowFilter)
     {
-        return expressions.stream().filter(this::supportsExpression).findFirst();
+        // This index doesn't support disjunctions, so we only consider the top-level AND expressions.
+        for (RowFilter.Expression expression : rowFilter.withoutDisjunctions().expressions())
+        {
+            if (supportsExpression(expression))
+                return Optional.of(expression);
+        }
+        return Optional.empty();
     }
 
     public Index.Searcher searcherFor(ReadCommand command)
     {
-        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter().getExpressions());
+        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter());
 
         if (target.isPresent())
         {

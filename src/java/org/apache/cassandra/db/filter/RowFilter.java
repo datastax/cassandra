@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -61,7 +60,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.lucene.util.SloppyMath;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
@@ -76,10 +74,9 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNu
  * be handled by a 2ndary index, and the rest is simply filtered out from the
  * result set (the later can only happen if the query was using ALLOW FILTERING).
  */
-public class RowFilter implements Iterable<RowFilter.Expression>
+public class RowFilter
 {
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     public static final Serializer serializer = new Serializer();
     public static final RowFilter NONE = new RowFilter(FilterElement.NONE);
@@ -96,10 +93,20 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         return root;
     }
 
-    public List<Expression> getExpressions()
+    /**
+     * @return all the expressions in this filter expression tree by traversing it in pre-order
+     */
+    public List<Expression> expressions()
     {
-        warnIfFilterIsATree();
-        return root.expressions;
+        return root.traversedExpressions();
+    }
+
+    /**
+     * @return {@code true} if this filter contains any disjunction, {@code false} otherwise.
+     */
+    public boolean containsDisjunctions()
+    {
+        return root.containsDisjunctions();
     }
 
     /**
@@ -108,8 +115,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
-        warnIfFilterIsATree();
-        for (Expression expression : root)
+        for (Expression expression : expressions())
         {
             ColumnMetadata column = expression.column();
             if (column.isClusteringColumn() || column.isRegular())
@@ -220,8 +226,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
     {
-        warnIfFilterIsATree();
-        for (Expression e : root)
+        for (Expression e : expressions())
         {
             if (!e.column.isPartitionKey())
                 continue;
@@ -241,8 +246,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering<?> clustering)
     {
-        warnIfFilterIsATree();
-        for (Expression e : root)
+        for (Expression e : expressions())
         {
             if (!e.column.isClusteringColumn())
                 continue;
@@ -259,7 +263,6 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      */
     public RowFilter without(Expression expression)
     {
-        warnIfFilterIsATree();
         assert root.contains(expression);
         if (root.size() == 1)
             return RowFilter.NONE;
@@ -270,6 +273,14 @@ public class RowFilter implements Iterable<RowFilter.Expression>
     public RowFilter withoutExpressions()
     {
         return NONE;
+    }
+
+    /**
+     * @return this filter pruning all its disjunction branches
+     */
+    public RowFilter withoutDisjunctions()
+    {
+        return new RowFilter(root.withoutDisjunctions());
     }
 
     public RowFilter restrict(Predicate<Expression> filter)
@@ -283,25 +294,9 @@ public class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     @Override
-    public Iterator<Expression> iterator()
-    {
-        warnIfFilterIsATree();
-        return root.iterator();
-    }
-
-    @Override
     public String toString()
     {
         return root.toString();
-    }
-
-    private void warnIfFilterIsATree()
-    {
-        if (!root.children.isEmpty())
-        {
-            noSpamLogger.warn("RowFilter is a tree, but we're using it as a list of top-levels expressions",
-                              new Exception("stacktrace of a potential misuse"));
-        }
     }
 
     public static Builder builder()
@@ -337,7 +332,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             if (Guardrails.queryFilters.enabled(queryState))
                 Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, queryState);
 
-            return new RowFilter(doBuild(restrictions, table, options));
+            return new RowFilter(root);
         }
 
         private FilterElement doBuild(StatementRestrictions restrictions, TableMetadata table, QueryOptions options)
@@ -496,7 +491,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         }
     }
 
-    public static class FilterElement implements Iterable<Expression>
+    public static class FilterElement
     {
         public static final Serializer serializer = new Serializer();
 
@@ -520,18 +515,46 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             return isDisjunction;
         }
 
+        private boolean containsDisjunctions()
+        {
+            if (isDisjunction)
+                return true;
+
+            for (FilterElement child : children)
+                if (child.containsDisjunctions())
+                    return true;
+
+            return false;
+        }
+
         public List<Expression> expressions()
         {
             return expressions;
         }
 
-        @Override
-        public Iterator<Expression> iterator()
+        private List<Expression> traversedExpressions()
         {
             List<Expression> allExpressions = new ArrayList<>(expressions);
             for (FilterElement child : children)
-                allExpressions.addAll(child.expressions);
-            return allExpressions.iterator();
+                allExpressions.addAll(child.traversedExpressions());
+            return allExpressions;
+        }
+
+        private FilterElement withoutDisjunctions()
+        {
+            if (isDisjunction)
+                return NONE;
+
+            FilterElement.Builder builder = new Builder(false);
+            builder.expressions.addAll(expressions);
+
+            for (FilterElement child : children)
+            {
+                if (!child.isDisjunction)
+                    builder.children.add(child);
+            }
+
+            return builder.build();
         }
 
         public FilterElement filter(Predicate<Expression> filter)
