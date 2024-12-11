@@ -485,7 +485,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private void reloadCompactionStrategy(CompactionParams compactionParams, CompactionStrategyContainer.ReloadReason reason)
     {
         CompactionStrategyContainer previous = strategyContainer;
-        strategyContainer = strategyFactory.reload(strategyContainer, compactionParams, reason, !storageHandler.isRemote());
+        strategyContainer = strategyFactory.reload(strategyContainer, compactionParams, reason, storageHandler.enableAutoCompaction());
         if (strategyContainer != previous)
         {
             getTracker().subscribe(strategyContainer);
@@ -632,6 +632,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             this.directories = new Directories(metadata.get());
 
         storageHandler = StorageHandler.create(this, metadata, directories, data);
+        logger.debug("Initialized storage handler with {} for {}.{}", storageHandler.getClass().getSimpleName(), keyspace.getName(), name);
 
         Collection<SSTableReader> sstables = null;
         // scan for sstables corresponding to this cf and load them
@@ -643,7 +644,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         this.strategyContainer = strategyFactory.reload(null,
                                                         metadata.get().params.compaction,
                                                         CompactionStrategyContainer.ReloadReason.FULL,
-                                                        !storageHandler.isRemote());
+                                                        storageHandler.enableAutoCompaction());
         getTracker().subscribe(strategyContainer);
 
         if (!strategyContainer.isEnabled() || DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean())
