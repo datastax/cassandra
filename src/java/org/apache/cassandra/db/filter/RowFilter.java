@@ -96,7 +96,7 @@ public class RowFilter
     /**
      * @return all the expressions in this filter expression tree by traversing it in pre-order
      */
-    public List<Expression> traversedExpressions()
+    public List<Expression> expressions()
     {
         return root.traversedExpressions();
     }
@@ -115,7 +115,7 @@ public class RowFilter
      */
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
-        for (Expression expression : traversedExpressions())
+        for (Expression expression : expressions())
         {
             ColumnMetadata column = expression.column();
             if (column.isClusteringColumn() || column.isRegular())
@@ -226,7 +226,7 @@ public class RowFilter
      */
     public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
     {
-        for (Expression e : traversedExpressions())
+        for (Expression e : expressions())
         {
             if (!e.column.isPartitionKey())
                 continue;
@@ -246,7 +246,7 @@ public class RowFilter
      */
     public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering<?> clustering)
     {
-        for (Expression e : traversedExpressions())
+        for (Expression e : expressions())
         {
             if (!e.column.isClusteringColumn())
                 continue;

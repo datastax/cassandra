@@ -288,7 +288,7 @@ public abstract class CassandraIndex implements Index
     private Optional<RowFilter.Expression> getTargetExpression(RowFilter rowFilter)
     {
         // This index doesn't support disjunctions, so we only consider the top-level AND expressions.
-        for (RowFilter.Expression expression : rowFilter.withoutDisjunctions().traversedExpressions())
+        for (RowFilter.Expression expression : rowFilter.withoutDisjunctions().expressions())
         {
             if (supportsExpression(expression))
                 return Optional.of(expression);

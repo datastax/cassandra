@@ -216,7 +216,7 @@ public class CustomCassandraIndex implements Index
 
     private Optional<RowFilter.Expression> getTargetExpression(RowFilter rowFilter)
     {
-        for (RowFilter.Expression expression : rowFilter.traversedExpressions())
+        for (RowFilter.Expression expression : rowFilter.expressions())
         {
             if (supportsExpression(expression))
                 return Optional.of(expression);
