@@ -1445,6 +1445,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 }
 
                 Throwable accumulate = null;
+
                 for (SSTableMultiWriter writer : flushResults)
                 {
                     accumulate = writer.commit(accumulate);
@@ -2453,6 +2454,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public void forceMajorCompaction(boolean splitOutput)
     {
         CompactionManager.instance.performMaximal(this, splitOutput);
+    }
+
+    public void forceMajorCompaction(int parallelism)
+    {
+        CompactionManager.instance.performMaximal(this, false, parallelism);
+    }
+
+    public void forceMajorCompaction(boolean splitOutput, int parallelism)
+    {
+        CompactionManager.instance.performMaximal(this, splitOutput, parallelism);
     }
 
     public void forceCompactionForTokenRange(Collection<Range<Token>> tokenRanges) throws ExecutionException, InterruptedException

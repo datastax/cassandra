@@ -373,15 +373,38 @@ any remainder for the top level, up to two times that number plus the remainder 
 still solves the original problem (higher-level compactions starving low levels of resources) while making better use of
 the compaction threads. This is the mode (with `max` reservations) used by default.
 
+## Output shard parallelization
+
+Because the sharding of the output of a compaction operation is known in advance, we can parallelize the compaction
+process by starting a separate task for each shard. This can dramatically speed the throughput of compaction and is
+especially helpful for the lower levels of the compaction heirarchy, where the number of input shards is very low
+(often just one). To make sure that we correctly change the state of input and output sstables, such operations will
+share a transaction and will complete only when all individual tasks complete (and, conversely, abort if any of the
+individual tasks abort). Early opening of sstables is not supported in this mode, because we currently do not support
+arbitraty filtering of the requests to an sstable; it is expected that the smaller size and quicker completion time of
+compactions should make up for this.
+
+This is controlled by the `parallelize_output_shards` parameter, which is `true` by default.
 
 ## Major compaction
 
-Under the working principles of UCS, a major compaction is an operation which compacts together all sstables that have
-(transitive) overlap, and where the output is split on shard boundaries appropriate for the expected result density.
+Major compaction in UCS always splits the output into a shard number suitable for the expected result density.
+If the input sstables can be split into non-overlapping sets that correspond to current shard boundaries, the compaction
+will construct independent operations that work over these sets, to improve the space overhead of the operation as well
+as the time needed to persistently complete individual steps. Because all levels will usually be split in $b$ shards,
+it will very often be the case that major compactions split into $b$ individual jobs, reducing the space overhead by a
+factor close to $b$. Note that this does not always apply; for example, if a topology change causes the sharding
+boundaries to move, the mismatch between old and new sharding boundaries will cause the compaction to produce a single
+operation and require 100% space overhead.
 
-In other words, it is expected that a major compaction will result in $b$ concurrent compactions, each containing all
-sstables covered in each of the base shards, and that the result will be split on shard boundaries whose number
-depends on the total size of data contained in the shard.
+Output shard parallelization also applies to major compactions: if the `parallelize_output_shards` option is enabled,
+shards of individual compactions will be compacted concurrently, which can significantly reduce the time needed to
+perform the compaction; if the option is not enabled, major compaction will only be parallelized up to the number of
+individual non-overlapping sets the sstables can be split into. In either case, the number of parallel operations is
+limited to a number specified as a parameter of the operation (e.g. `nodetool compact -j n`), which is set to half the
+compaction thread count by default. Using a jobs of 0 will let the compaction use all available threads and run
+as quickly as possible, but this will prevent other compaction operations from running until it completes and thus
+should be used with caution, only while the database is known to not receive any writes.
 
 ## Differences with STCS and LCS
 
@@ -511,6 +534,11 @@ UCS accepts these compaction strategy parameters:
   reservations are only used by the specific level. If set to `level_or_below`, the reservations can be used by this
   level as well as any one below it.  
   The default value is `level_or_below`.
+* `parallelize_output_shards` Enables or disables parallelization of compaction tasks for the output shards of a
+  compaction. This can dramatically improve compaction throughput especially on the lowest levels of the hierarchy,
+  but disables early open and thus may be less efficient when compaction is configured to produce very large
+  sstables.   
+  The default value is `true`.
 * `expired_sstable_check_frequency_seconds` Determines how often to check for expired SSTables.  
   The default value is 10 minutes.
 * `num_shards` Specifying this switches the strategy to UCS V1 mode, where the number of shards is fixed, but a

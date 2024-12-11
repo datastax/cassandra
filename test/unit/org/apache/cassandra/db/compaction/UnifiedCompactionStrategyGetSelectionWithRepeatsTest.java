@@ -18,18 +18,13 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.collect.ImmutableList;
 
 import org.mockito.Mockito;
-
-import static org.mockito.Mockito.when;
 
 public class UnifiedCompactionStrategyGetSelectionWithRepeatsTest extends UnifiedCompactionStrategyGetSelectionTest
 {

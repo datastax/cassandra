@@ -1645,6 +1645,7 @@
                 <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
                 <jvmarg value="-Dcassandra.skip_sync=true" />
                 <jvmarg value="-Dcassandra.allow_cursor_compaction=false" />
+                <jvmarg value="-Dunified_compaction.parallelize_output_shards=false" />
                 <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
             </testmacrohelper>
         </sequential>

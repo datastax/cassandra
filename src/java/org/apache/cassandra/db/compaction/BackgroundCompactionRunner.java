@@ -345,9 +345,12 @@ public class BackgroundCompactionRunner implements Runnable
         if (!compactionTasks.isEmpty())
         {
             logger.debug("Running compaction tasks: {}", compactionTasks);
-            return compactionTasks.stream()
-                                  .map(task -> startTask(cfs, task))
-                                  .toArray(CompletableFuture<?>[]::new);
+            CompletableFuture<Void>[] arr = new CompletableFuture[compactionTasks.size()];
+            int index = 0;
+            for (AbstractCompactionTask task : compactionTasks)
+                arr[index++] = startTask(cfs, task);
+
+            return arr;
         }
         else
         {
