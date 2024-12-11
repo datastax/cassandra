@@ -94,10 +94,9 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @param keyRange     key range specific in read command, used by ANN index
      * @param queryContext to track per sstable cache and per query metrics
      * @param defer        create the iterator in a deferred state
-     * @param limit        the initial num of rows to returned, used by ANN index. More rows may be requested if filtering throws away more than expected!
      * @return {@link KeyRangeIterator} that matches given expression
      */
-    public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
+    public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer) throws IOException;
 
     /**
      * Order the rows by the given Orderer.  Used for ORDER BY clause when
