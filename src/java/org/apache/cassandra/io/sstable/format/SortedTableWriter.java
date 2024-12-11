@@ -279,7 +279,7 @@ public abstract class SortedTableWriter extends SSTableWriter
     {
         assert decoratedKey != null : "Keys must not be null"; // empty keys ARE allowed b/c of indexed row values
         if (currentKey != null && currentKey.compareTo(decoratedKey) >= 0)
-            throw new RuntimeException("Last written key " + currentKey + " >= current key " + decoratedKey + " writing into " + getDataFile());
+            throw new AssertionError("Last written key " + currentKey + " >= current key " + decoratedKey + " writing into " + getDataFile());
     }
 
     protected void invalidateCacheAtBoundary(FileHandle dfile)
