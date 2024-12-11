@@ -571,9 +571,9 @@ public enum CassandraRelevantProperties
     RELEASE_VERSION("cassandra.releaseVersion"),
     RELOCATED_SHADED_IO_NETTY_TRANSPORT_NONATIVE("relocated.shaded.io.netty.transport.noNative"),
     /**
-     * The handler of the storage of sstables, and possibly other files such as txn logs.
+     * The factory for handler of the storage of sstables
      */
-    REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+    REMOTE_STORAGE_HANDLER_FACTORY("cassandra.remote_storage_handler_factory"),
     REPAIR_CLEANUP_INTERVAL_SECONDS("cassandra.repair_cleanup_interval_seconds", convertToString(Ints.checkedCast(TimeUnit.MINUTES.toSeconds(10)))),
     REPAIR_DELETE_TIMEOUT_SECONDS("cassandra.repair_delete_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
     REPAIR_FAIL_TIMEOUT_SECONDS("cassandra.repair_fail_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
