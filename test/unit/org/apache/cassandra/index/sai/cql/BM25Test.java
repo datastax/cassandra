@@ -51,11 +51,18 @@ public class BM25Test extends SAITester
         // create un-analyzed index
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
-
         execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+
+        // BM25 should fail with only an equality index
         assertThatThrownBy(() -> execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3"))
         .isInstanceOf(InvalidRequestException.class)
         .hasMessage("BM25 ordering on column v requires an analyzed index");
+
+        // create analyzed index
+        analyzeIndex();
+        // BM25 query should work now
+        var result = execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
+        assertRows(result, row(1));
     }
 
     @Test
