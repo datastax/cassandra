@@ -628,14 +628,6 @@ public class TrieIndexSSTableReader extends SSTableReader
                : new SSTableIterator(this, dataFileInput, key, indexEntry, slices, selectedColumns, rowIndexFile);
     }
 
-    public interface PartitionReader extends Closeable
-    {
-        /**
-         * Returns next item or null if exhausted.
-         */
-        Unfiltered next() throws IOException;
-    }
-
     @Override
     public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
     {

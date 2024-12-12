@@ -126,7 +126,7 @@ public class UnifiedCompactionTask extends CompactionTask
     }
 
     @Override
-    protected Set<SSTableReader> inputSSTables()
+    public Set<SSTableReader> inputSSTables()
     {
         return actuallyCompact;
     }
