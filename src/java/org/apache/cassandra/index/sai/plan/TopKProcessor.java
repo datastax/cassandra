@@ -368,7 +368,7 @@ public class TopKProcessor
     {
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(command.metadata());
 
-        for (RowFilter.Expression expression : command.rowFilter().getExpressions())
+        for (RowFilter.Expression expression : command.rowFilter().expressions())
         {
             StorageAttachedIndex sai = findVectorIndexFor(cfs.indexManager, expression);
             if (sai != null)
