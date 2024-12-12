@@ -29,14 +29,8 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import com.google.monitoring.runtime.instrumentation.common.collect.Sets;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.statements.SelectStatement;
-import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.index.Index.QueryPlan;
 import static org.junit.Assert.assertEquals;
@@ -110,10 +104,7 @@ public abstract class FilteredQueryTester extends SAITester
         assertRowsIgnoringOrder(execute(query), expectedRows);
 
         // verify whether indexes are used or skipped
-        String formattedQuery = formatQuery(query);
-        SelectStatement select = (SelectStatement) QueryProcessor.parseStatement(formattedQuery, ClientState.forInternalCalls());
-        ReadCommand cmd = (ReadCommand) select.getQuery(QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
-        org.apache.cassandra.index.Index.QueryPlan plan = cmd.indexQueryPlan();
+        org.apache.cassandra.index.Index.QueryPlan plan = parseReadCommand(query).indexQueryPlan();
         assertEquals(shouldUseIndexes, plan != null);
 
         // if we are using indexes, verify that we are using the expected ones
