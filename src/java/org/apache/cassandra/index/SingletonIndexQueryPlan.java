@@ -24,7 +24,6 @@ package org.apache.cassandra.index;
 import java.util.Collections;
 import java.util.Set;
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -40,18 +39,6 @@ public class SingletonIndexQueryPlan implements Index.QueryPlan
         this.index = index;
         this.indexes = Collections.singleton(index);
         this.postIndexFilter = postIndexFilter;
-    }
-
-    @Nullable
-    protected static SingletonIndexQueryPlan create(Index index, RowFilter rowFilter)
-    {
-        for (RowFilter.Expression e : rowFilter.getExpressions())
-        {
-            if (index.supportsExpression(e.column(), e.operator()))
-                return new SingletonIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
-        }
-
-        return null;
     }
 
     @Override
