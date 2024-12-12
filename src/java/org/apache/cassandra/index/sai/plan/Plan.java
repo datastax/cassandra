@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -1675,6 +1676,13 @@ abstract public class Plan
             return predicate.isLiteral()
                    ? new LiteralIndexScan(this, id, predicate, matchingKeysCount, defaultAccess, null)
                    : new NumericIndexScan(this, id, predicate, matchingKeysCount, defaultAccess, null);
+        }
+
+        public KeysIteration fullIndexScan(IndexContext context)
+        {
+            Expression everythingExpression = new Expression(context);
+            everythingExpression.operation = Expression.Op.RANGE;
+            return indexScan(everythingExpression, tableMetrics.rows);
         }
 
         /**
