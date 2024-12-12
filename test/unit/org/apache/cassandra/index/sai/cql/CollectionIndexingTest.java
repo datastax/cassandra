@@ -115,6 +115,15 @@ public class CollectionIndexingTest extends SAITester
         assertEquals(2, execute("SELECT * FROM %s WHERE value CONTAINS KEY 1").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE value NOT CONTAINS KEY 1").size());
         assertEquals(2, execute("SELECT * FROM %s WHERE value NOT CONTAINS KEY 5").size());
+
+        execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 3, new HashMap<Integer, String>() {{
+            put(1, "v1");
+            put(3, "v4");
+        }});
+        assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE value NOT CONTAINS KEY 2"), row(3));
+
+        execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 4, new HashMap<Integer, String>());
+        assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE value NOT CONTAINS KEY 2"), row(3), row(4));
     }
 
     @Test
