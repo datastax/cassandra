@@ -212,13 +212,17 @@ public class CustomCassandraIndex implements Index
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
-        return getTargetExpression(filter.getExpressions()).map(filter::without)
-                                                           .orElse(filter);
+        return getTargetExpression(filter).map(filter::without).orElse(filter);
     }
 
-    private Optional<RowFilter.Expression> getTargetExpression(List<RowFilter.Expression> expressions)
+    private Optional<RowFilter.Expression> getTargetExpression(RowFilter rowFilter)
     {
-        return expressions.stream().filter(this::supportsExpression).findFirst();
+        for (RowFilter.Expression expression : rowFilter.expressions())
+        {
+            if (supportsExpression(expression))
+                return Optional.of(expression);
+        }
+        return Optional.empty();
     }
 
     public Index.Searcher searcherFor(ReadCommand command)
