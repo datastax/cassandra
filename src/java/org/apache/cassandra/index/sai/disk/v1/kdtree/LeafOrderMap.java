@@ -27,9 +27,21 @@ import org.apache.lucene.util.LongValues;
 
 public class LeafOrderMap
 {
-    public static int getValue(int index, LongValues reader)
+    /**
+     * Get the value at the given index from the reader, and cast it to a short. If the value is too large to fit in a
+     * short, an ArithmeticException is thrown.
+     * @param index the index to read from
+     * @param reader the reader to read from
+     * @return the value at the given index, cast to a short
+     */
+    public static short getValue(int index, LongValues reader)
     {
-        return Math.toIntExact(reader.get(index));
+        var value = reader.get(index);
+        var result = (short) value;
+        if (result != value) {
+            throw new ArithmeticException("short overflow");
+        }
+        return result;
     }
 
     public static void write(ByteOrder order, final int[] array, int length, int maxValue, final DataOutput out) throws IOException
