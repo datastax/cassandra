@@ -34,7 +34,7 @@ public class SASIIndexQueryPlan extends SingletonIndexQueryPlan
     @Nullable
     public static SASIIndexQueryPlan create(SASIIndex index, RowFilter rowFilter)
     {
-        for (RowFilter.Expression e : rowFilter.getExpressions())
+        for (RowFilter.Expression e : rowFilter.expressions())
         {
             if (index.supportsExpression(e.column(), e.operator()))
                 return new SASIIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
