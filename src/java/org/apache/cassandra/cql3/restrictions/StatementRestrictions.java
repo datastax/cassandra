@@ -81,6 +81,7 @@ public class StatementRestrictions
     "Restriction on partition key column %s must not be nested under OR operator";
 
     public static final String GEO_DISTANCE_REQUIRES_INDEX_MESSAGE = "GEO_DISTANCE requires the vector column to be indexed";
+    public static final String BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE = "BM25 ordering on column %s requires an analyzed index";
     public static final String NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE = "Ordering on non-clustering column %s requires the column to be indexed";
     public static final String NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
     "Ordering on non-clustering column requires each restricted column to be indexed except for fully-specified partition keys";
@@ -696,8 +697,12 @@ public class StatementRestrictions
                         throw new InvalidRequestException(String.format("SAI based ordering on column %s of type %s is not supported",
                                                           restriction.getFirstColumn(),
                                                           restriction.getFirstColumn().type.asCQL3Type()));
-                    throw new InvalidRequestException(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE,
-                                                                    restriction.getFirstColumn()));
+                    if (ordering.expression instanceof Ordering.Bm25)
+                        throw new InvalidRequestException(String.format(BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE,
+                                                                        restriction.getFirstColumn()));
+                    else
+                        throw new InvalidRequestException(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE,
+                                                                        restriction.getFirstColumn()));
                 }
                 receiver.addRestriction(restriction, false);
             }

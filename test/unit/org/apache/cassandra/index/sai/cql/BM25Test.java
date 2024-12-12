@@ -20,9 +20,11 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 
 public class BM25Test extends SAITester
@@ -41,6 +43,19 @@ public class BM25Test extends SAITester
             var result = execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
             assertRows(result, row(1));
         });
+    }
+
+    @Test
+    public void testTwoIndexes() throws Throwable
+    {
+        // create un-analyzed index
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        assertThatThrownBy(() -> execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("BM25 ordering on column v requires an analyzed index");
     }
 
     @Test
