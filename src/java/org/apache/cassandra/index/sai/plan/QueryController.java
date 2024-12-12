@@ -480,7 +480,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return Operation.Node.buildTree(this, filterOperation()).analyzeTree(this).filterTree();
     }
 
-    private Plan.KeysIteration buildHalfRangeFromInEq(Expression originPredicate, Operator op)
+    private Plan.KeysIteration buildHalfRangeFromInequality(Expression originPredicate, Operator op)
     {
         assert originPredicate.getOp() == Expression.Op.NOT_EQ : "assumes inequality";
         assert originPredicate.lower.value == originPredicate.upper.value : "assumes lower and upper are the same in inequality";
@@ -491,6 +491,16 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return planFactory.indexScan(halfRange, matchingRowCount);
     }
 
+    /**
+     * Builds a plan for a restriction with inequality. It's implemented as
+     * union of two ranges, before the value and after the value.
+     * If the column type is truncatable, e.g., BigInteger or BigDecimal,
+     * then it returns a full index scan, since the ranges might result
+     * in false negatives when a truncated value is equivalent to
+     * the value to exclude.
+     * @param predicate Inequality expression with indexContext
+     * @return A plan on the index, which can also result false positives.
+     */
     private Plan.KeysIteration buildInequalityPlan(Expression predicate)
     {
         assert predicate.getOp()== Expression.Op.NOT_EQ : "Only inequality predicate is expected";
@@ -499,8 +509,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return planFactory.fullIndexScan(predicate.context);
         else
         {
-            Plan.KeysIteration left = buildHalfRangeFromInEq(predicate, Operator.LT);
-            Plan.KeysIteration right = buildHalfRangeFromInEq(predicate, Operator.GT);
+            Plan.KeysIteration left = buildHalfRangeFromInequality(predicate, Operator.LT);
+            Plan.KeysIteration right = buildHalfRangeFromInequality(predicate, Operator.GT);
             return planFactory.union(new ArrayList<>(Arrays.asList(left, right)));
         }
     }
