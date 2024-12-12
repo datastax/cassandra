@@ -59,6 +59,7 @@ import org.apache.cassandra.io.sstable.compaction.SortedStringTableCursor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
@@ -175,8 +176,8 @@ public class CorruptedSSTablesCompactionsTest
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(tableName);
 
-        final int ROWS_PER_SSTABLE = 10;
-        final int SSTABLES = cfs.metadata().params.minIndexInterval * 2 / ROWS_PER_SSTABLE;
+        final int ROWS_PER_SSTABLE = 1000; // enough data so that compression does not try to open the same chunk for multiple partial compaction tasks
+        final int SSTABLES = 25;
         final int SSTABLES_TO_CORRUPT = 8;
 
         assertTrue(String.format("Not enough sstables (%d), expected at least %d sstables to corrupt", SSTABLES, SSTABLES_TO_CORRUPT),
