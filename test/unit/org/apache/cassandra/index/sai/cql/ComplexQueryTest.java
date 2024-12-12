@@ -257,8 +257,7 @@ public class ComplexQueryTest extends SAITester
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE a = 1 or a = 2")).isInstanceOf(InvalidRequestException.class)
                                                                                    .hasMessage(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION);
 
-        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE a = 1 or a = 2 ALLOW FILTERING")).isInstanceOf(InvalidRequestException.class)
-                                                                                                   .hasMessage(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION);
+        assertRows(execute("SELECT pk FROM %s WHERE a = 1 or a = 2 ALLOW FILTERING"), row(1), row(2));
     }
 
     @Test
