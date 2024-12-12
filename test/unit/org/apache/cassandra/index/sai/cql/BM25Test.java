@@ -20,15 +20,137 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 
 public class BM25Test extends SAITester
 {
+    @Test
+    public void testTwoIndexes()
+    {
+        // create un-analyzed index
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+
+        // BM25 should fail with only an equality index
+        assertInvalidMessage("BM25 ordering on column v requires an analyzed index",
+                             "SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
+
+        // create analyzed index
+        analyzeIndex();
+        // BM25 query should work now
+        var result = execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
+        assertRows(result, row(1));
+    }
+
+    @Test
+    public void testTwoIndexesAmbiguousPredicate() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+
+        // Create analyzed and un-analyzed indexes
+        analyzeIndex();
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (2, 'apple juice')");
+        execute("INSERT INTO %s (k, v) VALUES (3, 'orange juice')");
+
+        // equality predicate is ambiguous (both analyzed and un-analyzed indexes could support it) so it should
+        // be rejected
+        beforeAndAfterFlush(() -> {
+            // Single predicate
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+                                 "SELECT k FROM %s WHERE v = 'apple'");
+
+            // AND
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+                                 "SELECT k FROM %s WHERE v = 'apple' AND v : 'juice'");
+
+            // OR
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+                                 "SELECT k FROM %s WHERE v = 'apple' OR v : 'juice'");
+        });
+    }
+
+    @Test
+    public void testTwoIndexesWithEqualsUnsupported() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        // analyzed index with equals_behavior:unsupported option
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'unsupported', " +
+                    "'index_analyzer':'{\"tokenizer\":{\"name\":\"standard\"},\"filters\":[{\"name\":\"porterstem\"}]}' }");
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (2, 'apple juice')");
+
+        beforeAndAfterFlush(() -> {
+            // combining two EQ predicates is not allowed
+            assertInvalid("SELECT k FROM %s WHERE v = 'apple' AND v = 'juice'");
+
+            // combining EQ and MATCH predicates is also not allowed (when we're not converting EQ to MATCH)
+            assertInvalid("SELECT k FROM %s WHERE v = 'apple' AND v : 'apple'");
+
+            // combining two MATCH predicates is fine
+            assertRows(execute("SELECT k FROM %s WHERE v : 'apple' AND v : 'juice'"),
+                       row(2));
+
+            // = operator should use un-analyzed index since equals is unsupported in analyzed index
+            assertRows(execute("SELECT k FROM %s WHERE v = 'apple'"),
+                       row(1));
+
+            // : operator should use analyzed index
+            assertRows(execute("SELECT k FROM %s WHERE v : 'apple'"),
+                       row(1), row(2));
+        });
+    }
+
+    @Test
+    public void testComplexQueriesWithMultipleIndexes() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 text, v2 text, v3 int)");
+
+        // Create mix of analyzed, unanalyzed, and non-text indexes
+        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v2) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = {" +
+                    "'index_analyzer': '{" +
+                    "\"tokenizer\" : {\"name\" : \"standard\"}, " +
+                    "\"filters\" : [{\"name\" : \"porterstem\"}]" +
+                    "}'" +
+                    "}");
+        createIndex("CREATE CUSTOM INDEX ON %s(v3) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, v1, v2, v3) VALUES (1, 'apple', 'orange juice', 5)");
+        execute("INSERT INTO %s (k, v1, v2, v3) VALUES (2, 'apple juice', 'apple', 10)");
+        execute("INSERT INTO %s (k, v1, v2, v3) VALUES (3, 'banana', 'grape juice', 5)");
+
+        beforeAndAfterFlush(() -> {
+            // Complex query mixing different types of indexes and operators
+            assertRows(execute("SELECT k FROM %s WHERE v1 = 'apple' AND v2 : 'juice' AND v3 = 5"),
+                       row(1));
+
+            // Mix of AND and OR conditions across different index types
+            assertRows(execute("SELECT k FROM %s WHERE v3 = 5 AND (v1 = 'apple' OR v2 : 'apple')"),
+                       row(1));
+
+            // Multi-term analyzed query
+            assertRows(execute("SELECT k FROM %s WHERE v2 : 'orange juice'"),
+                       row(1));
+
+            // Range query with text match
+            assertRows(execute("SELECT k FROM %s WHERE v3 >= 5 AND v2 : 'juice'"),
+                       row(1), row(3));
+        });
+    }
+
     @Test
     public void testMatchingAllowed() throws Throwable
     {
@@ -43,26 +165,6 @@ public class BM25Test extends SAITester
             var result = execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
             assertRows(result, row(1));
         });
-    }
-
-    @Test
-    public void testTwoIndexes() throws Throwable
-    {
-        // create un-analyzed index
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
-        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
-
-        // BM25 should fail with only an equality index
-        assertThatThrownBy(() -> execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3"))
-        .isInstanceOf(InvalidRequestException.class)
-        .hasMessage("BM25 ordering on column v requires an analyzed index");
-
-        // create analyzed index
-        analyzeIndex();
-        // BM25 query should work now
-        var result = execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
-        assertRows(result, row(1));
     }
 
     @Test

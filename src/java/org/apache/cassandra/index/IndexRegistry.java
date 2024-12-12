@@ -343,14 +343,94 @@ public interface IndexRegistry
         return table.isVirtual() ? EMPTY : Keyspace.openAndGetStore(table).indexManager;
     }
 
-    default Index supportsAnalyzedEq(ColumnMetadata cm)
+    enum EqBehavior
     {
+        EQ,
+        MATCH,
+        AMBIGUOUS
+    }
+
+    class EqBehaviorIndexes
+    {
+        public EqBehavior behavior;
+        public final Index eqIndex;
+        public final Index matchIndex;
+
+        private EqBehaviorIndexes(Index eqIndex, Index matchIndex, EqBehavior behavior)
+        {
+            this.eqIndex = eqIndex;
+            this.matchIndex = matchIndex;
+            this.behavior = behavior;
+        }
+
+        public static EqBehaviorIndexes eq(Index eqIndex)
+        {
+            return new EqBehaviorIndexes(eqIndex, null, EqBehavior.EQ);
+        }
+
+        public static EqBehaviorIndexes match(Index eqAndMatchIndex)
+        {
+            return new EqBehaviorIndexes(eqAndMatchIndex, eqAndMatchIndex, EqBehavior.MATCH);
+        }
+
+        public static EqBehaviorIndexes ambiguous(Index firstEqIndex, Index secondEqIndex)
+        {
+            return new EqBehaviorIndexes(firstEqIndex, secondEqIndex, EqBehavior.AMBIGUOUS);
+        }
+    }
+
+    /**
+     * @return - EQ if a single index supports EQ
+     * - MATCHES if a single index supports both
+     * - AMBIGUOUS if multiple indexes support EQ
+     */
+    default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm)
+    {
+        // scan the indexes for MATCHES and EQ support
+        Index matchesIndex = null;
+        Index eqIndex = null;
         for (Index index : listIndexes())
         {
-            if (index.supportsExpression(cm, Operator.ANALYZER_MATCHES) &&
-                index.supportsExpression(cm, Operator.EQ))
-                return index;
+            if (index.supportsExpression(cm, Operator.EQ))
+            {
+                if (eqIndex == null)
+                {
+                    eqIndex = index;
+                    continue;
+                }
+
+                // If we find a second EQ index, return AMBIGUOUS, taking care to assign the eqIndex and matchIndex correctly
+                if (index.supportsExpression(cm, Operator.ANALYZER_MATCHES))
+                {
+                    matchesIndex = index;
+                }
+                else
+                {
+                    assert eqIndex.supportsExpression(cm, Operator.ANALYZER_MATCHES);
+                    matchesIndex = eqIndex;
+                    eqIndex = index;
+                }
+                return EqBehaviorIndexes.ambiguous(eqIndex, matchesIndex);
+            }
+
+            if (index.supportsExpression(cm, Operator.ANALYZER_MATCHES))
+            {
+                // should only ever have one
+                assert matchesIndex == null;
+                matchesIndex = index;
+            }
         }
-        return null;
+
+        // If we didn't find any indexes that support EQ or MATCHES, return EQ
+        if (eqIndex == null && matchesIndex == null)
+            return EqBehaviorIndexes.eq(null);
+
+        // If the same index supports both EQ and MATCHES, promote to MATCHES
+        if (eqIndex == matchesIndex)
+            return EqBehaviorIndexes.match(matchesIndex);
+
+        // Otherwise we either have no MATCHES index, or it's distinct from the EQ index.
+        // In both cases we want to return EQ
+        return EqBehaviorIndexes.eq(eqIndex);
     }
 }

@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.index.IndexRegistry;
@@ -194,15 +195,27 @@ public final class SingleColumnRelation extends Relation
         if (mapKey == null)
         {
             Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-            var analyzedIndex = IndexRegistry.obtain(table).supportsAnalyzedEq(columnDef);
-            if (analyzedIndex == null)
+            // Leave the restriction as EQ if no analyzed index in backwards compatibility mode is present
+            var ebi = IndexRegistry.obtain(table).getEqBehavior(columnDef);
+            if (ebi.behavior == IndexRegistry.EqBehavior.EQ)
                 return new SingleColumnRestriction.EQRestriction(columnDef, term);
 
-            ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.EQ_RESTRICTION_ON_ANALYZED_WARNING,
-                                                   columnDef.toString(),
-                                                   analyzedIndex.getIndexMetadata().name),
-                                     columnDef);
-            return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, term);
+            // the index is configured to transform EQ into MATCH for backwards compatibility
+            if (ebi.behavior == IndexRegistry.EqBehavior.MATCH)
+            {
+                ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.EQ_RESTRICTION_ON_ANALYZED_WARNING,
+                                                       columnDef.toString(),
+                                                       ebi.matchIndex.getIndexMetadata().name),
+                                         columnDef);
+                return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, term);
+            }
+
+            // multiple indexes support EQ, this is unsupported
+            assert ebi.behavior == IndexRegistry.EqBehavior.AMBIGUOUS;
+            throw invalidRequest(AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR,
+                                 columnDef.toString(),
+                                 ebi.matchIndex.getIndexMetadata().name,
+                                 ebi.eqIndex.getIndexMetadata().name);
         }
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
