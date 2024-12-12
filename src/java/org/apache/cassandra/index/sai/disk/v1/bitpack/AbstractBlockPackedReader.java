@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
+import com.carrotsearch.hppc.IntObjectHashMap;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
@@ -31,6 +32,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
     private final long valueCount;
     final byte[] blockBitsPerValue; // package protected for test access
     private final SeekingRandomAccessInput input;
+    private final IntObjectHashMap<LongValues> readers;
 
     private long prevTokenValue = Long.MIN_VALUE;
     private long lastIndex; // the last index visited by token -> row ID searches
@@ -43,6 +45,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
         this.valueCount = valueCount;
         this.input = new SeekingRandomAccessInput(indexInput);
         this.blockBitsPerValue = blockBitsPerValue;
+        this.readers = new IntObjectHashMap<>();
         // start searching tokens from current index segment
         this.lastIndex = sstableRowId;
     }
@@ -59,9 +62,19 @@ public abstract class AbstractBlockPackedReader implements LongArray
 
         final int block = (int) (index >>> blockShift);
         final int idx = (int) (index & blockMask);
-        final LongValues subReader = blockBitsPerValue[block] == 0 ? LongValues.ZEROES
-                                                                   : LuceneCompat.directReaderGetInstance(input, blockBitsPerValue[block], blockOffsetAt(block));
-        return delta(block, idx) + subReader.get(idx);
+        return delta(block, idx) + getReader(block).get(idx);
+    }
+
+    private LongValues getReader(int block)
+    {
+        LongValues reader = readers.get(block);
+        if (reader == null)
+        {
+            reader = blockBitsPerValue[block] == 0 ? LongValues.ZEROES
+                                                   : LuceneCompat.directReaderGetInstance(input, blockBitsPerValue[block], blockOffsetAt(block));
+            readers.put(block, reader);
+        }
+        return reader;
     }
 
     @Override
