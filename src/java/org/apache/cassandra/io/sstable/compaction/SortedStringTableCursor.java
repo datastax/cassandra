@@ -121,7 +121,6 @@ public class SortedStringTableCursor implements SSTableCursor
                 // The range is empty. Rather than fail, use 0/0 as bounds which will not return any data.
                 this.endPosition = this.startPosition = 0;
             }
-            dataFile.seek(this.startPosition);
         }
         catch (Throwable t)
         {
@@ -393,8 +392,11 @@ public class SortedStringTableCursor implements SSTableCursor
                 case PARTITION:
                     if (consumeUnfilteredHeader())
                         return currentType;
-                    // else fall through
+
+                    consumePartitionHeader();
+                    return currentType;
                 case UNINITIALIZED:
+                    dataFile.seek(this.startPosition);
                     consumePartitionHeader();
                     return currentType;
                 default:
@@ -406,7 +408,7 @@ public class SortedStringTableCursor implements SSTableCursor
             sstable.markSuspect();
             throw e;
         }
-        catch (IOException | IndexOutOfBoundsException e)
+        catch (IOException | IndexOutOfBoundsException | AssertionError e)
         {
             sstable.markSuspect();
             throw new CorruptSSTableException(e, dataFile.getFile().path());
