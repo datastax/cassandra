@@ -61,6 +61,9 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
     private final String body;
     private final boolean orReplace;
     private final boolean ifNotExists;
+    private final boolean deterministic;
+    private final boolean monotonic;
+    private final List<ColumnIdentifier> monotonicOn;
 
     public CreateFunctionStatement(String queryString,
                                    String keyspaceName,
@@ -72,7 +75,10 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                                    String language,
                                    String body,
                                    boolean orReplace,
-                                   boolean ifNotExists)
+                                   boolean ifNotExists,
+                                   boolean deterministic,
+                                   boolean monotonic,
+                                   List<ColumnIdentifier> monotonicOn)
     {
         super(queryString, keyspaceName);
         this.functionName = functionName;
@@ -84,6 +90,10 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         this.body = body;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+        this.deterministic = deterministic;
+        this.monotonic = monotonic;
+        this.monotonicOn = monotonicOn;
+
     }
 
     // TODO: replace affected aggregates !!
@@ -125,7 +135,10 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                               returnType,
                               calledOnNullInput,
                               language,
-                              body);
+                              body,
+                              deterministic,
+                              monotonic,
+                              monotonicOn);
 
         UserFunction existingFunction = keyspace.userFunctions.find(function.name(), argumentTypes).orElse(null);
         if (null != existingFunction)
@@ -220,6 +233,9 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         private final String body;
         private final boolean orReplace;
         private final boolean ifNotExists;
+        private final boolean deterministic;
+        private final boolean monotonic;
+        private final List<ColumnIdentifier> monotonicOn;
 
         public Raw(FunctionName name,
                    List<ColumnIdentifier> argumentNames,
@@ -229,7 +245,10 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                    String language,
                    String body,
                    boolean orReplace,
-                   boolean ifNotExists)
+                   boolean ifNotExists,
+                   boolean deterministic,
+                   boolean monotonic,
+                   List<ColumnIdentifier> monotonicOn)
         {
             this.name = name;
             this.argumentNames = argumentNames;
@@ -240,6 +259,9 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
             this.body = body;
             this.orReplace = orReplace;
             this.ifNotExists = ifNotExists;
+            this.deterministic = deterministic;
+            this.monotonic = monotonic;
+            this.monotonicOn = monotonicOn;
         }
 
         @Override
@@ -263,7 +285,10 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                                                language,
                                                body,
                                                orReplace,
-                                               ifNotExists);
+                                               ifNotExists,
+                                               deterministic,
+                                               monotonic,
+                                               monotonicOn);
         }
     }
 }
