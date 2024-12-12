@@ -22,6 +22,7 @@ import java.util.Arrays;
 
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -50,6 +51,7 @@ public class TraversingBKDReader implements Closeable
     final int leafNodeOffset;
     final int numDims;
     final int maxPointsInLeafNode;
+    final int bitsPerValue;
     final int packedBytesLength;
 
     @SuppressWarnings("resource")
@@ -64,6 +66,7 @@ public class TraversingBKDReader implements Closeable
 
             numDims = in.readVInt();
             maxPointsInLeafNode = in.readVInt();
+            bitsPerValue = LuceneCompat.directWriterUnsignedBitsRequired(in.order(), maxPointsInLeafNode - 1);
             bytesPerDim = in.readVInt();
             packedBytesLength = numDims * bytesPerDim;
 
