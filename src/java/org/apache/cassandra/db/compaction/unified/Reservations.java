@@ -138,7 +138,7 @@ public abstract class Reservations
                 // we have a remainder to distribute
                 if (oneRemainderPerLevel)
                 {
-                    if (perLevel[inLevel] <= perLevelCount) // we can only give one, and only if that one above is not yet used
+                    if (perLevel[inLevel] <= perLevelCount) // we can only give one above, and only if that one is not yet used
                     {
                         ++assigned;
                         ++remainderDistributed;
@@ -146,7 +146,6 @@ public abstract class Reservations
                 }
                 else
                 {
-                    // assigned can be negative if we have already given from the remainder
                     int requestedFromRemainder = requestedParallelism - assigned;
                     int assignedFromRemainder = Math.min(requestedFromRemainder, remainder - remainderDistributed);
                     assigned += assignedFromRemainder;

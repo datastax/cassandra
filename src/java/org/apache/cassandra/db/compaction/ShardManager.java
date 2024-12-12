@@ -38,20 +38,18 @@ import org.apache.cassandra.utils.SortingIterator;
 
 public interface ShardManager
 {
-    /**
-     * Single-partition, and generally sstables with very few partitions, can cover very small sections of the token
-     * space, resulting in very high densities.
-     * When the number of partitions in an sstable is smaller than this threshold, we will use a per-partition minimum
-     * span, calculated from the total number of partitions in this table.
-     */
+    /// Single-partition, and generally sstables with very few partitions, can cover very small sections of the token
+    /// space, resulting in very high densities.
+    ///
+    /// When the number of partitions in an sstable is smaller than this threshold, we will use a per-partition minimum
+    /// span, calculated from the total number of partitions in this table.
     long PER_PARTITION_SPAN_THRESHOLD = 100;
 
-    /**
-     * Additionally, sstables that have completely fallen outside the local token ranges will end up with a zero
-     * coverage.
-     * To avoid problems with this we check if coverage is below the minimum, and replace it using the per-partition
-     * calculation.
-     */
+    /// Additionally, sstables that have completely fallen outside the local token ranges will end up with a zero
+    /// coverage.
+    ///
+    /// To avoid problems with this we check if coverage is below the minimum, and replace it using the per-partition
+    /// calculation.
     double MINIMUM_TOKEN_COVERAGE = Math.scalb(1.0, -48);
 
     static ShardManager create(DiskBoundaries diskBoundaries, AbstractReplicationStrategy rs, boolean isReplicaAware)
@@ -65,9 +63,9 @@ public interface ShardManager
         if (localRanges.getRanges().isEmpty() || !localRanges.getRanges()
                                                              .get(0)
                                                              .range()
-                                                  .left
-                                                  .getPartitioner()
-                                                  .equals(localRanges.getRealm().getPartitioner()))
+                                                             .left
+                                                             .getPartitioner()
+                                                             .equals(localRanges.getRealm().getPartitioner()))
             localRanges = new SortedLocalRanges(localRanges.getRealm(),
                                                 localRanges.getRingVersion(),
                                                 null);
@@ -84,36 +82,27 @@ public interface ShardManager
             return new ShardManagerTrivial(partitioner);
     }
 
-    /**
-     * The token range fraction spanned by the given range, adjusted for the local range ownership.
-     */
+    /// The token range fraction spanned by the given range, adjusted for the local range ownership.
     double rangeSpanned(Range<Token> tableRange);
 
-    /**
-     * The total fraction of the token space covered by the local ranges.
-     */
+    /// The total fraction of the token space covered by the local ranges.
     double localSpaceCoverage();
 
-    /**
-     * The fraction of the token space covered by a shard set, i.e. the space that is split in the requested number of
-     * shards.
-     * If no disks are defined, this is the same as localSpaceCoverage(). Otherwise, it is the token coverage of a disk.
-     */
+    /// The fraction of the token space covered by a shard set, i.e. the space that is split in the requested number of
+    /// shards.
+    ///
+    /// If no disks are defined, this is the same as localSpaceCoverage(). Otherwise, it is the token coverage of a disk.
     double shardSetCoverage();
 
-    /**
-     * The minimum token space share per partition that should be assigned to sstables with small numbers of partitions
-     * or which have fallen outside the local token ranges.
-     */
+    /// The minimum token space share per partition that should be assigned to sstables with small numbers of partitions
+    /// or which have fallen outside the local token ranges.
     double minimumPerPartitionSpan();
 
-    /**
-     * Construct a boundary/shard iterator for the given number of shards.
-     * <p>
-     * Note: This does not offer a method of listing the shard boundaries it generates, just to advance to the
-     * corresponding one for a given token.  The only usage for listing is currently in tests. Should a need for this
-     * arise, see {@link CompactionSimulationTest} for a possible implementation.
-     */
+    /// Construct a boundary/shard iterator for the given number of shards.
+    ///
+    /// Note: This does not offer a method of listing the shard boundaries it generates, just to advance to the
+    /// corresponding one for a given token.  The only usage for listing is currently in tests. Should a need for this
+    /// arise, see `CompactionSimulationTest` for a possible implementation.
     ShardTracker boundaries(int shardCount);
 
     static Range<Token> coveringRange(CompactionSSTable sstable)
@@ -128,10 +117,8 @@ public interface ShardManager
     }
 
 
-    /**
-     * Return the token space share that the given SSTable spans, excluding any non-locally owned space.
-     * Returns a positive floating-point number between 0 and 1.
-     */
+    /// Return the token space share that the given SSTable spans, excluding any non-locally owned space.
+    /// Returns a positive floating-point number between 0 and 1.
     default double rangeSpanned(CompactionSSTable rdr)
     {
         double reported = rdr.tokenSpaceCoverage();
@@ -163,13 +150,11 @@ public interface ShardManager
         return rangeSpanned(ShardManager.coveringRange(first, last));
     }
 
-    /**
-     * Return the density of an SSTable, i.e. its size divided by the covered token space share.
-     * This is an improved measure of the compaction age of an SSTable that grows both with STCS-like full-SSTable
-     * compactions (where size grows, share is constant), LCS-like size-threshold splitting (where size is constant
-     * but share shrinks), UCS-like compactions (where size may grow and covered shards i.e. share may decrease)
-     * and can reproduce levelling structure that corresponds to all, including their mixtures.
-     */
+    /// Return the density of an SSTable, i.e. its size divided by the covered token space share.
+    /// This is an improved measure of the compaction age of an SSTable that grows both with STCS-like full-SSTable
+    /// compactions (where size grows, share is constant), LCS-like size-threshold splitting (where size is constant
+    /// but share shrinks), UCS-like compactions (where size may grow and covered shards i.e. share may decrease)
+    /// and can reproduce levelling structure that corresponds to all, including their mixtures.
     default double density(CompactionSSTable rdr)
     {
         return rdr.onDiskLength() / rangeSpanned(rdr);
@@ -265,8 +250,8 @@ public interface ShardManager
     /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
     /// the given function on the combination of each shard range and the intersecting sstable set.
     ///
-    /// This version accepts a parallelism limit and will group shards together to fit within that limit and a
-    /// restricted operation range.
+    /// This version restricts the operation to the given token range (which may be null) and accepts a parallelism
+    /// limit and will group shards together to fit within that limit.
     default <T, R extends CompactionSSTable> List<T> splitSSTablesInShardsLimited(Collection<R> sstables,
                                                                                   Range<Token> operationRange,
                                                                                   int numShardsForDensity,
@@ -341,6 +326,7 @@ public interface ShardManager
         return tasks;
     }
 
+    /// Return the number of shards that the given range of positions (start- and end-inclusive) spans.
     default int coveredShardCount(PartitionPosition first, PartitionPosition last, int numShardsForDensity)
     {
         var boundaries = boundaries(numShardsForDensity);

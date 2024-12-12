@@ -119,8 +119,6 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
 
     /// Commit the transaction part. Because this is a part of a composite transaction, the actual commit will be
     /// carried out only after all parts have committed.
-    ///
-    ///
     public Throwable commit(Throwable accumulate)
     {
         Throwables.maybeFail(accumulate); // we must be called with a null accumulate

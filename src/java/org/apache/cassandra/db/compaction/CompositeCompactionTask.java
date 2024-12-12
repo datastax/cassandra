@@ -26,9 +26,9 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.utils.Throwables;
 
-/// A composition of several compaction tasks into one. This is used to limit the parallelism of some compaction tasks
-/// that split into a large number of parallelizable tasks but should not be allowed to take all compaction executor
-/// threads.
+/// A composition of several compaction tasks into one. This object executes the given tasks sequentially and
+/// is used to limit the parallelism of some compaction tasks that split into a large number of parallelizable ones
+/// but should not be allowed to take all compaction executor threads.
 public class CompositeCompactionTask extends AbstractCompactionTask
 {
     @VisibleForTesting

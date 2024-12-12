@@ -208,11 +208,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return CompactionTasks.create(tasks);
     }
 
-    public synchronized Collection<CompactionAggregate.UnifiedAggregate> getMaximalAggregates()
+    /// Get a list of maximal aggregates that can be compacted independently in parallel to achieve a major compaction.
+    ///
+    /// These aggregates split the sstables in each arena into non-overlapping groups where the boundaries between these
+    /// groups are also boundaries of the current sharding configuration. Compacting the groups independently has the
+    /// same effect as compacting all of the sstables in the arena together in one operation.
+    public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates()
     {
         maybeUpdateSelector();
-        // The aggregates are split by repair status and disk, as well as in non-overlapping sections to enable some
-        // parallelism and efficient use of extra space. The result will be split across shards according to its density.
+        // The aggregates are split into arenas by repair status and disk, as well as in non-overlapping sections to
+        // enable some parallelism and efficient use of extra space. The result will be split across shards according to
+        // its density.
         // Depending on the parallelism, the operation may require up to 100% extra space to complete.
         List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
 
@@ -222,7 +228,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             // for smaller extra space requirements. However, if the sharding configuration has changed, a major
             // compaction should combine non-overlapping sets if they are split on a boundary that is no longer
             // in effect.
-                // in effect.
             List<Set<CompactionSSTable>> groups =
             getShardManager().splitSSTablesInShards(arena.sstables,
                                                     makeShardingStats(arena.sstables).shardCountForDensity,
@@ -230,7 +235,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
             // Now combine all of these groups that share an sstable so that we have valid independent transactions.
             groups = Overlaps.combineSetsWithCommonElement(groups);
-            for (var group : groups)
+
+            for (Set<CompactionSSTable> group : groups)
             {
                 aggregates.add(CompactionAggregate.createUnified(group,
                                                                  Overlaps.maxOverlap(group,
@@ -252,17 +258,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         if (permittedParallelism <= 0)
             permittedParallelism = Integer.MAX_VALUE;
 
-        // The tasks are split by repair status and disk, as well as in non-overlapping sections to enable some
-        // parallelism and efficient use of extra space. The result will be split across shards according to its density.
-        // Depending on the parallelism, the operation may require up to 100% extra space to complete.
         List<AbstractCompactionTask> tasks = new ArrayList<>();
         try
         {
+            // Split the space into independently compactable groups.
             for (var aggregate : getMaximalAggregates())
             {
                 LifecycleTransaction txn = realm.tryModify(aggregate.getSelected().sstables(),
                                                            OperationType.COMPACTION,
                                                            aggregate.getSelected().id());
+
+                // Create (potentially parallelized) tasks for each group.
                 if (txn != null)
                     createAndAddTasks(gcBefore, txn, getShardingStats(aggregate), permittedParallelism, tasks);
                 // we ignore splitOutput (always split according to the strategy's sharding) and do not need isMaximal
@@ -394,8 +400,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    /// Used by CNDB where compaction aggregates can already be split into subranges of the operation.
-    public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedAggregate aggregate, Collection<AbstractCompactionTask> tasks)
+    /// Create compaction tasks for the given aggregate and add them to the given tasks list.
+    public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedAggregate aggregate, Collection<? super UnifiedCompactionTask> tasks)
     {
         CompactionPick selected = aggregate.getSelected();
         int parallelism = aggregate.getPermittedParallelism();
@@ -435,6 +441,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         public final int shardCountForDensity;
         public final int coveredShardCount;
 
+        /// Construct sharding statistics for the given collection of sstables that are to be compacted in full.
         public ShardingStats(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, Controller controller)
         {
             assert !sstables.isEmpty();
@@ -469,11 +476,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
         }
 
+        /// Construct sharding statistics for the given collection of sstables that are to be partially compacted
+        /// in the given operation range. Done by adjusting numbers by the fraction of the sstable that is in range.
         public ShardingStats(Collection<? extends CompactionSSTable> sstables, Range<Token> operationRange, ShardManager shardManager, Controller controller)
         {
             assert !sstables.isEmpty();
             assert operationRange != null;
-            // the partition count aggregation is costly, so we only perform this once when the aggregate is selected for execution.
             long onDiskLengthInRange = 0;
             long partitionCountSum = 0;
             long partitionCountSumInRange = 0;
@@ -533,7 +541,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    // used by CNDB
+    /// Get and store the sharding stats for a given aggregate
     public ShardingStats getShardingStats(CompactionAggregate.UnifiedAggregate aggregate)
     {
         var shardingStats = aggregate.getShardingStats();
@@ -574,7 +582,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                            boolean keepOriginals,
                            ShardingStats shardingStats,
                            int parallelism,
-                           Collection<? super CompactionTask> tasks)
+                           Collection<? super UnifiedCompactionTask> tasks)
     {
         if (controller.parallelizeOutputShards() && parallelism > 1)
             tasks.addAll(createParallelCompactionTasks(transaction, operationRange, keepOriginals, shardingStats, gcBefore, parallelism));
@@ -643,12 +651,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return createCompactionTask(txn, makeShardingStats(txn), gcBefore);
     }
 
-    private Collection<CompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction,
-                                                                     Range<Token> operationRange,
-                                                                     boolean keepOriginals,
-                                                                     ShardingStats shardingStats,
-                                                                     int gcBefore,
-                                                                     int parallelism)
+    /// Create a collection of parallelized compaction tasks that perform the compaction in parallel.
+    private Collection<UnifiedCompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction,
+                                                                            Range<Token> operationRange,
+                                                                            boolean keepOriginals,
+                                                                            ShardingStats shardingStats,
+                                                                            int gcBefore,
+                                                                            int parallelism)
     {
         final int coveredShardCount = shardingStats.coveredShardCount;
         assert parallelism > 1;
@@ -658,7 +667,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
         SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
         SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
-        List<CompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
+        List<UnifiedCompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
             sstables,
             operationRange,
             shardingStats.shardCountForDensity,
@@ -1027,7 +1036,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             int parallelism = controller.parallelizeOutputShards() ? getShardingStats(aggregate).coveredShardCount : 1;
             if (parallelism > remaining)
                 parallelism = remaining;
-            assert currentLevel >= 0 : "Invalid level in " + pick + ": level -1 is only allowed for expired-only compactions";
+            assert currentLevel >= 0 : "Invalid level in " + pick;
 
             if (isAdaptive)
             {

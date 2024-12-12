@@ -204,6 +204,17 @@ public class Overlaps
     }
 
 
+    /// Overlap inclusion method to use when combining overlap sections into a bucket. For example, with
+    /// items A(0, 5), B(2, 9), C(6, 12), D(10, 12) whose overlap sections calculation returns \[AB, BC, CD\],
+    ///   - `NONE` means no sections are to be merged. AB, BC and CD will be separate buckets, selections AB, BC and CD
+    ///     will be added separately, thus some items will be partially used / single-source compacted, likely
+    ///     to be recompacted again with the next selected bucket.
+    ///   - `SINGLE` means only overlaps of the sstables in the selected bucket will be added. AB+BC will be one bucket,
+    ///     and CD will be another (as BC is already used). A middle ground of sorts, should reduce overcompaction but
+    ///     still has some.
+    ///   - `TRANSITIVE` means a transitive closure of overlapping sstables will be selected. AB+BC+CD will be in the
+    ///     same bucket, selected compactions will apply to all overlapping sstables and no overcompaction will be done,
+    ///     at the cost of reduced compaction parallelism and increased length of the operation.
     public enum InclusionMethod
     {
         NONE, SINGLE, TRANSITIVE
@@ -214,19 +225,19 @@ public class Overlaps
         B makeBucket(List<Set<E>> sets, int startIndexInclusive, int endIndexExclusive);
     }
 
-    /// Assign overlap sections into buckets Identify sections that have at least threshold-many overlapping
+    /// Assign overlap sections into buckets. Identify sections that have at least threshold-many overlapping
     /// items and apply the overlap inclusion method to combine with any neighbouring sections that contain
     /// selected sstables to make sure we make full use of any sstables selected for compaction (i.e. avoid
-    /// recompacting, see [#overlapInclusionMethod()]).
-    /// For non-transitive inclusionMethod the order in which we select the buckets matters because an sstables that
-    /// spans overlap sets could be chosen for only one of the candidate buckets
-    ///      * containing it. To make the most efficient selection we thus perform it by descending size, starting with the
-    ///      * sets with most overlap.
+    /// recompacting, see [InclusionMethod]).
+    ///
+    /// For non-transitive inclusion method the order in which we select the buckets matters because an sstables that
+    /// spans overlap sets could be chosen for only one of the candidate buckets containing it. To make the most
+    /// efficient selection we thus perform it by descending size, starting with the sets with most overlap.
     ///
     /// @param threshold       Threshold for selecting a bucket. Sets below this size will be ignored, unless they need
     ///                        to be grouped with a neighboring set due to overlap.
-    /// @param inclusionMethod NONE to only form buckets of the overlapping sets, SINGLE to include all
-    ///                        sets that share an sstable with a selected bucket, or TRANSITIVE to include
+    /// @param inclusionMethod `NONE` to only form buckets of the overlapping sets, `SINGLE` to include all
+    ///                        sets that share an sstable with a selected bucket, or `TRANSITIVE` to include
     ///                        all sets that have an overlap chain to a selected bucket.
     /// @param overlaps        An ordered list of overlap sets as returned by [#constructOverlapSets].
     /// @param bucketer        Method used to create a bucket out of the supplied set indexes.

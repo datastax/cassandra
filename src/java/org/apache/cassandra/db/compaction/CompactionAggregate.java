@@ -832,6 +832,13 @@ public abstract class CompactionAggregate
         }
     }
 
+    /**
+     * A unified compaction aggregate for compaction over a specified subrange of the given sources. This would be a
+     * part of a larger composite transaction over the same inputs sstables, thus a ranged aggregate's tasks cannot
+     * delete any of the input sstables, which needs to be done in addition to the execution of this aggregate.
+     * The intended use of this is to parallelize compactions over multiple nodes in CNDB.
+     * See RangedAggregatesTest for an example of how this would be used.
+     */
     public static class UnifiedWithRange extends UnifiedAggregate
     {
         private final Range<Token> operationRange;
@@ -879,7 +886,9 @@ public abstract class CompactionAggregate
         return new UnifiedAggregate(sstables, maxOverlap, selected, pending, arena, level);
     }
 
-    // used by CNDB
+    /**
+     * Create a ranged portion of the specified aggregate. To be used by CNDB to split compaction over nodes.
+     */
     public static UnifiedAggregate createUnifiedWithRange(UnifiedAggregate base,
                                                           Collection<? extends CompactionSSTable> rangeSSTables,
                                                           Range<Token> range,
