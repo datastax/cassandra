@@ -75,6 +75,9 @@ public abstract class ColumnFilter
 
     public static final Serializer serializer = new Serializer();
 
+    // TODO remove this with ANN_USE_SYNTHETIC_SCORE
+    public abstract boolean fetchesExplicitly(ColumnMetadata column);
+
     /**
      * The fetching strategy for the different queries.
      */
@@ -670,6 +673,12 @@ public abstract class ColumnFilter
         }
 
         @Override
+        public boolean fetchesExplicitly(ColumnMetadata column)
+        {
+            return false;
+        }
+
+        @Override
         public boolean fetchedColumnIsQueried(ColumnMetadata column)
         {
             return true;
@@ -815,6 +824,12 @@ public abstract class ColumnFilter
         public boolean fetches(ColumnMetadata column)
         {
             return fetchingStrategy.fetchesAllColumns(column.isStatic()) || fetched.contains(column);
+        }
+
+        @Override
+        public boolean fetchesExplicitly(ColumnMetadata column)
+        {
+            return fetched.contains(column);
         }
 
         /**

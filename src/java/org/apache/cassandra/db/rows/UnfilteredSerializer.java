@@ -242,11 +242,6 @@ public class UnfilteredSerializer
                 // with. So we use the ColumnMetadata from the "header" which is "current". Also see #11810 for what
                 // happens if we don't do that.
                 ColumnMetadata column = si.next(cd.column());
-                // We can't know for sure whether to add the synthetic score column because WildcardColumnFilter
-                // just says "yes" to everything; instead, we just skip it here.
-                // TODO remove this with SelectStatement.ANN_USE_SYNTHETIC_SCORE.
-                if (column == null)
-                    return;
                 assert column != null : cd.column.toString();
 
                 try

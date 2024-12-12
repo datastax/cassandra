@@ -42,6 +42,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
@@ -636,7 +637,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                         }
                     }
                 }
-                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row, sourceKeys) : null;
+                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row, sourceKeys, controller.command()) : null;
             }
         }
 
@@ -657,7 +658,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             private boolean consumed = false;
             private final Unfiltered row;
 
-            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, List<PrimaryKeyWithSortKey> primaryKeysWithScore)
+            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, List<PrimaryKeyWithSortKey> primaryKeysWithScore, ReadCommand command)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -668,7 +669,24 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                       partition.stats());
 
                 assert !primaryKeysWithScore.isEmpty();
-                if (!content.isRow() || !(primaryKeysWithScore.get(0) instanceof PrimaryKeyWithScore))
+                var isScoredRow = primaryKeysWithScore.get(0) instanceof PrimaryKeyWithScore;
+                if (!content.isRow() || !isScoredRow)
+                {
+                    this.row = content;
+                    return;
+                }
+
+                // When +score is added on the coordinator side, it's represented as a PrecomputedColumnFilter
+                // even in a 'SELECT *' because WCF is not capable of representing synthetic columns.
+                // This can be simplified when we remove ANN_USE_SYNTHETIC_SCORE
+                var tm = metadata();
+                var scoreColumn = ColumnMetadata.syntheticColumn(tm.keyspace,
+                                                                 tm.name,
+                                                                 ColumnMetadata.SYNTHETIC_SCORE_ID,
+                                                                 FloatType.instance);
+                var isScoreFetched = !(command.columnFilter() instanceof ColumnFilter.WildCardColumnFilter)
+                                     && command.columnFilter().fetchesExplicitly(scoreColumn);
+                if (!isScoreFetched)
                 {
                     this.row = content;
                     return;
@@ -680,11 +698,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 columnData.addAll(originalRow.columnData());
 
                 // inject +score as a new column
-                var tm = metadata();
-                var scoreColumn = ColumnMetadata.syntheticColumn(tm.keyspace,
-                                                                 tm.name,
-                                                                 ColumnMetadata.SYNTHETIC_SCORE_ID,
-                                                                 FloatType.instance);
                 var pkWithScore = (PrimaryKeyWithScore) primaryKeysWithScore.get(0);
                 columnData.add(BufferCell.live(scoreColumn,
                                                FBUtilities.nowInSeconds(),

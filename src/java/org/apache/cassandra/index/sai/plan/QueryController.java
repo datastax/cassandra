@@ -195,6 +195,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return command.metadata();
     }
 
+    public ReadCommand command()
+    {
+        return command;
+    }
+
     RowFilter.FilterElement filterOperation()
     {
         // NOTE: we cannot remove the order by filter expression here yet because it is used in the FilterTree class

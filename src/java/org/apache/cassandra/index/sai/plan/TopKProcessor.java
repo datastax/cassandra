@@ -364,7 +364,7 @@ public class TopKProcessor
             return FloatType.instance.compose(cell.buffer());
         }
 
-        // TODO remove this once we enable the scored path for vector queries
+        // TODO remove this once we enable ANN_USE_SYNTHETIC_SCORE
         ByteBuffer value = indexContext.getValueOf(key, row, FBUtilities.nowInSeconds());
         if (value != null)
         {

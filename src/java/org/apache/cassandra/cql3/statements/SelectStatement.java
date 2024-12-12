@@ -103,9 +103,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 {
     // TODO remove this when we no longer need to downgrade to replicas that don't know about synthetic columns,
     // and the related code in
-    //  - Columns.Serializer.encodeBitmap
-    //  - UnfilteredSerializer.serializeRowBody)
     //  - StatementRestrictions.addOrderingRestrictions
+    //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
     public static final boolean ANN_USE_SYNTHETIC_SCORE = Boolean.parseBoolean(System.getProperty("cassandra.sai.ann_use_synthetic_score", "false"));
 
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
