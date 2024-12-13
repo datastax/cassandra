@@ -40,7 +40,7 @@ import static org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPosi
 /// Simple SSTable scanner that reads sequentially through an SSTable without using the index.
 ///
 /// This is a significant improvement for the performance of compaction over using the full-blown DataRange-capable
-/// [SSTableScanner] and enables correct calculation of data sizes to process.
+/// SSTable scanners and enables correct calculation of data sizes to process.
 public class SSTableSimpleScanner
 implements ISSTableScanner
 {
@@ -129,7 +129,7 @@ implements ISSTableScanner
     @Override
     public int level()
     {
-        return 0;
+        return sstable.getSSTableLevel();
     }
 
     public TableMetadata metadata()

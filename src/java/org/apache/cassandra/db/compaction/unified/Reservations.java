@@ -21,29 +21,27 @@ package org.apache.cassandra.db.compaction.unified;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Reservations management for compaction. Defines the two types of reservations, and implements the code for accepting
- * or rejecting compactions to satisfy the reservation requirements.
- */
+/// Reservations management for compaction. Defines the two types of reservations, and implements the code for accepting
+/// or rejecting compactions to satisfy the reservation requirements.
 public abstract class Reservations
 {
     public enum Type
     {
-        /** The given number of reservations can be used only for the level. */
+        /// The given number of reservations can be used only for the level.
         PER_LEVEL,
-        /** The reservations can be used for the level, or any one below it. */
+        /// The reservations can be used for the level, or any one below it.
         LEVEL_OR_BELOW
     }
 
     private static final Logger logger = LoggerFactory.getLogger(Reservations.class);
 
-    /** Number of compactions to reserve for each level. */
+    /// Number of compactions to reserve for each level.
     final int perLevelCount;
-    /** Remainder of compactions to be distributed among the levels. */
+    /// Remainder of compactions to be distributed among the levels.
     final int remainder;
-    /** Whether only one compaction over the reservation count is allowed per level. */
+    /// Whether only one compaction over the reservation count is allowed per level.
     final boolean oneRemainderPerLevel;
-    /** Number of compactions already running or selected in each level. */
+    /// Number of compactions already running or selected in each level.
     final int[] perLevel;
 
     private Reservations(int totalCount, int[] perLevel, int reservedThreadsTarget)
@@ -59,7 +57,13 @@ public abstract class Reservations
         oneRemainderPerLevel = perLevelCount < reservedThreadsTarget;
     }
 
-    public abstract boolean accept(int inLevel);
+    /// Accept a compaction in the given level if possible.
+    /// @param parallelismRequested The number of threads requested for the compaction.
+    /// @returns The number of threads given to the compaction, or 0 if the compaction cannot be accepted.
+    public abstract int accept(int inLevel, int parallelismRequested);
+
+    public abstract boolean hasRoom(int inLevel);
+
     public abstract void debugOutput(int selectedCount, int proposedCount, int remaining);
 
     public static Reservations create(int totalCount, int[] perLevel, int reservedThreadsTarget, Type reservationsType)
@@ -71,9 +75,7 @@ public abstract class Reservations
                : new LevelOrBelow(totalCount, perLevel, reservedThreadsTarget);
     }
 
-    /**
-     * Trivial tracker used when there are no reservations. All compactions are accepted.
-     */
+    /// Trivial tracker used when there are no reservations. All compactions are accepted.
     private static class Trivial extends Reservations
     {
         private Trivial(int totalCount, int[] perLevel)
@@ -82,9 +84,15 @@ public abstract class Reservations
         }
 
         @Override
-        public boolean accept(int inLevel)
+        public int accept(int inLevel, int requestedParallelism)
         {
-            ++perLevel[inLevel];
+            perLevel[inLevel] += requestedParallelism;
+            return requestedParallelism;
+        }
+
+        @Override
+        public boolean hasRoom(int inLevel)
+        {
             return true;
         }
 
@@ -100,12 +108,10 @@ public abstract class Reservations
         }
     }
 
-    /**
-     * Per-level tracker.
-     * <p>
-     * Reservations are applied by tracking how much of the remainder threads are being used, and only allowing
-     * compactions in a level if their number is below the per-level count, or if there is a remainder slot to be given.
-     */
+    /// Per-level tracker.
+    ///
+    /// Reservations are applied by tracking how much of the remainder threads are being used, and only allowing
+    /// compactions in a level if their number is below the per-level count, or if there is a remainder slot to be given.
     private static class PerLevel extends Reservations
     {
         int remainderDistributed;
@@ -121,18 +127,43 @@ public abstract class Reservations
         }
 
         @Override
-        public boolean accept(int inLevel)
+        public int accept(int inLevel, int requestedParallelism)
         {
-            if (perLevel[inLevel] >= perLevelCount)
+            int assigned = perLevelCount - perLevel[inLevel];
+            assigned = Math.min(assigned, requestedParallelism);
+            assigned = Math.max(assigned, 0);
+
+            if (assigned < requestedParallelism && remainderDistributed < remainder)
             {
-                if (remainderDistributed >= remainder)
-                    return false;  // share used up and no remainder to distribute
-                if (oneRemainderPerLevel && perLevel[inLevel] > perLevelCount)
-                    return false;  // this level is already using up all its share + one
-                ++remainderDistributed;
+                // we have a remainder to distribute
+                if (oneRemainderPerLevel)
+                {
+                    if (perLevel[inLevel] <= perLevelCount) // we can only give one above, and only if that one is not yet used
+                    {
+                        ++assigned;
+                        ++remainderDistributed;
+                    }
+                }
+                else
+                {
+                    int requestedFromRemainder = requestedParallelism - assigned;
+                    int assignedFromRemainder = Math.min(requestedFromRemainder, remainder - remainderDistributed);
+                    assigned += assignedFromRemainder;
+                    remainderDistributed += assignedFromRemainder;
+                }
             }
-            ++perLevel[inLevel];
-            return true;
+
+            perLevel[inLevel] += assigned;
+            return assigned;
+        }
+
+        @Override
+        public boolean hasRoom(int inLevel)
+        {
+            // If we have room in the level, we can accommodate.
+            return (perLevel[inLevel] < perLevelCount) ||
+                   // Otherwise, we need to have remainder to distribute, and not used the one extra if we are in oneRemainderPerLevel mode.
+                   (remainderDistributed < remainder) && (!oneRemainderPerLevel || perLevel[inLevel] == perLevelCount);
         }
 
         @Override
@@ -144,17 +175,15 @@ public abstract class Reservations
         }
     }
 
-    /**
-     * Tracker for the level or below case.
-     * <p>
-     * For any given level, the reservations are satisfied if the total sum of compactions for the level and all levels
-     * above it is at most the product of the number of levels and the per-level count, plus any remainder (up to the
-     * number of levels when oneRemainderPerLevel is true).
-     * <p>
-     * To permit a compaction, we gather this sum for all levels above, and make sure this property will not be violated
-     * by adding the new compaction for the current, as well as all levels below it. The latter is necessary because
-     * a lower level may have already used up all allocations for this one.
-     */
+    /// Tracker for the level or below case.
+    ///
+    /// For any given level, the reservations are satisfied if the total sum of compactions for the level and all levels
+    /// above it is at most the product of the number of levels and the per-level count, plus any remainder (up to the
+    /// number of levels when oneRemainderPerLevel is true).
+    ///
+    /// To permit a compaction, we gather this sum for all levels above, and make sure this property will not be violated
+    /// by adding the new compaction for the current, as well as all levels below it. The latter is necessary because
+    /// a lower level may have already used up all allocations for this one.
     private static class LevelOrBelow extends Reservations
     {
         LevelOrBelow(int totalCount, int[] perLevel, int reservedThreadsTarget)
@@ -163,35 +192,52 @@ public abstract class Reservations
         }
 
         @Override
-        public boolean accept(int inLevel)
+        public int accept(int inLevel, int requestedParallelism)
+        {
+            return checkRoom(inLevel, requestedParallelism, true);
+        }
+
+        @Override
+        public boolean hasRoom(int inLevel)
+        {
+            return checkRoom(inLevel, 1, false) > 0;
+        }
+
+        public int checkRoom(int inLevel, int requestedParallelism, boolean markUse)
         {
             // Limit the sum of the number of threads of any level and all higher to their number
             // times perLevelCount, plus any remainder (up to the number when oneRemainderPerLevel is true).
             int sum = 0;
-            int permitted = 0;
+            int permittedQuota = 0;
             int permittedRemainder = oneRemainderPerLevel ? 0 : remainder;
             int level = perLevel.length - 1;
+            int tentativelyAssigned = requestedParallelism;
             // For all higher levels, calculate the total number of threads used and permitted.
             for (; level > inLevel; --level)
             {
                 sum += perLevel[level];
-                permitted += perLevelCount;
+                permittedQuota += perLevelCount;
                 if (oneRemainderPerLevel && permittedRemainder < remainder)
                     ++permittedRemainder;
             }
 
-            // For this level and all below, check that the limit is not yet hit.
+            // Also adjust for the limit as it applies for this level and all below.
             for (; level >= 0; --level)
             {
                 sum += perLevel[level];
-                permitted += perLevelCount;
+                permittedQuota += perLevelCount;
                 if (oneRemainderPerLevel && permittedRemainder < remainder)
                     ++permittedRemainder;
-                if (sum >= permitted + permittedRemainder)
-                    return false; // some lower level used up our share
+                if (tentativelyAssigned > permittedQuota + permittedRemainder - sum)
+                {
+                    tentativelyAssigned = permittedQuota + permittedRemainder - sum;
+                    if (tentativelyAssigned <= 0)
+                        return 0; // some lower level used up our share
+                }
             }
-            ++perLevel[inLevel];
-            return true;
+            if (markUse)
+                perLevel[inLevel] += tentativelyAssigned;
+            return tentativelyAssigned;
         }
 
         @Override
