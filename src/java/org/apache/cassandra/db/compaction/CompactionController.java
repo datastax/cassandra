@@ -24,6 +24,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.LongPredicate;
+import java.util.function.UnaryOperator;
+
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
@@ -127,7 +129,7 @@ public class CompactionController extends AbstractCompactionController
     {
         if (overlapTracker == null)
             return Collections.emptySet();
-        return getFullyExpiredSSTables(realm, compacting, overlapTracker.overlaps(), gcBefore, ignoreOverlaps());
+        return getFullyExpiredSSTables(realm, compacting, c -> overlapTracker.overlaps(), gcBefore, ignoreOverlaps());
     }
 
     /**
@@ -142,7 +144,7 @@ public class CompactionController extends AbstractCompactionController
      *
      * @param realm
      * @param compacting we take the drop-candidates from this set, it is usually the sstables included in the compaction
-     * @param overlapping the sstables that overlap the ones in compacting.
+     * @param overlappingSupplier called on the compacting sstables to compute the set of sstables that overlap with them if needed
      * @param gcBefore
      * @param ignoreOverlaps don't check if data shadows/overlaps any data in other sstables
      * @return
@@ -150,7 +152,7 @@ public class CompactionController extends AbstractCompactionController
     public static
     Set<CompactionSSTable> getFullyExpiredSSTables(CompactionRealm realm,
                                                    Iterable<? extends CompactionSSTable> compacting,
-                                                   Iterable<? extends CompactionSSTable> overlapping,
+                                                   UnaryOperator<Iterable<? extends CompactionSSTable>> overlappingSupplier,
                                                    long gcBefore,
                                                    boolean ignoreOverlaps)
     {
@@ -165,6 +167,7 @@ public class CompactionController extends AbstractCompactionController
         long minTimestamp;
         if (!ignoreOverlaps)
         {
+            var overlapping = overlappingSupplier.apply(compacting);
             minTimestamp = Math.min(Math.min(minSurvivingTimestamp(overlapping, gcBefore),
                                              minSurvivingTimestamp(compacting, gcBefore)),
                                     minTimestamp(realm.getAllMemtables()));
@@ -222,10 +225,10 @@ public class CompactionController extends AbstractCompactionController
     public static
     Set<CompactionSSTable> getFullyExpiredSSTables(CompactionRealm realm,
                                                    Iterable<? extends CompactionSSTable> compacting,
-                                                   Iterable<? extends CompactionSSTable> overlapping,
+                                                   UnaryOperator<Iterable<? extends CompactionSSTable>> overlappingSupplier,
                                                    long gcBefore)
     {
-        return getFullyExpiredSSTables(realm, compacting, overlapping, gcBefore, false);
+        return getFullyExpiredSSTables(realm, compacting, overlappingSupplier, gcBefore, false);
     }
 
     /**
