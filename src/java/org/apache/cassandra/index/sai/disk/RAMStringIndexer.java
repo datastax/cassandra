@@ -140,27 +140,36 @@ public class RAMStringIndexer
         };
     }
 
+    /**
+     * @return bytes allocated.  may be zero if the (term, row) pair is a duplicate
+     */
     public long add(BytesRef term, int segmentRowId)
     {
         long startBytes = estimatedBytesUsed();
         int termID = termsHash.add(term);
+        boolean firstOccurrence = termID >= 0;
 
-        if (termID >= 0)
+        if (firstOccurrence)
         {
-            // firs time seeing this term, create the term's first slice !
+            // first time seeing this term, create the term's first slice !
             slices.createNewSlice(termID);
         }
         else
         {
             termID = (-termID) - 1;
+            // compaction should call this method only with increasing segmentRowIds
+            assert segmentRowId >= lastSegmentRowID[termID];
+            // Skip if we've already recorded seen this segmentRowId for this term
+            if (segmentRowId == lastSegmentRowID[termID])
+                return 0;
         }
 
         if (termID >= lastSegmentRowID.length - 1)
-        {
             lastSegmentRowID = ArrayUtil.grow(lastSegmentRowID, termID + 1);
-        }
 
         int delta = segmentRowId - lastSegmentRowID[termID];
+        // sanity check that we're advancing the row id, i.e. no duplicate entries.
+        assert firstOccurrence || delta > 0;
 
         lastSegmentRowID[termID] = segmentRowId;
 

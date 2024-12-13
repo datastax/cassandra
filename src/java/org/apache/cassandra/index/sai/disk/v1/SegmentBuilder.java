@@ -208,6 +208,7 @@ public abstract class SegmentBuilder
             var encodedTerm = components.onDiskFormat().encodeForTrie(term, termComparator);
             var bytes = ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(byteComparableVersion));
             var bytesRef = new BytesRef(bytes);
+            // ramIndexer is responsible for merging duplicate (term, row) pairs
             return ramIndexer.add(bytesRef, segmentRowId);
         }
 
