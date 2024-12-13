@@ -382,7 +382,7 @@ public interface IndexRegistry
 
     /**
      * @return
-     * - AMBIGUOUS if an index supports EQ and a different one supports EQ and ANALYZER_MATCHES
+     * - AMBIGUOUS if an index supports EQ and a different one supports both EQ and ANALYZER_MATCHES
      * - MATCHES if an index supports both EQ and ANALYZER_MATCHES
      * - otherwise EQ
      */

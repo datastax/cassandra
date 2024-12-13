@@ -40,12 +40,30 @@ public class MultipleColumnIndexTest extends SAITester
     }
 
     @Test
-    public void cannotHaveMultipleLiteralIndexesWithDifferentOptions() throws Throwable
+    public void canHaveAnalyzedAndUnanalyzedIndexesOnSameColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, value text, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }");
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false, 'equals_behaviour_when_analyzed': 'unsupported' }");
+
+        execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, "a");
+        execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 2, "A");
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE value = 'a'"),
+                       row(1));
+            assertRows(execute("SELECT pk FROM %s WHERE value : 'a'"),
+                       row(1),
+                       row(2));
+        });
+    }
+
+    @Test
+    public void cannotHaveMultipleAnalyzingIndexesOnSameColumn() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, ck int, value text, PRIMARY KEY(pk, ck))");
-        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }");
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false }"))
-                .isInstanceOf(InvalidRequestException.class);
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false }");
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : true }"))
+        .isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
