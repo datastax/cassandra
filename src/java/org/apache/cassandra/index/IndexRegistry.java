@@ -21,6 +21,7 @@
 package org.apache.cassandra.index;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
@@ -380,57 +381,36 @@ public interface IndexRegistry
     }
 
     /**
-     * @return - EQ if a single index supports EQ
-     * - MATCHES if a single index supports both
-     * - AMBIGUOUS if multiple indexes support EQ
+     * @return
+     * - AMBIGUOUS if an index supports EQ and a different one supports EQ and ANALYZER_MATCHES
+     * - MATCHES if an index supports both EQ and ANALYZER_MATCHES
+     * - otherwise EQ
      */
     default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm)
     {
-        // scan the indexes for MATCHES and EQ support
-        Index matchesIndex = null;
-        Index eqIndex = null;
+        Index eqOnlyIndex = null;
+        Index bothIndex = null;
+
         for (Index index : listIndexes())
         {
-            if (index.supportsExpression(cm, Operator.EQ))
-            {
-                if (eqIndex == null)
-                {
-                    eqIndex = index;
-                    continue;
-                }
+            boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
+            boolean supportsMatches = index.supportsExpression(cm, Operator.ANALYZER_MATCHES);
 
-                // If we find a second EQ index, return AMBIGUOUS, taking care to assign the eqIndex and matchIndex correctly
-                if (index.supportsExpression(cm, Operator.ANALYZER_MATCHES))
-                {
-                    matchesIndex = index;
-                }
-                else
-                {
-                    assert eqIndex.supportsExpression(cm, Operator.ANALYZER_MATCHES);
-                    matchesIndex = eqIndex;
-                    eqIndex = index;
-                }
-                return EqBehaviorIndexes.ambiguous(eqIndex, matchesIndex);
-            }
-
-            if (index.supportsExpression(cm, Operator.ANALYZER_MATCHES))
-            {
-                // should only ever have one
-                assert matchesIndex == null;
-                matchesIndex = index;
-            }
+            if (supportsEq && supportsMatches)
+                bothIndex = index;
+            else if (supportsEq)
+                eqOnlyIndex = index;
         }
 
-        // If we didn't find any indexes that support EQ or MATCHES, return EQ
-        if (eqIndex == null && matchesIndex == null)
-            return EqBehaviorIndexes.eq(null);
+        // If we have one index supporting only EQ and another supporting both, return AMBIGUOUS
+        if (eqOnlyIndex != null && bothIndex != null)
+            return EqBehaviorIndexes.ambiguous(eqOnlyIndex, bothIndex);
 
-        // If the same index supports both EQ and MATCHES, promote to MATCHES
-        if (eqIndex == matchesIndex)
-            return EqBehaviorIndexes.match(matchesIndex);
+        // If we have an index supporting both EQ and MATCHES, return MATCHES
+        if (bothIndex != null)
+            return EqBehaviorIndexes.match(bothIndex);
 
-        // Otherwise we either have no MATCHES index, or it's distinct from the EQ index.
-        // In both cases we want to return EQ
-        return EqBehaviorIndexes.eq(eqIndex);
+        // Otherwise return EQ
+        return EqBehaviorIndexes.eq(eqOnlyIndex == null ? bothIndex : eqOnlyIndex);
     }
 }
