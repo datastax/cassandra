@@ -62,7 +62,7 @@ public interface ShardTracker
      */
     int shardIndex();
 
-    default long shardAdjustedKeyCount(Set<SSTableReader> sstables)
+    default long shardAdjustedKeyCount(Set<? extends CompactionSSTable> sstables)
     {
         // Note: computationally non-trivial; can be optimized if we save start/stop shards and size per table.
         long shardAdjustedKeyCount = 0;

@@ -122,12 +122,12 @@ public class PendingRepairHolder extends AbstractStrategyHolder
     }
 
     @Override
-    public Collection<AbstractCompactionTask> getMaximalTasks(int gcBefore, boolean splitOutput)
+    public Collection<AbstractCompactionTask> getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
         List<AbstractCompactionTask> tasks = new ArrayList<>(managers.size());
         for (PendingRepairManager manager : managers)
         {
-            tasks.addAll(manager.getMaximalTasks(gcBefore, splitOutput));
+            tasks.addAll(manager.getMaximalTasks(gcBefore, splitOutput, permittedParallelism));
         }
         return tasks;
     }

@@ -914,7 +914,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public CompactionTasks getMaximalTasks(final int gcBefore, final boolean splitOutput)
+    public CompactionTasks getMaximalTasks(final int gcBefore, final boolean splitOutput, int permittedParallelism)
     {
         maybeReloadDiskBoundaries();
         // runWithCompactionsDisabled cancels active compactions and disables them, then we are able
@@ -927,14 +927,14 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
             {
                 for (AbstractStrategyHolder holder : holders)
                 {
-                    tasks.addAll(holder.getMaximalTasks(gcBefore, splitOutput));
+                    tasks.addAll(holder.getMaximalTasks(gcBefore, splitOutput, permittedParallelism));
                 }
             }
             finally
             {
                 readLock.unlock();
             }
-            return CompactionTasks.create(tasks);
+            return CompactionTasks.create(CompositeCompactionTask.applyParallelismLimit(tasks, permittedParallelism));
         }, false, false, TableOperation.StopTrigger.COMPACTION);
     }
 

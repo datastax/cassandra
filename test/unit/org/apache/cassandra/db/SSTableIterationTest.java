@@ -19,9 +19,11 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.cql3.CQLTester;
@@ -29,6 +31,9 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.compaction.SortedStringTableCursor;
 import org.apache.cassandra.io.sstable.compaction.IteratorFromCursor;
 import org.apache.cassandra.io.sstable.compaction.SSTableCursor;
@@ -36,6 +41,8 @@ import org.apache.cassandra.io.sstable.compaction.SSTableCursorMerger;
 import org.apache.cassandra.io.sstable.compaction.SkipEmptyDataCursor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.FBUtilities;
+
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -46,8 +53,8 @@ import static org.junit.Assert.assertTrue;
 public class SSTableIterationTest extends CQLTester
 {
 
-    public static final int PARTITIONS = 5;
-    public static final int ROWS = 10;
+    public static final int PARTITIONS = 50;
+    public static final int ROWS = 100;
 
     @Test
     public void testRowIteration() throws Throwable
@@ -142,6 +149,48 @@ public class SSTableIterationTest extends CQLTester
         SSTableReader reader = cfs.getLiveSSTables().iterator().next();
         assertCursorMatchesScanner(reader);
     }
+
+    @Test
+    public void testRestrictedIteration() throws Throwable
+    {
+        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
+        for (int i = 0; i < PARTITIONS; ++i)
+            for (int j = 0; j < ROWS; j++)
+                if (i != j)
+                    execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?) USING TIMESTAMP ?", i, 0, j, i + j, (long) j);
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        assertEquals((ROWS - 1) * PARTITIONS, execute("SELECT * FROM %s").size());
+
+        Random rand = new Random(1);
+        SSTableReader reader = cfs.getLiveSSTables().iterator().next();
+        assertCursorMatchesScanner(reader, 0.1, 0.1);
+        // one-sided bounds
+        assertCursorMatchesScanner(reader, Double.NaN, 0.7);
+        assertCursorMatchesScanner(reader, 0.6, Double.NaN);
+        // at ends of the sstable (start partition should be removed, end partition should be kept)
+        assertCursorMatchesScanner(reader, 0, 0.5);
+        assertCursorMatchesScanner(reader, 0, Double.NaN);
+        assertCursorMatchesScanner(reader, 0.4, 0);
+        assertCursorMatchesScanner(reader, Double.NaN, 0);
+        // beyond the ends of the sstable
+        assertCursorMatchesScanner(reader, -0.001, 0.3);
+        assertCursorMatchesScanner(reader, 0.7, -0.001);
+        // No bounds variations
+        assertCursorMatchesScanner(reader, Double.NaN, Double.NaN);
+        assertCursorMatchesScanner(reader, -0.001, -0.001);
+        // almost empty
+        assertCursorMatchesScanner(reader, 0.499, 0.5);
+        assertCursorMatchesScanner(reader, 0.0, 0.999);
+        assertCursorMatchesScanner(reader, 0.999, 0);
+        // outside span
+        assertCursorMatchesScanner(reader, Double.NaN, 1.001);
+        assertCursorMatchesScanner(reader, 1.001, Double.NaN);
+        assertCursorMatchesScanner(reader, -0.002, 1.001);
+        assertCursorMatchesScanner(reader, 1.001, -0.002);
+    }
+
 
 
     @Test
@@ -260,6 +309,37 @@ public class SSTableIterationTest extends CQLTester
              UnfilteredPartitionIterator cursor = new IteratorFromCursor(reader.metadata(), new SortedStringTableCursor(reader)))
         {
             assertIteratorsEqual(scanner, cursor, false);
+        }
+    }
+
+    private void assertCursorMatchesScanner(SSTableReader reader, double cutLeft, double cutRight) throws IOException
+    {
+
+        final Token first = reader.first.getToken();
+        final Token last = reader.last.getToken();
+        final IPartitioner partitioner = first.getPartitioner();
+
+        // cut off the given ratio from start and end
+        final Token left = !Double.isNaN(cutLeft) ? partitioner.split(first, last, cutLeft) : partitioner.getMinimumToken();
+        final Token right = !Double.isNaN(cutRight) ? partitioner.split(first, last, 1 - cutRight) : partitioner.getMinimumToken();
+        Range<Token> range = new Range<>(left, right);
+        System.out.println(String.format("\nRange %.3f to %.3f: %s", cutLeft, 1 - cutRight, range));
+        assert !range.isTrulyWrapAround();
+        try (var scanner = reader.getScanner(ImmutableList.of(range));
+             var cursor = new SortedStringTableCursor(reader, range))
+        {
+            System.out.println(String.format("Length %s vs %s", FBUtilities.prettyPrintMemory(scanner.getLengthInBytes()),
+                                             FBUtilities.prettyPrintMemory(cursor.bytesTotal())));
+            System.out.println(String.format("Position %s vs %s", FBUtilities.prettyPrintMemory(scanner.getCurrentPosition()),
+                                             FBUtilities.prettyPrintMemory(cursor.bytesProcessed())));
+
+            var fromCursor = new IteratorFromCursor(reader.metadata(), cursor);
+            assertIteratorsEqual(scanner, fromCursor, false);
+
+            System.out.println(String.format("Length %s vs %s", FBUtilities.prettyPrintMemory(scanner.getLengthInBytes()),
+                                             FBUtilities.prettyPrintMemory(cursor.bytesTotal())));
+            System.out.println(String.format("Position %s vs %s", FBUtilities.prettyPrintMemory(scanner.getCurrentPosition()),
+                                             FBUtilities.prettyPrintMemory(cursor.bytesProcessed())));
         }
     }
 

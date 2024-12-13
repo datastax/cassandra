@@ -28,7 +28,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.compaction.LeveledManifest;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
@@ -45,7 +45,7 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
 
     public MajorLeveledCompactionWriter(CompactionRealm realm,
                                         Directories directories,
-                                        LifecycleTransaction txn,
+                                        ILifecycleTransaction txn,
                                         Set<SSTableReader> nonExpiredSSTables,
                                         long maxSSTableSize)
     {
@@ -55,7 +55,7 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
     @SuppressWarnings("resource")
     public MajorLeveledCompactionWriter(CompactionRealm realm,
                                         Directories directories,
-                                        LifecycleTransaction txn,
+                                        ILifecycleTransaction txn,
                                         Set<SSTableReader> nonExpiredSSTables,
                                         long maxSSTableSize,
                                         boolean keepOriginals)

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.UUID;
+import java.util.function.BiPredicate;
 
 import javax.annotation.Nullable;
 
@@ -57,6 +58,7 @@ public interface CompactionSSTable
     Comparator<CompactionSSTable> sizeComparator = (o1, o2) -> Long.compare(o1.onDiskLength(), o2.onDiskLength());
     Comparator<CompactionSSTable> idComparator = (o1, o2) -> SSTableIdFactory.COMPARATOR.compare(o1.getId(), o2.getId());
     Comparator<CompactionSSTable> idReverseComparator = idComparator.reversed();
+    BiPredicate<CompactionSSTable, CompactionSSTable> startsAfter = (a, b) -> a.getFirst().compareTo(b.getLast()) > 0;
 
     /**
      * @return the position of the first partition in the sstable

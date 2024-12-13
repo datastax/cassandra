@@ -166,16 +166,16 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     }
 
     /**
-     * @param gcBefore throw away tombstones older than this
-     *
+     * @param gcBefore             throw away tombstones older than this
+     * @param permittedParallelism the maximum permitted parallelism for the operation
      * @return a compaction task that should be run to compact this columnfamilystore
      * as much as possible.  Null if nothing to do.
-     *
+     * <p>
      * Is responsible for marking its sstables as compaction-pending.
      */
     @Override
     @SuppressWarnings("resource")
-    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
         Iterable<? extends CompactionSSTable> filteredSSTables = Iterables.filter(getSSTables(), sstable -> !sstable.isMarkedSuspect());
         if (Iterables.isEmpty(filteredSSTables))

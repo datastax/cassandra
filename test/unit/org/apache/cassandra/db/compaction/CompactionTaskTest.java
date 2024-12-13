@@ -334,7 +334,7 @@ public class CompactionTaskTest
         Mockito.when(mock.getCompactionLogger()).thenReturn(logger);
         Mockito.when(mock.getScanners(anyCollection()))
                .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), null));
-        Mockito.when(mock.getScanners(anyCollection(), anyCollection()))
+        Mockito.when(mock.getScanners(anyCollection(), any()))
                .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), answ.getArgument(1)));
         return mock;
     }

@@ -106,6 +106,11 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         return new SSTableRewriter(transaction, maxAge, calculateOpenInterval(realm.supportsEarlyOpen()), keepOriginals, true);
     }
 
+    public static SSTableRewriter construct(CompactionRealm realm, ILifecycleTransaction transaction, boolean keepOriginals, long maxAge, boolean earlyOpenAllowed)
+    {
+        return new SSTableRewriter(transaction, maxAge, calculateOpenInterval(earlyOpenAllowed && realm.supportsEarlyOpen()), keepOriginals, true);
+    }
+
     private static long calculateOpenInterval(boolean shouldOpenEarly)
     {
         long interval = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMB() * (1L << 20);

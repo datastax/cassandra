@@ -138,7 +138,7 @@ class SimpleShardTracker implements ShardTracker
     }
 
     @Override
-    public long shardAdjustedKeyCount(Set<SSTableReader> sstables)
+    public long shardAdjustedKeyCount(Set<? extends CompactionSSTable> sstables)
     {
         // Not sure if this needs a custom implementation yet
         return ShardTracker.super.shardAdjustedKeyCount(sstables);

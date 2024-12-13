@@ -18,25 +18,32 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
 import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SortedLocalRanges;
+import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.utils.Pair;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
@@ -380,7 +387,197 @@ public class ShardManagerTest
                     ++count;
                 }
                 assertEquals(numDisks * numShards, count);
+
+                assertEquals(numDisks * numShards, iterator.count());
             }
         }
+    }
+
+    @Test
+    public void testSpannedShardCount()
+    {
+        CompactionRealm realm = Mockito.mock(CompactionRealm.class);
+        when(realm.getPartitioner()).thenReturn(partitioner);
+        SortedLocalRanges sortedRanges = SortedLocalRanges.forTestingFull(realm);
+
+        for (int numDisks = 1; numDisks <= 3; ++numDisks)
+        {
+            List<Token> diskBoundaries = sortedRanges.split(numDisks);
+            DiskBoundaries db = Mockito.mock(DiskBoundaries.class);
+            when(db.getLocalRanges()).thenReturn(sortedRanges);
+            when(db.getPositions()).thenReturn(diskBoundaries);
+
+            var rs = Mockito.mock(AbstractReplicationStrategy.class);
+
+            ShardManager shardManager = ShardManager.create(db, rs, false);
+            for (int numShards = 1; numShards <= 3; ++numShards)
+            {
+                checkCoveredCount(shardManager, numDisks, numShards, 0.01, 0.99);
+                checkCoveredCount(shardManager, numDisks, numShards, 0.01, 0.49);
+                checkCoveredCount(shardManager, numDisks, numShards, 0.51, 0.99);
+                checkCoveredCount(shardManager, numDisks, numShards, 0.26, 0.74);
+
+                for (double l = 0; l <= 1; l += 0.05)
+                    for (double r = l; r <= 1; r += 0.05)
+                        checkCoveredCount(shardManager, numDisks, numShards, l, r);
+            }
+        }
+    }
+
+    private void checkCoveredCount(ShardManager shardManager, int numDisks, int numShards, double left, double right)
+    {
+        Token min = partitioner.getMinimumToken();
+        int totalSplits = numDisks * numShards;
+        int leftIdx = left == 0 ? 0 : (int) Math.ceil(left * totalSplits) - 1; // to reflect end-inclusiveness of ranges
+        int rightIdx = right == 0 ? 0 : (int) Math.ceil(right * totalSplits) - 1;
+        assertEquals(String.format("numDisks %d numShards %d left %f right %f", numDisks, numShards, left, right),
+                     rightIdx - leftIdx + 1,
+                     shardManager.coveredShardCount(partitioner.split(min, min, left).maxKeyBound(),
+                                                    partitioner.split(min, min, right).maxKeyBound(),
+                                                    numShards));
+    }
+
+    @Test
+    public void testSplitSSTablesInRanges()
+    {
+        testSplitSSTablesInRanges(8, ints(1, 2, 4));
+        testSplitSSTablesInRanges(4, ints(1, 2, 4));
+        testSplitSSTablesInRanges(2, ints(1, 2, 4));
+        testSplitSSTablesInRanges(5, ints(1, 2, 4));
+        testSplitSSTablesInRanges(5, ints(2, 4, 8));
+        testSplitSSTablesInRanges(3, ints(1, 3, 5));
+        testSplitSSTablesInRanges(3, ints(3, 3, 3));
+
+        testSplitSSTablesInRanges(1, ints(1, 2, 3));
+
+        testSplitSSTablesInRanges(3, ints());
+    }
+
+    @Test
+    public void testSplitSSTablesInRangesMissingParts()
+    {
+        // Drop some sstables without losing ranges
+        testSplitSSTablesInRanges(8, ints(2, 4, 8),
+                                ints(1));
+
+        testSplitSSTablesInRanges(8, ints(2, 4, 8),
+                                ints(1), ints(0), ints(2, 7));
+
+        testSplitSSTablesInRanges(5, ints(2, 4, 8),
+                                ints(1), ints(0), ints(2, 7));
+    }
+
+    @Test
+    public void testSplitSSTablesInRangesOneRange()
+    {
+        // Drop second half
+        testSplitSSTablesInRanges(2, ints(2, 4, 8),
+                                ints(1), ints(2, 3), ints(4, 5, 6, 7));
+        // Drop all except center, within shard
+        testSplitSSTablesInRanges(3, ints(5, 7, 9),
+                                ints(0, 1, 3, 4), ints(0, 1, 2, 4, 5, 6), ints(0, 1, 2, 6, 7, 8));
+    }
+
+    @Test
+    public void testSplitSSTablesInRangesSkippedRange()
+    {
+        // Drop all sstables containing the 4/8-5/8 range.
+        testSplitSSTablesInRanges(8, ints(2, 4, 8),
+                                ints(1), ints(2), ints(4));
+        // Drop all sstables containing the 4/8-6/8 range.
+        testSplitSSTablesInRanges(8, ints(2, 4, 8),
+                                ints(1), ints(2), ints(4, 5));
+        // Drop all sstables containing the 4/8-8/8 range.
+        testSplitSSTablesInRanges(8, ints(2, 4, 8),
+                                ints(1), ints(2, 3), ints(4, 5, 6, 7));
+
+        // Drop all sstables containing the 0/8-2/8 range.
+        testSplitSSTablesInRanges(5, ints(2, 4, 8),
+                                ints(0), ints(0), ints(0, 1));
+        // Drop all sstables containing the 6/8-8/8 range.
+        testSplitSSTablesInRanges(5, ints(2, 4, 8),
+                                ints(1), ints(3), ints(6, 7));
+        // Drop sstables on both ends.
+        testSplitSSTablesInRanges(5, ints(3, 4, 8),
+                                ints(0, 2), ints(0, 3), ints(0, 1, 6, 7));
+    }
+
+    public void testSplitSSTablesInRanges(int numShards, int[] perLevelCounts, int[]... dropsPerLevel)
+    {
+        weightedRanges.clear();
+        weightedRanges.add(new Splitter.WeightedRange(1.0, new Range<>(minimumToken, minimumToken)));
+        ShardManager manager = new ShardManagerNoDisks(localRanges);
+
+        Set<CompactionSSTable> allSSTables = new HashSet<>();
+        int levelNum = 0;
+        for (int perLevelCount : perLevelCounts)
+        {
+            List<CompactionSSTable> ssTables = mockNonOverlappingSSTables(perLevelCount);
+            if (levelNum < dropsPerLevel.length)
+            {
+                for (int i = dropsPerLevel[levelNum].length - 1; i >= 0; i--)
+                    ssTables.remove(dropsPerLevel[levelNum][i]);
+            }
+            allSSTables.addAll(ssTables);
+            ++levelNum;
+        }
+
+        var results = new ArrayList<Pair<Range<Token>, Set<CompactionSSTable>>>();
+        manager.splitSSTablesInShards(allSSTables, numShards, (sstables, range) -> results.add(Pair.create(range, Set.copyOf(sstables))));
+        int i = 0;
+        int[] expectedSSTablesInTasks = new int[results.size()];
+        int[] collectedSSTablesPerTask = new int[results.size()];
+        for (var t : results)
+        {
+            collectedSSTablesPerTask[i] = t.right().size();
+            expectedSSTablesInTasks[i] = (int) allSSTables.stream().filter(x -> intersects(x, t.left())).count();
+            ++i;
+        }
+        Assert.assertEquals(Arrays.toString(expectedSSTablesInTasks), Arrays.toString(collectedSSTablesPerTask));
+        System.out.println(Arrays.toString(expectedSSTablesInTasks));
+    }
+
+    private boolean intersects(CompactionSSTable r, Range<Token> range)
+    {
+        if (range == null)
+            return true;
+        return range.intersects(range(r));
+    }
+
+
+    private Bounds<Token> range(CompactionSSTable x)
+    {
+        return new Bounds<>(x.getFirst().getToken(), x.getLast().getToken());
+    }
+
+    List<CompactionSSTable> mockNonOverlappingSSTables(int numSSTables)
+    {
+        if (!partitioner.splitter().isPresent())
+            throw new IllegalStateException(String.format("Cannot split ranges with current partitioner %s", partitioner));
+
+        ByteBuffer emptyBuffer = ByteBuffer.allocate(0);
+
+        List<CompactionSSTable> sstables = new ArrayList<>(numSSTables);
+        for (int i = 0; i < numSSTables; i++)
+        {
+            DecoratedKey first = new BufferDecoratedKey(boundary(numSSTables, i).nextValidToken(), emptyBuffer);
+            DecoratedKey last =  new BufferDecoratedKey(boundary(numSSTables, i+1), emptyBuffer);
+            sstables.add(mockSSTable(first, last));
+        }
+
+        return sstables;
+    }
+
+    private Token boundary(int numSSTables, int i)
+    {
+        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), i * 1.0 / numSSTables);
+    }
+
+    private CompactionSSTable mockSSTable(DecoratedKey first, DecoratedKey last)
+    {
+        CompactionSSTable sstable = Mockito.mock(CompactionSSTable.class);
+        when(sstable.getFirst()).thenReturn(first);
+        when(sstable.getLast()).thenReturn(last);
+        return sstable;
     }
 }

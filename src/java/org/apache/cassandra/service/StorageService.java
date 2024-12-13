@@ -3982,6 +3982,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
+    public void forceKeyspaceCompaction(boolean splitOutput, int parallelism, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    {
+        for (ColumnFamilyStore cfStore : getValidColumnFamilies(true, false, keyspaceName, tableNames))
+        {
+            cfStore.forceMajorCompaction(splitOutput, parallelism);
+        }
+    }
+
     public int relocateSSTables(String keyspaceName, String ... columnFamilies) throws IOException, ExecutionException, InterruptedException
     {
         return relocateSSTables(0, keyspaceName, columnFamilies);

@@ -27,13 +27,11 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WrappedRunnable;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 
 import static com.google.common.base.Throwables.propagate;
 
@@ -43,9 +41,11 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     // See CNDB-10549
     static final boolean SKIP_REPAIR_STATE_CHECKING =
         CassandraRelevantProperties.COMPACTION_SKIP_REPAIR_STATE_CHECKING.getBoolean();
+    static final boolean SKIP_COMPACTING_STATE_CHECKING =
+    CassandraRelevantProperties.COMPACTION_SKIP_COMPACTING_STATE_CHECKING.getBoolean();
 
     protected final CompactionRealm realm;
-    protected LifecycleTransaction transaction;
+    protected ILifecycleTransaction transaction;
     protected boolean isUserDefined;
     protected OperationType compactionType;
     protected TableOperationObserver opObserver;
@@ -55,7 +55,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
      * @param realm
      * @param transaction the modifying managing the status of the sstables we're replacing
      */
-    protected AbstractCompactionTask(CompactionRealm realm, LifecycleTransaction transaction)
+    protected AbstractCompactionTask(CompactionRealm realm, ILifecycleTransaction transaction)
     {
         this.realm = realm;
         this.transaction = transaction;
@@ -66,10 +66,13 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
 
         try
         {
-            // enforce contract that caller should mark sstables compacting
-            Set<SSTableReader> compacting = transaction.getCompacting();
-            for (SSTableReader sstable : transaction.originals())
-                assert compacting.contains(sstable) : sstable.getFilename() + " is not correctly marked compacting";
+            if (!SKIP_COMPACTING_STATE_CHECKING && !transaction.isOffline())
+            {
+                // enforce contract that caller should mark sstables compacting
+                var compacting = realm.getCompactingSSTables();
+                for (SSTableReader sstable : transaction.originals())
+                    assert compacting.contains(sstable) : sstable.getFilename() + " is not correctly marked compacting";
+            }
 
             validateSSTables(transaction.originals());
         }
@@ -120,18 +123,18 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
      * Executes the task after setting a new observer, normally the observer is the
      * compaction manager metrics.
      */
-    public int execute(TableOperationObserver observer)
+    public void execute(TableOperationObserver observer)
     {
-        return setOpObserver(observer).execute();
+        setOpObserver(observer).execute();
     }
 
     /** Executes the task */
-    public int execute()
+    public void execute()
     {
         Throwable t = null;
         try
         {
-            return executeInternal();
+            executeInternal();
         }
         catch (FSDiskFullWriteError e)
         {
@@ -151,7 +154,12 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         }
     }
 
-    public Throwable cleanup(Throwable err)
+    public Throwable rejected(Throwable t)
+    {
+        return cleanup(t);
+    }
+
+    protected Throwable cleanup(Throwable err)
     {
         final boolean isSuccess = err == null;
         for (CompactionObserver compObserver : compObservers)
@@ -160,21 +168,10 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         return Throwables.perform(err, () -> transaction.close());
     }
 
-    public abstract CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables);
-
-    @VisibleForTesting
-    public LifecycleTransaction getTransaction()
+    protected void executeInternal()
     {
-        return transaction;
+        run();
     }
-
-    @VisibleForTesting
-    public OperationType getCompactionType()
-    {
-        return compactionType;
-    }
-
-    protected abstract int executeInternal();
 
     // TODO Eventually these three setters should be passed in to the constructor.
 
@@ -182,6 +179,14 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     {
         this.isUserDefined = isUserDefined;
         return this;
+    }
+
+    /**
+     * @return The type of compaction this task is performing. Used by CNDB.
+     */
+    public OperationType getCompactionType()
+    {
+        return compactionType;
     }
 
     public AbstractCompactionTask setCompactionType(OperationType compactionType)
@@ -204,14 +209,18 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         compObservers.add(compObserver);
     }
 
-    @VisibleForTesting
+    /**
+     * @return The compaction observers for this task. Used by CNDB.
+     */
     public List<CompactionObserver> getCompObservers()
     {
         return compObservers;
     }
 
-    @VisibleForTesting
-    public LifecycleTransaction transaction()
+    /**
+     * Return the transaction that this task is working on. Used by CNDB as well as tests.
+     */
+    public ILifecycleTransaction getTransaction()
     {
         return transaction;
     }

@@ -323,7 +323,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         for (ISSTableScanner scanner : scanners)
         {
             int level = scanner.level();
-            long n = scanner.getCurrentPosition();
+            long n = scanner.getBytesScanned();
 
             if (level >= 0 && level < bytesReadByLevel.length)
                 bytesReadByLevel[level] += n;

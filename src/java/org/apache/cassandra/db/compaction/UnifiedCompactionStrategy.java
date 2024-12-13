@@ -34,6 +34,7 @@ import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
@@ -48,26 +50,33 @@ import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.ShardedMultiWriter;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
+import org.apache.cassandra.db.lifecycle.CompositeLifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
+import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.utils.Throwables.perform;
 
-/**
- * The unified compaction strategy is described in this design document:
- *
- * See CEP-26: https://cwiki.apache.org/confluence/display/CASSANDRA/CEP-26%3A+Unified+Compaction+Strategy
- */
+/// The design of the unified compaction strategy is described in [UnifiedCompactionStrategy.md](./UnifiedCompactionStrategy.md).
+///
+/// See also [CEP-26](https://cwiki.apache.org/confluence/display/CASSANDRA/CEP-26%3A+Unified+Compaction+Strategy).
 public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 {
+    @SuppressWarnings("unused") // accessed via reflection
     public static final Class<? extends CompactionStrategyContainer> CONTAINER_CLASS = UnifiedCompactionContainer.class;
 
     private static final Logger logger = LoggerFactory.getLogger(UnifiedCompactionStrategy.class);
@@ -78,24 +87,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     private static final Pattern SCALING_PARAMETER_PATTERN = Pattern.compile("(N)|L(\\d+)|T(\\d+)|([+-]?\\d+)");
     private static final String SCALING_PARAMETER_PATTERN_SIMPLIFIED = SCALING_PARAMETER_PATTERN.pattern()
                                                                                                 .replaceAll("[()]", "")
-
                                                                                                 .replace("\\d", "[0-9]");
+
+    /// Special level definition for major compactions.
+    static final Level LEVEL_MAXIMAL = new Level(-1, 0, 0, 0, 1, 0, Double.POSITIVE_INFINITY);
 
     private final Controller controller;
 
-    private volatile ArenaSelector arenaSelector;
-    private volatile ShardManager shardManager;
+    private volatile ArenaSelector currentArenaSelector;
+    private volatile ShardManager currentShardManager;
 
     private long lastExpiredCheck;
-
-    static final Level EXPIRED_TABLES_LEVEL = new Level(-1, 0, 0, 0, 0, 0, 0)
-    {
-        @Override
-        public String toString()
-        {
-            return "expired";
-        }
-    };
 
     public UnifiedCompactionStrategy(CompactionStrategyFactory factory, BackgroundCompactions backgroundCompactions, Map<String, String> options)
     {
@@ -165,11 +167,22 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public static String printScalingParameter(int w)
     {
         if (w < 0)
-            return "L" + Integer.toString(2 - w);
+            return 'L' + Integer.toString(2 - w);
         else if (w > 0)
-            return "T" + Integer.toString(w + 2);
+            return 'T' + Integer.toString(w + 2);
         else
             return "N";
+    }
+
+    /// Make a time-based UUID for unified compaction tasks with sequence 0. The reason to do this is to accommodate
+    /// parallelized compactions:
+    /// - Sequence 0 (visible as `-8000-` in the UUID string) denotes single-task (i.e. non-parallelized) compactions.
+    /// - Sequence >0 (`-800n-`) denotes the individual task's index of a parallelized compaction.
+    /// - Parallelized compactions use sequence 0 as the transaction id, and sequences from 1 to the number of tasks
+    ///   for the ids of individual tasks.
+    public static UUID nextTimeUUID()
+    {
+        return UUIDGen.withSequence(UUIDGen.getTimeUUID(), 0);
     }
 
     @Override
@@ -195,60 +208,84 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return CompactionTasks.create(tasks);
     }
 
-    @Override
-    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    /// Get a list of maximal aggregates that can be compacted independently in parallel to achieve a major compaction.
+    ///
+    /// These aggregates split the sstables in each arena into non-overlapping groups where the boundaries between these
+    /// groups are also boundaries of the current sharding configuration. Compacting the groups independently has the
+    /// same effect as compacting all of the sstables in the arena together in one operation.
+    public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates()
     {
         maybeUpdateSelector();
-        // The tasks are split by repair status and disk, as well as in non-overlapping sections to enable some
-        // parallelism (to the amount that L0 sstables are split, i.e. at least base_shard_count). The result will be
-        // split across shards according to its density. Depending on the parallelism, the operation may require up to
-        // 100% extra space to complete.
-        List<AbstractCompactionTask> tasks = new ArrayList<>();
+        // The aggregates are split into arenas by repair status and disk, as well as in non-overlapping sections to
+        // enable some parallelism and efficient use of extra space. The result will be split across shards according to
+        // its density.
+        // Depending on the parallelism, the operation may require up to 100% extra space to complete.
+        List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
+
         for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
         {
-            List<Set<CompactionSSTable>> nonOverlapping = splitInNonOverlappingSets(arena.sstables);
-            for (Set<CompactionSSTable> set : nonOverlapping)
+            // If possible, we want to issue separate compactions for non-overlapping sets of sstables, to allow
+            // for smaller extra space requirements. However, if the sharding configuration has changed, a major
+            // compaction should combine non-overlapping sets if they are split on a boundary that is no longer
+            // in effect.
+            List<Set<CompactionSSTable>> groups =
+            getShardManager().splitSSTablesInShards(arena.sstables,
+                                                    makeShardingStats(arena.sstables).shardCountForDensity,
+                                                    (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
+
+            // Now combine all of these groups that share an sstable so that we have valid independent transactions.
+            groups = Overlaps.combineSetsWithCommonElement(groups);
+
+            for (Set<CompactionSSTable> group : groups)
             {
-                LifecycleTransaction txn = realm.tryModify(set, OperationType.COMPACTION);
-                if (txn != null)
-                    tasks.add(createCompactionTask(gcBefore, txn, true, splitOutput));
+                aggregates.add(CompactionAggregate.createUnified(group,
+                                                                 Overlaps.maxOverlap(group,
+                                                                                     CompactionSSTable.startsAfter,
+                                                                                     CompactionSSTable.firstKeyComparator,
+                                                                                     CompactionSSTable.lastKeyComparator),
+                                                                 CompactionPick.create(nextTimeUUID(), LEVEL_MAXIMAL.index, group),
+                                                                 Collections.emptyList(),
+                                                                 arena,
+                                                                 LEVEL_MAXIMAL));
             }
         }
-        return CompactionTasks.create(tasks);
+        return aggregates;
     }
 
-    /**
-     * Utility method to split a list of sstables into non-overlapping sets. Used by CNDB.
-     *
-     *
-     * @param sstables A list of items to distribute in overlap sets. This is assumed to be a transient list and the
-     *                 method may modify or consume it. It is assumed that the start and end positions of an item are
-     *                 ordered, and the items are non-empty.
-     * @return list of non-overlapping sets of sstables
-     */
-    public static List<Set<CompactionSSTable>> splitInNonOverlappingSets(List<CompactionSSTable> sstables)
+    @Override
+    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
-        List<Set<CompactionSSTable>> overlapSets = Overlaps.constructOverlapSets(sstables,
-                                                                                 UnifiedCompactionStrategy::startsAfter,
-                                                                                 CompactionSSTable.firstKeyComparator,
-                                                                                 CompactionSSTable.lastKeyComparator);
-        Set<CompactionSSTable> group = overlapSets.get(0);
-        List<Set<CompactionSSTable>> groups = new ArrayList<>();
-        for (int i = 1; i < overlapSets.size(); ++i)
+        if (permittedParallelism <= 0)
+            permittedParallelism = Integer.MAX_VALUE;
+
+        List<AbstractCompactionTask> tasks = new ArrayList<>();
+        try
         {
-            Set<CompactionSSTable> current = overlapSets.get(i);
-            if (Sets.intersection(current, group).isEmpty())
+            // Split the space into independently compactable groups.
+            for (var aggregate : getMaximalAggregates())
             {
-                groups.add(group);
-                group = current;
+                LifecycleTransaction txn = realm.tryModify(aggregate.getSelected().sstables(),
+                                                           OperationType.COMPACTION,
+                                                           aggregate.getSelected().id());
+
+                // Create (potentially parallelized) tasks for each group.
+                if (txn != null)
+                    createAndAddTasks(gcBefore, txn, getShardingStats(aggregate), permittedParallelism, tasks);
+                // we ignore splitOutput (always split according to the strategy's sharding) and do not need isMaximal
+
+                // Note: major compactions should not end up in the background compactions tracker to avoid wreaking
+                // havok in the thread assignment logic.
             }
-            else
-            {
-                group.addAll(current);
-            }
+
+            // If we have more arenas/non-overlapping sets than the permitted parallelism, we will try to run all the
+            // individual tasks in parallel (including as parallelized compactions) so that they finish quickest and release
+            // any space they hold, and then reuse the compaction thread to run the next set of tasks.
+            return CompactionTasks.create(CompositeCompactionTask.applyParallelismLimit(tasks, permittedParallelism));
         }
-        groups.add(group);
-        return groups;
+        catch (Throwable t)
+        {
+            throw rejectTasks(tasks, t);
+        }
     }
 
     @Override
@@ -265,23 +302,21 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 controller::shutdown);
     }
 
-    /**
-     * Returns a collections of compaction tasks.
-     *
-     * This method is synchornized because task creation is significantly more expensive in UCS; the strategy is
-     * stateless, therefore it has to compute the shard/bucket structure on each call.
-     *
-     * @param gcBefore throw away tombstones older than this
-     * @return collection of AbstractCompactionTask, which could be either a CompactionTask or an UnifiedCompactionTask
-     */
+    /// Returns a collections of compaction tasks.
+    ///
+    /// This method is synchornized because task creation is significantly more expensive in UCS; the strategy is
+    /// stateless, therefore it has to compute the shard/bucket structure on each call.
+    ///
+    /// @param gcBefore throw away tombstones older than this
+    /// @return collection of AbstractCompactionTask, which could be either a CompactionTask or an UnifiedCompactionTask
     @Override
     public synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
     {
         // TODO - we should perhaps consider executing this code less frequently than legacy strategies
         // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
 
-        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables. 
-        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction 
+        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables.
+        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction
         // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
         Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
                                                                      .instance
@@ -290,53 +325,276 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                      .getZombieRepairFinalizationTasks(realm, realm.getLiveSSTables());
         if (!repairFinalizationTasks.isEmpty())
             return repairFinalizationTasks;
-        else
-            return getNextBackgroundTasks(getNextCompactionAggregates(gcBefore), gcBefore);
+
+        // Expirations have to run before compaction (if run in parallel they may cause overlap tracker to leave
+        // unnecessary tombstones in place), so return only them if found.
+        Collection<AbstractCompactionTask> expirationTasks = getExpirationTasks(gcBefore);
+        if (expirationTasks != null)
+            return expirationTasks;
+
+        return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore);
     }
 
-    /**
-     * Used by CNDB where compaction aggregates come from etcd rather than the strategy
-     * @return collection of AbstractCompactionTask, which could be either a CompactionTask or an UnifiedCompactionTask
-     */
+    /// Check for fully expired sstables and return a collection of expiration tasks if found. Called by CNDB directly.
+    public Collection<AbstractCompactionTask> getExpirationTasks(int gcBefore)
+    {
+        long ts = System.currentTimeMillis();
+        boolean expiredCheck = ts - lastExpiredCheck > controller.getExpiredSSTableCheckFrequency();
+        if (!expiredCheck)
+            return null;
+        lastExpiredCheck = ts;
+
+        // Get all expired sstables, regardless of expiration status.
+        // This is simpler and faster than per-arena collection, and will find nothing in most calls.
+        var expired = CompactionController.getFullyExpiredSSTables(realm,
+                                                                   getSuitableSSTables(),
+                                                                   realm::getOverlappingLiveSSTables,
+                                                                   gcBefore,
+                                                                   controller.getIgnoreOverlapsInExpirationCheck());
+        if (expired.isEmpty())
+            return null;
+
+        if (logger.isDebugEnabled())
+            logger.debug("Expiration check found {} fully expired SSTables", expired.size());
+
+        // if we found sstables to expire, split them to arenas to correctly isolate their repair status.
+        var tasks = new ArrayList<AbstractCompactionTask>();
+        try
+        {
+            for (var arena : getCompactionArenas(expired, (i1, i2) -> true))
+            {
+                LifecycleTransaction txn = realm.tryModify(arena.sstables, OperationType.COMPACTION);
+                if (txn != null)
+                    tasks.add(createExpirationTask(txn));
+                else
+                    logger.warn("Failed to submit expiration task because a transaction could not be created. If this happens frequently, it should be reported");
+            }
+            return tasks;
+        }
+        catch (Throwable t)
+        {
+            throw rejectTasks(tasks, t);
+        }
+    }
+
+    /// Used by CNDB where compaction aggregates come from etcd rather than the strategy
+    /// @return collection of `AbstractCompactionTask`, which could be either a `CompactionTask` or a `UnifiedCompactionTask`
     public synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(Collection<CompactionAggregate> aggregates, int gcBefore)
     {
         controller.onStrategyBackgroundTaskRequest();
         return createCompactionTasks(aggregates, gcBefore);
     }
 
-    private synchronized Collection<AbstractCompactionTask> createCompactionTasks(Collection<CompactionAggregate> aggregates, int gcBefore)
+    private Collection<AbstractCompactionTask> createCompactionTasks(Collection<CompactionAggregate> aggregates, int gcBefore)
     {
         Collection<AbstractCompactionTask> tasks = new ArrayList<>(aggregates.size());
-        for (CompactionAggregate aggregate : aggregates)
+        try
         {
-            CompactionPick selected = aggregate.getSelected();
-            Preconditions.checkNotNull(selected);
-            Preconditions.checkArgument(!selected.isEmpty());
+            for (CompactionAggregate aggregate : aggregates)
+                createAndAddTasks(gcBefore, (CompactionAggregate.UnifiedAggregate) aggregate, tasks);
 
-            LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
-                                                               OperationType.COMPACTION,
-                                                               selected.id());
-            if (transaction != null)
-            {
-                backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-                tasks.add(createCompactionTask(transaction, gcBefore));
-            }
-            else
-            {
-                // This can happen e.g. due to a race with upgrade tasks
-                logger.error("Failed to submit compaction {} because a transaction could not be created. If this happens frequently, it should be reported", aggregate);
-            }
+            return tasks;
         }
-
-        return tasks;
+        catch (Throwable t)
+        {
+            throw rejectTasks(tasks, t);
+        }
     }
 
-    /**
-     * Create the sstable writer used for flushing.
-     *
-     * @return an sstable writer that will split sstables into a number of shards as calculated by the controller for
-     *         the expected flush density.
-     */
+    /// Create compaction tasks for the given aggregate and add them to the given tasks list.
+    public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedAggregate aggregate, Collection<? super UnifiedCompactionTask> tasks)
+    {
+        CompactionPick selected = aggregate.getSelected();
+        int parallelism = aggregate.getPermittedParallelism();
+        Preconditions.checkNotNull(selected);
+        Preconditions.checkArgument(!selected.isEmpty());
+
+        LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
+                                                           OperationType.COMPACTION,
+                                                           selected.id());
+        if (transaction != null)
+        {
+            // This will ignore the range of the operation, which is fine.
+            backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
+            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), aggregate.keepOriginals(), getShardingStats(aggregate), parallelism, tasks);
+        }
+        else
+        {
+            // This can happen e.g. due to a race with upgrade tasks
+            logger.error("Failed to submit compaction {} because a transaction could not be created. If this happens frequently, it should be reported", aggregate);
+        }
+    }
+
+    private static RuntimeException rejectTasks(Iterable<? extends AbstractCompactionTask> tasks, Throwable error)
+    {
+        for (var task : tasks)
+            error = task.rejected(error);
+        throw Throwables.throwAsUncheckedException(error);
+    }
+
+    public static class ShardingStats
+    {
+        public final PartitionPosition min;
+        public final PartitionPosition max;
+        public final long totalOnDiskSize;
+        public final double uniqueKeyRatio;
+        public final double density;
+        public final int shardCountForDensity;
+        public final int coveredShardCount;
+
+        /// Construct sharding statistics for the given collection of sstables that are to be compacted in full.
+        public ShardingStats(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, Controller controller)
+        {
+            assert !sstables.isEmpty();
+            // the partition count aggregation is costly, so we only perform this once when the aggregate is selected for execution.
+            long onDiskLength = 0;
+            long partitionCountSum = 0;
+            PartitionPosition min = null;
+            PartitionPosition max = null;
+            boolean hasOnlySSTableReaders = true;
+            for (CompactionSSTable sstable : sstables)
+            {
+                onDiskLength += sstable.onDiskLength();
+                partitionCountSum += sstable.estimatedKeys();
+                min = min == null || min.compareTo(sstable.getFirst()) > 0 ? sstable.getFirst() : min;
+                max = max == null || max.compareTo(sstable.getLast()) < 0 ? sstable.getLast() : max;
+                if (!(sstable instanceof SSTableReader)
+                    || ((SSTableReader) sstable).descriptor == null)    // for tests
+                    hasOnlySSTableReaders = false;
+            }
+            long estimatedPartitionCount;
+            if (hasOnlySSTableReaders)
+                estimatedPartitionCount = SSTableReader.getApproximateKeyCount(Iterables.filter(sstables, SSTableReader.class));
+            else
+                estimatedPartitionCount = partitionCountSum;
+
+            this.totalOnDiskSize = onDiskLength;
+            this.uniqueKeyRatio = 1.0 * estimatedPartitionCount / partitionCountSum;
+            this.min = min;
+            this.max = max;
+            this.density = shardManager.density(onDiskLength, min, max, estimatedPartitionCount);
+            this.shardCountForDensity = controller.getNumShards(this.density * shardManager.shardSetCoverage());
+            this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
+        }
+
+        /// Construct sharding statistics for the given collection of sstables that are to be partially compacted
+        /// in the given operation range. Done by adjusting numbers by the fraction of the sstable that is in range.
+        public ShardingStats(Collection<? extends CompactionSSTable> sstables, Range<Token> operationRange, ShardManager shardManager, Controller controller)
+        {
+            assert !sstables.isEmpty();
+            assert operationRange != null;
+            long onDiskLengthInRange = 0;
+            long partitionCountSum = 0;
+            long partitionCountSumInRange = 0;
+            PartitionPosition min = null;
+            PartitionPosition max = null;
+            boolean hasOnlySSTableReaders = true;
+            for (CompactionSSTable sstable : sstables)
+            {
+                PartitionPosition left = sstable.getFirst();
+                PartitionPosition right = sstable.getLast();
+                boolean extendsBefore = left.getToken().compareTo(operationRange.left) <= 0;
+                boolean extendsAfter = !operationRange.right.isMinimum() && right.getToken().compareTo(operationRange.right) > 0;
+                if (extendsBefore)
+                    left = operationRange.left.nextValidToken().minKeyBound();
+                if (extendsAfter)
+                    right = operationRange.right.maxKeyBound();
+                double fractionInRange = extendsBefore || extendsAfter
+                                         ? shardManager.rangeSpanned(left, right) / shardManager.rangeSpanned(sstable.getFirst(), sstable.getLast())
+                                         : 1;
+
+                onDiskLengthInRange += (long) (sstable.onDiskLength() * fractionInRange);
+                partitionCountSumInRange += (long) (sstable.estimatedKeys() * fractionInRange);
+                partitionCountSum += sstable.estimatedKeys();
+                min = min == null || min.compareTo(left) > 0 ? left : min;
+                max = max == null || max.compareTo(right) < 0 ? right : max;
+                if (!(sstable instanceof SSTableReader)
+                    || ((SSTableReader) sstable).descriptor == null)    // for tests
+                    hasOnlySSTableReaders = false;
+            }
+            long estimatedPartitionCount;
+            if (hasOnlySSTableReaders)
+                estimatedPartitionCount = SSTableReader.getApproximateKeyCount(Iterables.filter(sstables, SSTableReader.class));
+            else
+                estimatedPartitionCount = partitionCountSum;
+
+            this.min = min;
+            this.max = max;
+            this.totalOnDiskSize = onDiskLengthInRange;
+            this.uniqueKeyRatio = 1.0 * estimatedPartitionCount / partitionCountSum;
+            this.density = shardManager.density(onDiskLengthInRange, min, max, (long) (partitionCountSumInRange * uniqueKeyRatio));
+            this.shardCountForDensity = controller.getNumShards(this.density * shardManager.shardSetCoverage());
+            this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
+        }
+
+        /// Testing only, use specified values.
+        @VisibleForTesting
+        ShardingStats(PartitionPosition min, PartitionPosition max, long totalOnDiskSize, double uniqueKeyRatio, double density, int shardCountForDensity, int coveredShardCount)
+        {
+
+            this.min = min;
+            this.max = max;
+            this.totalOnDiskSize = totalOnDiskSize;
+            this.uniqueKeyRatio = uniqueKeyRatio;
+            this.density = density;
+            this.shardCountForDensity = shardCountForDensity;
+            this.coveredShardCount = coveredShardCount;
+        }
+    }
+
+    /// Get and store the sharding stats for a given aggregate
+    public ShardingStats getShardingStats(CompactionAggregate.UnifiedAggregate aggregate)
+    {
+        var shardingStats = aggregate.getShardingStats();
+        if (shardingStats == null)
+        {
+            final Range<Token> operationRange = aggregate.operationRange();
+            shardingStats = operationRange != null
+                            ? new ShardingStats(aggregate.getSelected().sstables(), operationRange, getShardManager(), controller)
+                            : new ShardingStats(aggregate.getSelected().sstables(), getShardManager(), controller);
+            aggregate.setShardingStats(shardingStats);
+        }
+        return shardingStats;
+    }
+
+    ShardingStats makeShardingStats(ILifecycleTransaction txn)
+    {
+        return makeShardingStats(txn.originals());
+    }
+
+    ShardingStats makeShardingStats(Collection<? extends CompactionSSTable> sstables)
+    {
+        return new ShardingStats(sstables, getShardManager(), controller);
+    }
+
+    void createAndAddTasks(int gcBefore,
+                           LifecycleTransaction transaction,
+                           ShardingStats shardingStats,
+                           int parallelism,
+                           Collection<? super CompactionTask> tasks)
+    {
+        createAndAddTasks(gcBefore, transaction, null, false, shardingStats, parallelism, tasks);
+    }
+
+    @VisibleForTesting
+    void createAndAddTasks(int gcBefore,
+                           LifecycleTransaction transaction,
+                           Range<Token> operationRange,
+                           boolean keepOriginals,
+                           ShardingStats shardingStats,
+                           int parallelism,
+                           Collection<? super UnifiedCompactionTask> tasks)
+    {
+        if (controller.parallelizeOutputShards() && parallelism > 1)
+            tasks.addAll(createParallelCompactionTasks(transaction, operationRange, keepOriginals, shardingStats, gcBefore, parallelism));
+        else
+            tasks.add(createCompactionTask(transaction, operationRange, keepOriginals, shardingStats, gcBefore));
+    }
+
+    /// Create the sstable writer used for flushing.
+    ///
+    /// @return an sstable writer that will split sstables into a number of shards as calculated by the controller for
+    ///         the expected flush density.
     @Override
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor,
                                                        long keyCount,
@@ -349,9 +607,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
-        ShardManager currentShardManager = getShardManager();
-        double flushDensity = realm.metrics().flushSizeOnDisk().get() * currentShardManager.shardSetCoverage() / currentShardManager.localSpaceCoverage();
-        ShardTracker boundaries = currentShardManager.boundaries(controller.getFlushShards(flushDensity));
+        ShardManager shardManager = getShardManager();
+        double flushDensity = realm.metrics().flushSizeOnDisk().get() * shardManager.shardSetCoverage() / shardManager.localSpaceCoverage();
+        ShardTracker boundaries = shardManager.boundaries(controller.getFlushShards(flushDensity));
         return new ShardedMultiWriter(realm,
                                       descriptor,
                                       keyCount,
@@ -365,54 +623,122 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                       boundaries);
     }
 
-    /**
-     * Create the task that in turns creates the sstable writer used for compaction.
-     *
-     * @return a sharded compaction task that in turn will create a sharded compaction writer.
-     */
-    private UnifiedCompactionTask createCompactionTask(LifecycleTransaction transaction, int gcBefore)
+    /// Create the task that in turns creates the sstable writer used for compaction.
+    ///
+    /// @return a sharded compaction task that in turn will create a sharded compaction writer.
+    private UnifiedCompactionTask createCompactionTask(LifecycleTransaction transaction, ShardingStats shardingStats, int gcBefore)
     {
-        return new UnifiedCompactionTask(realm, this, transaction, gcBefore, getShardManager());
+        return new UnifiedCompactionTask(realm, this, transaction, gcBefore, getShardManager(), shardingStats);
+    }
+
+    /// Create the task that in turns creates the sstable writer used for compaction. This version is for a ranged task,
+    /// where we produce outputs but cannot delete the input sstables until all components of the operation are complete.
+    ///
+    /// @return a sharded compaction task that in turn will create a sharded compaction writer.
+    private UnifiedCompactionTask createCompactionTask(LifecycleTransaction transaction, Range<Token> operationRange, boolean keepOriginals, ShardingStats shardingStats, int gcBefore)
+    {
+        return new UnifiedCompactionTask(realm, this, transaction, gcBefore, keepOriginals, getShardManager(), shardingStats, operationRange, transaction.originals(), null, null);
     }
 
     @Override
     protected UnifiedCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
-        return createCompactionTask(txn, gcBefore);
+        return createCompactionTask(txn, makeShardingStats(txn), gcBefore);
     }
 
     @Override
     public UnifiedCompactionTask createCompactionTask(LifecycleTransaction txn, final int gcBefore, long maxSSTableBytes)
     {
-        return createCompactionTask(txn, gcBefore);
+        return createCompactionTask(txn, makeShardingStats(txn), gcBefore);
+    }
+
+    /// Create a collection of parallelized compaction tasks that perform the compaction in parallel.
+    private Collection<UnifiedCompactionTask> createParallelCompactionTasks(LifecycleTransaction transaction,
+                                                                            Range<Token> operationRange,
+                                                                            boolean keepOriginals,
+                                                                            ShardingStats shardingStats,
+                                                                            int gcBefore,
+                                                                            int parallelism)
+    {
+        final int coveredShardCount = shardingStats.coveredShardCount;
+        assert parallelism > 1;
+
+        Collection<SSTableReader> sstables = transaction.originals();
+        ShardManager shardManager = getShardManager();
+        CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
+        SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
+        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
+        List<UnifiedCompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
+            sstables,
+            operationRange,
+            shardingStats.shardCountForDensity,
+            shardingStats.coveredShardCount,
+            parallelism,
+            (rangeSSTables, range) -> new UnifiedCompactionTask(realm,
+                                                                this,
+                                                                new PartialLifecycleTransaction(compositeTransaction),
+                                                                gcBefore,
+                                                                keepOriginals,
+                                                                shardManager,
+                                                                shardingStats,
+                                                                range,
+                                                                rangeSSTables,
+                                                                sharedProgress,
+                                                                sharedObserver)
+        );
+        compositeTransaction.completeInitialization();
+        assert tasks.size() <= parallelism;
+        assert tasks.size() <= coveredShardCount;
+
+        if (tasks.isEmpty())
+            transaction.close(); // this should not be reachable normally, close the transaction for safety
+
+        if (tasks.size() == 1) // if there's just one range, make it a non-ranged task (to apply early open etc.)
+        {
+            assert tasks.get(0).inputSSTables().equals(sstables);
+            return Collections.singletonList(createCompactionTask(transaction, operationRange, keepOriginals, shardingStats, gcBefore));
+        }
+        else
+            return tasks;
+    }
+
+    private ExpirationTask createExpirationTask(LifecycleTransaction transaction)
+    {
+        return new ExpirationTask(realm, transaction);
     }
 
     private void maybeUpdateSelector()
     {
-        if (arenaSelector != null && !arenaSelector.diskBoundaries.isOutOfDate())
+        if (currentArenaSelector != null && !currentArenaSelector.diskBoundaries.isOutOfDate())
             return; // the disk boundaries (and thus the local ranges too) have not changed since the last time we calculated
 
         synchronized (this)
         {
-            if (arenaSelector != null && !arenaSelector.diskBoundaries.isOutOfDate())
+            if (currentArenaSelector != null && !currentArenaSelector.diskBoundaries.isOutOfDate())
                 return; // another thread beat us to the update
 
             DiskBoundaries currentBoundaries = realm.getDiskBoundaries();
             var maybeShardManager = realm.buildShardManager();
-            shardManager = maybeShardManager != null
+            currentShardManager = maybeShardManager != null
                            ? maybeShardManager
                            : ShardManager.create(currentBoundaries, realm.getKeyspaceReplicationStrategy(), controller.isReplicaAware());
-            arenaSelector = new ArenaSelector(controller, currentBoundaries);
+            currentArenaSelector = new ArenaSelector(controller, currentBoundaries);
             // Note: this can just as well be done without the synchronization (races would be benign, just doing some
             // redundant work). For the current usages of this blocking is fine and expected to perform no worse.
         }
     }
 
-    @VisibleForTesting
-    ShardManager getShardManager()
+    // used by CNDB
+    public ShardManager getShardManager()
     {
         maybeUpdateSelector();
-        return shardManager;
+        return currentShardManager;
+    }
+
+    ArenaSelector getArenaSelector()
+    {
+        maybeUpdateSelector();
+        return currentArenaSelector;
     }
 
     private CompactionLimits getCurrentLimits(int maxConcurrentCompactions)
@@ -529,39 +855,33 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             perLevel = Arrays.copyOf(perLevel, levelCount);
 
         return getSelection(pending,
-                            controller,
                             limits.maxCompactions,
                             perLevel,
                             limits.spaceAvailable,
                             limits.remainingAdaptiveCompactions);
     }
 
-    /**
-     * Selects compactions to run next.
-     *
-     * @param gcBefore
-     * @return a subset of compaction aggregates to run next
-     */
-    private Collection<CompactionAggregate> getNextCompactionAggregates(int gcBefore)
+    /// Selects compactions to run next.
+    ///
+    /// @return a subset of compaction aggregates to run next
+    private Collection<CompactionAggregate> getNextCompactionAggregates()
     {
         final CompactionLimits limits = getCurrentLimits(controller.maxConcurrentCompactions());
 
-        List<CompactionAggregate.UnifiedAggregate> pending = getPendingCompactionAggregates(limits.spaceAvailable, gcBefore);
+        List<CompactionAggregate.UnifiedAggregate> pending = getPendingCompactionAggregates(limits.spaceAvailable);
         setPendingCompactionAggregates(pending);
 
         return updateLevelCountWithParentAndGetSelection(limits, pending);
     }
 
-    /**
-     * Selects compactions to run next from the passed aggregates.
-     *
-     * The intention here is to use this method directly from outside processes, to run compactions from a set
-     * of pre-existing aggregates, that have been generated out of process.
-     *
-     * @param aggregates a collection of aggregates from which to select the next compactions
-     * @param maxConcurrentCompactions the maximum number of concurrent compactions
-     * @return a subset of compaction aggregates to run next
-     */
+    /// Selects compactions to run next from the passed aggregates.
+    ///
+    /// The intention here is to use this method directly from outside processes, to run compactions from a set
+    /// of pre-existing aggregates, that have been generated out of process.
+    ///
+    /// @param aggregates a collection of aggregates from which to select the next compactions
+    /// @param maxConcurrentCompactions the maximum number of concurrent compactions
+    /// @return a subset of compaction aggregates to run next
     public Collection<CompactionAggregate> getNextCompactionAggregates(Collection<CompactionAggregate.UnifiedAggregate> aggregates,
                                                                        int maxConcurrentCompactions)
     {
@@ -570,67 +890,47 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return updateLevelCountWithParentAndGetSelection(limits, new ArrayList<>(aggregates));
     }
 
-    /**
-     * Returns all pending compaction aggregates.
-     *
-     * This method is used by CNDB to find all pending compactions and put them to etcd.
-     *
-     * @param gcBefore
-     * @return all pending compaction aggregates
-     **/
-    public Collection<CompactionAggregate.UnifiedAggregate> getPendingCompactionAggregates(int gcBefore)
+    /// Returns all pending compaction aggregates.
+    ///
+    /// This method is used by CNDB to find all pending compactions and put them to etcd.
+    ///
+    /// @return all pending compaction aggregates
+    public Collection<CompactionAggregate.UnifiedAggregate> getPendingCompactionAggregates()
     {
-        return getPendingCompactionAggregates(controller.maxCompactionSpaceBytes(), gcBefore);
+        return getPendingCompactionAggregates(controller.maxCompactionSpaceBytes());
     }
 
-    /**
-     * Set the compaction aggregates passed in as pending in {@link BackgroundCompactions}. This ensures
-     * that the compaction statistics will be accurate.
-     * <p/>
-     * This is called by {@link UnifiedCompactionStrategy#getNextCompactionAggregates(int)}
-     * and externally after calling {@link UnifiedCompactionStrategy#getPendingCompactionAggregates(int)}
-     * or before submitting tasks.
-     *
-     * Also, note that skipping the call to {@link BackgroundCompactions#setPending(CompactionStrategy, Collection)}
-     * would result in memory leaks: the aggregates added in {@link BackgroundCompactions#setSubmitted(CompactionStrategy, UUID, CompactionAggregate)}
-     * would never be removed, and the aggregates hold references to the compaction tasks, so they retain a significant
-     * size of heap memory.
-     *
-     * @param pending the aggregates that should be set as pending compactions
-     */
+    /// Set the compaction aggregates passed in as pending in [BackgroundCompactions]. This ensures
+    /// that the compaction statistics will be accurate.
+    ///
+    /// This is called by [#getNextCompactionAggregates()]
+    /// and externally after calling [#getPendingCompactionAggregates()]
+    /// or before submitting tasks.
+    ///
+    /// Also, note that skipping the call to [#setPending(CompactionStrategy,Collection)]
+    /// would result in memory leaks: the aggregates added in [#setSubmitted(CompactionStrategy,UUID,CompactionAggregate)]
+    /// would never be removed, and the aggregates hold references to the compaction tasks, so they retain a significant
+    /// size of heap memory.
+    ///
+    /// @param pending the aggregates that should be set as pending compactions
     public void setPendingCompactionAggregates(Collection<? extends CompactionAggregate> pending)
     {
         backgroundCompactions.setPending(this, pending);
     }
 
-    private List<CompactionAggregate.UnifiedAggregate> getPendingCompactionAggregates(long spaceAvailable, int gcBefore)
+    private List<CompactionAggregate.UnifiedAggregate> getPendingCompactionAggregates(long spaceAvailable)
     {
         maybeUpdateSelector();
 
         List<CompactionAggregate.UnifiedAggregate> pending = new ArrayList<>();
-        long ts = System.currentTimeMillis();
-        boolean expiredCheck = ts - lastExpiredCheck > controller.getExpiredSSTableCheckFrequency();
-        if (expiredCheck)
-            lastExpiredCheck = ts;
 
-        Set<CompactionSSTable> expired = Collections.emptySet();
         for (Map.Entry<Arena, List<Level>> entry : getLevels().entrySet())
         {
             Arena arena = entry.getKey();
-            if (expiredCheck)
-            {
-                expired = arena.getExpiredSSTables(gcBefore, controller.getIgnoreOverlapsInExpirationCheck());
-                if (!expired.isEmpty())
-                {
-                    if (logger.isTraceEnabled())
-                        logger.trace("Expiration check for arena {} found {} fully expired SSTables", arena.name(), expired.size());
-                    pending.add(CompactionAggregate.createUnified(expired, 0, CompactionPick.create(-1, expired, expired), Collections.emptySet(), arena, EXPIRED_TABLES_LEVEL));
-                }
-            }
 
             for (Level level : entry.getValue())
             {
-                Collection<CompactionAggregate.UnifiedAggregate> aggregates = level.getCompactionAggregates(arena, expired, controller, spaceAvailable);
+                Collection<CompactionAggregate.UnifiedAggregate> aggregates = level.getCompactionAggregates(arena, controller, spaceAvailable);
                 // Note: We allow empty aggregates into the list of pending compactions. The pending compactions list
                 // is for progress tracking only, and it is helpful to see empty levels there.
                 pending.addAll(aggregates);
@@ -640,13 +940,11 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return pending;
     }
 
-    /**
-     * This method logs a warning related to the fact that the space overhead limit also applies when a
-     * single compaction is above that limit. This should prevent running out of space at the expense of ending up
-     * with several extra sstables at the highest-level (compared to the number of sstables that we should have
-     * as per config of the strategy), i.e. slightly higher read amplification. This is a sensible tradeoff but
-     * the operators must be warned if this happens, and that's the purpose of this warning.
-     */
+    /// This method logs a warning related to the fact that the space overhead limit also applies when a
+    /// single compaction is above that limit. This should prevent running out of space at the expense of ending up
+    /// with several extra sstables at the highest-level (compared to the number of sstables that we should have
+    /// as per config of the strategy), i.e. slightly higher read amplification. This is a sensible tradeoff but
+    /// the operators must be warned if this happens, and that's the purpose of this warning.
     private void warnIfSizeAbove(CompactionAggregate.UnifiedAggregate aggregate, long spaceOverheadLimit)
     {
         if (controller.getOverheadSizeInBytes(aggregate.selected) > spaceOverheadLimit)
@@ -665,33 +963,30 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                         Controller.MAX_SPACE_OVERHEAD_OPTION);
     }
 
-    /**
-     * Returns a selection of the compactions to be submitted. The selection will be chosen so that the total
-     * number of compactions is at most totalCount, where each level gets a share that is the whole part of the ratio
-     * between the total permitted number of compactions, and the remainder gets distributed among the levels
-     * according to the preferences of the {@link Controller#prioritize} method. Usually this means preferring
-     * compaction picks with a higher max overlap, with a random selection when multiple picks have the same maximum.
-     * Note that if a level does not have tasks to fill its share, its quota will remain unused in this
-     * allocation.
-     *
-     * The selection also limits the size of the newly scheduled compactions to be below spaceAvailable by not
-     * scheduling compactions if they would push the combined size above that limit.
-     *
-     * @param pending list of all current aggregates with possible selection for each bucket
-     * @param totalCount maximum number of compactions permitted to run
-     * @param perLevel int array with the number of in-progress compactions per level
-     * @param spaceAvailable amount of space in bytes available for the new compactions
-     * @param remainingAdaptiveCompactions number of adaptive compactions (i.e. ones triggered by scaling parameter
-     *                                     change by the adaptive controller) that can still be scheduled
-     *
-     */
-    static List<CompactionAggregate> getSelection(List<CompactionAggregate.UnifiedAggregate> pending,
-                                                  Controller controller,
-                                                  int totalCount,
-                                                  int[] perLevel,
-                                                  long spaceAvailable,
-                                                  int remainingAdaptiveCompactions)
+    /// Returns a selection of the compactions to be submitted. The selection will be chosen so that the total
+    /// number of compactions is at most totalCount, where each level gets a share that is the whole part of the ratio
+    /// between the total permitted number of compactions, and the remainder gets distributed among the levels
+    /// according to the preferences of the [#prioritize] method. Usually this means preferring
+    /// compaction picks with a higher max overlap, with a random selection when multiple picks have the same maximum.
+    /// Note that if a level does not have tasks to fill its share, its quota will remain unused in this
+    /// allocation.
+    ///
+    /// The selection also limits the size of the newly scheduled compactions to be below spaceAvailable by not
+    /// scheduling compactions if they would push the combined size above that limit.
+    ///
+    /// @param pending list of all current aggregates with possible selection for each bucket
+    /// @param totalCount maximum number of compactions permitted to run
+    /// @param perLevel int array with the number of in-progress compactions per level
+    /// @param spaceAvailable amount of space in bytes available for the new compactions
+    /// @param remainingAdaptiveCompactions number of adaptive compactions (i.e. ones triggered by scaling parameter
+    ///                                     change by the adaptive controller) that can still be scheduled
+    List<CompactionAggregate> getSelection(List<CompactionAggregate.UnifiedAggregate> pending,
+                                           int totalCount,
+                                           int[] perLevel,
+                                           long spaceAvailable,
+                                           int remainingAdaptiveCompactions)
     {
+        Controller controller = getController();
         Reservations reservations = Reservations.create(totalCount,
                                                         perLevel,
                                                         controller.getReservedThreads(),
@@ -716,43 +1011,55 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         List<CompactionAggregate> selected = new ArrayList<>(pending.size());
         for (CompactionAggregate.UnifiedAggregate aggregate : pending)
         {
+            if (remaining == 0)
+                break; // no threads to allocate from
+
             final CompactionPick pick = aggregate.getSelected();
             if (pick.isEmpty())
                 continue;
-            if (pick.hasExpiredOnly())
-            {
-                selected.add(aggregate);    // always add expired-only compactions, they are not subject to any limits
-                continue;
-            }
+
             ++proposed;
             long overheadSizeInBytes = controller.getOverheadSizeInBytes(pick);
             if (overheadSizeInBytes > spaceAvailable)
                 continue; // compaction is too large for current cycle
 
             int currentLevel = levelOf(pick);
-            assert currentLevel >= 0 : "Invalid level in " + pick + ": level -1 is only allowed for expired-only compactions";
-
             boolean isAdaptive = controller.isRecentAdaptive(pick);
+            // avoid computing sharding stats if are not going to schedule the compaction at all
+            if (!reservations.hasRoom(currentLevel))
+                continue;  // honor the reserved thread counts
             if (isAdaptive && remainingAdaptiveCompactions <= 0)
                 continue; // do not allow more than remainingAdaptiveCompactions to limit latency spikes upon changing W
-
             if (shouldCheckSSTableSelected && !Collections.disjoint(selectedSSTables, pick.sstables()))
                 continue; // do not allow multiple selections of the same sstable
 
-            if (!reservations.accept(currentLevel))
-                continue; // honor the reserved thread counts
+            int parallelism = controller.parallelizeOutputShards() ? getShardingStats(aggregate).coveredShardCount : 1;
+            if (parallelism > remaining)
+                parallelism = remaining;
+            assert currentLevel >= 0 : "Invalid level in " + pick;
+
+            if (isAdaptive)
+            {
+                if (parallelism > remainingAdaptiveCompactions)
+                {
+                    parallelism = remainingAdaptiveCompactions;
+                    assert parallelism > 0; // we checked the remainingAdaptiveCompactions in advance
+                }
+            }
+
+            parallelism = reservations.accept(currentLevel, parallelism);
+            assert parallelism > 0; // we checked hasRoom in advance, there must always be at least one thread to use
+
             // Note: the reservations tracker assumes it is the last check and a pick is accepted if it returns true.
 
             if (isAdaptive)
-                remainingAdaptiveCompactions--;
-            --remaining;
+                remainingAdaptiveCompactions -= parallelism;
+            remaining -= parallelism;
             spaceAvailable -= overheadSizeInBytes;
+            aggregate.setPermittedParallelism(parallelism);
             selected.add(aggregate);
             if (shouldCheckSSTableSelected)
                 selectedSSTables.addAll(pick.sstables());
-
-            if (remaining == 0)
-                break;
         }
 
         reservations.debugOutput(selected.size(), proposed, remaining);
@@ -783,84 +1090,84 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return controller.getScalingParameter(index);
     }
 
-    @VisibleForTesting
     public Controller getController()
     {
         return controller;
     }
 
-    /**
-     * Group candidate sstables into compaction arenas.
-     * Each compaction arena is obtained by comparing using a compound comparator for the equivalence classes
-     * configured in the arena selector of this strategy.
-     *
-     * @param sstables a collection of the sstables to be assigned to arenas
-     * @param compactionFilter a bifilter (sstable, isCompacting) to include CompactionSSTables suitable for compaction
-     * @return a list of arenas, where each arena contains sstables that belong to that arena
-     */
+    /// Group candidate sstables into compaction arenas.
+    /// Each compaction arena is obtained by comparing using a compound comparator for the equivalence classes
+    /// configured in the arena selector of this strategy.
+    ///
+    /// @param sstables a collection of the sstables to be assigned to arenas
+    /// @param compactionFilter a bifilter (sstable, isCompacting) to include CompactionSSTables suitable for compaction
+    /// @return a list of arenas, where each arena contains sstables that belong to that arena
     public Collection<Arena> getCompactionArenas(Collection<? extends CompactionSSTable> sstables,
                                                  BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
-        return getCompactionArenas(sstables, compactionFilter, this.arenaSelector);
+        return getCompactionArenas(sstables, compactionFilter, getArenaSelector());
     }
 
     Collection<Arena> getCompactionArenas(Collection<? extends CompactionSSTable> sstables,
                                           BiPredicate<CompactionSSTable, Boolean> compactionFilter,
                                           ArenaSelector arenaSelector)
     {
-        maybeUpdateSelector();
         Map<CompactionSSTable, Arena> arenasBySSTables = new TreeMap<>(arenaSelector);
         Set<? extends CompactionSSTable> compacting = realm.getCompactingSSTables();
         for (CompactionSSTable sstable : sstables)
             if (compactionFilter.test(sstable, compacting.contains(sstable)))
-                arenasBySSTables.computeIfAbsent(sstable, t -> new Arena(arenaSelector, realm))
+                arenasBySSTables.computeIfAbsent(sstable, t -> new Arena(arenaSelector))
                       .add(sstable);
 
         return arenasBySSTables.values();
     }
 
-    // used by CNDB to deserialize aggregates
+    @SuppressWarnings("unused") // used by CNDB to deserialize aggregates
     public Arena getCompactionArena(Collection<? extends CompactionSSTable> sstables)
     {
-        maybeUpdateSelector();
-        Arena arena = new Arena(arenaSelector, realm);
+        Arena arena = new Arena(getArenaSelector());
         for (CompactionSSTable table : sstables)
             arena.add(table);
         return arena;
     }
 
-    // used by CNDB to deserialize aggregates
+    @SuppressWarnings("unused") // used by CNDB to deserialize aggregates
     public Level getLevel(int index, double min, double max)
     {
-        if (index == EXPIRED_TABLES_LEVEL.index)
-            return EXPIRED_TABLES_LEVEL;
         return new Level(controller, index, min, max);
     }
 
-    /**
-     * @return a LinkedHashMap of arenas with buckets where order of arenas are preserved
-     */
+    /// @return a LinkedHashMap of arenas with buckets where order of arenas are preserved
     @VisibleForTesting
     Map<Arena, List<Level>> getLevels()
     {
         return getLevels(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction);
     }
 
-    private static boolean isSuitableForCompaction(CompactionSSTable sstable, Boolean isCompacting)
+    private static boolean isSuitableForCompaction(CompactionSSTable sstable, boolean isCompacting)
     {
         return sstable.isSuitableForCompaction() && !isCompacting;
     }
 
-    /**
-     * Groups the sstables passed in into arenas and buckets. This is used by the strategy to determine
-     * new compactions, and by external tools in CNDB to analyze the strategy decisions.
-     *
-     * @param sstables a collection of the sstables to be assigned to arenas
-     * @param compactionFilter a bifilter(sstable, isCompacting) to include CompactionSSTables,
-     *                         e.g., {@link CompactionSSTable#isSuitableForCompaction()}
-     *
-     * @return a map of arenas to their buckets
-     */
+    Iterable<? extends CompactionSSTable> getSuitableSSTables()
+    {
+        return getFilteredSSTables(UnifiedCompactionStrategy::isSuitableForCompaction);
+    }
+
+    Iterable<? extends CompactionSSTable> getFilteredSSTables(BiPredicate<CompactionSSTable, Boolean> predicate)
+    {
+        Set<? extends CompactionSSTable> compacting = realm.getCompactingSSTables();
+        return Iterables.filter(realm.getLiveSSTables(), s -> predicate.test(s, compacting.contains(s)));
+    }
+
+    /// Groups the sstables passed in into arenas and buckets. This is used by the strategy to determine
+    /// new compactions, and by external tools in CNDB to analyze the strategy decisions.
+    ///
+    /// @param sstables a collection of the sstables to be assigned to arenas
+    /// @param compactionFilter a bifilter(sstable, isCompacting) to include CompactionSSTables,
+    ///                         e.g., [#isSuitableForCompaction()]
+    ///
+    /// @return a map of arenas to their buckets
     public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
                                              BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
@@ -940,25 +1247,15 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return realm.metadata();
     }
 
-    private static boolean startsAfter(CompactionSSTable a, CompactionSSTable b)
-    {
-        // Strict comparison because the span is end-inclusive.
-        return a.getFirst().compareTo(b.getLast()) > 0;
-    }
-
-    /**
-     * A compaction arena contains the list of sstables that belong to this arena as well as the arena
-     * selector used for comparison.
-     */
+    /// A compaction arena contains the list of sstables that belong to this arena as well as the arena
+    /// selector used for comparison.
     public static class Arena implements Comparable<Arena>
     {
         final List<CompactionSSTable> sstables;
         final ArenaSelector selector;
-        private final CompactionRealm realm;
 
-        Arena(ArenaSelector selector, CompactionRealm realm)
+        Arena(ArenaSelector selector)
         {
-            this.realm = realm;
             this.sstables = new ArrayList<>();
             this.selector = selector;
         }
@@ -991,21 +1288,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             return sstables;
         }
-
-        /**
-         * Find fully expired SSTables. Those will be included in the aggregate no matter what.
-         * @param gcBefore
-         * @param ignoreOverlaps
-         * @return expired SSTables
-         */
-        Set<CompactionSSTable> getExpiredSSTables(int gcBefore, boolean ignoreOverlaps)
-        {
-            return CompactionController.getFullyExpiredSSTables(realm,
-                                                                sstables,
-                                                                realm.getOverlappingLiveSSTables(sstables),
-                                                                gcBefore,
-                                                                ignoreOverlaps);
-        }
     }
 
     @Override
@@ -1014,9 +1296,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return String.format("Unified strategy %s", getMetadata());
     }
 
-    /**
-     * A level: index, sstables and some properties.
-     */
+    /// A level: index, sstables and some properties.
     public static class Level
     {
         final List<CompactionSSTable> sstables;
@@ -1078,23 +1358,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 logger.trace("Level: {}", this);
         }
 
-        /**
-         * Return the compaction aggregate
-         */
+        /// Return the compaction aggregate
         Collection<CompactionAggregate.UnifiedAggregate> getCompactionAggregates(Arena arena,
-                                                                                 Set<CompactionSSTable> expired,
                                                                                  Controller controller,
                                                                                  long spaceAvailable)
         {
-            sstables.removeAll(expired);
-
             if (logger.isTraceEnabled())
                 logger.trace("Creating compaction aggregate with sstable set {}", sstables);
 
 
             // Note that adjacent overlap sets may include deduplicated sstable
             List<Set<CompactionSSTable>> overlaps = Overlaps.constructOverlapSets(sstables,
-                                                                                  UnifiedCompactionStrategy::startsAfter,
+                                                                                  CompactionSSTable.startsAfter,
                                                                                   CompactionSSTable.firstKeyComparator,
                                                                                   CompactionSSTable.lastKeyComparator);
             for (Set<CompactionSSTable> overlap : overlaps)
@@ -1154,9 +1429,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    /**
-     * A compaction bucket, i.e. a selection of overlapping sstables from which a compaction should be selected.
-     */
+    /// A compaction bucket, i.e. a selection of overlapping sstables from which a compaction should be selected.
     static abstract class Bucket
     {
         final Level level;
@@ -1188,25 +1461,23 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.maxOverlap = maxOverlap;
         }
 
-        /**
-         * Select compactions from this bucket. Normally this would form a compaction out of all sstables in the
-         * bucket, but if compaction is very late we may prefer to act more carefully:
-         * - we should not use more inputs than the permitted maximum
-         * - we should not select a compaction whose execution will use more temporary space than is available
-         * - we should select SSTables in a way that preserves the structure of the compaction hierarchy
-         * These impose a limit on the size of a compaction; to make sure we always reduce the read amplification by
-         * this much, we treat this number as a limit on overlapping sstables, i.e. if A and B don't overlap with each
-         * other but both overlap with C and D, all four will be selected to form a limit-three compaction. A limit-two
-         * one may choose CD, ABC or ABD.
-         * Also, the subset is selected by max timestamp order, oldest first, to avoid violating sstable time order. In
-         * the example above, if B is oldest and C is older than D, the limit-two choice would be ABC (if A is older
-         * than D) or BC (if A is younger, avoiding combining C with A skipping D).
-         *
-         * @param controller The compaction controller.
-         * @param spaceAvailable The amount of space available for compaction, limits the maximum number of sstables
-         *                       that can be selected.
-         * @return A compaction pick to execute next.
-         */
+        /// Select compactions from this bucket. Normally this would form a compaction out of all sstables in the
+        /// bucket, but if compaction is very late we may prefer to act more carefully:
+        /// - we should not use more inputs than the permitted maximum
+        /// - we should not select a compaction whose execution will use more temporary space than is available
+        /// - we should select SSTables in a way that preserves the structure of the compaction hierarchy
+        /// These impose a limit on the size of a compaction; to make sure we always reduce the read amplification by
+        /// this much, we treat this number as a limit on overlapping sstables, i.e. if A and B don't overlap with each
+        /// other but both overlap with C and D, all four will be selected to form a limit-three compaction. A limit-two
+        /// one may choose CD, ABC or ABD.
+        /// Also, the subset is selected by max timestamp order, oldest first, to avoid violating sstable time order. In
+        /// the example above, if B is oldest and C is older than D, the limit-two choice would be ABC (if A is older
+        /// than D) or BC (if A is younger, avoiding combining C with A skipping D).
+        ///
+        /// @param controller The compaction controller.
+        /// @param spaceAvailable The amount of space available for compaction, limits the maximum number of sstables
+        ///                       that can be selected.
+        /// @return A compaction pick to execute next.
         CompactionAggregate.UnifiedAggregate constructAggregate(Controller controller, long spaceAvailable, Arena arena)
         {
             int count = maxOverlap;
@@ -1218,15 +1489,14 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             assert count >= threshold;
             if (count <= fanout)
             {
-                /**
-                 * Happy path. We are not late or (for levelled) we are only so late that a compaction now will
-                 * have the same effect as doing levelled compactions one by one. Compact all. We do not cap
-                 * this pick at maxSSTablesToCompact due to an assumption that maxSSTablesToCompact is much
-                 * greater than F. See {@link Controller#MAX_SSTABLES_TO_COMPACT_OPTION} for more details.
-                 */
+
+                // Happy path. We are not late or (for levelled) we are only so late that a compaction now will
+                // have the same effect as doing levelled compactions one by one. Compact all. We do not cap
+                // this pick at maxSSTablesToCompact due to an assumption that maxSSTablesToCompact is much
+                // greater than F. See {@link Controller#MAX_SSTABLES_TO_COMPACT_OPTION} for more details.
                 return CompactionAggregate.createUnified(allSSTablesSorted,
                                                          maxOverlap,
-                                                         CompactionPick.create(index, allSSTablesSorted),
+                                                         CompactionPick.create(nextTimeUUID(), index, allSSTablesSorted),
                                                          Collections.emptySet(),
                                                          arena,
                                                          level);
@@ -1242,17 +1512,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 if (count <= maxSSTablesToCompact)
                     return CompactionAggregate.createUnified(allSSTablesSorted,
                                                              maxOverlap,
-                                                             CompactionPick.create(index, allSSTablesSorted),
+                                                             CompactionPick.create(nextTimeUUID(), index, allSSTablesSorted),
                                                              Collections.emptySet(),
                                                              arena,
                                                              level);
 
-                CompactionPick pick = CompactionPick.create(index, pullOldestSSTables(maxSSTablesToCompact));
+                CompactionPick pick = CompactionPick.create(nextTimeUUID(), index, pullOldestSSTables(maxSSTablesToCompact));
                 count -= maxSSTablesToCompact;
                 List<CompactionPick> pending = new ArrayList<>();
                 while (count >= threshold)
                 {
-                    pending.add(CompactionPick.create(index, pullOldestSSTables(maxSSTablesToCompact)));
+                    pending.add(CompactionPick.create(nextTimeUUID(), index, pullOldestSSTables(maxSSTablesToCompact)));
                     count -= maxSSTablesToCompact;
                 }
 
@@ -1286,29 +1556,26 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (size - pos >= level.threshold) // can only happen in the levelled case.
             {
                 assert size - pos < maxSSTablesToCompact; // otherwise it should have already been picked
-                pending.add(CompactionPick.create(level.index, allSSTablesSorted));
+                pending.add(CompactionPick.create(nextTimeUUID(), level.index, allSSTablesSorted));
             }
             return pending;
         }
 
-        /**
-         * Collects in {@param list} compactions of {@param sstables} such that they land in {@param level} and higher.
-         *
-         * Recursively combines SSTables into {@link CompactionPick}s in way that up to {@param maxSSTablesToCompact}
-         * SSTables are combined to reach the highest possible level, then the rest is combined for the level before,
-         * etc up to {@param level}.
-         *
-         * To agree with what compaction normally does, the first sstables from the list are placed in the picks that
-         * combine to reach the highest levels.
-         *
-         * @param controller
-         * @param level minimum target level for compactions to land
-         * @param step - number of source SSTables required to reach level
-         * @param maxSSTablesToCompact limit on the number of sstables per compaction
-         * @param list - result list of layout-preserving compaction picks
-         * @return index of the last used SSTable from {@param sstables}; the number of remaining sstables will be lower
-         *         than step
-         */
+        /// Collects in {@param list} compactions of {@param sstables} such that they land in {@param level} and higher.
+        ///
+        /// Recursively combines SSTables into [CompactionPick]s in way that up to {@param maxSSTablesToCompact}
+        /// SSTables are combined to reach the highest possible level, then the rest is combined for the level before,
+        /// etc up to {@param level}.
+        ///
+        /// To agree with what compaction normally does, the first sstables from the list are placed in the picks that
+        /// combine to reach the highest levels.
+        ///
+        /// @param level minimum target level for compactions to land
+        /// @param step - number of source SSTables required to reach level
+        /// @param maxSSTablesToCompact limit on the number of sstables per compaction
+        /// @param list - result list of layout-preserving compaction picks
+        /// @return index of the last used SSTable from {@param sstables}; the number of remaining sstables will be lower
+        ///         than step
         private int layoutCompactions(Controller controller,
                                       int level,
                                       int step,
@@ -1350,7 +1617,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // threshold (which corresponds to pickSize == step, always the case for tiered); in the case of
                 // levelled compaction, when we compact more than 1 but less than F sstables on a level (which
                 // corresponds to pickSize > step), it is an operation that is triggered on the same level.
-                list.add(CompactionPick.create(pickSize > step ? level : level - 1,
+                list.add(CompactionPick.create(nextTimeUUID(),
+                                               pickSize > step ? level : level - 1,
                                                pullOldestSSTables(pickSize)));
                 pos += pickSize;
             }
@@ -1360,7 +1628,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (pos + step <= total)
             {
                 pickSize = ((total - pos) / step) * step;
-                list.add(CompactionPick.create(pickSize > step ? level : level - 1,
+                list.add(CompactionPick.create(nextTimeUUID(),
+                                               pickSize > step ? level : level - 1,
                                                pullOldestSSTables(pickSize)));
                 pos += pickSize;
             }

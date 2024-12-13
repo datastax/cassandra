@@ -24,7 +24,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
@@ -38,7 +38,7 @@ public class MaxSSTableSizeWriter extends CompactionAwareWriter
 
     public MaxSSTableSizeWriter(CompactionRealm realm,
                                 Directories directories,
-                                LifecycleTransaction txn,
+                                ILifecycleTransaction txn,
                                 Set<SSTableReader> nonExpiredSSTables,
                                 long maxSSTableSize,
                                 int level)
@@ -48,7 +48,7 @@ public class MaxSSTableSizeWriter extends CompactionAwareWriter
 
     public MaxSSTableSizeWriter(CompactionRealm realm,
                                 Directories directories,
-                                LifecycleTransaction txn,
+                                ILifecycleTransaction txn,
                                 Set<SSTableReader> nonExpiredSSTables,
                                 long maxSSTableSize,
                                 int level,
