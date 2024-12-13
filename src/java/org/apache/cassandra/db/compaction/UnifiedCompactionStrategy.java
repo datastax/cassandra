@@ -451,7 +451,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             long partitionCountSum = 0;
             PartitionPosition min = null;
             PartitionPosition max = null;
-            boolean hasNonSSTableReaders = false;
+            boolean hasOnlySSTableReaders = true;
             for (CompactionSSTable sstable : sstables)
             {
                 onDiskLength += sstable.onDiskLength();
@@ -460,10 +460,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 max = max == null || max.compareTo(sstable.getLast()) < 0 ? sstable.getLast() : max;
                 if (!(sstable instanceof SSTableReader)
                     || ((SSTableReader) sstable).descriptor == null)    // for tests
-                    hasNonSSTableReaders = true;
+                    hasOnlySSTableReaders = false;
             }
             long estimatedPartitionCount;
-            if (!hasNonSSTableReaders)
+            if (hasOnlySSTableReaders)
                 estimatedPartitionCount = SSTableReader.getApproximateKeyCount(Iterables.filter(sstables, SSTableReader.class));
             else
                 estimatedPartitionCount = partitionCountSum;
@@ -488,7 +488,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             long partitionCountSumInRange = 0;
             PartitionPosition min = null;
             PartitionPosition max = null;
-            boolean hasNonSSTableReaders = false;
+            boolean hasOnlySSTableReaders = true;
             for (CompactionSSTable sstable : sstables)
             {
                 PartitionPosition left = sstable.getFirst();
@@ -510,10 +510,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 max = max == null || max.compareTo(right) < 0 ? right : max;
                 if (!(sstable instanceof SSTableReader)
                     || ((SSTableReader) sstable).descriptor == null)    // for tests
-                    hasNonSSTableReaders = true;
+                    hasOnlySSTableReaders = false;
             }
             long estimatedPartitionCount;
-            if (!hasNonSSTableReaders)
+            if (hasOnlySSTableReaders)
                 estimatedPartitionCount = SSTableReader.getApproximateKeyCount(Iterables.filter(sstables, SSTableReader.class));
             else
                 estimatedPartitionCount = partitionCountSum;
@@ -1011,14 +1011,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         List<CompactionAggregate> selected = new ArrayList<>(pending.size());
         for (CompactionAggregate.UnifiedAggregate aggregate : pending)
         {
+            if (remaining == 0)
+                break; // no threads to allocate from
+
             final CompactionPick pick = aggregate.getSelected();
             if (pick.isEmpty())
                 continue;
-            if (pick.hasExpiredOnly())
-            {
-                selected.add(aggregate);    // always add expired-only compactions, they are not subject to any limits
-                continue;
-            }
+
             ++proposed;
             long overheadSizeInBytes = controller.getOverheadSizeInBytes(pick);
             if (overheadSizeInBytes > spaceAvailable)
@@ -1028,9 +1027,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             boolean isAdaptive = controller.isRecentAdaptive(pick);
             // avoid computing sharding stats if are not going to schedule the compaction at all
             if (!reservations.hasRoom(currentLevel))
-                continue;
+                continue;  // honor the reserved thread counts
             if (isAdaptive && remainingAdaptiveCompactions <= 0)
-                continue;
+                continue; // do not allow more than remainingAdaptiveCompactions to limit latency spikes upon changing W
             if (shouldCheckSSTableSelected && !Collections.disjoint(selectedSSTables, pick.sstables()))
                 continue; // do not allow multiple selections of the same sstable
 
@@ -1044,14 +1043,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 if (parallelism > remainingAdaptiveCompactions)
                 {
                     parallelism = remainingAdaptiveCompactions;
-                    if (parallelism <= 0)
-                        continue; // do not allow more than remainingAdaptiveCompactions to limit latency spikes upon changing W
+                    assert parallelism > 0; // we checked the remainingAdaptiveCompactions in advance
                 }
             }
 
             parallelism = reservations.accept(currentLevel, parallelism);
-            if (parallelism <= 0)
-                continue; // honor the reserved thread counts
+            assert parallelism > 0; // we checked hasRoom in advance, there must always be at least one thread to use
+
             // Note: the reservations tracker assumes it is the last check and a pick is accepted if it returns true.
 
             if (isAdaptive)
@@ -1062,9 +1060,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             selected.add(aggregate);
             if (shouldCheckSSTableSelected)
                 selectedSSTables.addAll(pick.sstables());
-
-            if (remaining == 0)
-                break;
         }
 
         reservations.debugOutput(selected.size(), proposed, remaining);
