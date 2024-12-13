@@ -1232,7 +1232,7 @@ public class SSTableReaderTest
         assertEquals("The table should have only one sstable", 1, liveSSTables.size());
 
         ISSTableScanner scanner = liveSSTables.iterator().next().getScanner(new Range<>(t(0), t(1)));
-        assertFalse(scanner.hasNext());
+        assertEquals(0, scanner.getLengthInBytes());
     }
 
     @Test

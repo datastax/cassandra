@@ -240,6 +240,88 @@ public class OverlapsTest
 
 
     @Test
+    public void testCombineSetsWithCommonElement()
+    {
+        String[] sets = new String[]{
+        "ABCD",
+        "ADE",
+        "EF",
+        "HI",
+        "LN",
+        "NO",
+        "NPQ",
+        "RST",
+        };
+        String[] nonOverlapping = new String[]{
+        "ABCDEF",
+        "HI",
+        "LNOPQ",
+        "RST",
+        };
+
+        List<Set<Character>> input = Arrays.stream(sets).map(OverlapsTest::asSet).collect(Collectors.toList());
+        List<Set<Character>> expected = Arrays.stream(nonOverlapping).map(OverlapsTest::asSet).collect(Collectors.toList());
+
+        List<Set<Character>> result = Overlaps.combineSetsWithCommonElement(input);
+        assertEquals(expected, result);
+    }
+
+    @Test
+    public void testSplitInNonOverlappingSetsRandom()
+    {
+        int size;
+        int range = 100;
+        Random rand = new Random();
+        for (int i = 0; i < 1000; ++i)
+        {
+            size = rand.nextInt(range) + 2;
+            Interval<Integer, String>[] input = new Interval[size];
+            char c = 'A';
+            for (int j = 0; j < size; ++j)
+            {
+                int start = rand.nextInt(range);
+                input[j] = (new Interval<>(start, start + 1 + random.nextInt(range - start), Character.toString(c++)));
+            }
+
+            boolean endInclusive = rand.nextBoolean();
+
+            List<Set<Interval<Integer, String>>> overlaps =
+            Overlaps.splitInNonOverlappingSets(Arrays.asList(input),
+                                               endInclusive ? (x, y) -> x.min > y.max
+                                                            : (x, y) -> x.min >= y.max,
+                                               Comparator.comparingInt(x -> x.min),
+                                               Comparator.comparingInt(x -> x.max));
+
+            for (var set : overlaps)
+            {
+                for (var interval : set)
+                {
+                    // must intersect with at least one other item in the set
+                    if (set.size() > 1)
+                        Assert.assertTrue(set.stream().filter(x -> x != interval).anyMatch(x -> intersects(x, interval, endInclusive)));
+                    // and no interval outside the set
+                    Assert.assertTrue(overlaps.stream().filter(x -> x != set).flatMap(Set::stream).noneMatch(x -> intersects(x, interval, endInclusive)));
+                }
+            }
+        }
+    }
+
+    <C extends Comparable<C>, D> boolean intersects(Interval<C, D> i1, Interval<C, D> i2, boolean endInclusive)
+    {
+        return endInclusive ? intersectsEndsIncluded(i1, i2) : intersectsEndsExcluded(i1, i2);
+    }
+
+    <C extends Comparable<C>, D> boolean intersectsEndsExcluded(Interval<C, D> i1, Interval<C, D> i2)
+    {
+        return i1.min.compareTo(i2.max) < 0 && i1.max.compareTo(i2.min) > 0;
+    }
+
+    <C extends Comparable<C>, D> boolean intersectsEndsIncluded(Interval<C, D> i1, Interval<C, D> i2)
+    {
+        return i1.min.compareTo(i2.max) <= 0 && i1.max.compareTo(i2.min) >= 0;
+    }
+
+    @Test
     public void testAssignOverlapsIntoBuckets()
     {
         String[] sets = new String[]{

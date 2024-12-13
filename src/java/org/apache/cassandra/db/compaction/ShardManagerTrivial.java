@@ -18,13 +18,15 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 public class ShardManagerTrivial implements ShardManager
 {
@@ -48,12 +50,17 @@ public class ShardManagerTrivial implements ShardManager
     }
 
     @Override
-    public double calculateCombinedDensity(Set<? extends CompactionSSTable> sstables)
+    public double density(long onDiskLength, PartitionPosition min, PartitionPosition max, long approximatePartitionCount)
     {
-        double totalSize = 0;
-        for (CompactionSSTable sstable : sstables)
-            totalSize += sstable.onDiskLength();
-        return totalSize;
+        return onDiskLength;
+    }
+
+    @Override
+    public <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
+                                                                          int numShardsForDensity,
+                                                                          BiFunction<Collection<R>, Range<Token>, T> maker)
+    {
+        return List.of(maker.apply(sstables, new Range<>(partitioner.getMinimumToken(), partitioner.getMinimumToken())));
     }
 
     @Override
@@ -84,7 +91,7 @@ public class ShardManagerTrivial implements ShardManager
         @Override
         public Token shardEnd()
         {
-            return partitioner.getMinimumToken();
+            return null;
         }
 
         @Override
@@ -130,7 +137,7 @@ public class ShardManagerTrivial implements ShardManager
         }
 
         @Override
-        public long shardAdjustedKeyCount(Set<SSTableReader> sstables)
+        public long shardAdjustedKeyCount(Set<? extends CompactionSSTable> sstables)
         {
             long shardAdjustedKeyCount = 0;
             for (CompactionSSTable sstable : sstables)
