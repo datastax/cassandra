@@ -180,6 +180,11 @@ public enum CassandraRelevantProperties
     COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB("compaction_rate_limit_granularity_in_kb"),
 
     /**
+     * If this is true, compaction will not verify that sstables selected for compaction are marked compacted.
+     */
+    COMPACTION_SKIP_COMPACTING_STATE_CHECKING("cassandra.compaction.skip_compacting_state_checking", "false"),
+
+    /**
      * If this is true, compaction will not verify that sstables selected for compaction are in the same repair
      * state. This check is done to ensure that incremental repair is not improperly carried out (potentially causing
      * data loss) if a node has somehow entered an invalid state. The flag should only be used to recover from
@@ -851,6 +856,7 @@ public enum CassandraRelevantProperties
     UCS_NUM_SHARDS("unified_compaction.num_shards"),
     UCS_OVERLAP_INCLUSION_METHOD("unified_compaction.overlap_inclusion_method"),
     UCS_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES("unified_compaction.override_ucs_config_for_vector_tables", "false"),
+    UCS_PARALLELIZE_OUTPUT_SHARDS("unified_compaction.parallelize_output_shards", "true"),
     UCS_RESERVATIONS_TYPE_OPTION("unified_compaction.reservations_type_option", Reservations.Type.LEVEL_OR_BELOW.name()),
     UCS_RESERVED_THREADS("reserved_threads", "max"),
     UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
