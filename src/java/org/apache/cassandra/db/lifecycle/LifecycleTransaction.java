@@ -226,11 +226,6 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         return log.id();
     }
 
-    public Set<SSTableReader> getCompacting()
-    {
-        return tracker.getCompacting();
-    }
-
     public void doPrepare()
     {
         // note for future: in anticompaction two different operations use the same Transaction, and both prepareToCommit()
@@ -609,6 +604,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     }
 
     // convenience method for callers that know only one sstable is involved in the transaction
+    // overridden to avoid defensive copying
     public SSTableReader onlyOne()
     {
         assert originals.size() == 1;

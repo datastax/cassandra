@@ -429,6 +429,24 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
             return toBytes(rawTimestampToMsb(unixMicrosToRawTimestamp(nextUnixMicros())), clockSeqAndNode);
         }
 
+        public static int sequence(TimeUUID timeUUID)
+        {
+            long lsb = timeUUID.asUUID().getLeastSignificantBits();
+            return (int) ((lsb >> 48) & 0x0000000000003FFFL);
+        }
+
+        /**
+         * Returns a new TimeUUID with the same timestamp as this one, but with the provided sequence value.
+         */
+        public static TimeUUID withSequence(TimeUUID timeUUID, long sequence)
+        {
+            long sequenceBits = 0x0000000000003FFFL;
+            long sequenceMask = ~(sequenceBits << 48);
+            final long bits = (sequence & sequenceBits) << 48;
+            UUID uuid = timeUUID.asUUID();
+            return TimeUUID.fromBytes(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits() & sequenceMask | bits);
+        }
+
         // needs to return two different values for the same when.
         // we can generate at most 10k UUIDs per ms.
         private static long nextUnixMicros()
