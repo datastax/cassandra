@@ -165,16 +165,16 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     }
 
     /**
-     * @param gcBefore throw away tombstones older than this
-     *
+     * @param gcBefore             throw away tombstones older than this
+     * @param permittedParallelism the maximum permitted parallelism for the operation
      * @return a compaction task that should be run to compact this columnfamilystore
      * as much as possible.  Null if nothing to do.
-     *
+     * <p>
      * Is responsible for marking its sstables as compaction-pending.
      */
     @Override
     @SuppressWarnings("resource")
-    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput)
+    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, int permittedParallelism)
     {
         Iterable<? extends CompactionSSTable> filteredSSTables = Iterables.filter(getSSTables(), sstable -> !sstable.isMarkedSuspect());
         if (Iterables.isEmpty(filteredSSTables))
@@ -186,9 +186,9 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     }
 
     @Override
-    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType)
+    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, int permittedParallelism, OperationType operationType)
     {
-        CompactionTasks maximalTasks = getMaximalTasks(gcBefore, splitOutput);
+        CompactionTasks maximalTasks = getMaximalTasks(gcBefore, splitOutput, permittedParallelism);
         for (AbstractCompactionTask task: maximalTasks)
         {
             task.setCompactionType(operationType);
@@ -224,7 +224,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     /**
      * Create a compaction task for a maximal, user defined or background compaction without aggregates (legacy strategies).
      * Background compactions for strategies that extend {@link LegacyAbstractCompactionStrategy.WithAggregates} will use
-     * {@link LegacyAbstractCompactionStrategy.WithAggregates#createCompactionTask(int, LifecycleTransaction, boolean, boolean)} instead.
+     * {@link LegacyAbstractCompactionStrategy.WithAggregates#createCompactionTask(long, LifecycleTransaction, boolean, boolean)} instead.
      *
      * @param gcBefore tombstone threshold, older tombstones can be discarded
      * @param txn the transaction containing the files to be compacted
