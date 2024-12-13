@@ -62,8 +62,6 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -300,12 +298,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     @Override
     public void shutdown()
     {
-        if (!SchemaConstants.isSystemKeyspace(realm.getKeyspaceName()))
-        {
-            logger.debug("storing controller config on shutdown for {}.{}", realm.getKeyspaceName(), realm.getTableName());
-            logger.debug("stack trace: ", new Exception("here").fillInStackTrace());
-            storeControllerConfig();
-        }
         perform(super::shutdown,
                 controller::shutdown);
     }
