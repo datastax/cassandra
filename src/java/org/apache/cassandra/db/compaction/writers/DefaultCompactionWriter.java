@@ -27,8 +27,8 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.CompactionRealm;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
@@ -42,12 +42,13 @@ public class DefaultCompactionWriter extends CompactionAwareWriter
     protected static final Logger logger = LoggerFactory.getLogger(DefaultCompactionWriter.class);
     private final int sstableLevel;
 
-    public DefaultCompactionWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+    public DefaultCompactionWriter(CompactionRealm realm, Directories directories, ILifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
     {
         this(realm, directories, txn, nonExpiredSSTables, false, 0);
     }
 
-    public DefaultCompactionWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, boolean keepOriginals, int sstableLevel)
+    @SuppressWarnings("resource")
+    public DefaultCompactionWriter(CompactionRealm realm, Directories directories, ILifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, boolean keepOriginals, int sstableLevel)
     {
         super(realm, directories, txn, nonExpiredSSTables, keepOriginals);
         this.sstableLevel = sstableLevel;

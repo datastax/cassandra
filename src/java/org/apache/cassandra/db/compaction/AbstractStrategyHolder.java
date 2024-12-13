@@ -173,7 +173,7 @@ public abstract class AbstractStrategyHolder
 
     public abstract Collection<TasksSupplier> getBackgroundTaskSuppliers(long gcBefore);
 
-    public abstract Collection<AbstractCompactionTask> getMaximalTasks(long gcBefore, boolean splitOutput);
+    public abstract Collection<AbstractCompactionTask> getMaximalTasks(long gcBefore, boolean splitOutput, int permittedParallelism);
 
     public abstract Collection<AbstractCompactionTask> getUserDefinedTasks(GroupedSSTableContainer<CompactionSSTable> sstables, long gcBefore);
 

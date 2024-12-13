@@ -114,6 +114,13 @@ public class UnifiedCompactionStatistics extends CompactionAggregateStatistics
         return maxDensityBytes;
     }
 
+    /** The maximum number of overlapping sstables in this bucket */
+    @JsonProperty
+    public int maxOverlap()
+    {
+        return maxOverlap;
+    }
+
     /** The name of the shard, empty if the compaction is not sharded (the default). */
     @JsonProperty
     @Override

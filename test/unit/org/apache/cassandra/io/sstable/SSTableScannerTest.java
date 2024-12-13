@@ -647,7 +647,7 @@ public class SSTableScannerTest
     {
         testRequestNextRowIteratorWithoutConsumingPrevious(r -> r.partitionIterator(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER),
                                                            UnfilteredPartitionIterator::hasNext,
-                                                           ".*UnfilteredRowIterator.*must be closed.*");
+                                                           ".*UnfilteredRowIterator.*(should|must) be.*closed.*");
     }
 
     @Test
@@ -655,7 +655,7 @@ public class SSTableScannerTest
     {
         testRequestNextRowIteratorWithoutConsumingPrevious(r -> r.partitionIterator(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER),
                                                            UnfilteredPartitionIterator::next,
-                                                           ".*UnfilteredRowIterator.*must be closed.*");
+                                                           ".*UnfilteredRowIterator.*(should|must) be.*closed.*");
     }
 
     private static void testRequestNextRowIteratorAfterClosingPrevious(Function<SSTableReader, UnfilteredPartitionIterator> makeScanner)
