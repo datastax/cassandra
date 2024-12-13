@@ -684,8 +684,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                                                  tm.name,
                                                                  ColumnMetadata.SYNTHETIC_SCORE_ID,
                                                                  FloatType.instance);
-                var isScoreFetched = !(command.columnFilter() instanceof ColumnFilter.WildCardColumnFilter)
-                                     && command.columnFilter().fetchesExplicitly(scoreColumn);
+                var isScoreFetched = command.columnFilter().fetchesExplicitly(scoreColumn);
                 if (!isScoreFetched)
                 {
                     this.row = content;
