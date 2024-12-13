@@ -192,17 +192,17 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
     {
         final long length = fc.size();
         long bytesTransferred = 0;
+        assert fc.position() == 0;
 
         try
         {
             while (bytesTransferred < length)
             {
                 int toWrite = (int) min(batchSize, length - bytesTransferred);
-                final long position = bytesTransferred;
 
                 writeToChannel(bufferSupplier -> {
                     ByteBuffer outBuffer = bufferSupplier.get(toWrite);
-                    long read = fc.read(outBuffer, position);
+                    long read = fc.read(outBuffer);
                     if (read != toWrite)
                         throw new IOException(String.format("could not read required number of bytes from " +
                                                             "file to be streamed: read %d bytes, wanted %d bytes",
