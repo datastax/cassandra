@@ -139,10 +139,10 @@ public class TTLExpiryTest
         Set<SSTableReader> sstables = Sets.newHashSet(cfs.getLiveSSTables());
         long now = FBUtilities.nowInSeconds();
         long gcBefore = now + 2;
-        Set<SSTableReader> expired = CompactionController.getFullyExpiredSSTables(
+        Set<CompactionSSTable> expired = CompactionController.getFullyExpiredSSTables(
                 cfs,
                 sstables,
-                Collections.EMPTY_SET,
+                c -> Collections.<SSTableReader>emptySet(),
                 gcBefore);
         assertEquals(2, expired.size());
 
