@@ -1410,4 +1410,23 @@ public class Util
         }
         return new UserType(ks, UTF8Type.instance.decompose(name), fieldNames, fieldTypes, multicell);
     }
+
+    public static void assumeAssertsEnabled()
+    {
+        Assume.assumeTrue("Asserts must be enabled for this test", assertsEnabled());
+    }
+
+    public static boolean assertsEnabled()
+    {
+        try
+        {
+            assert false;
+            return false;
+        }
+        catch (AssertionError e)
+        {
+            return true;
+        }
+    }
+
 }

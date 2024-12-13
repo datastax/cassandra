@@ -190,7 +190,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
             if (e.getCause() instanceof IOException)
             {
                 sstable.markSuspect();
-                throw new CorruptSSTableException((Exception)e.getCause(), file);
+                throw new CorruptSSTableException(e.getCause(), file);
             }
             else
             {
