@@ -335,7 +335,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore);
     }
 
-    private Collection<AbstractCompactionTask> getExpirationTasks(int gcBefore)
+    /// Check for fully expired sstables and return a collection of expiration tasks if found. Called by CNDB directly.
+    public Collection<AbstractCompactionTask> getExpirationTasks(int gcBefore)
     {
         long ts = System.currentTimeMillis();
         boolean expiredCheck = ts - lastExpiredCheck > controller.getExpiredSSTableCheckFrequency();
