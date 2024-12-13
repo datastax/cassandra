@@ -220,7 +220,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         Assert.assertNotNull(prm.get(repairID));
         LocalSessionAccessor.finalizeUnsafe(repairID);
 
-        Collection<AbstractCompactionTask> tasks = prm.getMaximalTasks(FBUtilities.nowInSeconds(), false);
+        Collection<AbstractCompactionTask> tasks = prm.getMaximalTasks(FBUtilities.nowInSeconds(), false, 0);
         try
         {
             Assert.assertEquals(1, tasks.size());
