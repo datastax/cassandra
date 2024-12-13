@@ -43,6 +43,7 @@ import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.LogAction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.apache.cassandra.utils.concurrent.CountDownLatch;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
@@ -83,7 +84,7 @@ public class UpgradeSSTablesTest extends TestBaseImpl
 
             Future<?> future = cluster.get(1).asyncAcceptsOnInstance((String ks) -> {
                 ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore("tbl");
-                CompactionManager.instance.submitMaximal(cfs, FBUtilities.nowInSeconds(), false, OperationType.COMPACTION);
+                CompactionManager.instance.submitMaximal(cfs, FBUtilities.nowInSeconds(), false, CompactionManager.instance.active, OperationType.COMPACTION);
             }).apply(KEYSPACE);
 
             Assert.assertTrue(cluster.get(1).callOnInstance(() -> CompactionLatchByteman.starting.awaitUninterruptibly(1, TimeUnit.MINUTES)));
@@ -129,7 +130,7 @@ public class UpgradeSSTablesTest extends TestBaseImpl
 
             cluster.get(1).acceptsOnInstance((String ks) -> {
                 ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore("tbl");
-                FBUtilities.allOf(CompactionManager.instance.submitMaximal(cfs, FBUtilities.nowInSeconds(), false, OperationType.COMPACTION))
+                FBUtilities.allOf(CompactionManager.instance.submitMaximal(cfs, FBUtilities.nowInSeconds(), false, CompactionManager.instance.active, OperationType.COMPACTION))
                            .awaitUninterruptibly(1, TimeUnit.MINUTES);
 
             }).accept(KEYSPACE);
@@ -327,16 +328,17 @@ public class UpgradeSSTablesTest extends TestBaseImpl
         }
 
         @SuppressWarnings("unused")
-        public static void onOperationStart(TableOperation op, @SuperCall Callable<Void> zuperCall)
+        public static NonThrowingCloseable onOperationStart(TableOperation op, @SuperCall Callable<NonThrowingCloseable> zuperCall)
         {
             try
             {
-                zuperCall.call();
+                NonThrowingCloseable result = zuperCall.call();
                 if (op.getProgress().operationType() == OperationType.UPGRADE_SSTABLES)
                 {
                     starting.decrement();
                     Assert.assertTrue(start.awaitUninterruptibly(1, TimeUnit.MINUTES));
                 }
+                return result;
             }
             catch (Exception e)
             {
@@ -361,16 +363,17 @@ public class UpgradeSSTablesTest extends TestBaseImpl
         }
 
         @SuppressWarnings("unused")
-        public static void onOperationStart(TableOperation op, @SuperCall Callable<Void> zuperCall)
+        public static NonThrowingCloseable onOperationStart(TableOperation op, @SuperCall Callable<NonThrowingCloseable> zuperCall)
         {
             try
             {
-                zuperCall.call();
+                NonThrowingCloseable result = zuperCall.call();
                 if (op.getProgress().operationType() == OperationType.COMPACTION)
                 {
                     starting.decrement();
                     Assert.assertTrue(start.awaitUninterruptibly(1, TimeUnit.MINUTES));
                 }
+                return result;
             }
             catch (Exception e)
             {

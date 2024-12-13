@@ -190,7 +190,7 @@ public class ZombieSSTablesTest
         final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(tableName + MAXIMAL);
 
         prepareZombieSSTables(cfs);
-        Collection<AbstractCompactionTask> maximalTasks = cfs.getCompactionStrategy().getMaximalTasks(0, false);
+        Collection<AbstractCompactionTask> maximalTasks = cfs.getCompactionStrategy().getMaximalTasks(0, false, 0);
         assertNotNull(maximalTasks);
         assertFalse(maximalTasks.isEmpty());
         maximalTasks.stream().forEach(task -> task.transaction.abort());    // avoid leak

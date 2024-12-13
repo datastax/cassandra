@@ -18,17 +18,13 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.Set;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.TimeUUID;
@@ -45,7 +41,7 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
     private final boolean isTransient;
 
     public RepairFinishedCompactionTask(CompactionRealm realm,
-                                        LifecycleTransaction transaction,
+                                        ILifecycleTransaction transaction,
                                         TimeUUID sessionID,
                                         long repairedAt,
                                         boolean isTransient)
@@ -89,7 +85,8 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
         {
             if (obsoleteSSTables)
             {
-                transaction.finish();
+                transaction.prepareToCommit();
+                transaction.commit();
             }
             else
             {
@@ -103,16 +100,5 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
                 realm.repairSessionCompleted(sessionID);
             }
         }
-    }
-
-    public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    protected int executeInternal()
-    {
-        run();
-        return transaction.originals().size();
     }
 }
