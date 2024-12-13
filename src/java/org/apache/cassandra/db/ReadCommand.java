@@ -1049,10 +1049,10 @@ public abstract class ReadCommand extends AbstractReadQuery
 
             // add synthetic columns to the tablemetadata so we can serialize them in our response
             var tmb = metadata.unbuild();
-            for (var it = columnFilter.fetchedColumns().regulars.simpleColumnsDesc(); it.hasNext(); )
+            for (var it = columnFilter.fetchedColumns().regulars.simpleColumns(); it.hasNext(); )
             {
                 var c = it.next();
-                // synthetic columns sort last, so when we hit the first non-synthetic, we're done
+                // synthetic columns sort first, so when we hit the first non-synthetic, we're done
                 if (!c.isSynthetic())
                     break;
                 tmb.addColumn(ColumnMetadata.syntheticColumn(c.ksName, c.cfName, c.name, c.type));

@@ -336,11 +336,6 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
         return BTree.iterator(columns, 0, complexIdx - 1, BTree.Dir.ASC);
     }
 
-    public Iterator<ColumnMetadata> simpleColumnsDesc()
-    {
-        return BTree.iterator(columns, 0, complexIdx - 1, BTree.Dir.DESC);
-    }
-
     /**
      * Iterator over the complex columns of this object.
      *
@@ -486,14 +481,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
             long packedCount = getPackedCount(syntheticCount, regularCount);
             out.writeUnsignedVInt(packedCount);
 
-            // First pass - write regular columns
-            for (ColumnMetadata column : columns)
-            {
-                if (!column.isSynthetic())
-                    ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
-            }
-
-            // Second pass - write synthetic columns with their full metadata
+            // First pass - write synthetic columns with their full metadata
             for (ColumnMetadata column : columns)
             {
                 if (column.isSynthetic())
@@ -501,6 +489,13 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                     ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
                     typeSerializer.serialize(column.type, out);
                 }
+            }
+
+            // Second pass - write regular columns
+            for (ColumnMetadata column : columns)
+            {
+                if (!column.isSynthetic())
+                    ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
             }
         }
 
@@ -545,7 +540,20 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                 int regularCount = (int) (packedCount & 0xFFFFF);
                 int syntheticCount = (int) (packedCount >> 20);
 
-                // First pass - regular columns
+                // First pass - synthetic columns
+                for (int i = 0; i < syntheticCount; i++)
+                {
+                    ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
+                    AbstractType<?> type = typeSerializer.deserialize(in);
+
+                    if (!name.equals(ColumnMetadata.SYNTHETIC_SCORE_ID.bytes))
+                        throw new IllegalStateException("Unknown synthetic column " + UTF8Type.instance.getString(name));
+
+                    ColumnMetadata column = ColumnMetadata.syntheticColumn(metadata.keyspace, metadata.name, ColumnMetadata.SYNTHETIC_SCORE_ID, type);
+                    builder.add(column);
+                }
+
+                // Second pass - regular columns
                 for (int i = 0; i < regularCount; i++)
                 {
                     ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
@@ -557,19 +565,6 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                         if (column == null)
                             throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
                     }
-                    builder.add(column);
-                }
-
-                // Second pass - synthetic columns
-                for (int i = 0; i < syntheticCount; i++)
-                {
-                    ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
-                    AbstractType<?> type = typeSerializer.deserialize(in);
-
-                    if (!name.equals(ColumnMetadata.SYNTHETIC_SCORE_ID.bytes))
-                        throw new IllegalStateException("Unknown synthetic column " + UTF8Type.instance.getString(name));
-
-                    ColumnMetadata column = ColumnMetadata.syntheticColumn(metadata.keyspace, metadata.name, ColumnMetadata.SYNTHETIC_SCORE_ID, type);
                     builder.add(column);
                 }
                 return new Columns(builder.build());

@@ -81,11 +81,13 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     public enum Kind
     {
         // NOTE: if adding a new type, must modify comparisonOrder
+        SYNTHETIC,
         PARTITION_KEY,
         CLUSTERING,
         REGULAR,
-        STATIC,
-        SYNTHETIC;
+        STATIC;
+        // it is not possible to add new Kinds after Synthetic without invasive changes to BTreeRow, which
+        // assumes that complex regulr/static columns are the last ones
 
         public boolean isPrimaryKeyKind()
         {
