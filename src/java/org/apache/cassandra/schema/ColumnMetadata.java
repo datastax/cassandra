@@ -479,7 +479,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
             return 0;
 
         if (comparisonOrder != other.comparisonOrder)
-            return Long.compare(comparisonOrder, other.comparisonOrder);
+            return Long.compareUnsigned(comparisonOrder, other.comparisonOrder);
 
         return this.name.compareTo(other.name);
     }
