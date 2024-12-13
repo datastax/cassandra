@@ -71,6 +71,7 @@ public class StaticController extends Controller
                             int reservedThreadsPerLevel,
                             Reservations.Type reservationsType,
                             Overlaps.InclusionMethod overlapInclusionMethod,
+                            boolean parallelizeOutputShards,
                             boolean hasVectorType,
                             String keyspaceName,
                             String tableName)
@@ -93,6 +94,7 @@ public class StaticController extends Controller
               reservedThreadsPerLevel,
               reservationsType,
               overlapInclusionMethod,
+              parallelizeOutputShards,
               hasVectorType);
         this.scalingParameters = scalingParameters;
         this.keyspaceName = keyspaceName;
@@ -115,6 +117,7 @@ public class StaticController extends Controller
                                   int reservedThreadsPerLevel,
                                   Reservations.Type reservationsType,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
+                                  boolean parallelizeOutputShards,
                                   boolean hasVectorType,
                                   String keyspaceName,
                                   String tableName,
@@ -168,6 +171,7 @@ public class StaticController extends Controller
                                     reservedThreadsPerLevel,
                                     reservationsType,
                                     overlapInclusionMethod,
+                                    parallelizeOutputShards,
                                     hasVectorType,
                                     keyspaceName,
                                     tableName);
