@@ -684,6 +684,7 @@ public abstract class Controller
     public long getFlushSizeBytes()
     {
         logger.debug("calling getFlushSizeBytes here: ", new Exception("here").fillInStackTrace());
+        logger.debug("class: {}", env.getClass().getName());
         if (flushSizeOverride > 0)
             return flushSizeOverride;
 
