@@ -174,12 +174,13 @@ public class InvertedIndexSearcher extends IndexSearcher
         // find documents that match each term
         var queryTerms = orderer.getQueryTerms();
         var postingLists = queryTerms.stream()
-                                     .collect(Collectors.toMap(Function.identity(),  term ->
-                                     {
-                                         var encodedTerm = version.onDiskFormat().encodeForTrie(term, indexContext.getValidator());
-                                         var listener = MulticastQueryEventListeners.of(queryContext, perColumnEventListener);
-                                         return reader.exactMatch(encodedTerm, listener, queryContext);
-                                     }));
+                                     .collect(Collectors.toMap(Function.identity(), term ->
+        {
+            var encodedTerm = version.onDiskFormat().encodeForTrie(term, indexContext.getValidator());
+            var listener = MulticastQueryEventListeners.of(queryContext, perColumnEventListener);
+            var postings = reader.exactMatch(encodedTerm, listener, queryContext);
+            return postings == null ? PostingList.EMPTY : postings;
+        }));
         // extract the match count for each
         var documentFrequencies = postingLists.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (long) e.getValue().size()));
 

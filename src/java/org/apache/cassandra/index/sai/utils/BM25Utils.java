@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -64,9 +63,9 @@ public class BM25Utils
     {
         private final PrimaryKey pk;
         private final Map<ByteBuffer, Integer> frequencies;
-        private final float termCount;
+        private final int termCount;
 
-        private DocTF(PrimaryKey pk, float termCount, Map<ByteBuffer, Integer> frequencies)
+        private DocTF(PrimaryKey pk, int termCount, Map<ByteBuffer, Integer> frequencies)
         {
             this.pk = pk;
             this.frequencies = frequencies;
@@ -83,7 +82,7 @@ public class BM25Utils
                                              AbstractAnalyzer docAnalyzer,
                                              Collection<ByteBuffer> queryTerms)
         {
-            float count = 0;
+            int count = 0;
             Map<ByteBuffer, Integer> frequencies = new HashMap<>();
 
             docAnalyzer.reset(cell.buffer());
@@ -146,7 +145,7 @@ public class BM25Utils
         }
 
         // Calculate average document length
-        double avgDocLength = documents.size() > 0 ? totalTermCount / documents.size() : 0.0;
+        double avgDocLength = !documents.isEmpty() ? totalTermCount / documents.size() : 0.0;
 
         // Calculate BM25 scores
         var scoredDocs = new ArrayList<PrimaryKeyWithScore>(documents.size());
@@ -157,10 +156,15 @@ public class BM25Utils
             {
                 int tf = doc.getTermFrequency(queryTerm);
                 Long df = docStats.frequencies.get(queryTerm);
+                // we shouldn't have more hits for a term than we counted total documents
+                if (df > docStats.docCount)
+                    throw new AssertionError(String.format("df=%d, totalDocs=%d", df, docStats.docCount));
+
                 double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount / avgDocLength));
                 double idf = Math.log(1 + (docStats.docCount - df + 0.5) / (df + 0.5));
                 double deltaScore = normalizedTf * idf;
-                assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, totalDocs=%d is %f", tf, df, docStats.docCount, deltaScore);
+                assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, tc=%d, totalDocs=%d is %f",
+                                                       tf, df, doc.termCount, docStats.docCount, deltaScore);
                 score += deltaScore;
             }
             if (source instanceof Memtable)

@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
@@ -50,7 +52,7 @@ public class Orderer
     public final Operator operator;
     public final ByteBuffer term;
     private float[] vector;
-    private ArrayList<ByteBuffer> queryTerms;
+    private List<ByteBuffer> queryTerms;
 
     /**
      * Create an orderer for the given index context, operator, and term.
@@ -133,23 +135,24 @@ public class Orderer
         return vector;
     }
 
-    public ArrayList<ByteBuffer> getQueryTerms()
+    public List<ByteBuffer> getQueryTerms()
     {
         if (queryTerms != null)
             return queryTerms;
 
         var queryAnalyzer = context.getQueryAnalyzerFactory().create();
         // Split query into terms
-        queryTerms = new ArrayList<ByteBuffer>();
+        var uniqueTerms = new HashSet<ByteBuffer>();
         queryAnalyzer.reset(term);
         try
         {
-            queryAnalyzer.forEachRemaining(queryTerms::add);
+            queryAnalyzer.forEachRemaining(uniqueTerms::add);
         }
         finally
         {
             queryAnalyzer.end();
         }
+        queryTerms = new ArrayList<>(uniqueTerms);
         return queryTerms;
     }
 }

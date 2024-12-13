@@ -50,6 +50,9 @@ public class IntersectingPostingList implements PostingList
      */
     public static PostingList intersect(List<PostingList> postingLists)
     {
+        if (postingLists.isEmpty())
+            return PostingList.EMPTY;
+
         if (postingLists.size() == 1)
             return postingLists.get(0);
 
