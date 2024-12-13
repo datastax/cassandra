@@ -77,17 +77,18 @@ public interface CompactionStrategy extends CompactionObserver
     Collection<AbstractCompactionTask> getNextBackgroundTasks(long gcBefore);
 
     /**
-     * @param gcBefore throw away tombstones older than this
-     *
-     * @return a compaction task that should be run to compact this table
-     * as much as possible.  Null if nothing to do.
-     *
+     * @param gcBefore             throw away tombstones older than this
+     * @param splitOutput          whether the output of the compaction should be split (only applicable to STCS)
+     * @param permittedParallelism the maximum number of tasks that can be run in parallel, if the operation can be
+     *                             parallelized (UCS with parallelize_output_shards enabled)
+     * @return compaction tasks that should be run to compact this table as much as possible.
+     * <p>
      * Is responsible for marking its sstables as compaction-pending.
      */
     @SuppressWarnings("resource")
-    CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput);
+    CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, int permittedParallelism);
 
-    CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType);
+    CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, int permittedParallelism, OperationType operationType);
 
     /**
      * @param sstables SSTables to compact. Must be marked as compacting.
