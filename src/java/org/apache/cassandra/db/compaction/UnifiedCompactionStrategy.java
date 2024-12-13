@@ -303,6 +303,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         if (!SchemaConstants.isSystemKeyspace(realm.getKeyspaceName()))
         {
             logger.debug("storing controller config on shutdown for {}.{}", realm.getKeyspaceName(), realm.getTableName());
+            logger.debug("stack trace: ", new Exception("here").fillInStackTrace());
             storeControllerConfig();
         }
         perform(super::shutdown,
