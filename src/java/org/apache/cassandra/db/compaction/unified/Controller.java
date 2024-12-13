@@ -683,6 +683,7 @@ public abstract class Controller
      */
     public long getFlushSizeBytes()
     {
+        logger.debug("calling getFlushSizeBytes here: ", new Exception("here").fillInStackTrace());
         if (flushSizeOverride > 0)
             return flushSizeOverride;
 
