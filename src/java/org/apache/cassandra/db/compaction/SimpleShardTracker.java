@@ -24,7 +24,6 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 
 /**
@@ -138,7 +137,7 @@ class SimpleShardTracker implements ShardTracker
     }
 
     @Override
-    public long shardAdjustedKeyCount(Set<SSTableReader> sstables)
+    public long shardAdjustedKeyCount(Set<? extends CompactionSSTable> sstables)
     {
         // Not sure if this needs a custom implementation yet
         return ShardTracker.super.shardAdjustedKeyCount(sstables);

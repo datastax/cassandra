@@ -1000,13 +1000,13 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public CompactionTasks getMaximalTasks(final long gcBefore, final boolean splitOutput)
+    public CompactionTasks getMaximalTasks(final long gcBefore, final boolean splitOutput, int permittedParallelism)
     {
-        return this.getMaximalTasks(gcBefore, splitOutput, OperationType.MAJOR_COMPACTION);
+        return this.getMaximalTasks(gcBefore, splitOutput, permittedParallelism, OperationType.MAJOR_COMPACTION);
     }
 
     @Override
-    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, OperationType operationType)
+    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput, int permittedParallelism, OperationType operationType)
     {
         maybeReloadDiskBoundaries();
         // runWithCompactionsDisabled cancels active compactions and disables them, then we are able
@@ -1019,7 +1019,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
             {
                 for (AbstractStrategyHolder holder : holders)
                 {
-                    for (AbstractCompactionTask task: holder.getMaximalTasks(gcBefore, splitOutput))
+                    for (AbstractCompactionTask task: holder.getMaximalTasks(gcBefore, splitOutput, permittedParallelism))
                     {
                         tasks.add(task.setCompactionType(operationType));
                     }
@@ -1029,7 +1029,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
             {
                 readLock.unlock();
             }
-            return CompactionTasks.create(tasks);
+            return CompactionTasks.create(CompositeCompactionTask.applyParallelismLimit(tasks, permittedParallelism));
         }, operationType, false, false, TableOperation.StopTrigger.COMPACTION);
     }
 

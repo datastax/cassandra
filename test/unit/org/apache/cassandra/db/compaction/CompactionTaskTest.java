@@ -318,7 +318,7 @@ public class CompactionTaskTest
     public void testMajorCompactTask()
     {
         //major compact without range/pk specified
-        CompactionTasks compactionTasks = cfs.getCompactionStrategyContainer().getMaximalTasks(Integer.MAX_VALUE, false);
+        CompactionTasks compactionTasks = cfs.getCompactionStrategyContainer().getMaximalTasks(Integer.MAX_VALUE, false, 0);
         Assert.assertTrue(compactionTasks.stream().allMatch(task -> task.compactionType.equals(OperationType.MAJOR_COMPACTION)));
     }
 
@@ -380,7 +380,7 @@ public class CompactionTaskTest
         Mockito.when(mock.getCompactionLogger()).thenReturn(logger);
         Mockito.when(mock.getScanners(anyCollection()))
                .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), null));
-        Mockito.when(mock.getScanners(anyCollection(), anyCollection()))
+        Mockito.when(mock.getScanners(anyCollection(), any()))
                .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), answ.getArgument(1)));
         return mock;
     }
