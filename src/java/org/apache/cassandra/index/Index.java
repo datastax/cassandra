@@ -29,6 +29,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
@@ -42,6 +43,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
@@ -125,6 +127,13 @@ import org.apache.commons.lang3.NotImplementedException;
  * cannot support a given Expression. After filtering, the set of candidate indexes are ranked according to the result
  * of getEstimatedResultRows and the most selective (i.e. the one expected to return the smallest number of results) is
  * chosen. A Searcher instance is then obtained from the searcherFor method and used to perform the actual Index lookup.
+ * Finally, Indexes can define a post processing step to be performed on the coordinator, after results (partitions from
+ * the primary table) have been received from replicas and reconciled. This post processing is defined as a
+ * {@code java.util.functions.BiFunction<PartitionIterator, RowFilter, PartitionIterator>}, that is a function which takes as
+ * arguments a PartitionIterator (containing the reconciled result rows) and a RowFilter (from the ReadCommand being
+ * executed) and returns another iterator of partitions, possibly having transformed the initial results in some way.
+ * The post processing function is obtained from the Index's postProcessorFor method; the built-in indexes which ship
+ * with Cassandra return a no-op function here.
  *
  * An optional static method may be provided to validate custom index options (two variants are supported):
  *
@@ -1006,6 +1015,27 @@ public interface Index
          * @return an Searcher with which to perform the supplied command
          */
         Searcher searcherFor(ReadCommand command);
+
+        /**
+         * Return a function which performs post processing on the results of a partition range read command.
+         * In future, this may be used as a generalized mechanism for transforming results on the coordinator prior
+         * to returning them to the caller.
+         *
+         * This is used on the coordinator during execution of a range command to perform post
+         * processing of merged results obtained from the necessary replicas. This is the only way in which results are
+         * transformed in this way but this may change over time as usage is generalized.
+         * See CASSANDRA-8717 for further discussion.
+         *
+         * The function takes a PartitionIterator of the results from the replicas which has already been collated
+         * and reconciled, along with the command being executed. It returns another PartitionIterator containing the results
+         * of the transformation (which may be the same as the input if the transformation is a no-op).
+         *
+         * @param command the read command being executed
+         */
+        default Function<PartitionIterator, PartitionIterator> postProcessor(ReadCommand command)
+        {
+            return partitions -> partitions;
+        }
 
         /**
          * Transform an initial {@link RowFilter} into the filter that will still need to applied to a set of Rows after

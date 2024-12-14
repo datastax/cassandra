@@ -315,15 +315,4 @@ public enum ConsistencyLevel
 
         throw new InvalidRequestException("Serial consistency levels are disallowed by disallowedWriteConsistencies Guardrail");
     }
-
-    /**
-     * With a replication factor greater than one, reads that contact more than one replica will require
-     * reconciliation of the individual replica results at the coordinator.
-     *
-     * @return true if reads at this consistency level require merging at the coordinator
-     */
-    public boolean needsReconciliation()
-    {
-        return this != ConsistencyLevel.ONE && this != ConsistencyLevel.LOCAL_ONE && this != ConsistencyLevel.NODE_LOCAL;
-    }
 }

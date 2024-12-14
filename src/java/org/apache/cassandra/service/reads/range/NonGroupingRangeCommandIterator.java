@@ -83,8 +83,8 @@ public class NonGroupingRangeCommandIterator extends RangeCommandIterator
 
         Tracing.trace("Submitted {} concurrent range requests", concurrentQueries.size());
         // We want to count the results for the sake of updating the concurrency factor (see updateConcurrencyFactor)
-        // but we don't want to enforce any particular limit at this point (this could break index-based sorting done
-        // at later stages), hence the unlimited counter that uses DataLimits.NONE.
+        // but we don't want to enforce any particular limit at this point (this could break code than rely on
+        // postReconciliationProcessing), hence the unlimited counter that uses DataLimits.NONE.
         counter = command.createUnlimitedCounter(true);
         return counter.applyTo(StorageProxy.concatAndBlockOnRepair(concurrentQueries, readRepairs));
     }

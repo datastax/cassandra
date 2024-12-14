@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -31,6 +32,7 @@ import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.index.TargetParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -207,6 +209,14 @@ public class CustomCassandraIndex implements Index
     public long getEstimatedResultRows()
     {
         return indexCfs.getMeanEstimatedCellPerPartitionCount();
+    }
+
+    /**
+     * No post processing of query results, just return them unchanged
+     */
+    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
+    {
+        return (partitionIterator, readCommand) -> partitionIterator;
     }
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)

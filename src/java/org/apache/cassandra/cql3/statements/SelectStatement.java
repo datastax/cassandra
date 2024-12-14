@@ -402,7 +402,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                        String.format(TOPK_CONSISTENCY_LEVEL_ERROR, options.getConsistency()));
 
             // Consistency levels with more than one replica are downgraded to ONE/LOCAL_ONE.
-            if (options.getConsistency().needsReconciliation())
+            if (options.getConsistency() != ConsistencyLevel.ONE &&
+                options.getConsistency() != ConsistencyLevel.LOCAL_ONE &&
+                options.getConsistency() != ConsistencyLevel.NODE_LOCAL)
             {
                 ConsistencyLevel supplied = options.getConsistency();
                 ConsistencyLevel downgrade = supplied.isDatacenterLocal() ? ConsistencyLevel.LOCAL_ONE : ConsistencyLevel.ONE;
