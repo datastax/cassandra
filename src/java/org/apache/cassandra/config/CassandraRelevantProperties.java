@@ -155,6 +155,22 @@ public enum CassandraRelevantProperties
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),
+    /**
+     * The class name of the custom cluster version provider to use.
+     */
+    CLUSTER_VERSION_PROVIDER_CLASS_NAME("cassandra.cluster_version_provider.class_name"),
+
+    /**
+     * Minimum time that needs to pass after the cluster is detected as fully upgraded to report that there is
+     * no upgrade in progress (when using the default cluster version provider).
+     */
+    CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION("cassandra.cluster_version_provider.min_stable_duration_ms", "60000"),
+
+    /**
+     * Do not wait for gossip to be enabled before starting stabilisation period. This is required especially for tests
+     * which do not enable gossip at all.
+     */
+    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip"),
     COMMITLOG_ALLOW_IGNORE_SYNC_CRC("cassandra.commitlog.allow_ignore_sync_crc"),
     COMMITLOG_IGNORE_REPLAY_ERRORS("cassandra.commitlog.ignorereplayerrors"),
     COMMITLOG_MAX_OUTSTANDING_REPLAY_BYTES("cassandra.commitlog_max_outstanding_replay_bytes", convertToString(1024 * 1024 * 64)),
