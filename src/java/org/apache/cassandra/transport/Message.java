@@ -23,21 +23,26 @@ import java.nio.ByteBuffer;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -235,8 +240,30 @@ public abstract class Message
 
         protected abstract Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest);
 
+        /**
+         * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
+         * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
+         *
+         * @param timeUnit the time unit in which to return the elapsed time
+         * @return the time elapsed since this request was created
+         */
+        protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
+        {
+            return timeUnit.convert(MonotonicClock.Global.approxTime.now() - createdAtNanos, TimeUnit.NANOSECONDS);
+        }
+
+
         public final Future<Response> execute(QueryState queryState, Dispatcher.RequestTime requestTime)
         {
+            // at the time of the check, this is approximately the time spent in the NTR stage's queue
+            long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+            ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+            {
+                ClientMetrics.instance.markTimedOutBeforeProcessing();
+                return ImmediateFuture.success(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
+            }
+
             boolean shouldTrace = false;
             TimeUUID tracingSessionId = null;
 
