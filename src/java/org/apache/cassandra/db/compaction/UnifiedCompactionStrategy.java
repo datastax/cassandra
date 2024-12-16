@@ -335,7 +335,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore);
     }
 
-    /// Check for fully expired sstables and return a collection of expiration tasks if found. Called by CNDB directly.
+    /// Check for fully expired sstables and return a collection of expiration tasks if found.
     public Collection<AbstractCompactionTask> getExpirationTasks(int gcBefore)
     {
         long ts = System.currentTimeMillis();
@@ -344,13 +344,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return null;
         lastExpiredCheck = ts;
 
-        // Get all expired sstables, regardless of expiration status.
-        // This is simpler and faster than per-arena collection, and will find nothing in most calls.
-        var expired = CompactionController.getFullyExpiredSSTables(realm,
-                                                                   getSuitableSSTables(),
-                                                                   realm::getOverlappingLiveSSTables,
-                                                                   gcBefore,
-                                                                   controller.getIgnoreOverlapsInExpirationCheck());
+        var expired = getFullyExpiredSSTables(gcBefore);
         if (expired.isEmpty())
             return null;
 
@@ -375,6 +369,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             throw rejectTasks(tasks, t);
         }
+    }
+
+    /// Get all expired sstables, regardless of expiration status.
+    /// This is simpler and faster than per-arena collection, and will find nothing in most calls.
+    /// Used by CNDB
+    public Set<CompactionSSTable> getFullyExpiredSSTables(int gcBefore)
+    {
+        return CompactionController.getFullyExpiredSSTables(realm,
+                                                                   getSuitableSSTables(),
+                                                                   realm::getOverlappingLiveSSTables,
+                                                                   gcBefore,
+                                                                   controller.getIgnoreOverlapsInExpirationCheck());
     }
 
     /// Used by CNDB where compaction aggregates come from etcd rather than the strategy
@@ -702,7 +708,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return tasks;
     }
 
-    private ExpirationTask createExpirationTask(LifecycleTransaction transaction)
+    // Used by CNDB
+    public ExpirationTask createExpirationTask(LifecycleTransaction transaction)
     {
         return new ExpirationTask(realm, transaction);
     }
