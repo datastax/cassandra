@@ -20,10 +20,6 @@ package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -38,12 +34,9 @@ import java.util.stream.IntStream;
 
 import org.junit.Before;
 import org.junit.Test;
-
 import org.slf4j.Logger;
 
 import org.apache.cassandra.db.memtable.TrieMemtable;
-
-import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 
 public class LongBM25Test extends SAITester
 {
@@ -157,7 +150,7 @@ public class LongBM25Test extends SAITester
 
         for (int i = 0; i < numLines; i++)
         {
-            selectedLines.add(randomLine(R));
+            selectedLines.add(randomQuery(R));
         }
 
         return String.join("\n", selectedLines);
@@ -186,10 +179,20 @@ public class LongBM25Test extends SAITester
             }
             else
             {
-                var line = randomLine(R);
+                var line = randomQuery(R);
                 execute("SELECT * FROM %s ORDER BY value BM25 OF ? LIMIT ?", line, R.nextInt(1, 100));
             }
         });
+    }
+
+    private static String randomQuery(ThreadLocalRandom R)
+    {
+        while (true)
+        {
+            var line = randomLine(R);
+            if (line.chars().anyMatch(Character::isAlphabetic))
+                return line;
+        }
     }
 
     @Test
@@ -205,7 +208,7 @@ public class LongBM25Test extends SAITester
             }
             else
             {
-                var line = randomLine(R);
+                var line = randomQuery(R);
                 execute("SELECT * FROM %s ORDER BY value BM25 OF ? LIMIT ?", line, R.nextInt(1, 100));
             }
         });

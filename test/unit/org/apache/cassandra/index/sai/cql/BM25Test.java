@@ -168,6 +168,48 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testUnknownQueryTerm() throws Throwable
+    {
+        createSimpleTable();
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+
+        beforeAndAfterFlush(() ->
+                            {
+                                var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'orange' LIMIT 1");
+                                assertEmpty(result);
+                            });
+    }
+
+    @Test
+    public void testDuplicateQueryTerm() throws Throwable
+    {
+        createSimpleTable();
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+
+        beforeAndAfterFlush(() ->
+                            {
+                                var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'apple apple' LIMIT 1");
+                                assertRows(result, row(1));
+                            });
+    }
+
+    @Test
+    public void testEmptyQuery() throws Throwable
+    {
+        createSimpleTable();
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+
+        beforeAndAfterFlush(() ->
+                            {
+                                assertInvalidMessage("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)",
+                                                     "SELECT k FROM %s ORDER BY v BM25 OF '+' LIMIT 1");
+                            });
+    }
+
+    @Test
     public void testTermFrequencyOrdering() throws Throwable
     {
         createSimpleTable();

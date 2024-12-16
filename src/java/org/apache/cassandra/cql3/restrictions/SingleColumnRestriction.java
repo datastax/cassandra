@@ -24,14 +24,18 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.MarkerOrTerms;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Terms;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -1205,7 +1209,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                                    IndexRegistry indexRegistry,
                                    QueryOptions options)
         {
-            filter.add(columnDef, Operator.BM25, value.bindAndGet(options));
+            var index = findSupportingIndex(indexRegistry);
+            var valueBytes = value.bindAndGet(options);
+            var terms = index.getAnalyzer().get().analyze(valueBytes);
+            if (terms.isEmpty())
+                throw invalidRequest("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)");
+            filter.add(columnDef, Operator.BM25, valueBytes);
         }
 
         @Override
