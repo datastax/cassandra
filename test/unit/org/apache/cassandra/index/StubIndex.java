@@ -20,8 +20,10 @@ package org.apache.cassandra.index;
 
 import java.util.*;
 import java.util.concurrent.Callable;
+import java.util.function.BiFunction;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
@@ -214,6 +216,11 @@ public class StubIndex implements Index
     public Searcher searcherFor(final ReadCommand command)
     {
         return new Searcher(command);
+    }
+
+    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand readCommand)
+    {
+        return (iter, command) -> iter;
     }
 
     protected class Searcher implements Index.Searcher
