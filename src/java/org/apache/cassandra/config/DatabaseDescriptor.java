@@ -5331,4 +5331,14 @@ public class DatabaseDescriptor
         Preconditions.checkArgument(factor <= StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR, "ANN brute force expense factor must be at most " + StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR);
         conf.sai_options.ann_brute_force_factor = factor;
     }
+
+    public static long getNativeTransportTimeout(TimeUnit timeUnit)
+    {
+        return conf.native_transport_timeout_in_ms.to(timeUnit);
+    }
+
+    public static void setNativeTransportTimeout(long timeout, TimeUnit timeUnit)
+    {
+        conf.native_transport_timeout_in_ms = new DurationSpec.LongMillisecondsBound(timeUnit.toMillis(timeout));
+    }
 }
