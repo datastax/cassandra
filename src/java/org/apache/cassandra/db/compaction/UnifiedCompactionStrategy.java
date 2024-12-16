@@ -351,6 +351,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         if (logger.isDebugEnabled())
             logger.debug("Expiration check found {} fully expired SSTables", expired.size());
 
+        return createdExpirationTasks(expired);
+    }
+
+    /// Create expiration tasks for the given set of expired sstables.
+    /// Used by CNDB
+    public List<AbstractCompactionTask> createdExpirationTasks(Set<CompactionSSTable> expired)
+    {
         // if we found sstables to expire, split them to arenas to correctly isolate their repair status.
         var tasks = new ArrayList<AbstractCompactionTask>();
         try
@@ -431,8 +438,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    // Called by CNDB
-    public static RuntimeException rejectTasks(Iterable<? extends AbstractCompactionTask> tasks, Throwable error)
+    private static RuntimeException rejectTasks(Iterable<? extends AbstractCompactionTask> tasks, Throwable error)
     {
         for (var task : tasks)
             error = task.rejected(error);
@@ -709,8 +715,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return tasks;
     }
 
-    // Used by CNDB
-    public ExpirationTask createExpirationTask(LifecycleTransaction transaction)
+    private ExpirationTask createExpirationTask(LifecycleTransaction transaction)
     {
         return new ExpirationTask(realm, transaction);
     }
