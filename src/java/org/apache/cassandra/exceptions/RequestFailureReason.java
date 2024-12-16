@@ -88,7 +88,7 @@ public enum RequestFailureReason
             throw new IllegalArgumentException("RequestFailureReason code must be non-negative (got " + code + ')');
 
         // be forgiving and return UNKNOWN if we aren't aware of the code - for forward compatibility
-        return code < codeToReasonMap.length ? codeToReasonMap[code] : UNKNOWN;
+        return (code < codeToReasonMap.length && codeToReasonMap[code] != null) ? codeToReasonMap[code] : UNKNOWN;
     }
 
     public static RequestFailureReason forException(Throwable t)

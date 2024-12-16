@@ -19,6 +19,8 @@
 package org.apache.cassandra.exceptions;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
+
 public class RequestFailureReasonTest
 {
     private static final RequestFailureReason[] REASONS = RequestFailureReason.values();
@@ -45,5 +47,24 @@ public class RequestFailureReasonTest
         }
         assertEquals("Number of RequestFailureReason enum constants has changed. Update the test.",
                      EXPECTED_VALUES.length, REASONS.length);
+    }
+
+    @Test
+    public void testFromCode()
+    {
+        // Test valid codes
+        assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(0));
+        assertEquals(RequestFailureReason.READ_TOO_MANY_TOMBSTONES, RequestFailureReason.fromCode(1));
+        assertEquals(RequestFailureReason.TIMEOUT, RequestFailureReason.fromCode(2));
+        assertEquals(RequestFailureReason.INCOMPATIBLE_SCHEMA, RequestFailureReason.fromCode(3));
+        assertEquals(RequestFailureReason.INDEX_NOT_AVAILABLE, RequestFailureReason.fromCode(6));
+        assertEquals(RequestFailureReason.UNKNOWN_COLUMN, RequestFailureReason.fromCode(500));
+        assertEquals(RequestFailureReason.UNKNOWN_TABLE, RequestFailureReason.fromCode(501));
+        assertEquals(RequestFailureReason.REMOTE_STORAGE_FAILURE, RequestFailureReason.fromCode(502));
+
+        // Test invalid codes
+        assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(200));
+        assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(999));
+        assertThrows(IllegalArgumentException.class, () -> RequestFailureReason.fromCode(-1));
     }
 }
