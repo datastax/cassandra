@@ -431,7 +431,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    private static RuntimeException rejectTasks(Iterable<? extends AbstractCompactionTask> tasks, Throwable error)
+    // Called by CNDB
+    public static RuntimeException rejectTasks(Iterable<? extends AbstractCompactionTask> tasks, Throwable error)
     {
         for (var task : tasks)
             error = task.rejected(error);
