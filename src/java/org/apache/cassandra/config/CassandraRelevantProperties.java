@@ -680,6 +680,7 @@ public enum CassandraRelevantProperties
     SHUTDOWN_ANNOUNCE_DELAY_IN_MS("cassandra.shutdown_announce_in_ms", "2000"),
     SIZE_RECORDER_INTERVAL("cassandra.size_recorder_interval", "300"),
     SKIP_DEFAULT_ROLE_SETUP("cassandra.skip_default_role_setup"),
+    SKIP_MUTATING_STATS_AFTER_ZCS("cassandra.skip_mutating_stats_after_zcs"),
     SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE("cassandra.skip_paxos_repair_on_topology_change"),
     /** If necessary for operational purposes, permit certain keyspaces to be ignored for paxos topology repairs. */
     SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE_KEYSPACES("cassandra.skip_paxos_repair_on_topology_change_keyspaces"),
