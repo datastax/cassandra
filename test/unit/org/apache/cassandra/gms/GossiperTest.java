@@ -64,6 +64,7 @@ public class GossiperTest
 {
     static
     {
+        CassandraRelevantProperties.CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION.setLong(30000);
         System.setProperty(Gossiper.Props.DISABLE_THREAD_VALIDATION, "true");
         DatabaseDescriptor.daemonInitialization();
         CommitLog.instance.start();
