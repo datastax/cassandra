@@ -351,12 +351,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         if (logger.isDebugEnabled())
             logger.debug("Expiration check found {} fully expired SSTables", expired.size());
 
-        return createdExpirationTasks(expired);
+        return createExpirationTasks(expired);
     }
 
     /// Create expiration tasks for the given set of expired sstables.
     /// Used by CNDB
-    public List<AbstractCompactionTask> createdExpirationTasks(Set<CompactionSSTable> expired)
+    public List<AbstractCompactionTask> createExpirationTasks(Set<CompactionSSTable> expired)
     {
         // if we found sstables to expire, split them to arenas to correctly isolate their repair status.
         var tasks = new ArrayList<AbstractCompactionTask>();
