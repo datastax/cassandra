@@ -551,7 +551,18 @@ public enum CassandraRelevantProperties
      * stages respectively; in other words, the native transport stage will not block, offloading request processing
      * (and any related blocking behaviour) to the specific read and write stages.
      */
-    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false");
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false"),
+
+    /**
+     * Minimum time that needs to pass after the cluster is detected as fully upgraded to report that there is
+     * no upgrade in progress (when using the default cluster version provider).
+     */
+    CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION("cassandra.cluster_version_provider.min_stable_duration_ms", "60000"),
+
+    /**
+     * The class name of the custom cluster version provider to use.
+     */
+    CLUSTER_VERSION_PROVIDER_CLASS_NAME("cassandra.cluster_version_provider.class_name");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

@@ -83,6 +83,8 @@ import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CLUSTER_VERSION_PROVIDER_CLASS_NAME;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIPER_QUARANTINE_DELAY;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.ECHO_REQ;
@@ -195,30 +197,22 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     private class DefaultClusterVersionProvider implements IClusterVersionProvider
     {
-        // -1L means that the cluster may be in upgrading state; positive value is the timestamp of the cluster
+        // -1L means that the cluster may be in upgrading state; positive value is the timestamp when the cluster
         // was detected as fully upgraded
-        private final AtomicLong notUpgradingSince = new AtomicLong(-1L);
-
-        // returns true when the node does not know the existence of other nodes
-        private boolean isLoneNode(Map<InetAddressAndPort, EndpointState> epStates)
-        {
-            return epStates.isEmpty() || epStates.keySet().equals(Collections.singleton(FBUtilities.getBroadcastAddressAndPort()));
-        }
+        private final AtomicLong notUpgradingSinceMillis = new AtomicLong(-1L);
 
         // minimum time that needs to pass after the cluster is detected as fully upgraded
         // to report that there is no upgrade in progress
-        private final long MIN_STABLE_DURATION_MS = Long.getLong("cassandra.cluster_version_provider.min_stable_duration_ms", 60_000);
+        private final long MIN_STABLE_DURATION_MS = CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION.getLong();
 
         private final Supplier<ExpiringMemoizingSupplier.ReturnValue<CassandraVersion>> upgradeFromVersionSupplier = () ->
         {
-            long notUpgradingSince = this.notUpgradingSince.get();
-            long stableDuration = notUpgradingSince < 0 ? -1 : System.currentTimeMillis() - notUpgradingSince;
+            long notUpgradingSinceMillis = this.notUpgradingSinceMillis.get();
+            long stableDuration = notUpgradingSinceMillis < 0 ? -1 : System.currentTimeMillis() - notUpgradingSinceMillis;
 
             // The cluster is upgraded
             if (stableDuration > 0)
-                return new ExpiringMemoizingSupplier.Memoized<>(null);
-
-            CassandraVersion minVersion = SystemKeyspace.CURRENT_VERSION;
+                return new ExpiringMemoizingSupplier.Memoized<>(SystemKeyspace.CURRENT_VERSION);
 
             if (!isEnabled())
             {
@@ -226,25 +220,20 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 {
                     // Skip the round if the gossiper has not started yet
                     // Otherwise, upgradeInProgressPossible can be set to false wrongly.
-                    return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
+                    return new ExpiringMemoizingSupplier.NotMemoized<>(SystemKeyspace.CURRENT_VERSION);
                 }
                 else
                 {
                     // it is not going to be enabled because we are not running in server mode
-                    this.notUpgradingSince.compareAndSet(notUpgradingSince, 0); // set 0 to make it stable
-                    return new ExpiringMemoizingSupplier.Memoized<>(null);
+                    if (this.notUpgradingSinceMillis.compareAndSet(notUpgradingSinceMillis, 0)) // set 0 to make it stable
+                        return new ExpiringMemoizingSupplier.Memoized<>(SystemKeyspace.CURRENT_VERSION);
+                    else
+                        return new ExpiringMemoizingSupplier.NotMemoized<>(SystemKeyspace.CURRENT_VERSION);
                 }
             }
 
-            // If we don't know any epstate we don't know anything about the cluster.
-            // If we only know about ourselves, we can assume that version is CURRENT_VERSION
-            if (isLoneNode(endpointStateMap))
-            {
-                this.notUpgradingSince.compareAndSet(notUpgradingSince, System.currentTimeMillis()); // set 0 to make it stable
-                return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
-            }
-
             // Check the release version of all the peers it heard of. Not necessary the peer that it has/had contacted with.
+            CassandraVersion minVersion = SystemKeyspace.CURRENT_VERSION;
             boolean allHostsHaveKnownVersion = true;
             for (InetAddressAndPort host : endpointStateMap.keySet())
             {
@@ -266,30 +255,32 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
 
             // all hosts have known versions and == CURRENT_VERSION, we can stop checking - the cluster is fully upgraded
-            this.notUpgradingSince.compareAndSet(notUpgradingSince, System.currentTimeMillis());
-            return new ExpiringMemoizingSupplier.Memoized<>(null);
+            // start the stability period by setting the current timestamp in notUpgradingSinceMillis
+            if (this.notUpgradingSinceMillis.compareAndSet(notUpgradingSinceMillis, System.currentTimeMillis()))
+                return new ExpiringMemoizingSupplier.Memoized<>(minVersion);
+            else
+                return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
         };
 
-        private final ExpiringMemoizingSupplier<CassandraVersion> upgradeFromVersionMemoized = ExpiringMemoizingSupplier.memoizeWithExpiration(upgradeFromVersionSupplier, MIN_STABLE_DURATION_MS, TimeUnit.MILLISECONDS);
+        private final ExpiringMemoizingSupplier<CassandraVersion> minVersionMemoized = ExpiringMemoizingSupplier.memoizeWithExpiration(upgradeFromVersionSupplier, MIN_STABLE_DURATION_MS, TimeUnit.MILLISECONDS);
 
         @Override
         public void reset()
         {
-            notUpgradingSince.set(-1L);
-            upgradeFromVersionMemoized.expire();
+            notUpgradingSinceMillis.set(-1L);
+            minVersionMemoized.expire();
         }
 
         @Override
         public CassandraVersion getMinClusterVersion()
         {
-            CassandraVersion v = upgradeFromVersionMemoized.get();
-            return v == null ? SystemKeyspace.CURRENT_VERSION : v;
+            return minVersionMemoized.get();
         }
 
         @Override
         public boolean isUpgradeInProgress()
         {
-            long notUpgradingSince = this.notUpgradingSince.get();
+            long notUpgradingSince = this.notUpgradingSinceMillis.get();
             long stableDuration = notUpgradingSince < 0 ? -1 : System.currentTimeMillis() - notUpgradingSince;
             return stableDuration >= MIN_STABLE_DURATION_MS;
         }
@@ -301,7 +292,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     private static IClusterVersionProvider maybeCustomClusterVersionProvider()
     {
         IClusterVersionProvider clusterVersionProvider = null;
-        String className = System.getProperty("cassandra.cluster_version_provider.class_name");
+        String className = CLUSTER_VERSION_PROVIDER_CLASS_NAME.getString();
         if (className != null)
         {
             clusterVersionProvider = FBUtilities.instanceOrConstruct(className,"Custom implementation of " + IClusterVersionProvider.class.getSimpleName());
@@ -2416,11 +2407,11 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      */
     public CassandraVersion getMinVersion()
     {
-        if (!clusterVersionProvider.isUpgradeInProgress())
-            return clusterVersionProvider.getMinClusterVersion();
-
         CassandraVersion v = clusterVersionProvider.getMinClusterVersion();
         assert v != null : "API contract violation: cluster version provider implementation should never return null";
+
+        if (!clusterVersionProvider.isUpgradeInProgress())
+            return v;
 
         // we are in the upgrade state but since the minimum reported version is current version, we do not know
         // anything about the other nodes
