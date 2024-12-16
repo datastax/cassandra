@@ -23,7 +23,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.function.Consumer;
 
-import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -31,6 +30,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.Util;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -41,12 +43,12 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
-import org.apache.cassandra.utils.CustomClusterVersionProvider;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -92,20 +94,17 @@ public class ColumnFilterTest
     @BeforeClass
     public static void beforeClass()
     {
-        CustomClusterVersionProvider.set();
+        DatabaseDescriptor.setConfig(new Config());
+        DatabaseDescriptor.setSeedProvider(Arrays::asList);
+        DatabaseDescriptor.setEndpointSnitch(new SimpleSnitch());
+        Gossiper.instance.start(0);
     }
 
     @Before
     public void before()
     {
-        CustomClusterVersionProvider.instance.version = new CassandraVersion(clusterMinVersion);
-        assertThat(Gossiper.instance.getMinVersion()).isEqualTo(CustomClusterVersionProvider.instance.version);
-    }
-
-    @AfterClass
-    public static void afterClass()
-    {
-        CustomClusterVersionProvider.instance.assertUsed();
+        Util.setUpgradeFromVersion(clusterMinVersion);
+        assertThat(Gossiper.instance.getMinVersion()).isEqualTo(new CassandraVersion(clusterMinVersion));
     }
 
     // Select all

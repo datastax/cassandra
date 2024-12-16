@@ -18,13 +18,14 @@
 
 package org.apache.cassandra.utils;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.gms.IClusterVersionProvider;
 
 public class CustomClusterVersionProvider implements IClusterVersionProvider
 {
     public static void set()
     {
-        System.setProperty("cassandra.cluster_version_provider.class_name", CustomClusterVersionProvider.class.getName());
+        CassandraRelevantProperties.CLUSTER_VERSION_PROVIDER_CLASS_NAME.setString(CustomClusterVersionProvider.class.getName());
     }
 
     public final static CustomClusterVersionProvider instance = new CustomClusterVersionProvider();
@@ -48,7 +49,8 @@ public class CustomClusterVersionProvider implements IClusterVersionProvider
     public void reset()
     {
         wasUsed = true;
-        onReset.run();
+        if (onReset != null)
+            onReset.run();
     }
 
     @Override

@@ -562,7 +562,13 @@ public enum CassandraRelevantProperties
     /**
      * The class name of the custom cluster version provider to use.
      */
-    CLUSTER_VERSION_PROVIDER_CLASS_NAME("cassandra.cluster_version_provider.class_name");
+    CLUSTER_VERSION_PROVIDER_CLASS_NAME("cassandra.cluster_version_provider.class_name"),
+
+    /**
+     * Do not wait for gossip to be enabled before starting stabilisation period. This is required especially for tests
+     * which do not enable gossip at all.
+     */
+    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

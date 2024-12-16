@@ -216,10 +216,13 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
             if (!isEnabled())
             {
+                // start the stabilisation period by setting the current timestamp in notUpgradingSinceMillis
+                // if Gossiper is going to be enabled, it will be enabled quickly
                 if (DatabaseDescriptor.isDaemonInitialized())
                 {
-                    // Skip the round if the gossiper has not started yet
-                    // Otherwise, upgradeInProgressPossible can be set to false wrongly.
+                    if (CassandraRelevantProperties.CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP.getBoolean())
+                        this.notUpgradingSinceMillis.compareAndSet(notUpgradingSinceMillis, System.currentTimeMillis());
+
                     return new ExpiringMemoizingSupplier.NotMemoized<>(SystemKeyspace.CURRENT_VERSION);
                 }
                 else
@@ -262,7 +265,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
         };
 
-        private final ExpiringMemoizingSupplier<CassandraVersion> minVersionMemoized = ExpiringMemoizingSupplier.memoizeWithExpiration(upgradeFromVersionSupplier, MIN_STABLE_DURATION_MS, TimeUnit.MILLISECONDS);
+        private final ExpiringMemoizingSupplier<CassandraVersion> minVersionMemoized = ExpiringMemoizingSupplier.memoizeWithExpiration(upgradeFromVersionSupplier, 60, TimeUnit.SECONDS);
 
         @Override
         public void reset()
@@ -288,7 +291,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     // For testing only
     @VisibleForTesting
-    void setNotUpgradingSinceMillisUnsafe(long notUpgradingSinceMillis)
+    public void setNotUpgradingSinceMillisUnsafe(long notUpgradingSinceMillis)
     {
         ((DefaultClusterVersionProvider) clusterVersionProvider).notUpgradingSinceMillis.set(notUpgradingSinceMillis);
     }
