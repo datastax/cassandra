@@ -286,6 +286,13 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         }
     }
 
+    // For testing only
+    @VisibleForTesting
+    void setNotUpgradingSinceMillisUnsafe(long notUpgradingSinceMillis)
+    {
+        ((DefaultClusterVersionProvider) clusterVersionProvider).notUpgradingSinceMillis.set(notUpgradingSinceMillis);
+    }
+
     @VisibleForTesting
     public final IClusterVersionProvider clusterVersionProvider;
 
