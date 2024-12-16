@@ -335,7 +335,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore);
     }
 
-    /// Check for fully expired sstables and return a collection of expiration tasks if found. Called by CNDB directly.
+    /// Check for fully expired sstables and return a collection of expiration tasks if found.
     public Collection<AbstractCompactionTask> getExpirationTasks(long gcBefore)
     {
         long ts = Clock.Global.currentTimeMillis();
@@ -344,19 +344,20 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return null;
         lastExpiredCheck = ts;
 
-        // Get all expired sstables, regardless of expiration status.
-        // This is simpler and faster than per-arena collection, and will find nothing in most calls.
-        var expired = CompactionController.getFullyExpiredSSTables(realm,
-                                                                   getSuitableSSTables(),
-                                                                   realm::getOverlappingLiveSSTables,
-                                                                   gcBefore,
-                                                                   controller.getIgnoreOverlapsInExpirationCheck());
+        var expired = getFullyExpiredSSTables(gcBefore);
         if (expired.isEmpty())
             return null;
 
         if (logger.isDebugEnabled())
             logger.debug("Expiration check found {} fully expired SSTables", expired.size());
 
+        return createExpirationTasks(expired);
+    }
+
+    /// Create expiration tasks for the given set of expired sstables.
+    /// Used by CNDB
+    public List<AbstractCompactionTask> createExpirationTasks(Set<CompactionSSTable> expired)
+    {
         // if we found sstables to expire, split them to arenas to correctly isolate their repair status.
         var tasks = new ArrayList<AbstractCompactionTask>();
         try
@@ -375,6 +376,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             throw rejectTasks(tasks, t);
         }
+    }
+
+    /// Get all expired sstables, regardless of expiration status.
+    /// This is simpler and faster than per-arena collection, and will find nothing in most calls.
+    /// Used by CNDB
+    public Set<CompactionSSTable> getFullyExpiredSSTables(long gcBefore)
+    {
+        return CompactionController.getFullyExpiredSSTables(realm,
+                                                                   getSuitableSSTables(),
+                                                                   realm::getOverlappingLiveSSTables,
+                                                                   gcBefore,
+                                                                   controller.getIgnoreOverlapsInExpirationCheck());
     }
 
     /// Used by CNDB where compaction aggregates come from etcd rather than the strategy
