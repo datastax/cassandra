@@ -24,7 +24,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -229,7 +228,7 @@ public class IndexStatusManager
                 // Versions 5.0.0 through 5.0.2 use a much more bloated format that duplicates keyspace names
                 // and writes full status names instead of their numeric codes. If the minimum cluster version is
                 // unknown or one of those 3 versions, continue to propagate the old format.
-                CassandraVersion minVersion = Gossiper.instance.getMinVersion(1, TimeUnit.SECONDS);
+                CassandraVersion minVersion = Gossiper.instance.getMinVersion();
                 String newSerializedStatusMap = shouldWriteLegacyStatusFormat(minVersion) ? JsonUtils.writeAsJsonString(statusMap) 
                                                                                           : toSerializedFormat(statusMap);
 
