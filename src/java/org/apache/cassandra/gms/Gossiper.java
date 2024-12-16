@@ -282,7 +282,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         {
             long notUpgradingSince = this.notUpgradingSinceMillis.get();
             long stableDuration = notUpgradingSince < 0 ? -1 : System.currentTimeMillis() - notUpgradingSince;
-            return stableDuration >= MIN_STABLE_DURATION_MS;
+            return stableDuration < MIN_STABLE_DURATION_MS;
         }
     }
 
