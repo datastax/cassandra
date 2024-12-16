@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.plan;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
@@ -29,6 +30,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.Index;
@@ -202,6 +204,19 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
                                                 orderer,
                                                 indexFeatureSet,
                                                 DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
+    }
+
+    /**
+     * Called on coordinator after merging replica responses before returning to client
+     */
+    @Override
+    public Function<PartitionIterator, PartitionIterator> postProcessor(ReadCommand command)
+    {
+        if (!isTopK())
+            return partitions -> partitions;
+
+        // in case of top-k query, filter out rows that are not actually global top-K
+        return partitions -> (PartitionIterator) new TopKProcessor(command).filter(partitions);
     }
 
     /**
