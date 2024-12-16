@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.function.UnaryOperator;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +56,8 @@ import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 public class CassandraEntireSSTableStreamReader implements IStreamReader
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraEntireSSTableStreamReader.class);
+
+    private static final boolean SKIP_MUTATING_STATS_AFTER_ZCS = CassandraRelevantProperties.SKIP_MUTATING_STATS_AFTER_ZCS.getBoolean();
 
     private final TableId tableId;
     private final StreamSession session;
@@ -133,11 +137,22 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
                              prettyPrintMemory(totalSize));
             }
 
-            UnaryOperator<StatsMetadata> transform = stats -> stats.mutateLevel(header.sstableLevel)
-                                                                   .mutateRepairedMetadata(messageHeader.repairedAt, messageHeader.pendingRepair, false);
-            String description = String.format("level %s and repairedAt time %s and pendingRepair %s",
-                                               header.sstableLevel, messageHeader.repairedAt, messageHeader.pendingRepair);
-            writer.descriptor.getMetadataSerializer().mutate(writer.descriptor, description, transform);
+            if (!SKIP_MUTATING_STATS_AFTER_ZCS)
+            {
+                UnaryOperator<StatsMetadata> transform = stats -> stats.mutateLevel(header.sstableLevel)
+                                                                       .mutateRepairedMetadata(messageHeader.repairedAt, messageHeader.pendingRepair, false);
+                String description = String.format("level %s and repairedAt time %s and pendingRepair %s",
+                                                   header.sstableLevel, messageHeader.repairedAt, messageHeader.pendingRepair);
+                writer.descriptor.getMetadataSerializer().mutate(writer.descriptor, description, transform);
+            }
+            else
+            {
+                logger.debug("[Stream #{}] Skipped mutating {} component from {} for sstable {} by config -Dcassandra.skip_mutating_stats_after_zcs",
+                             session.planId(),
+                             SSTableFormat.Components.STATS,
+                             session.peer,
+                             writer.descriptor);
+            }
             return writer;
         }
         catch (Throwable e)
