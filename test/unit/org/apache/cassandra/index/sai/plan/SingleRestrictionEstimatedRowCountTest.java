@@ -85,10 +85,6 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
                     .memtableFlushPeriod(0);
         SchemaTestUtil.announceNewTable(tableBuilder.build());
         createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
-        for (int i = 0; i < 100; i++)
-        {
-            execute("INSERT INTO %s (pk, age) VALUES (?," + i + ')', "key" + i);
-        }
         return getCurrentColumnFamilyStore();
     }
 
@@ -151,30 +147,39 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             SAIUtil.setLatestVersion(version);
 
             ColumnFamilyStore cfs = prepareTable(type);
-            Object filter = getFilterValue(type, filterValue);
+            cfs.unsafeRunWithoutFlushing(()-> {
+                for (int i = 0; i < 100; i++)
+                {
+                    execute("INSERT INTO %s (pk, age) VALUES (?," + i + ')', "key" + i);
+                }
 
-            ReadCommand rc = Util.cmd(cfs)
-                                 .columns("age")
-                                 .filterOn("age", op, filter)
-                                 .build();
-            QueryController controller = new QueryController(cfs,
-                                                             rc,
-                                                             version.onDiskFormat().indexFeatureSet(),
-                                                             new QueryContext(),
-                                                             null);
-            long totalRows = controller.planFactory.tableMetrics.rows;
-            assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
-            assertEquals(97, totalRows);
+                Object filter = getFilterValue(type, filterValue);
 
-            Plan plan = controller.buildPlan();
-            assert plan instanceof Plan.RowsIteration;
-            Plan.RowsIteration root = (Plan.RowsIteration) plan;
-            Plan.KeysIteration planNode = root.firstNodeOfType(Plan.KeysIteration.class);
-            assertNotNull(planNode);
+                                             ReadCommand rc = Util.cmd(cfs)
+                                                                  .columns("age")
+                                                                  .filterOn("age", op, filter)
+                                                                  .build();
+                                             QueryController controller = new QueryController(cfs,
+                                                                                              rc,
+                                                                                              version.onDiskFormat().indexFeatureSet(),
+                                                                                              new QueryContext(),
+                                                                                              null);
+                                             long totalRows = controller.planFactory.tableMetrics.rows;
+//            assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
+//            assertEquals(0, cfs.getLiveSSTables().size());
+                                             assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
+                                             assertEquals(97, totalRows);
 
-            assertEquals(expectedRows, root.expectedRows(), 0.1);
-            assertEquals(expectedRows, planNode.expectedKeys(), 0.1);
-            assertEquals(expectedRows / totalRows, planNode.selectivity(), 0.001);
+                                             Plan plan = controller.buildPlan();
+                                             assert plan instanceof Plan.RowsIteration;
+                                             Plan.RowsIteration root = (Plan.RowsIteration) plan;
+                                             Plan.KeysIteration planNode = root.firstNodeOfType(Plan.KeysIteration.class);
+                                             assertNotNull(planNode);
+
+                                             assertEquals(expectedRows, root.expectedRows(), 0.1);
+                                             assertEquals(expectedRows, planNode.expectedKeys(), 0.1);
+                                             assertEquals(expectedRows / totalRows, planNode.selectivity(), 0.001);
+                                         });
 
             SAIUtil.setLatestVersion(latest);
         }
