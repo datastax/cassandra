@@ -18,16 +18,41 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Collection;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 
+@RunWith(Parameterized.class)
 public class BM25Test extends SAITester
 {
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data()
+    {
+        return Stream.of(Version.EB).map(v -> new Object[]{ v}).collect(Collectors.toList());
+    }
+
+    @Before
+    public void setup() throws Throwable
+    {
+        SAIUtil.setLatestVersion(version);
+    }
+
     @Test
     public void testTwoIndexes()
     {
