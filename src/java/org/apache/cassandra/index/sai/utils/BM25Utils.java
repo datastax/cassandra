@@ -157,8 +157,7 @@ public class BM25Utils
                 int tf = doc.getTermFrequency(queryTerm);
                 Long df = docStats.frequencies.get(queryTerm);
                 // we shouldn't have more hits for a term than we counted total documents
-                if (df > docStats.docCount)
-                    throw new AssertionError(String.format("df=%d, totalDocs=%d", df, docStats.docCount));
+                assert df <= docStats.docCount : String.format("df=%d, totalDocs=%d", df, docStats.docCount);
 
                 double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount / avgDocLength));
                 double idf = Math.log(1 + (docStats.docCount - df + 0.5) / (df + 0.5));
