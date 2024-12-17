@@ -44,7 +44,7 @@ public class BM25Test extends SAITester
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
-        return Stream.of(Version.EB).map(v -> new Object[]{ v}).collect(Collectors.toList());
+        return Stream.of(Version.DC, Version.EB).map(v -> new Object[]{ v}).collect(Collectors.toList());
     }
 
     @Before
