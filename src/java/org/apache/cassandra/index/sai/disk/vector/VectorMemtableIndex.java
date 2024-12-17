@@ -222,7 +222,7 @@ public class VectorMemtableIndex implements MemtableIndex
         assert slice == null : "ANN does not support index slicing";
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
-        var qv = vts.createFloatVector(orderer.vector);
+        var qv = vts.createFloatVector(orderer.getVectorTerm());
 
         return List.of(searchInternal(context, qv, keyRange, limit, 0));
     }
@@ -310,7 +310,7 @@ public class VectorMemtableIndex implements MemtableIndex
                             relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), limit);
 
         // convert the expression value to query vector
-        var qv = vts.createFloatVector(orderer.vector);
+        var qv = vts.createFloatVector(orderer.getVectorTerm());
         // brute force path
         if (keysInGraph.size() <= maxBruteForceRows)
         {

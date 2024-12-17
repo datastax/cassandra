@@ -144,7 +144,7 @@ public class Segment implements Closeable
      */
     public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
     {
-        return index.search(expression, keyRange, context, defer, limit);
+        return index.search(expression, keyRange, context, defer);
     }
 
     /**
