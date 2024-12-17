@@ -206,7 +206,9 @@ public class TrieMemtableIndex implements MemtableIndex
         // but the rest of the iterators are create lazily in the loop below.
         assert rangeIndexes[startShard] != null;
         KeyRangeIterator firstIterator = rangeIndexes[startShard].search(expression, keyRange);
-        var keyCount = firstIterator.getMaxKeys();
+        // Assume all shards are the same size, but we must not pass 0 because of some checks in KeyRangeIterator
+        // that assume 0 means empty iterator and could fail.
+        var keyCount = Math.max(1, firstIterator.getMaxKeys());
         builder.add(firstIterator);
 
         // Prepare the search on the remaining shards, but wrap them in KeyRangeLazyIterator, so they don't run
@@ -218,10 +220,7 @@ public class TrieMemtableIndex implements MemtableIndex
             var shardRange = boundaries.getBounds(shard);
             var minKey = index.indexContext.keyFactory().createTokenOnly(shardRange.left.getToken());
             var maxKey = index.indexContext.keyFactory().createTokenOnly(shardRange.right.getToken());
-            // Assume all shards are the same size, but we must not pass 0 because of some checks in KeyRangeIterator
-            // that assume 0 means empty iterator and could fail.
-            var count = Math.max(1, keyCount);
-            builder.add(new KeyRangeLazyIterator(() -> index.search(expression, keyRange), minKey, maxKey, count));
+            builder.add(new KeyRangeLazyIterator(() -> index.search(expression, keyRange), minKey, maxKey, keyCount));
         }
 
         return builder.build();
