@@ -26,14 +26,21 @@ import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.schema.SchemaTestUtil;
+import org.apache.cassandra.schema.TableMetadata;
 
+import static org.apache.cassandra.cql3.CQL3Type.Native.DECIMAL;
+import static org.apache.cassandra.cql3.CQL3Type.Native.INT;
+import static org.apache.cassandra.cql3.CQL3Type.Native.VARINT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
@@ -41,6 +48,21 @@ import static org.junit.Assert.fail;
 public class SingleRestrictionEstimatedRowCountTest extends SAITester
 {
     private int queryOptLevel;
+
+    static protected Object getFilterValue(CQL3Type.Native type, int value)
+    {
+        switch (type)
+        {
+            case INT:
+                return value;
+            case DECIMAL:
+                return BigDecimal.valueOf(value);
+            case VARINT:
+                return BigInteger.valueOf(value);
+        }
+        fail("Must be known type");
+        return null;
+    }
 
     @Before
     public void setup()
@@ -55,30 +77,61 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         QueryController.QUERY_OPT_LEVEL = queryOptLevel;
     }
 
-    static protected Object getFilterValue(String type, int value)
+    protected ColumnFamilyStore prepareTable(CQL3Type.Native type)
     {
-        switch (type)
-        {
-            case "int":
-                return value;
-            case "decimal":
-                return BigDecimal.valueOf(value);
-            case "varint":
-                return BigInteger.valueOf(value);
-        }
-        fail("Must be known type");
-        return null;
-    }
-
-    protected ColumnFamilyStore prepareTable(String type)
-    {
-        createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
+        TableMetadata.Builder tableBuilder = TableMetadata.builder(KEYSPACE, createTableName());
+        tableBuilder.addPartitionKeyColumn("pk", UTF8Type.instance)
+                    .addRegularColumn("age", type.getType())
+                    .memtableFlushPeriod(0);
+        SchemaTestUtil.announceNewTable(tableBuilder.build());
         createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
         for (int i = 0; i < 100; i++)
         {
             execute("INSERT INTO %s (pk, age) VALUES (?," + i + ')', "key" + i);
         }
         return getCurrentColumnFamilyStore();
+    }
+
+    @Test
+    public void testInequality()
+    {
+        var test = new RowCountTest(Operator.NEQ, 25);
+        test.doTest(Version.DB, INT, 97.0);
+        test.doTest(Version.EB, INT, 97.0);
+        // Truncated numeric types planned differently
+        test.doTest(Version.DB, DECIMAL, 97.0);
+        test.doTest(Version.EB, DECIMAL, 97.0);
+        test.doTest(Version.EB, VARINT, 97.0);
+    }
+
+    @Test
+    public void testHalfRangeMiddle()
+    {
+        var test = new RowCountTest(Operator.LT, 50);
+        test.doTest(Version.DB, INT, 48);
+        test.doTest(Version.EB, INT, 48);
+        test.doTest(Version.DB, DECIMAL, 48);
+        test.doTest(Version.EB, DECIMAL, 48);
+    }
+
+    @Test
+    public void testHalfRangeEverything()
+    {
+        var test = new RowCountTest(Operator.LT, 150);
+        test.doTest(Version.DB, INT, 97);
+        test.doTest(Version.EB, INT, 97);
+        test.doTest(Version.DB, DECIMAL, 97);
+        test.doTest(Version.EB, DECIMAL, 97);
+    }
+
+    @Test
+    public void testEquality()
+    {
+        var test = new RowCountTest(Operator.EQ, 31);
+        test.doTest(Version.DB, INT, 15);
+        test.doTest(Version.EB, INT, 0);
+        test.doTest(Version.DB, DECIMAL, 15);
+        test.doTest(Version.EB, DECIMAL, 0);
     }
 
     class RowCountTest
@@ -92,7 +145,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             this.filterValue = filterValue;
         }
 
-        void doTest(Version version, String type, double expectedRows)
+        void doTest(Version version, CQL3Type.Native type, double expectedRows)
         {
             Version latest = Version.latest();
             SAIUtil.setLatestVersion(version);
@@ -124,47 +177,5 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
 
             SAIUtil.setLatestVersion(latest);
         }
-    }
-
-    @Test
-    public void testInequality()
-    {
-        var test = new RowCountTest(Operator.NEQ, 25);
-        test.doTest(Version.DB, "int", 97.0);
-        test.doTest(Version.EB, "int", 97.0);
-        // Truncated numeric types planned differently
-        test.doTest(Version.DB, "decimal", 97.0);
-        test.doTest(Version.EB, "decimal", 97.0);
-        test.doTest(Version.EB, "varint", 97.0);
-    }
-
-    @Test
-    public void testHalfRangeMiddle()
-    {
-        var test = new RowCountTest(Operator.LT, 50);
-        test.doTest(Version.DB, "int", 48);
-        test.doTest(Version.EB, "int", 48);
-        test.doTest(Version.DB, "decimal", 48);
-        test.doTest(Version.EB, "decimal", 48);
-    }
-
-    @Test
-    public void testHalfRangeEverything()
-    {
-        var test = new RowCountTest(Operator.LT, 150);
-        test.doTest(Version.DB, "int", 97);
-        test.doTest(Version.EB, "int", 97);
-        test.doTest(Version.DB, "decimal", 97);
-        test.doTest(Version.EB, "decimal", 97);
-    }
-
-    @Test
-    public void testEquality()
-    {
-        var test = new RowCountTest(Operator.EQ, 31);
-        test.doTest(Version.DB, "int", 15);
-        test.doTest(Version.EB, "int", 0);
-        test.doTest(Version.DB, "decimal", 15);
-        test.doTest(Version.EB, "decimal", 0);
     }
 }
