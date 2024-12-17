@@ -86,6 +86,9 @@ public class Injections
         long pid = HeapUtils.getProcessId();
         List<String> properties = new ArrayList<>();
         properties.add("org.jboss.byteman.transform.all=true");
+        // uncomment below two lines to add debug or/and more verbose info, if you need to debug an injection
+        // properties.add("org.jboss.byteman.verbose=true");
+        // properties.add("org.jboss.byteman.debug=true");
         Install.install(Long.toString(pid), true, true, FBUtilities.getBroadcastAddressAndPort().address.getHostAddress(), port, properties.toArray(new String[0]));
         return port;
     }

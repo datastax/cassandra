@@ -29,8 +29,10 @@ import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
+import org.apache.cassandra.service.ClientWarn;
 import org.assertj.core.api.Assertions;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -823,5 +825,62 @@ public class LuceneAnalyzerTest extends SAITester
                 break;
         }
         assertTrue("Query too slow: " + minElapsed + " ms", minElapsed < 1000);
+    }
+
+    @Test
+    public void testClientWarningOnNGram()
+    {
+        // no explicit analyzer
+        assertNoWarning("{}");
+        assertNoWarning("{'ascii': 'true', 'case_sensitive': 'false', 'normalize': 'true'}");
+
+        // standard analyzer
+        assertNoWarning("{'index_analyzer': 'standard'}");
+        assertNoWarning("{'index_analyzer': 'whitespace'}");
+
+        // custom non-ngram analyzer
+
+        // ngram analyzer without query_analyzer
+        assertClientWarningOnNGram("{'index_analyzer': '{" +
+                                   "   \"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                                   "   \"filters\":[{\"name\":\"lowercase\"}]}'}");
+        assertClientWarningOnNGram("{'index_analyzer': '{" +
+                                   "   \"tokenizer\":{\"name\":\"whitespace\"}," +
+                                   "   \"filters\":[{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}]}'}");
+
+        // ngram analyzer with ngram query_analyzer
+        assertNoWarning("{'index_analyzer': '{" +
+                        "   \"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}}'," +
+                        "'query_analyzer': '{" +
+                        "   \"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}}'}");
+
+        // ngram analyzer with non-ngram query_analyzer
+        assertNoWarning("{'index_analyzer': '{" +
+                        "   \"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                        "   \"filters\":[{\"name\":\"lowercase\"}]}'," +
+                        "'query_analyzer': '{" +
+                        "   \"tokenizer\":{\"name\":\"whitespace\"}," +
+                        "   \"filters\":[{\"name\":\"porterstem\"}]}'}");
+    }
+
+    private void assertClientWarningOnNGram(String indexOptions)
+    {
+        createIndexFromOptions(indexOptions);
+        Assertions.assertThat(ClientWarn.instance.getWarnings())
+                  .hasSize(1)
+                  .allMatch(w -> w.contains(StorageAttachedIndex.NGRAM_WITHOUT_QUERY_ANALYZER_WARNING));
+    }
+
+    private void assertNoWarning(String indexOptions)
+    {
+        createIndexFromOptions(indexOptions);
+        Assertions.assertThat(ClientWarn.instance.getWarnings()).isNull();
+    }
+
+    private void createIndexFromOptions(String options)
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        ClientWarn.instance.captureWarnings();
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = " + options);
     }
 }

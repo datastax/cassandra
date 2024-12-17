@@ -283,6 +283,8 @@ public class QueryProcessor implements QueryHandler
     {
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
         ClientState clientState = queryState.getClientState();
+
+        Tracing.trace("Authorizing against client state");
         statement.authorize(clientState);
         statement.validate(queryState);
 
@@ -296,6 +298,7 @@ public class QueryProcessor implements QueryHandler
                 return result;
         }
 
+        Tracing.trace("Executing prepared statement");
         ResultMessage result = options.getConsistency() == ConsistencyLevel.NODE_LOCAL
                                ? processNodeLocalStatement(statement, queryState, options, queryStartNanoTime)
                                : statement.execute(queryState, options, queryStartNanoTime);
@@ -615,11 +618,10 @@ public class QueryProcessor implements QueryHandler
 
         synchronized (this)
         {
-            CassandraVersion minVersion = Gossiper.instance.getMinVersion(DatabaseDescriptor.getWriteRpcTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS);
-            if (minVersion != null &&
-                ((minVersion.major == 3 && minVersion.minor == 0 && minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_30) >= 0) ||
-                 (minVersion.major == 3 && minVersion.minor > 0 && minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_3X) >= 0) ||
-                 (minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_40, true) >= 0)))
+            CassandraVersion minVersion = Gossiper.instance.getMinVersion();
+            if ((minVersion.major == 3 && minVersion.minor == 0 && minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_30) >= 0) ||
+                (minVersion.major == 3 && minVersion.minor > 0 && minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_3X) >= 0) ||
+                (minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_40, true) >= 0))
             {
                 logger.info("Fully upgraded to at least {}", minVersion);
                 newPreparedStatementBehaviour = true;
@@ -820,9 +822,11 @@ public class QueryProcessor implements QueryHandler
                 return result;
         }
 
+        Tracing.trace("Authorizing batch");
         batch.authorize(clientState);
         batch.validate();
         batch.validate(queryState);
+        Tracing.trace("Executing batch");
         return batch.execute(queryState, options, queryStartNanoTime);
     }
 

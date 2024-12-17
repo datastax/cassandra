@@ -198,6 +198,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
 
         try (CompactionCursor ci = new CompactionCursor(OperationType.COMPACTION,
                                                         compacting,
+                                                        null,
                                                         controller,
                                                         RateLimiter.create(Double.MAX_VALUE),
                                                         FBUtilities.nowInSeconds(),
@@ -221,6 +222,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
 
         try (CompactionCursor ci = new CompactionCursor(OperationType.COMPACTION,
                                                         compacting,
+                                                        null,
                                                         controller,
                                                         RateLimiter.create(Double.MAX_VALUE),
                                                         FBUtilities.nowInSeconds(),

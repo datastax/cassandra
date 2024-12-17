@@ -1195,7 +1195,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (indexes.isEmpty() || rowFilter.isEmpty())
             return null;
 
-        for (RowFilter.Expression expression : rowFilter)
+        for (RowFilter.Expression expression : rowFilter.expressions())
         {
             if (expression.isCustom())
             {

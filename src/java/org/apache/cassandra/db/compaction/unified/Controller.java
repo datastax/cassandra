@@ -301,6 +301,15 @@ public abstract class Controller
                                                           Overlaps.InclusionMethod.TRANSITIVE.toString()).toUpperCase());
 
     /**
+     * Whether to create subtask for the output shards of individual compactions and execute them in parallel.
+     * Defaults to true for improved parallelization and efficiency.
+     */
+    static final String PARALLELIZE_OUTPUT_SHARDS_OPTION = "parallelize_output_shards";
+    static final boolean DEFAULT_PARALLELIZE_OUTPUT_SHARDS =
+        Boolean.parseBoolean(getSystemProperty(PARALLELIZE_OUTPUT_SHARDS_OPTION,
+                                               "true"));
+
+    /**
      * The scaling parameters W, one per bucket index and separated by a comma.
      * Higher indexes will use the value of the last index with a W specified.
      */
@@ -320,6 +329,7 @@ public abstract class Controller
     protected final int maxSSTablesToCompact;
     protected final long expiredSSTableCheckFrequency;
     protected final boolean ignoreOverlapsInExpirationCheck;
+    protected final boolean parallelizeOutputShards;
     protected String keyspaceName;
     protected String tableName;
 
@@ -358,6 +368,7 @@ public abstract class Controller
                int reservedThreads,
                Reservations.Type reservationsType,
                Overlaps.InclusionMethod overlapInclusionMethod,
+               boolean parallelizeOutputShards,
                boolean hasVectorType)
     {
         this.clock = clock;
@@ -377,6 +388,7 @@ public abstract class Controller
         this.reservationsType = reservationsType;
         this.maxSpaceOverhead = maxSpaceOverhead;
         this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
+        this.parallelizeOutputShards = parallelizeOutputShards;
         this.hasVectorType = hasVectorType;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
@@ -576,6 +588,11 @@ public abstract class Controller
             }
             return shards;
         }
+    }
+
+    public boolean parallelizeOutputShards()
+    {
+        return parallelizeOutputShards;
     }
 
     public boolean isReplicaAware()
@@ -1012,6 +1029,10 @@ public abstract class Controller
                                                           ? Overlaps.InclusionMethod.valueOf(options.get(OVERLAP_INCLUSION_METHOD_OPTION).toUpperCase())
                                                           : DEFAULT_OVERLAP_INCLUSION_METHOD;
 
+        boolean parallelizeOutputShards = options.containsKey(PARALLELIZE_OUTPUT_SHARDS_OPTION)
+                                          ? Boolean.parseBoolean(options.get(PARALLELIZE_OUTPUT_SHARDS_OPTION))
+                                          : DEFAULT_PARALLELIZE_OUTPUT_SHARDS;
+
         return adaptive
                ? AdaptiveController.fromOptions(env,
                                                 survivalFactors,
@@ -1029,6 +1050,7 @@ public abstract class Controller
                                                 useVectorOptions ? vectorReservedThreadsPerLevel : reservedThreadsPerLevel,
                                                 reservationsType,
                                                 overlapInclusionMethod,
+                                                parallelizeOutputShards,
                                                 hasVectorType,
                                                 realm.getKeyspaceName(),
                                                 realm.getTableName(),
@@ -1049,6 +1071,7 @@ public abstract class Controller
                                               useVectorOptions ? vectorReservedThreadsPerLevel : reservedThreadsPerLevel,
                                               reservationsType,
                                               overlapInclusionMethod,
+                                              parallelizeOutputShards,
                                               hasVectorType,
                                               realm.getKeyspaceName(),
                                               realm.getTableName(),
@@ -1101,6 +1124,7 @@ public abstract class Controller
 
         adaptive = validateBoolean(options, ADAPTIVE_OPTION, DEFAULT_ADAPTIVE);
         validateBoolean(options, IS_REPLICA_AWARE_OPTION, DEFAULT_IS_REPLICA_AWARE);
+        validateBoolean(options, PARALLELIZE_OUTPUT_SHARDS_OPTION, DEFAULT_PARALLELIZE_OUTPUT_SHARDS);
 
         minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, DEFAULT_MIN_SSTABLE_SIZE);
         vectorMinSSTableSize = validateSizeWithSpecial(options, VECTOR_MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, VECTOR_DEFAULT_MIN_SSTABLE_SIZE);

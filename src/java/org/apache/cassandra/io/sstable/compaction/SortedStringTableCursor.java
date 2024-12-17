@@ -35,7 +35,10 @@ import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -73,19 +76,27 @@ public class SortedStringTableCursor implements SSTableCursor
     private LivenessInfo rowLivenessInfo;
     private DeletionTime complexColumnDeletion;
 
+    private final long endPosition;
+    private final long startPosition;
+
     private Type currentType = Type.UNINITIALIZED;
 
     public SortedStringTableCursor(SSTableReader sstable)
     {
-        this(sstable, sstable.openDataReader());
+        this(sstable, sstable.openDataReader(), null);
     }
 
-    public SortedStringTableCursor(SSTableReader sstable, RateLimiter limiter)
+    public SortedStringTableCursor(SSTableReader sstable, Range<Token> range)
     {
-        this(sstable, sstable.openDataReader(limiter));
+        this(sstable, sstable.openDataReader(), range);
     }
 
-    public SortedStringTableCursor(SSTableReader sstable, RandomAccessReader dataFile)
+    public SortedStringTableCursor(SSTableReader sstable, Range<Token> tokenRange, RateLimiter limiter)
+    {
+        this(sstable, sstable.openDataReader(limiter), tokenRange);
+    }
+
+    public SortedStringTableCursor(SSTableReader sstable, RandomAccessReader dataFile, Range<Token> tokenRange)
     {
         try
         {
@@ -97,6 +108,19 @@ public class SortedStringTableCursor implements SSTableCursor
             this.regularColumns = toArray(header.columns(false));
             this.staticColumns = toArray(header.columns(true));
             this.columnsReusableArray = new ColumnMetadata[Math.max(regularColumns.length, staticColumns.length)];
+
+            SSTableReader.PartitionPositionBounds bounds = tokenRange == null ? sstable.getPositionsForFullRange()
+                                                                              : sstable.getPositionsForBounds(Range.makeRowRange(tokenRange));
+            if (bounds != null)
+            {
+                this.startPosition = bounds.lowerPosition;
+                this.endPosition = bounds.upperPosition;
+            }
+            else
+            {
+                // The range is empty. Rather than fail, use 0/0 as bounds which will not return any data.
+                this.endPosition = this.startPosition = 0;
+            }
         }
         catch (Throwable t)
         {
@@ -117,7 +141,7 @@ public class SortedStringTableCursor implements SSTableCursor
 
     private boolean consumePartitionHeader() throws IOException
     {
-        if (dataFile.isEOF())
+        if (dataFile.getFilePointer() >= endPosition)
         {
             currentType = Type.EXHAUSTED;
             return false;
@@ -368,8 +392,11 @@ public class SortedStringTableCursor implements SSTableCursor
                 case PARTITION:
                     if (consumeUnfilteredHeader())
                         return currentType;
-                    // else fall through
+
+                    consumePartitionHeader();
+                    return currentType;
                 case UNINITIALIZED:
+                    dataFile.seek(this.startPosition);
                     consumePartitionHeader();
                     return currentType;
                 default:
@@ -381,7 +408,7 @@ public class SortedStringTableCursor implements SSTableCursor
             sstable.markSuspect();
             throw e;
         }
-        catch (IOException | IndexOutOfBoundsException e)
+        catch (IOException | IndexOutOfBoundsException | AssertionError e)
         {
             sstable.markSuspect();
             throw new CorruptSSTableException(e, dataFile.getFile().path());
@@ -440,12 +467,12 @@ public class SortedStringTableCursor implements SSTableCursor
 
     public long bytesProcessed()
     {
-        return dataFile.getFilePointer();
+        return dataFile.getFilePointer() - startPosition;
     }
 
     public long bytesTotal()
     {
-        return dataFile.length();
+        return endPosition - startPosition;
     }
 
     public void close()

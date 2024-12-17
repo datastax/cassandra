@@ -43,11 +43,6 @@ public interface CompactionProgress extends TableOperation.Progress
     CompactionStrategy strategy();
 
     /**
-     * @return true if the compaction was requested to interrupt
-     */
-    boolean isStopRequested();
-
-    /**
      * @return input sstables
      */
     Collection<SSTableReader> inSSTables();
@@ -97,9 +92,17 @@ public interface CompactionProgress extends TableOperation.Progress
     long uncompressedBytesWritten();
 
     /**
+     * @return the start time of this operation in nanoTime.
+     */
+    long startTimeNanos();
+
+    /**
      * @return the duration so far in nanoseconds.
      */
-    long durationInNanos();
+    default long durationInNanos()
+    {
+        return System.nanoTime() - startTimeNanos();
+    }
 
     /**
      * @return total number of partitions read
@@ -128,7 +131,16 @@ public interface CompactionProgress extends TableOperation.Progress
     /**
      * @return the ratio of bytes before and after compaction, using the adjusted input and output disk sizes (uncompressed values).
      */
-    double sizeRatio();
+    default double sizeRatio()
+    {
+        long estInputSizeBytes = adjustedInputDiskSize();
+        if (estInputSizeBytes > 0)
+            return outputDiskSize() / (double) estInputSizeBytes;
+
+        // this is a valid case, when there are no sstables to actually compact
+        // the previous code would return a NaN that would be logged as zero
+        return 0;
+    }
 
     default double readThroughput()
     {

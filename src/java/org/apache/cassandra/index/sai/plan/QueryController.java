@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -36,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
@@ -79,6 +81,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -90,9 +93,12 @@ import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Throwables;
 
 import static java.lang.Math.max;
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
+    public static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. " +
+                                                             StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
     /**
@@ -400,7 +406,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (orderer != null)
             keysIterationPlan = planFactory.sort(keysIterationPlan, orderer);
 
-        assert keysIterationPlan != planFactory.everything; // This would mean we have no WHERE nor ANN clauses at all
+        // This would mean we have no WHERE nor ANN clauses at all; this can happen in case an index was dropped after the
+        // query was initiated
+        if (keysIterationPlan == planFactory.everything)
+            throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
+
         return keysIterationPlan;
     }
 
@@ -475,6 +485,41 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return Operation.Node.buildTree(this, filterOperation()).analyzeTree(this).filterTree();
     }
 
+    private Plan.KeysIteration buildHalfRangeFromInequality(Expression originPredicate, Operator op)
+    {
+        assert originPredicate.getOp() == Expression.Op.NOT_EQ : "assumes inequality";
+        assert originPredicate.lower.value == originPredicate.upper.value : "assumes lower and upper are the same in inequality";
+
+        Expression halfRange = new Expression(originPredicate.context);
+        halfRange.add(op, originPredicate.lower.value.raw);
+        long matchingRowCount = Math.min(estimateMatchingRowCount(halfRange), planFactory.tableMetrics.rows);
+        return planFactory.indexScan(halfRange, matchingRowCount);
+    }
+
+    /**
+     * Builds a plan for a restriction with inequality. It's implemented as
+     * union of two ranges, before the value and after the value.
+     * If the column type is truncatable, e.g., BigInteger or BigDecimal,
+     * then it returns a full index scan, since the ranges might result
+     * in false negatives when a truncated value is equivalent to
+     * the value to exclude.
+     * @param predicate Inequality expression with indexContext
+     * @return A plan on the index, which can also result false positives.
+     */
+    private Plan.KeysIteration buildInequalityPlan(Expression predicate)
+    {
+        assert predicate.getOp()== Expression.Op.NOT_EQ : "Only inequality predicate is expected";
+
+        if (TypeUtil.supportsRounding(predicate.validator))
+            return planFactory.fullIndexScan(predicate.context);
+        else
+        {
+            Plan.KeysIteration left = buildHalfRangeFromInequality(predicate, Operator.LT);
+            Plan.KeysIteration right = buildHalfRangeFromInequality(predicate, Operator.GT);
+            return planFactory.union(new ArrayList<>(Arrays.asList(left, right)));
+        }
+    }
+
     /**
      * Build a {@link Plan} from the given list of expressions by applying given operation (OR/AND).
      * Building of such builder involves index search, results of which are persisted in the internal resources list
@@ -501,8 +546,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             if (expression.context.isIndexed())
             {
-                long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
-                builder.add(planFactory.indexScan(expression, expectedMatchingRowCount));
+                if ( expression.getOp() == Expression.Op.NOT_EQ)
+                    builder.add(buildInequalityPlan(expression));
+                else
+                {
+                    long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
+                    builder.add(planFactory.indexScan(expression, expectedMatchingRowCount));
+                }
             }
         }
     }

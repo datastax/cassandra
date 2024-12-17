@@ -253,7 +253,9 @@ public class SASIIndex implements Index, INotificationConsumer
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
-        return filter.withoutExpressions();
+        // This index doesn't support disjunctions, so if the query has any, we simply apply the entire filter.
+        // Otherwise, the index searcher should be able to handle the entire filter without postfiltering.
+        return filter.containsDisjunctions() ? filter : filter.withoutExpressions();
     }
 
     public long getEstimatedResultRows()
