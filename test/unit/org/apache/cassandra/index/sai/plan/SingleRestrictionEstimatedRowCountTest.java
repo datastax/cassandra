@@ -163,6 +163,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
                                                              new QueryContext(),
                                                              null);
             long totalRows = controller.planFactory.tableMetrics.rows;
+            assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
             assertEquals(97, totalRows);
 
             Plan plan = controller.buildPlan();
