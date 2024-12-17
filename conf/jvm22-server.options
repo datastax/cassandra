@@ -1,32 +1,12 @@
 ###########################################################################
-#                         jvm11-server.options                            #
+#                         jvm22-server.options                            #
 #                                                                         #
-# See jvm-server.options. This file is specific for Java 11 and newer.    #
+# See jvm-server.options. This file is specific for Java 22 and newer.    #
 ###########################################################################
-
--XX:ThreadPriorityPolicy=1
--XX:+UseThreadPriorities
 
 #################
 #  GC SETTINGS  #
 #################
-
-
-
-### CMS Settings
-#-XX:+UseConcMarkSweepGC
-#-XX:+CMSParallelRemarkEnabled
-#-XX:SurvivorRatio=8
-#-XX:MaxTenuringThreshold=1
-#-XX:CMSInitiatingOccupancyFraction=75
-#-XX:+UseCMSInitiatingOccupancyOnly
-#-XX:CMSWaitDuration=10000
-#-XX:+CMSParallelInitialMarkEnabled
-#-XX:+CMSEdenChunksRecordAlways
-## some JVMs will fill up their heap when accessed via JMX, see CASSANDRA-6541
-#-XX:+CMSClassUnloadingEnabled
-
-
 
 ### G1 Settings
 ## Use the Hotspot garbage-first collector.
@@ -60,32 +40,42 @@
 ### JPMS
 
 -Djdk.attach.allowAttachSelf=true
+-Djava.security.manager=allow
 --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
 --add-exports java.base/jdk.internal.ref=ALL-UNNAMED
---add-exports java.base/jdk.internal.util=ALL-UNNAMED
---add-exports java.base/jdk.internal.util=ALL-UNNAMED
+--add-exports java.base/jdk.internal.perf=ALL-UNNAMED
 --add-exports java.base/sun.nio.ch=ALL-UNNAMED
 --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED
 --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
 --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED
---add-exports java.sql/java.sql=ALL-UNNAMED
---add-exports jdk.unsupported/sun.misc=ALL-UNNAMED
 --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+--add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming
+--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED
 
 --add-opens java.base/java.io=ALL-UNNAMED
---add-opens java.base/java.lang=ALL-UNNAMED
 --add-opens java.base/java.lang.module=ALL-UNNAMED
+--add-opens java.base/java.lang=ALL-UNNAMED
 --add-opens java.base/java.lang.reflect=ALL-UNNAMED
---add-opens=java.base/java.util=ALL-UNNAMED
+--add-opens java.base/java.nio.file.spi=ALL-UNNAMED
+--add-opens java.base/java.nio=ALL-UNNAMED
+--add-opens java.base/java.net=ALL-UNNAMED
+--add-opens java.base/java.util=ALL-UNNAMED
+--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED
+--add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED
 --add-opens java.base/jdk.internal.loader=ALL-UNNAMED
---add-opens java.base/jdk.internal.ref=ALL-UNNAMED
---add-opens java.base/jdk.internal.reflect=ALL-UNNAMED
 --add-opens java.base/jdk.internal.math=ALL-UNNAMED
 --add-opens java.base/jdk.internal.module=ALL-UNNAMED
---add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED
+--add-opens java.base/jdk.internal.ref=ALL-UNNAMED
+--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED
+--add-opens java.base/jdk.internal.vm=ALL-UNNAMED
+--add-opens java.base/sun.nio.ch=ALL-UNNAMED
 --add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED
+--add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED
 --add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED
+--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED
 
+# required for org.apache.cassandra.Util.getSupportedMTimeGranularity
+--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED
 
 ### GC logging options -- uncomment to enable
 
@@ -111,5 +101,9 @@
 # creation of direct buffers using Unsafe. Without it, this falls back to ByteBuffer.allocateDirect which has
 # inferior performance and risks exceeding MaxDirectMemory
 -Dio.netty.tryReflectionSetAccessible=true
+
+### Enable vector incubator feature (simd support)
+
+--add-modules jdk.incubator.vector
 
 # The newline in the end of file is intentional
