@@ -57,5 +57,5 @@ public interface MemtableOrdering
      *
      * Assumes that the given  spans the same rows as the implementing index's segment.
      */
-    CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit);
+    CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, boolean canSkipOutOfWindowPKs);
 }
