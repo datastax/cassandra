@@ -18,16 +18,20 @@
 package org.apache.cassandra.index.sai.disk;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.ByteBlockPool;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefHash;
 import org.apache.lucene.util.Counter;
+
+import static java.lang.Math.min;
 
 /**
  * Indexes strings into an on-heap inverted index to be flushed in an SSTable attached index later.
@@ -46,8 +50,11 @@ public class RAMStringIndexer
     private int rowCount = 0;
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
-    public RAMStringIndexer()
+    private final boolean includeFrequencies;
+
+    public RAMStringIndexer(boolean includeFrequencies)
     {
+        this.includeFrequencies = includeFrequencies;
         termsBytesUsed = Counter.newCounter();
         slicesBytesUsed = Counter.newCounter();
 
@@ -55,7 +62,7 @@ public class RAMStringIndexer
 
         termsHash = new BytesRefHash(termsPool);
 
-        slices = new RAMPostingSlices(slicesBytesUsed);
+        slices = new RAMPostingSlices(slicesBytesUsed, includeFrequencies);
     }
 
     public long estimatedBytesUsed()
@@ -143,42 +150,60 @@ public class RAMStringIndexer
     /**
      * @return bytes allocated.  may be zero if the (term, row) pair is a duplicate
      */
-    public long add(BytesRef term, int segmentRowId)
+    public long addAll(List<BytesRef> terms, int segmentRowId)
     {
         long startBytes = estimatedBytesUsed();
-        int termID = termsHash.add(term);
-        boolean firstOccurrence = termID >= 0;
+        Int2IntHashMap frequencies = new Int2IntHashMap(Integer.MIN_VALUE);
+        Int2IntHashMap deltas = new Int2IntHashMap(Integer.MIN_VALUE);
 
-        if (firstOccurrence)
+        for (BytesRef term : terms)
         {
-            // first time seeing this term, create the term's first slice !
-            slices.createNewSlice(termID);
+            int termID = termsHash.add(term);
+            boolean firstOccurrence = termID >= 0;
+
+            if (firstOccurrence)
+            {
+                // first time seeing this term in any row, create the term's first slice !
+                slices.createNewSlice(termID);
+                if (termID >= lastSegmentRowID.length - 1)
+                    lastSegmentRowID = ArrayUtil.grow(lastSegmentRowID, termID + 1);
+            }
+            else
+            {
+                termID = (-termID) - 1;
+                // compaction should call this method only with increasing segmentRowIds
+                assert segmentRowId >= lastSegmentRowID[termID];
+                // Skip if we've already seen this term in this row
+                if (segmentRowId == lastSegmentRowID[termID])
+                {
+                    if (includeFrequencies)
+                    {
+                        int freq = frequencies.get(termID);
+                        assert freq > 0 : freq;
+                        frequencies.put(termID, min(freq + 1, 255));
+                    }
+                    continue;
+                }
+            }
+
+            // adding term -> segmentRowId posting
+            frequencies.put(termID, 1);
+
+            int delta = segmentRowId - lastSegmentRowID[termID];
+            // sanity check that we're advancing the row id, i.e. no duplicate entries.
+            assert firstOccurrence || delta > 0;
+            deltas.put(termID, delta);
+
+            lastSegmentRowID[termID] = segmentRowId;
         }
-        else
-        {
-            termID = (-termID) - 1;
-            // compaction should call this method only with increasing segmentRowIds
-            assert segmentRowId >= lastSegmentRowID[termID];
-            // Skip if we've already recorded seen this segmentRowId for this term
-            if (segmentRowId == lastSegmentRowID[termID])
-                return 0;
-        }
 
-        if (termID >= lastSegmentRowID.length - 1)
-            lastSegmentRowID = ArrayUtil.grow(lastSegmentRowID, termID + 1);
-
-        int delta = segmentRowId - lastSegmentRowID[termID];
-        // sanity check that we're advancing the row id, i.e. no duplicate entries.
-        assert firstOccurrence || delta > 0;
-
-        lastSegmentRowID[termID] = segmentRowId;
-
-        slices.writeVInt(termID, delta);
-
-        long allocatedBytes = estimatedBytesUsed() - startBytes;
+        // add the postings now that we know the frequencies
+        frequencies.forEachInt((termID, freq) -> {
+            slices.writePosting(termID, deltas.get(termID), freq);
+        });
 
         rowCount++;
 
-        return allocatedBytes;
+        return estimatedBytesUsed() - startBytes;
     }
 }

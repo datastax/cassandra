@@ -235,7 +235,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (term.remaining() == 0 && !indexContext.getValidator().allowsEmpty())
             return;
 
-        long allocated = currentBuilder.addAll(term, type, key, sstableRowId);
+        long allocated = currentBuilder.analyzeAndAdd(term, type, key, sstableRowId);
         limiter.increment(allocated);
     }
 

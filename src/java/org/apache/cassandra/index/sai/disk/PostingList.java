@@ -42,6 +42,14 @@ public interface PostingList extends Closeable
      */
     int nextPosting() throws IOException;
 
+    /**
+     * @return the number of occurrences of the term in the current row (the one most recently returned by nextPosting).
+     */
+    default int frequency()
+    {
+        return 1;
+    }
+
     int size();
 
     /**
