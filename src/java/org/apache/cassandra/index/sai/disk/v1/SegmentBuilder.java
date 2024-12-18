@@ -195,7 +195,7 @@ public abstract class SegmentBuilder
         {
             super(components, rowIdOffset, limiter);
             this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
-            ramIndexer = new RAMStringIndexer(false);
+            ramIndexer = new RAMStringIndexer(analyzer != null);
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
 

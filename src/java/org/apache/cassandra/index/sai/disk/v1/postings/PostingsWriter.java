@@ -185,13 +185,16 @@ public class PostingsWriter implements Closeable
         blockOffsets.clear();
         blockMaxIDs.clear();
 
+        dataOutput.writeByte((byte) (postings.includesFrequencies() ? 1 : 0));
+
         int segmentRowId;
         // When postings list are merged, we don't know exact size, just an upper bound.
         // We need to count how many postings we added to the block ourselves.
         int size = 0;
         while ((segmentRowId = postings.nextPosting()) != PostingList.END_OF_STREAM)
         {
-            writePosting(segmentRowId);
+            int frequency = postings.includesFrequencies() ? postings.frequency() : Integer.MIN_VALUE;
+            writePosting(segmentRowId, frequency);
             size++;
             totalPostings++;
         }

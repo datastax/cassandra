@@ -80,6 +80,12 @@ class RAMPostingSlices
             }
 
             @Override
+            public boolean includesFrequencies()
+            {
+                return includeFrequencies;
+            }
+
+            @Override
             public int frequency()
             {
                 if (!includeFrequencies)
