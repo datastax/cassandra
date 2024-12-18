@@ -41,6 +41,7 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
      * Adds the specified {@link PrimaryKey}.
      *
      * @param key a primary key
+     * @return the bytes allocated for the key (0 if it already existed in the set)
      */
     public long add(PrimaryKey key)
     {

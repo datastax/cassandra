@@ -101,7 +101,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         final int numTerms = randomIntBetween(64, 512), numPostings = randomIntBetween(256, 1024);
         final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, numTerms, numPostings);
 
-        try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
+        try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, termsEnum))
         {
             for (int t = 0; t < numTerms; ++t)
             {
@@ -159,7 +159,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
         final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, numTerms, numPostings);
 
-        try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
+        try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, termsEnum))
         {
             searcher.search(new Expression(indexContext)
                             .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false);
@@ -172,9 +172,8 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         }
     }
 
-    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<InvertedIndexBuilder.TermsEnum> termsEnum) throws IOException
+    private IndexSearcher buildIndexAndOpenSearcher(int terms, List<InvertedIndexBuilder.TermsEnum> termsEnum) throws IOException
     {
-        final int size = terms * postings;
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         final String index = newIndex();
         final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
@@ -189,7 +188,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
-            var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).iterator();
+            var iter = termsEnum.stream().map(InvertedIndexBuilder::toTermWithFrequency).iterator();
             MemtableTermsIterator termsIterator = new MemtableTermsIterator(null, null, iter);
             SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(termsIterator));
             metadataBuilder.setComponentsMetadata(indexMetas);

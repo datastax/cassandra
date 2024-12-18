@@ -34,7 +34,9 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.SortedSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
@@ -83,6 +85,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
+    private final Map<PkWithTerm, Integer> termFrequencies;
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -111,6 +114,34 @@ public class TrieMemoryIndex extends MemoryIndex
         this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
+        termFrequencies = new ConcurrentHashMap<>();
+    }
+
+    private static class PkWithTerm
+    {
+        private final PrimaryKey pk;
+        private final ByteComparable term;
+
+        private PkWithTerm(PrimaryKey pk, ByteComparable term)
+        {
+            this.pk = pk;
+            this.term = term;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(pk, ByteComparable.length(term, ByteComparable.Version.OSS41));
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (o == null || getClass() != o.getClass()) return false;
+            PkWithTerm that = (PkWithTerm) o;
+            return Objects.equals(pk, that.pk)
+                   && ByteComparable.compare(term, that.term, ByteComparable.Version.OSS41) == 0;
+        }
     }
 
     public synchronized void add(DecoratedKey key,
@@ -142,7 +173,16 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    data.putSingleton(encodedTerm, primaryKey, primaryKeysReducer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
+                    data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
+                        // First do the normal primary keys reduction
+                        PrimaryKeys result = primaryKeysReducer.apply(existing, update);
+
+                        // Then update term frequency
+                        var pkbc = new PkWithTerm(update, encodedTerm);
+                        termFrequencies.merge(pkbc, 1, Integer::sum);
+
+                        return result;
+                    }, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
                 catch (TrieSpaceExhaustedException e)
                 {
@@ -161,10 +201,10 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
+    public Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
+        return new Iterator<>()
         {
             @Override
             public boolean hasNext()
@@ -173,10 +213,16 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable, PrimaryKeys> next()
+            public Pair<ByteComparable, List<PkWithFrequency>> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(entry.getKey(), entry.getValue());
+                var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
+                for (PrimaryKey pk : entry.getValue().keys())
+                {
+                    int frequency = termFrequencies.get(new PkWithTerm(pk, entry.getKey()));
+                    pairs.add(new PkWithFrequency(pk, frequency));
+                }
+                return Pair.create(entry.getKey(), pairs);
             }
         };
     }
@@ -417,7 +463,6 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
-
 
     class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {

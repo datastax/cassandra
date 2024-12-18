@@ -54,6 +54,7 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
+import org.apache.cassandra.index.sai.utils.BM25Utils.DocTF;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
@@ -184,32 +185,42 @@ public class InvertedIndexSearcher extends IndexSearcher
         // extract the match count for each
         var documentFrequencies = postingLists.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (long) e.getValue().size()));
 
-        try (var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
-             var merged = IntersectingPostingList.intersect(List.copyOf(postingLists.values())))
-        {
-            // construct an Iterator<PrimaryKey>() from our intersected postings
-            var it = new AbstractIterator<PrimaryKey>() {
-                @Override
-                protected PrimaryKey computeNext()
+        var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+        var merged = IntersectingPostingList.intersect(postingLists);
+        
+        // Wrap the iterator with resource management
+        var it = new AbstractIterator<DocTF>() { // Anonymous class extends AbstractIterator
+            private boolean closed;
+            
+            @Override
+            protected DocTF computeNext()
+            {
+                try
                 {
-                    try
-                    {
-                        int rowId = merged.nextPosting();
-                        if (rowId == PostingList.END_OF_STREAM)
-                            return endOfData();
-                        return pkm.primaryKeyFromRowId(rowId);
-                    }
-                    catch (IOException e)
-                    {
-                        throw new UncheckedIOException(e);
-                    }
+                    int rowId = merged.nextPosting();
+                    if (rowId == PostingList.END_OF_STREAM)
+                        return endOfData();
+                    int termCount = 100; // FIXME
+                    return new DocTF(pkm.primaryKeyFromRowId(rowId), termCount, merged.frequencies());
                 }
-            };
-            return bm25Internal(it, queryTerms, documentFrequencies);
-        }
+                catch (IOException e)
+                {
+                    throw new UncheckedIOException(e);
+                }
+            }
+
+            @Override
+            public void close()
+            {
+                if (closed) return;
+                closed = true;
+                FileUtils.closeQuietly(pkm, merged);
+            }
+        };
+        return bm25Internal(it, queryTerms, documentFrequencies);
     }
 
-    private CloseableIterator<PrimaryKeyWithSortKey> bm25Internal(Iterator<PrimaryKey> keyIterator,
+    private CloseableIterator<PrimaryKeyWithSortKey> bm25Internal(CloseableIterator<DocTF> keyIterator,
                                                                   List<ByteBuffer> queryTerms,
                                                                   Map<ByteBuffer, Long> documentFrequencies)
     {
@@ -223,8 +234,7 @@ public class InvertedIndexSearcher extends IndexSearcher
                                        queryTerms,
                                        docStats,
                                        indexContext,
-                                       sstable.descriptor.id,
-                                       pk -> readColumn(sstable, pk));
+                                       sstable.descriptor.id);
     }
 
     @Override
@@ -255,7 +265,9 @@ public class InvertedIndexSearcher extends IndexSearcher
             }
             documentFrequencies.put(term, matches);
         }
-        return bm25Internal(keys.iterator(), queryTerms, documentFrequencies);
+        var analyzer = indexContext.getAnalyzerFactory().create();
+        var it = keys.stream().map(pk -> DocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms)).iterator();
+        return bm25Internal(CloseableIterator.wrap(it), queryTerms, documentFrequencies);
     }
 
     @Override

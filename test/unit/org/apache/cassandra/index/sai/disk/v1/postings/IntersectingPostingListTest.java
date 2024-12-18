@@ -19,9 +19,11 @@
 package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
@@ -30,88 +32,92 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class IntersectingPostingListTest extends SaiRandomizedTest
 {
+    private Map<ByteBuffer, PostingList> createPostingMap(PostingList... lists)
+    {
+        Map<ByteBuffer, PostingList> map = new HashMap<>();
+        for (int i = 0; i < lists.length; i++)
+        {
+            map.put(ByteBufferUtil.bytes(String.valueOf((char) ('A' + i))), lists[i]);
+        }
+        return map;
+    }
+
     @Test
     public void shouldIntersectOverlappingPostingLists() throws IOException
     {
-        var lists = listOfLists(new IntArrayPostingList(new int[]{ 1, 4, 6, 8 }),
-                                new IntArrayPostingList(new int[]{ 2, 4, 6, 9 }),
-                                new IntArrayPostingList(new int[]{ 4, 6, 7 }));
+        var map = createPostingMap(new IntArrayPostingList(new int[]{ 1, 4, 6, 8 }),
+                                   new IntArrayPostingList(new int[]{ 2, 4, 6, 9 }),
+                                   new IntArrayPostingList(new int[]{ 4, 6, 7 }));
 
-        final PostingList intersected = IntersectingPostingList.intersect(lists);
-
+        final PostingList intersected = IntersectingPostingList.intersect(map);
         assertPostingListEquals(new IntArrayPostingList(new int[]{ 4, 6 }), intersected);
     }
 
     @Test
     public void shouldIntersectDisjointPostingLists() throws IOException
     {
-        var lists = listOfLists(new IntArrayPostingList(new int[]{ 1, 3, 5 }),
-                                new IntArrayPostingList(new int[]{ 2, 4, 6 }));
+        var map = createPostingMap(new IntArrayPostingList(new int[]{ 1, 3, 5 }),
+                                   new IntArrayPostingList(new int[]{ 2, 4, 6 }));
 
-        final PostingList intersected = IntersectingPostingList.intersect(lists);
-
+        final PostingList intersected = IntersectingPostingList.intersect(map);
         assertPostingListEquals(new IntArrayPostingList(new int[]{}), intersected);
     }
 
     @Test
     public void shouldIntersectSinglePostingList() throws IOException
     {
-        var lists = listOfLists(new IntArrayPostingList(new int[]{ 1, 4, 6 }));
+        var map = createPostingMap(new IntArrayPostingList(new int[]{ 1, 4, 6 }));
 
-        final PostingList intersected = IntersectingPostingList.intersect(lists);
-
+        final PostingList intersected = IntersectingPostingList.intersect(map);
         assertPostingListEquals(new IntArrayPostingList(new int[]{ 1, 4, 6 }), intersected);
     }
 
     @Test
     public void shouldIntersectIdenticalPostingLists() throws IOException
     {
-        var lists = listOfLists(new IntArrayPostingList(new int[]{ 1, 2, 3 }),
-                                new IntArrayPostingList(new int[]{ 1, 2, 3 }));
+        var map = createPostingMap(new IntArrayPostingList(new int[]{ 1, 2, 3 }),
+                                   new IntArrayPostingList(new int[]{ 1, 2, 3 }));
 
-        final PostingList intersected = IntersectingPostingList.intersect(lists);
-
+        final PostingList intersected = IntersectingPostingList.intersect(map);
         assertPostingListEquals(new IntArrayPostingList(new int[]{ 1, 2, 3 }), intersected);
     }
 
     @Test
     public void shouldAdvanceAllIntersectedLists() throws IOException
     {
-        var lists = listOfLists(new IntArrayPostingList(new int[]{ 1, 3, 5, 7, 9 }),
-                                new IntArrayPostingList(new int[]{ 2, 3, 5, 7, 8 }),
-                                new IntArrayPostingList(new int[]{ 3, 5, 7, 10 }));
+        var map = createPostingMap(new IntArrayPostingList(new int[]{ 1, 3, 5, 7, 9 }),
+                                   new IntArrayPostingList(new int[]{ 2, 3, 5, 7, 8 }),
+                                   new IntArrayPostingList(new int[]{ 3, 5, 7, 10 }));
 
-        final PostingList intersected = IntersectingPostingList.intersect(lists);
+        final PostingList intersected = IntersectingPostingList.intersect(map);
         final PostingList expected = new IntArrayPostingList(new int[]{ 3, 5, 7 });
 
-        assertEquals(expected.advance(5),
-                     intersected.advance(5));
-
+        assertEquals(expected.advance(5), intersected.advance(5));
         assertPostingListEquals(expected, intersected);
     }
 
     @Test
     public void shouldHandleEmptyList() throws IOException
     {
-        var lists = listOfLists(new IntArrayPostingList(new int[]{}),
-                                new IntArrayPostingList(new int[]{ 1, 2, 3 }));
+        var map = createPostingMap(new IntArrayPostingList(new int[]{}),
+                                   new IntArrayPostingList(new int[]{ 1, 2, 3 }));
 
-        final PostingList intersected = IntersectingPostingList.intersect(lists);
-
+        final PostingList intersected = IntersectingPostingList.intersect(map);
         assertEquals(PostingList.END_OF_STREAM, intersected.advance(1));
     }
 
     @Test
     public void shouldInterleaveNextAndAdvance() throws IOException
     {
-        var lists = listOfLists(new IntArrayPostingList(new int[]{ 1, 3, 5, 7, 9 }),
-                                new IntArrayPostingList(new int[]{ 1, 3, 5, 7, 9 }),
-                                new IntArrayPostingList(new int[]{ 1, 3, 5, 7, 9 }));
+        var map = createPostingMap(new IntArrayPostingList(new int[]{ 1, 3, 5, 7, 9 }),
+                                   new IntArrayPostingList(new int[]{ 1, 3, 5, 7, 9 }),
+                                   new IntArrayPostingList(new int[]{ 1, 3, 5, 7, 9 }));
 
-        final PostingList intersected = IntersectingPostingList.intersect(lists);
+        final PostingList intersected = IntersectingPostingList.intersect(map);
 
         assertEquals(1, intersected.nextPosting());
         assertEquals(5, intersected.advance(5));
@@ -133,16 +139,14 @@ public class IntersectingPostingListTest extends SaiRandomizedTest
         final int postingsCount = nextInt(1, 50_000);
         final int postingListCount = nextInt(2, 10);
 
-        // Generate base postings that will be present in all lists
         final AtomicInteger rowId = new AtomicInteger();
         final int[] commonPostings = IntStream.generate(() -> rowId.addAndGet(nextInt(1, 10)))
-                                              .limit(postingsCount / 4)  // Fewer common elements
+                                              .limit(postingsCount / 4)
                                               .toArray();
 
         var splitPostingLists = new ArrayList<PostingList>();
         for (int i = 0; i < postingListCount; i++)
         {
-            // Combine common postings with some unique ones for each list
             final int[] uniquePostings = IntStream.generate(() -> rowId.addAndGet(nextInt(1, 10)))
                                                   .limit(postingsCount)
                                                   .toArray();
@@ -154,7 +158,7 @@ public class IntersectingPostingListTest extends SaiRandomizedTest
             splitPostingLists.add(new IntArrayPostingList(combined));
         }
 
-        final PostingList intersected = IntersectingPostingList.intersect(splitPostingLists);
+        final PostingList intersected = IntersectingPostingList.intersect(createPostingMap(splitPostingLists.toArray(new PostingList[0])));
         final PostingList expected = new IntArrayPostingList(commonPostings);
 
         final List<PostingListAdvance> actions = new ArrayList<>();
@@ -197,13 +201,6 @@ public class IntersectingPostingListTest extends SaiRandomizedTest
         {
             assertEquals(action.advance(expected), action.advance(intersected));
         }
-    }
-
-    private ArrayList<PostingList> listOfLists(PostingList... postingLists)
-    {
-        var L = new ArrayList<PostingList>();
-        Collections.addAll(L, postingLists);
-        return L;
     }
 
     private interface PostingListAdvance

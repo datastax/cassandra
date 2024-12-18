@@ -328,7 +328,7 @@ public class PostingsTest extends SaiRandomizedTest
     private PostingsReader.BlocksSummary assertBlockSummary(int blockSize, PostingList expected, IndexInput input) throws IOException
     {
         final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(input, input.getFilePointer());
-        assertEquals(blockSize, summary.blockSize);
+        assertEquals(blockSize, summary.blockEntries);
         assertEquals(expected.size(), summary.numPostings);
         assertTrue(summary.offsets.length() > 0);
         assertEquals(summary.offsets.length(), summary.maxValues.length());

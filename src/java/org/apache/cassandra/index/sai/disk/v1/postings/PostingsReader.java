@@ -51,7 +51,7 @@ public class PostingsReader implements OrdinalPostingList
 
     protected final IndexInput input;
     protected final InputCloser runOnClose;
-    private final int blockSize;
+    private final int blockEntries;
     private final int numPostings;
     private final LongArray blockOffsets;
     private final LongArray blockMaxValues;
@@ -69,6 +69,7 @@ public class PostingsReader implements OrdinalPostingList
     private long currentPosition;
     private LongValues currentFORValues;
     private int postingsDecoded = 0;
+    private int currentFrequency;
 
     @VisibleForTesting
     public PostingsReader(IndexInput input, long summaryOffset, QueryEventListener.PostingListEventListener listener) throws IOException
@@ -97,7 +98,7 @@ public class PostingsReader implements OrdinalPostingList
         this.input = input;
         this.seekingInput = new SeekingRandomAccessInput(input);
         this.blockOffsets = summary.offsets;
-        this.blockSize = summary.blockSize;
+        this.blockEntries = summary.blockEntries;
         this.numPostings = summary.numPostings;
         this.blockMaxValues = summary.maxValues;
         this.listener = listener;
@@ -122,7 +123,7 @@ public class PostingsReader implements OrdinalPostingList
 
     public static class BlocksSummary
     {
-        final int blockSize;
+        final int blockEntries;
         final int numPostings;
         final LongArray offsets;
         final LongArray maxValues;
@@ -139,7 +140,7 @@ public class PostingsReader implements OrdinalPostingList
             this.runOnClose = runOnClose;
 
             input.seek(offset);
-            this.blockSize = input.readVInt();
+            this.blockEntries = input.readVInt();
             // This is the count of row ids in a single posting list. For now, a segment cannot have more than
             // Integer.MAX_VALUE row ids, so it is safe to use an int here.
             this.numPostings = input.readVInt();
@@ -323,10 +324,10 @@ public class PostingsReader implements OrdinalPostingList
         // blockMaxValues is integer only
         actualSegmentRowId = Math.toIntExact(blockMaxValues.get(block));
         //upper bound, since we might've advanced to the last block, but upper bound is enough
-        totalPostingsRead += (blockSize - blockIdx) + (block - postingsBlockIdx + 1) * blockSize;
+        totalPostingsRead += (blockEntries - blockIdx) + (block - postingsBlockIdx + 1) * blockEntries;
 
         postingsBlockIdx = block + 1;
-        blockIdx = blockSize;
+        blockIdx = blockEntries;
     }
 
     @Override
@@ -341,9 +342,9 @@ public class PostingsReader implements OrdinalPostingList
     }
 
     @VisibleForTesting
-    int getBlockSize()
+    int getBlockEntries()
     {
-        return blockSize;
+        return blockEntries;
     }
 
     private int peekNext() throws IOException
@@ -352,24 +353,27 @@ public class PostingsReader implements OrdinalPostingList
         {
             return END_OF_STREAM;
         }
-        if (blockIdx == blockSize)
+        if (blockIdx == blockEntries)
         {
             reBuffer();
         }
 
-        return actualSegmentRowId + nextRowID();
+        return actualSegmentRowId + nextRowDelta();
     }
 
-    private int nextRowID()
+    private int nextRowDelta()
     {
         // currentFORValues is null when the all the values in the block are the same
         if (currentFORValues == null)
         {
+            // see TODO in PostingsWriter -- currently this will never be executed
+            currentFrequency = 1;
             return 0;
         }
         else
         {
-            final long id = currentFORValues.get(blockIdx);
+            long id = currentFORValues.get(2L * blockIdx);
+            currentFrequency = Math.toIntExact(currentFORValues.get(2L * blockIdx + 1));
             postingsDecoded++;
             return Math.toIntExact(id);
         }
@@ -419,5 +423,10 @@ public class PostingsReader implements OrdinalPostingList
                     String.format("Postings list #%s block is corrupted. Bits per value should be no more than 64 and is %d.", postingsBlockIdx, bitsPerValue), input);
         }
         currentFORValues = LuceneCompat.directReaderGetInstance(seekingInput, bitsPerValue, currentPosition);
+    }
+
+    @Override
+    public int frequency() {
+        return currentFrequency;
     }
 }

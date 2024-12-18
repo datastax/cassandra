@@ -20,14 +20,12 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
@@ -35,18 +33,15 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.ImmutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Column index writer that flushes indexed data directly from the corresponding Memtable index, without buffering index
@@ -126,7 +121,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             }
             else
             {
-                final Iterator<Pair<ByteComparable, IntArrayList>> iterator = rowMapping.merge(memtableIndex);
+                var iterator = rowMapping.merge(memtableIndex);
                 try (MemtableTermsIterator terms = new MemtableTermsIterator(memtableIndex.getMinTerm(), memtableIndex.getMaxTerm(), iterator))
                 {
                     long cellCount = flush(minKey, maxKey, indexContext().getValidator(), terms, rowMapping.maxSegmentRowId);
