@@ -32,7 +32,10 @@ import com.google.common.annotations.VisibleForTesting;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Meter;
 import com.github.luben.zstd.Zstd;
+import com.github.luben.zstd.ZstdCompressCtx;
+import com.github.luben.zstd.ZstdDecompressCtx;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
@@ -78,6 +81,7 @@ public class AdaptiveCompressor implements ICompressor
     protected static final String MIN_COMPRESSION_LEVEL_OPTION_NAME = "min_compression_level";
     protected static final String MAX_COMPRESSION_LEVEL_OPTION_NAME = "max_compression_level";
     protected static final String MAX_COMPACTION_QUEUE_LENGTH_OPTION_NAME = "max_compaction_queue_length";
+
 
     /**
      * Maps AdaptiveCompressor compression level to underlying ZStandard compression levels.
@@ -156,7 +160,6 @@ public class AdaptiveCompressor implements ICompressor
     private final ThreadLocal<State> state;
     private final Supplier<Double> writePressureSupplier;
 
-
     static class Params
     {
         final Uses use;
@@ -205,6 +208,9 @@ public class AdaptiveCompressor implements ICompressor
      */
     class State
     {
+        final ZstdCompressCtx compressCtx = new ZstdCompressCtx().setChecksum(true);
+        final ZstdDecompressCtx decompressCtx = new ZstdDecompressCtx();
+
         /**
          * ZStandard compression level that was used when compressing the previous chunk.
          * Can be adjusted up or down by at most 1 with every next block.
@@ -229,7 +235,7 @@ public class AdaptiveCompressor implements ICompressor
         /**
          * Computes the new compression level to use for the next chunk, based on the load.
          */
-        public int adjustAndGetCompressionLevel(long currentTime)
+        public void adjustCompressionLevel(long currentTime)
         {
             // The more write "pressure", the faster we want to go, so the lower the desired compression level.
             double pressure = getWritePressure();
@@ -256,7 +262,7 @@ public class AdaptiveCompressor implements ICompressor
                 currentCompressionLevel++;
 
             currentCompressionLevel = clampCompressionLevel(currentCompressionLevel);
-            return currentCompressionLevel;
+            compressCtx.setLevel(zstdCompressionLevels[currentCompressionLevel]);
         }
 
         /**
@@ -306,11 +312,15 @@ public class AdaptiveCompressor implements ICompressor
         {
             State state = getThreadLocalState();
             long startTime = System.nanoTime();
-            int compressionLevel = zstdCompressionLevels[state.adjustAndGetCompressionLevel(startTime)];
-            Zstd.compress(output, input, compressionLevel, true);
+            state.adjustCompressionLevel(startTime);
+            long inputSize = input.remaining();
+            state.compressCtx.compress(output, input);
             long endTime = System.nanoTime();
             state.recordCompressionDuration(startTime, endTime);
-            metrics.get(params.use).updateFrom(state);
+
+            Metrics m = metrics.get(params.use);
+            m.updateFrom(state);
+            m.compressionRate.mark(inputSize);
         }
         catch (Exception e)
         {
@@ -322,12 +332,14 @@ public class AdaptiveCompressor implements ICompressor
     @Override
     public int uncompress(byte[] input, int inputOffset, int inputLength, byte[] output, int outputOffset) throws IOException
     {
-        long dsz = Zstd.decompressByteArray(output, outputOffset, output.length - outputOffset,
-                                            input, inputOffset, inputLength);
+        State state = getThreadLocalState();
+        long dsz = state.decompressCtx.decompressByteArray(output, outputOffset, output.length - outputOffset,
+                                                           input, inputOffset, inputLength);
 
         if (Zstd.isError(dsz))
             throw new IOException(String.format("Decompression failed due to %s", Zstd.getErrorName(dsz)));
 
+        metrics.get(params.use).decompressionRate.mark(dsz);
         return (int) dsz;
     }
 
@@ -336,7 +348,9 @@ public class AdaptiveCompressor implements ICompressor
     {
         try
         {
-            Zstd.decompress(output, input);
+            State state = getThreadLocalState();
+            long dsz = state.decompressCtx.decompress(output, input);
+            metrics.get(params.use).decompressionRate.mark(dsz);
         } catch (Exception e)
         {
             throw new IOException("Decompression failed", e);
@@ -473,6 +487,9 @@ public class AdaptiveCompressor implements ICompressor
     {
         private final Counter[] compressionLevelHistogram;  // separate counters for each compression level
         private final Histogram relativeTimeSpentCompressing; // in % (i.e. multiplied by 100 becaue Histogram can only keep integers)
+        private final Meter compressionRate;
+        private final Meter decompressionRate;
+
 
         Metrics(Uses use)
         {
@@ -489,6 +506,9 @@ public class AdaptiveCompressor implements ICompressor
             }
 
             relativeTimeSpentCompressing = CassandraMetricsRegistry.Metrics.histogram(factory.createMetricName("RelativeTimeSpentCompressing_" + use.name()), true);
+
+            compressionRate = CassandraMetricsRegistry.Metrics.meter(factory.createMetricName("CompressionRate_" + use.name()));
+            decompressionRate = CassandraMetricsRegistry.Metrics.meter(factory.createMetricName("DecompressionRate_" + use.name()));
         }
 
         void updateFrom(State state)
