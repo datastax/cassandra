@@ -147,39 +147,39 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             SAIUtil.setLatestVersion(version);
 
             ColumnFamilyStore cfs = prepareTable(type);
-            cfs.unsafeRunWithoutFlushing(()-> {
+            cfs.unsafeRunWithoutFlushing(() -> {
                 for (int i = 0; i < 100; i++)
                 {
                     execute("INSERT INTO %s (pk, age) VALUES (?," + i + ')', "key" + i);
                 }
+            });
 
-                Object filter = getFilterValue(type, filterValue);
+            Object filter = getFilterValue(type, filterValue);
 
-                                             ReadCommand rc = Util.cmd(cfs)
-                                                                  .columns("age")
-                                                                  .filterOn("age", op, filter)
-                                                                  .build();
-                                             QueryController controller = new QueryController(cfs,
-                                                                                              rc,
-                                                                                              version.onDiskFormat().indexFeatureSet(),
-                                                                                              new QueryContext(),
-                                                                                              null);
-                                             long totalRows = controller.planFactory.tableMetrics.rows;
+            ReadCommand rc = Util.cmd(cfs)
+                                 .columns("age")
+                                 .filterOn("age", op, filter)
+                                 .build();
+            QueryController controller = new QueryController(cfs,
+                                                             rc,
+                                                             version.onDiskFormat().indexFeatureSet(),
+                                                             new QueryContext(),
+                                                             null);
+            long totalRows = controller.planFactory.tableMetrics.rows;
 //            assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
 //            assertEquals(0, cfs.getLiveSSTables().size());
-                                             assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
-                                             assertEquals(97, totalRows);
+            assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
+            assertEquals(97, totalRows);
 
-                                             Plan plan = controller.buildPlan();
-                                             assert plan instanceof Plan.RowsIteration;
-                                             Plan.RowsIteration root = (Plan.RowsIteration) plan;
-                                             Plan.KeysIteration planNode = root.firstNodeOfType(Plan.KeysIteration.class);
-                                             assertNotNull(planNode);
+            Plan plan = controller.buildPlan();
+            assert plan instanceof Plan.RowsIteration;
+            Plan.RowsIteration root = (Plan.RowsIteration) plan;
+            Plan.KeysIteration planNode = root.firstNodeOfType(Plan.KeysIteration.class);
+            assertNotNull(planNode);
 
-                                             assertEquals(expectedRows, root.expectedRows(), 0.1);
-                                             assertEquals(expectedRows, planNode.expectedKeys(), 0.1);
-                                             assertEquals(expectedRows / totalRows, planNode.selectivity(), 0.001);
-                                         });
+            assertEquals(expectedRows, root.expectedRows(), 0.1);
+            assertEquals(expectedRows, planNode.expectedKeys(), 0.1);
+            assertEquals(expectedRows / totalRows, planNode.selectivity(), 0.001);
 
             SAIUtil.setLatestVersion(latest);
         }
