@@ -381,6 +381,7 @@ public class DatabaseDescriptorTest
         testConfig.cas_contention_timeout = greaterThanLowestTimeout;
         testConfig.counter_write_request_timeout = greaterThanLowestTimeout;
         testConfig.request_timeout = greaterThanLowestTimeout;
+        testConfig.native_transport_timeout = greaterThanLowestTimeout;
 
         assertEquals(testConfig.read_request_timeout, greaterThanLowestTimeout);
         assertEquals(testConfig.range_request_timeout, greaterThanLowestTimeout);
@@ -389,6 +390,7 @@ public class DatabaseDescriptorTest
         assertEquals(testConfig.cas_contention_timeout, greaterThanLowestTimeout);
         assertEquals(testConfig.counter_write_request_timeout, greaterThanLowestTimeout);
         assertEquals(testConfig.request_timeout, greaterThanLowestTimeout);
+        assertEquals(testConfig.native_transport_timeout, greaterThanLowestTimeout);
 
         //set less than Lowest acceptable value
         DurationSpec.LongMillisecondsBound lowerThanLowestTimeout = new DurationSpec.LongMillisecondsBound(DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT.toMilliseconds() - 1);
@@ -400,6 +402,7 @@ public class DatabaseDescriptorTest
         testConfig.cas_contention_timeout = lowerThanLowestTimeout;
         testConfig.counter_write_request_timeout = lowerThanLowestTimeout;
         testConfig.request_timeout = lowerThanLowestTimeout;
+        testConfig.native_transport_timeout = lowerThanLowestTimeout;
 
         DatabaseDescriptor.checkForLowestAcceptedTimeouts(testConfig);
 
@@ -410,6 +413,7 @@ public class DatabaseDescriptorTest
         assertEquals(testConfig.cas_contention_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
         assertEquals(testConfig.counter_write_request_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
         assertEquals(testConfig.request_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.native_transport_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
     }
 
     @Test
