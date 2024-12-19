@@ -1360,7 +1360,8 @@ request_timeout: 10000ms
 # is dequeued and executed by an async stage if NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED
 # is set to true. If the request is not completed within this time, an
 # OverloadedException is thrown.
-native_transport_timeout_in_ms: 12000
+# Min unit: ms
+native_transport_timeout: 12000ms
 
 
 # Defensive settings for protecting Cassandra from true network partitions.

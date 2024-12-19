@@ -75,6 +75,7 @@ public class ParseAndConvertUnitsTest
         assertEquals(new DurationSpec.LongMillisecondsBound(1500), config.user_defined_functions_fail_timeout);
         assertEquals(new DurationSpec.LongMillisecondsBound(500), config.user_defined_functions_warn_timeout);
         assertEquals(new DurationSpec.IntSecondsBound(3600), config.validation_preview_purge_head_start);
+        assertEquals(new DurationSpec.LongMillisecondsBound(12000), config.native_transport_timeout);
 
         //Confirm space parameters were successfully parsed with the default values in cassandra.yaml
         assertNull(config.memtable_heap_space);
