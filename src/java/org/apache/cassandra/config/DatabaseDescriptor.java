@@ -1441,6 +1441,11 @@ public class DatabaseDescriptor
             logInfo("truncate_request_timeout", conf.truncate_request_timeout, LOWEST_ACCEPTED_TIMEOUT);
             conf.truncate_request_timeout = LOWEST_ACCEPTED_TIMEOUT;
         }
+        if(conf.native_transport_timeout.toMilliseconds() < LOWEST_ACCEPTED_TIMEOUT.toMilliseconds())
+        {
+            logInfo("native_transport_timeout", conf.native_transport_timeout, LOWEST_ACCEPTED_TIMEOUT);
+            conf.native_transport_timeout = LOWEST_ACCEPTED_TIMEOUT;
+        }
     }
 
     private static void logInfo(String property, DurationSpec.LongMillisecondsBound actualValue, DurationSpec.LongMillisecondsBound lowestAcceptedValue)
@@ -5334,11 +5339,11 @@ public class DatabaseDescriptor
 
     public static long getNativeTransportTimeout(TimeUnit timeUnit)
     {
-        return conf.native_transport_timeout_in_ms.to(timeUnit);
+        return conf.native_transport_timeout.to(timeUnit);
     }
 
     public static void setNativeTransportTimeout(long timeout, TimeUnit timeUnit)
     {
-        conf.native_transport_timeout_in_ms = new DurationSpec.LongMillisecondsBound(timeUnit.toMillis(timeout));
+        conf.native_transport_timeout = new DurationSpec.LongMillisecondsBound(timeUnit.toMillis(timeout));
     }
 }
