@@ -59,7 +59,7 @@ public class OutboundConnections
     - Math.max(Math.max(LegacyLZ4Constants.HEADER_LENGTH, FrameEncoderCrc.HEADER_AND_TRAILER_LENGTH), FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH);
 
     private final SimpleCondition metricsReady = new SimpleCondition();
-    private volatile InternodeOutboundMetrics metrics;
+    public volatile InternodeOutboundMetrics metrics;
     private final ResourceLimits.Limit reserveCapacity;
 
     private OutboundConnectionSettings template;
