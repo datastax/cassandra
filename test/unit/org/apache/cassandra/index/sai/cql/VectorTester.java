@@ -197,6 +197,9 @@ public class VectorTester extends SAITester
         }
     }
 
+    /**
+     * {@link Versioned} that verifies checksums on flushing and compaction.
+     */
     abstract static class VersionedWithChecksums extends Versioned
     {
         @Override

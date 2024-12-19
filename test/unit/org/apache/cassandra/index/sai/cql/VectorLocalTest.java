@@ -653,6 +653,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     {
         return getVectorsFromResult(result, word2vec.dimension());
     }
+
     private List<float[]> getVectorsFromResult(UntypedResultSet result, int dimension)
     {
         List<float[]> vectors = new ArrayList<>();
@@ -665,17 +666,5 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
         }
 
         return vectors;
-    }
-
-    @Override
-    public void flush() {
-        super.flush();
-        verifyChecksum();
-    }
-
-    @Override
-    public void compact() {
-        super.compact();
-        verifyChecksum();
     }
 }

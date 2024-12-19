@@ -25,6 +25,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.primitives.Ints;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -141,13 +142,35 @@ public enum CassandraRelevantProperties
     CDC_STREAMING_ENABLED("cassandra.cdc.enable_streaming", "true"),
     /** default heartbeating period is 1 minute */
     CHECK_DATA_RESURRECTION_HEARTBEAT_PERIOD("check_data_resurrection_heartbeat_period_milli", "60000"),
+    CHRONICLE_ANALYTICS_DISABLE("chronicle.analytics.disable"),
     CHRONICLE_ANNOUNCER_DISABLE("chronicle.announcer.disable"),
     CHUNKCACHE_ASYNC_CLEANUP("cassandra.chunkcache.async_cleanup", "true"),
     CHUNKCACHE_CLEANER_THREADS("dse.chunk.cache.cleaner.threads","1"),
     CHUNKCACHE_INITIAL_CAPACITY("cassandra.chunkcache_initialcapacity", "16"),
+    /**
+     * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
+     * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
+     */
+    CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),
+    /**
+     * The class name of the custom cluster version provider to use.
+     */
+    CLUSTER_VERSION_PROVIDER_CLASS_NAME("cassandra.cluster_version_provider.class_name"),
+
+    /**
+     * Minimum time that needs to pass after the cluster is detected as fully upgraded to report that there is
+     * no upgrade in progress (when using the default cluster version provider).
+     */
+    CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION("cassandra.cluster_version_provider.min_stable_duration_ms", "60000"),
+
+    /**
+     * Do not wait for gossip to be enabled before starting stabilisation period. This is required especially for tests
+     * which do not enable gossip at all.
+     */
+    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip"),
     COMMITLOG_ALLOW_IGNORE_SYNC_CRC("cassandra.commitlog.allow_ignore_sync_crc"),
     COMMITLOG_IGNORE_REPLAY_ERRORS("cassandra.commitlog.ignorereplayerrors"),
     COMMITLOG_MAX_OUTSTANDING_REPLAY_BYTES("cassandra.commitlog_max_outstanding_replay_bytes", convertToString(1024 * 1024 * 64)),
@@ -171,6 +194,11 @@ public enum CassandraRelevantProperties
     COMMIT_LOG_REPLAY_LIST("cassandra.replayList"),
     COMPACTION_HISTORY_ENABLED("cassandra.compaction_history_enabled", "true"),
     COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB("compaction_rate_limit_granularity_in_kb"),
+
+    /**
+     * If this is true, compaction will not verify that sstables selected for compaction are marked compacted.
+     */
+    COMPACTION_SKIP_COMPACTING_STATE_CHECKING("cassandra.compaction.skip_compacting_state_checking", "false"),
 
     /**
      * If this is true, compaction will not verify that sstables selected for compaction are in the same repair
@@ -264,9 +292,19 @@ public enum CassandraRelevantProperties
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
     /**
+     * If provided, this custom factory class will be used to create stage executor for a couple of stages.
+     * @see Stage for details
+     */
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class"),
+    /**
      * Used to support directory creation for different file system and remote/local conversion
      */
     CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
+
+    /**
+     * Which class to use when notifying about stage task execution
+     */
+    CUSTOM_TASK_EXECUTION_CALLBACK_CLASS("cassandra.custom_task_execution_callback_class"),
 
     /** Which class to use for token metadata provider */
     CUSTOM_TMD_PROVIDER_PROPERTY("cassandra.custom_token_metadata_provider_class"),
@@ -322,6 +360,12 @@ public enum CassandraRelevantProperties
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),
     /** In_JVM dtest property indicating that the test should use "latest" configuration */
     DTEST_JVM_DTESTS_USE_LATEST("jvm_dtests.latest"),
+    // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
+    DYNAMIC_ENDPOINT_SNITCH_QUANTILE("cassandra.dynamic_endpoint_snitch_quantile", "0.5"),
+
+    // whether to quantize the dynamic endpoint snitch score to milliseconds; if set to false the nanosecond measurement
+    // is used
+    DYNAMIC_ENDPOINT_SNITCH_QUANTIZE_TO_MILLIS("cassandra.dynamic_endpoint_snitch_quantize_to_millis", "true"),
     /** Which class to use for dynamic snitch severity values */
     DYNAMIC_SNITCH_SEVERITY_PROVIDER("cassandra.dynamic_snitch_severity_provider"),
     ENABLE_DC_LOCAL_COMMIT("cassandra.enable_dc_local_commit", "true"),
@@ -470,6 +514,7 @@ public enum CassandraRelevantProperties
     LOG_TRANSACTIONS_FACTORY("cassandra.log_transactions_factory"),
     /** Loosen the definition of "empty" for gossip state, for use during host replacements if things go awry */
     LOOSE_DEF_OF_EMPTY_ENABLED(Config.PROPERTY_PREFIX + "gossiper.loose_empty_enabled"),
+    LWT_MAX_BACKOFF_MS("cassandra.lwt_max_backoff_ms", "50"),
     MAX_CONCURRENT_RANGE_REQUESTS("cassandra.max_concurrent_range_requests"),
     MAX_HINT_BUFFERS("cassandra.MAX_HINT_BUFFERS", "3"),
     MAX_LOCAL_PAUSE_IN_MS("cassandra.max_local_pause_in_ms", "5000"),
@@ -493,6 +538,13 @@ public enum CassandraRelevantProperties
     MX4JPORT("mx4jport"),
     NANOTIMETOMILLIS_TIMESTAMP_UPDATE_INTERVAL("cassandra.NANOTIMETOMILLIS_TIMESTAMP_UPDATE_INTERVAL", "10000"),
     NATIVE_EPOLL_ENABLED("cassandra.native.epoll.enabled", "true"),
+    /**
+     * If true, makes read and write CQL statements async, splitting them from the {@link org.apache.cassandra.concurrent.Stage#NATIVE_TRANSPORT_REQUESTS}
+     * stage and into the {@link org.apache.cassandra.concurrent.Stage#COORDINATE_READ} and {@link org.apache.cassandra.concurrent.Stage#COORDINATE_MUTATION}
+     * stages respectively; in other words, the native transport stage will not block, offloading request processing
+     * (and any related blocking behaviour) to the specific read and write stages.
+     */
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false"),
     /** This is the port used with RPC address for the native protocol to communicate with clients. Now that thrift RPC is no longer in use there is no RPC port. */
     NATIVE_TRANSPORT_PORT("cassandra.native_transport_port"),
     NEVER_PURGE_TOMBSTONES("cassandra.never_purge_tombstones"),
@@ -538,9 +590,9 @@ public enum CassandraRelevantProperties
     RELEASE_VERSION("cassandra.releaseVersion"),
     RELOCATED_SHADED_IO_NETTY_TRANSPORT_NONATIVE("relocated.shaded.io.netty.transport.noNative"),
     /**
-     * The handler of the storage of sstables, and possibly other files such as txn logs.
+     * The factory for handler of the storage of sstables
      */
-    REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+    REMOTE_STORAGE_HANDLER_FACTORY("cassandra.remote_storage_handler_factory"),
     REPAIR_CLEANUP_INTERVAL_SECONDS("cassandra.repair_cleanup_interval_seconds", convertToString(Ints.checkedCast(TimeUnit.MINUTES.toSeconds(10)))),
     REPAIR_DELETE_TIMEOUT_SECONDS("cassandra.repair_delete_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
     REPAIR_FAIL_TIMEOUT_SECONDS("cassandra.repair_fail_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
@@ -581,6 +633,8 @@ public enum CassandraRelevantProperties
 
     // SAI specific properties
 
+    /** Class used to discover/load the proper SAI index components file for a given sstable. */
+    SAI_CUSTOM_COMPONENTS_DISCOVERY_CLASS("cassandra.sai.custom_components_discovery_class"),
     SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
     SAI_ENABLE_GENERAL_ORDER_BY("cassandra.sai.general_order_by", "true"),
     SAI_ENABLE_JVECTOR_DELETES("cassandra.sai.enable_jvector_deletes", "true"),
@@ -604,7 +658,7 @@ public enum CassandraRelevantProperties
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
 
     /** Latest version to be used for SAI index writing */
-    SAI_LATEST_VERSION("cassandra.sai.latest_version", "db"),
+    SAI_LATEST_VERSION("cassandra.sai.latest_version", "dc"),
 
     SAI_MAX_ANALYZED_SIZE("cassandra.sai.max_analyzed_size_kb", "8"),
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),
@@ -640,6 +694,7 @@ public enum CassandraRelevantProperties
     SHUTDOWN_ANNOUNCE_DELAY_IN_MS("cassandra.shutdown_announce_in_ms", "2000"),
     SIZE_RECORDER_INTERVAL("cassandra.size_recorder_interval", "300"),
     SKIP_DEFAULT_ROLE_SETUP("cassandra.skip_default_role_setup"),
+    SKIP_MUTATING_STATS_AFTER_ZCS("cassandra.skip_mutating_stats_after_zcs"),
     SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE("cassandra.skip_paxos_repair_on_topology_change"),
     /** If necessary for operational purposes, permit certain keyspaces to be ignored for paxos topology repairs. */
     SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE_KEYSPACES("cassandra.skip_paxos_repair_on_topology_change_keyspaces"),
@@ -794,20 +849,33 @@ public enum CassandraRelevantProperties
      * To provide custom implementation to prioritize compaction tasks in UCS
      */
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
+    /**
+     * whether to include non-data files size into compaction space estimaton in UCS
+     */
+    UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
     UCS_DATASET_SIZE("unified_compaction.dataset_size"),
+    UCS_IS_REPLICA_AWARE("unified_compaction.is_replica_aware"),
     UCS_L0_SHARDS_ENABLED("unified_compaction.l0_shards_enabled", "true"),
     UCS_MAX_ADAPTIVE_COMPACTIONS("unified_compaction.max_adaptive_compactions", "5"),
     UCS_MAX_SPACE_OVERHEAD("unified_compaction.max_space_overhead", "0.2"),
     UCS_MIN_SSTABLE_SIZE("unified_compaction.min_sstable_size", "100MiB"),
     UCS_NUM_SHARDS("unified_compaction.num_shards"),
     UCS_OVERLAP_INCLUSION_METHOD("unified_compaction.overlap_inclusion_method"),
+    UCS_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES("unified_compaction.override_ucs_config_for_vector_tables", "false"),
+    UCS_PARALLELIZE_OUTPUT_SHARDS("unified_compaction.parallelize_output_shards", "true"),
     UCS_RESERVATIONS_TYPE_OPTION("unified_compaction.reservations_type_option", Reservations.Type.LEVEL_OR_BELOW.name()),
     UCS_RESERVED_THREADS("reserved_threads", "max"),
     UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
-    UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0.5"),
+    UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0.333"),
     UCS_STATIC_SCALING_PARAMETERS("unified_compaction.scaling_parameters", "T4"),
     UCS_SURVIVAL_FACTOR("unified_compaction.survival_factor", "1"),
-    UCS_TARGET_SSTABLE_SIZE("unified_compaction.target_sstable_size", "5GiB"),
+    UCS_TARGET_SSTABLE_SIZE("unified_compaction.target_sstable_size", "1GiB"),
+    UCS_VECTOR_BASE_SHARD_COUNT("unified_compaction.vector_base_shard_count", "1"),
+    UCS_VECTOR_MIN_SSTABLE_SIZE("unified_compaction.vector_min_sstable_size", "1024MiB"),
+    UCS_VECTOR_RESERVED_THREADS("unified_compaction.vector_reserved_threads", "max"),
+    UCS_VECTOR_SCALING_PARAMETERS("unified_compaction.vector_scaling_parameters", "-8"),
+    UCS_VECTOR_SSTABLE_GROWTH("unified_compaction.vector_sstable_growth", "1.0"),
+    UCS_VECTOR_TARGET_SSTABLE_SIZE("unified_compaction.vector_target_sstable_size", "5GiB"),
     UDF_EXECUTOR_THREAD_KEEPALIVE_MS("cassandra.udf_executor_thread_keepalive_ms", "30000"),
     UNSAFE_SYSTEM("cassandra.unsafesystem"),
     /** User's home directory. */

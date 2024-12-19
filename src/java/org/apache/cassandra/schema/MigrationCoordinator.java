@@ -49,9 +49,9 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.FutureTask;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.ApplicationState;
@@ -229,7 +229,7 @@ public class MigrationCoordinator
     private final BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback;
     private final Set<InetAddressAndPort> lastPullFailures = new HashSet<>();
 
-    final ExecutorPlus executor;
+    final Stage executor;
 
     /**
      * Creates but does not start migration coordinator instance.
@@ -238,7 +238,7 @@ public class MigrationCoordinator
      * @param periodicCheckExecutor executor on which the periodic checks are scheduled
      */
     MigrationCoordinator(MessagingService messagingService,
-                         ExecutorPlus executor,
+                         Stage executor,
                          ScheduledExecutorService periodicCheckExecutor,
                          int maxOutstandingVersionRequests,
                          Gossiper gossiper,

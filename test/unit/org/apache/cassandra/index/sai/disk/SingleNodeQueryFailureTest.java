@@ -88,8 +88,6 @@ public class SingleNodeQueryFailureTest extends SAITester
 
     private void testFailedMultiIndexesQuery(String name, Class<?> targetClass, String targetMethod) throws Throwable
     {
-        String table = "test_mixed_index_query_" + name;
-
         Injection injection = Injections.newCustom(name)
                                         .add(newInvokePoint().onClass(targetClass).onMethod(targetMethod))
                                         .add(newActionBuilder().actions().doThrow(RuntimeException.class, quote("Injected failure!")))

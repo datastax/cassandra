@@ -92,7 +92,7 @@ public class NameSortTest
     {
         for (FilteredPartition partition : Util.getAll(Util.cmd(cfs).build()))
         {
-            for (Row r : partition)
+            for (Row r : partition.rows())
             {
                 for (ColumnMetadata cd : r.columns())
                 {

@@ -33,6 +33,8 @@ import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -54,10 +56,12 @@ public class Version
     public static final Version DB = new Version("db", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g,"db"));
     // revamps vector postings lists to cause fewer reads from disk
     public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
+    // histograms in index metadata
+    public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
@@ -140,13 +144,26 @@ public class Version
     }
 
 
-    public static interface FileNameFormatter
+    public interface FileNameFormatter
     {
         /**
          * Format filename for given index component, context and generation.  Only the "component" part of the
          * filename is returned (so the suffix of the full filename), not a full path.
          */
-        public String format(IndexComponentType indexComponentType, IndexContext indexContext, int generation);
+        default String format(IndexComponentType indexComponentType, IndexContext indexContext, int generation)
+        {
+            return  format(indexComponentType, indexContext == null ? null : indexContext.getIndexName(), generation);
+        }
+
+        /**
+         * Format filename for given index component, index and generation.  Only the "component" part of the
+         * filename is returned (so the suffix of the full filename), not a full path.
+         *
+         * @param indexComponentType the type of the index component.
+         * @param indexName the name of the index, or {@code null} for a per-sstable component.
+         * @param generation the generation of the build of the component.
+         */
+        String format(IndexComponentType indexComponentType, @Nullable String indexName, int generation);
     }
 
     /**
@@ -179,17 +196,15 @@ public class Version
 
     public static class ParsedFileName
     {
-        public final Version version;
+        public final ComponentsBuildId buildId;
         public final IndexComponentType component;
         public final @Nullable String indexName;
-        public final int generation;
 
-        private ParsedFileName(Version version, IndexComponentType component, @Nullable String indexName, int generation)
+        private ParsedFileName(ComponentsBuildId buildId, IndexComponentType component, @Nullable String indexName)
         {
-            this.version = version;
+            this.buildId = buildId;
             this.component = component;
             this.indexName = indexName;
-            this.generation = generation;
         }
     }
 
@@ -201,20 +216,19 @@ public class Version
     private static final String VERSION_AA_PER_SSTABLE_FORMAT = "SAI_%s.db";
     private static final String VERSION_AA_PER_INDEX_FORMAT = "SAI_%s_%s.db";
 
-    private static String aaFileNameFormat(IndexComponentType indexComponentType, IndexContext indexContext, int generation)
+    private static String aaFileNameFormat(IndexComponentType indexComponentType, @Nullable String indexName, int generation)
     {
         Preconditions.checkArgument(generation == 0, "Generation is not supported for AA version");
         StringBuilder stringBuilder = new StringBuilder();
 
-        stringBuilder.append(indexContext == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponentType.representation)
-                                                  : String.format(VERSION_AA_PER_INDEX_FORMAT, indexContext.getIndexName(), indexComponentType.representation));
+        stringBuilder.append(indexName == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponentType.representation)
+                                                  : String.format(VERSION_AA_PER_INDEX_FORMAT, indexName, indexComponentType.representation));
 
         return stringBuilder.toString();
     }
 
     private static Optional<ParsedFileName> tryParseAAFileName(String componentStr)
     {
-        int generation = 0;
         int lastSepIdx = componentStr.lastIndexOf('_');
         if (lastSepIdx == -1)
             return Optional.empty();
@@ -227,7 +241,7 @@ public class Version
         if (firstSepIdx != -1 && firstSepIdx != lastSepIdx)
             indexName = componentStr.substring(firstSepIdx + 1, lastSepIdx);
 
-        return Optional.of(new ParsedFileName(AA, indexComponentType, indexName, generation));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(AA, 0), indexComponentType, indexName));
     }
 
     //
@@ -239,7 +253,7 @@ public class Version
     private static final String SAI_SEPARATOR = "+";
     private static final String EXTENSION = ".db";
 
-    private static String stargazerFileNameFormat(IndexComponentType indexComponentType, IndexContext indexContext, int generation, String version)
+    private static String stargazerFileNameFormat(IndexComponentType indexComponentType, @Nullable String indexName, int generation, String version)
     {
         StringBuilder stringBuilder = new StringBuilder();
 
@@ -247,8 +261,8 @@ public class Version
         stringBuilder.append(SAI_SEPARATOR).append(version);
         if (generation > 0)
             stringBuilder.append(SAI_SEPARATOR).append(generation);
-        if (indexContext != null)
-            stringBuilder.append(SAI_SEPARATOR).append(indexContext.getIndexName());
+        if (indexName != null)
+            stringBuilder.append(SAI_SEPARATOR).append(indexName);
         stringBuilder.append(SAI_SEPARATOR).append(indexComponentType.representation);
         stringBuilder.append(EXTENSION);
 
@@ -259,7 +273,7 @@ public class Version
     {
         return this == AA && component == IndexComponentType.TERMS_DATA
                ? sstableFormatVersion.getByteComparableVersion()
-               : ByteComparable.Version.OSS50;
+               : TypeUtil.BYTE_COMPARABLE_VERSION;
     }
 
     private static Optional<ParsedFileName> tryParseStargazerFileName(String componentStr)
@@ -287,6 +301,6 @@ public class Version
                 indexName = splits[splits.length - 2];
         }
 
-        return Optional.of(new ParsedFileName(version, indexComponentType, indexName, generation));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(version, generation), indexComponentType, indexName));
     }
 }

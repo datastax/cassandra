@@ -96,6 +96,8 @@ import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
+import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -175,6 +177,7 @@ import org.apache.cassandra.service.snapshot.SnapshotManifest;
 import org.apache.cassandra.service.snapshot.TableSnapshot;
 import org.apache.cassandra.streaming.TableStreamManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.DefaultValue;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -482,7 +485,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private void reloadCompactionStrategy(CompactionParams compactionParams, CompactionStrategyContainer.ReloadReason reason)
     {
         CompactionStrategyContainer previous = strategyContainer;
-        strategyContainer = strategyFactory.reload(strategyContainer, compactionParams, reason, !storageHandler.isRemote());
+        strategyContainer = strategyFactory.reload(strategyContainer, compactionParams, reason, storageHandler.enableAutoCompaction());
         if (strategyContainer != previous)
         {
             getTracker().subscribe(strategyContainer);
@@ -629,6 +632,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             this.directories = new Directories(metadata.get());
 
         storageHandler = StorageHandler.create(this, metadata, directories, data);
+        logger.debug("Initialized storage handler with {} for {}.{}", storageHandler.getClass().getSimpleName(), keyspace.getName(), name);
 
         Collection<SSTableReader> sstables = null;
         // scan for sstables corresponding to this cf and load them
@@ -640,7 +644,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         this.strategyContainer = strategyFactory.reload(null,
                                                         metadata.get().params.compaction,
                                                         CompactionStrategyContainer.ReloadReason.FULL,
-                                                        !storageHandler.isRemote());
+                                                        storageHandler.enableAutoCompaction());
         getTracker().subscribe(strategyContainer);
 
         if (!strategyContainer.isEnabled() || DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean())
@@ -734,6 +738,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     }
 
     @Override
+    public Environment makeUCSEnvironment()
+    {
+        return new RealEnvironment(this);
+    }
+
     public TableMetadata metadata()
     {
         return metadata.get();
@@ -1462,7 +1471,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 reclaim(memtable);
                 return Collections.emptyList();
             }
-
+            long start = Clock.Global.nanoTime();
             List<Future<SSTableMultiWriter>> futures = new ArrayList<>();
             long totalBytesOnDisk = 0;
             long maxBytesOnDisk = 0;
@@ -1550,6 +1559,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 }
 
                 Throwable accumulate = null;
+
                 for (SSTableMultiWriter writer : flushResults)
                 {
                     accumulate = writer.commit(accumulate);
@@ -1573,6 +1583,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         }
                     }
                 }
+                metric.memTableFlushCompleted(Clock.Global.nanoTime() - start);
 
                 cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }
@@ -2057,6 +2068,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public Iterable<Memtable> getAllMemtables()
     {
         return data.getView().getAllMemtables();
+    }
+
+    @Override
+    public OpOrder readOrdering()
+    {
+        return readOrdering;
     }
 
     public Map<TimeUUID, PendingStat> getPendingRepairStats()
@@ -2654,6 +2671,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public void forceMajorCompaction(boolean splitOutput)
     {
         CompactionManager.instance.performMaximal(this, splitOutput);
+    }
+
+    @Override
+    public void forceMajorCompaction(int parallelism)
+    {
+        CompactionManager.instance.performMaximal(this, false, parallelism);
+    }
+
+    public void forceMajorCompaction(boolean splitOutput, int parallelism)
+    {
+        CompactionManager.instance.performMaximal(this, splitOutput, parallelism);
     }
 
     @Override

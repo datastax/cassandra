@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.btree.BTree;
 
 import static org.apache.cassandra.utils.btree.BTree.Dir.desc;
 
-public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
+public abstract class AbstractBTreePartition implements Partition
 {
     protected final DecoratedKey partitionKey;
 
@@ -352,50 +352,22 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
     @Override
     public String toString()
     {
-        return toString(true);
-    }
-
-    public String toString(boolean includeFullDetails)
-    {
-        StringBuilder sb = new StringBuilder();
-        if (includeFullDetails)
-        {
-            sb.append(String.format("[%s.%s] key=%s partition_deletion=%s columns=%s",
-                                    metadata().keyspace,
-                                    metadata().name,
-                                    metadata().partitionKeyType.getString(partitionKey().getKey()),
-                                    partitionLevelDeletion(),
-                                    columns()));
-        }
-        else
-        {
-            sb.append("key=").append(metadata().partitionKeyType.getString(partitionKey().getKey()));
-        }
-
-        if (staticRow() != Rows.EMPTY_STATIC_ROW)
-            sb.append("\n    ").append(staticRow().toString(metadata(), includeFullDetails));
-
-        try (UnfilteredRowIterator iter = unfilteredIterator())
-        {
-            while (iter.hasNext())
-                sb.append("\n    ").append(iter.next().toString(metadata(), includeFullDetails));
-        }
-        return sb.toString();
+        return Partition.toString(this);
     }
 
     @Override
     public boolean equals(Object obj)
     {
-        if (!(obj instanceof PartitionUpdate))
+        if (!(obj instanceof BTreePartitionUpdate))
             return false;
 
-        PartitionUpdate that = (PartitionUpdate) obj;
+        BTreePartitionUpdate that = (BTreePartitionUpdate) obj;
         BTreePartitionData a = this.holder(), b = that.holder();
         return partitionKey.equals(that.partitionKey)
                && metadata().id.equals(that.metadata().id)
                && a.deletionInfo.equals(b.deletionInfo)
                && a.staticRow.equals(b.staticRow)
-               && Iterators.elementsEqual(iterator(), that.iterator());
+               && Iterators.elementsEqual(rowIterator(), that.rowIterator());
     }
 
     public int rowCount()
@@ -403,7 +375,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return BTree.size(holder().tree);
     }
 
-    public Iterator<Row> iterator()
+    public Iterator<Row> rowIterator()
     {
         return BTree.<Row>iterator(holder().tree);
     }

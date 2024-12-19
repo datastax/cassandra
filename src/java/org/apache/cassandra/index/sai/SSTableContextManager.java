@@ -132,7 +132,7 @@ public class SSTableContextManager
         //    from a complete set, so if it is not complete, it means the previous components have been corrupted, and
         //    we want to use the new one (a rebuild)).
         // 3. it uses "up-to-date" per-sstable components.
-        if (previousContext != null && previousContext.usedPerSSTableComponents().isComplete() && previousContext.usedPerSSTableComponents().hasSameVersionAndGenerationThan(perSSTableComponents))
+        if (previousContext != null && previousContext.usedPerSSTableComponents().isComplete() && previousContext.usedPerSSTableComponents().buildId().equals(perSSTableComponents.buildId()))
             return previousContext;
 
         // Now, if we create a new one, we should close the previous one if it exists.
