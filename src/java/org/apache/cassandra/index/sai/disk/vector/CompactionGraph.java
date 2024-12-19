@@ -22,14 +22,16 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,14 +44,12 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
-import io.github.jbellis.jvector.pq.PQVectors;
+import io.github.jbellis.jvector.pq.MutablePQVectors;
 import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
-import io.github.jbellis.jvector.vector.ArrayByteSequence;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
-import io.github.jbellis.jvector.vector.types.ByteSequence;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import net.openhft.chronicle.bytes.Bytes;
@@ -93,11 +93,12 @@ public class CompactionGraph implements Closeable, Accountable
                                                                        null,
                                                                        false);
 
-    private final GraphIndexBuilder builder;
+    @VisibleForTesting
+    public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
+
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
     private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
-    private final PQVectors pqVectors;
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext context;
     private final boolean unitVectors;
@@ -106,13 +107,21 @@ public class CompactionGraph implements Closeable, Accountable
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
-    private final ProductQuantization compressor;
     private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
     private int lastRowId = -1;
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
+
+    // protects the fine-tuning changes (done in maybeAddVector) from addGraphNode threads
+    // (and creates happens-before events so we don't need to mark the other fields volatile)
+    private final ReadWriteLock trainingLock = new ReentrantReadWriteLock();
+    private boolean pqFinetuned = false;
+    // will be updated to different objects after fine-tuning
+    private ProductQuantization compressor;
+    private MutablePQVectors pqVectors;
+    private GraphIndexBuilder builder;
 
     public CompactionGraph(IndexComponents.ForWrite perIndexComponents, ProductQuantization compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
     {
@@ -160,7 +169,7 @@ public class CompactionGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         // VSTODO add LVQ
-        pqVectors = new PQVectors(compressor, postingsEntriesAllocated);
+        pqVectors = new MutablePQVectors(compressor, postingsEntriesAllocated);
         builder = new GraphIndexBuilder(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, pqVectors),
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
@@ -250,6 +259,38 @@ public class CompactionGraph implements Closeable, Accountable
             int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
             postings = new CompactionVectorPostings(ordinal, segmentRowId);
             postingsMap.put(vector, postings);
+
+            // fine-tune the PQ if we've collected enough vectors
+            if (!pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
+            {
+                final var trainingVectors = new ConcurrentVectorValues(dimension);
+                postingsMap.forEach((v, p) -> trainingVectors.add(p.getOrdinal(), v));
+                // lock the addGraphNode threads out
+                trainingLock.writeLock().lock();
+                try
+                {
+                    // Fine tune the pq codebook and re-encode the vectors added so far.
+                    compressor = compressor.refine(trainingVectors);
+                    pqVectors = new MutablePQVectors(compressor, postingsEntriesAllocated);
+                    for (int i = 0; i < builder.getGraph().getIdUpperBound(); i++)
+                    {
+                        var v = trainingVectors.getVector(i);
+                        if (v == null)
+                            pqVectors.setZero(i);
+                        else
+                            pqVectors.encodeAndSet(i, v);
+                    }
+
+                    // Keep the existing edges but recompute their scores
+                    builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, pqVectors));
+                }
+                finally
+                {
+                    trainingLock.writeLock().unlock();
+                }
+                pqFinetuned = true;
+            }
+
             writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
             // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
             while (pqVectors.count() < ordinal)
@@ -273,7 +314,15 @@ public class CompactionGraph implements Closeable, Accountable
 
     public long addGraphNode(InsertionResult result)
     {
-        return builder.addGraphNode(result.ordinal, result.vector);
+        trainingLock.readLock().lock();
+        try
+        {
+            return builder.addGraphNode(result.ordinal, result.vector);
+        }
+        finally
+        {
+            trainingLock.readLock().unlock();
+        }
     }
 
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
