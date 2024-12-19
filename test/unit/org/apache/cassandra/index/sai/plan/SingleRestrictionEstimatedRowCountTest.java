@@ -30,13 +30,10 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.schema.SchemaTestUtil;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.cql3.CQL3Type.Native.DECIMAL;
 import static org.apache.cassandra.cql3.CQL3Type.Native.INT;
@@ -75,17 +72,6 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
     public void teardown()
     {
         QueryController.QUERY_OPT_LEVEL = queryOptLevel;
-    }
-
-    protected ColumnFamilyStore prepareTable(CQL3Type.Native type)
-    {
-        TableMetadata.Builder tableBuilder = TableMetadata.builder(KEYSPACE, createTableName());
-        tableBuilder.addPartitionKeyColumn("pk", UTF8Type.instance)
-                    .addRegularColumn("age", type.getType())
-                    .memtableFlushPeriod(0);
-        SchemaTestUtil.announceNewTable(tableBuilder.build());
-        createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
-        return getCurrentColumnFamilyStore();
     }
 
     @Test
@@ -130,6 +116,13 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         test.doTest(Version.EB, DECIMAL, 0);
     }
 
+    protected ColumnFamilyStore prepareTable(CQL3Type.Native type)
+    {
+        createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
+        createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
+        return getCurrentColumnFamilyStore();
+    }
+
     class RowCountTest
     {
         final Operator op;
@@ -147,6 +140,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             SAIUtil.setLatestVersion(version);
 
             ColumnFamilyStore cfs = prepareTable(type);
+            // Avoid race condition of flushing after the index creation
             cfs.unsafeRunWithoutFlushing(() -> {
                 for (int i = 0; i < 100; i++)
                 {
