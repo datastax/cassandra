@@ -166,7 +166,8 @@ public class Config
 
     public volatile DurationSpec.LongMillisecondsBound repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound("10000ms");
 
-    public volatile DurationSpec.LongMillisecondsBound native_transport_timeout_in_ms = new DurationSpec.LongMillisecondsBound("12000ms");
+    @Replaces(oldName = "native_transport_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound native_transport_timeout = new DurationSpec.LongMillisecondsBound("12000ms");
 
     public Integer streaming_connections_per_host = 1;
     @Replaces(oldName = "streaming_keep_alive_period_in_secs", converter = Converters.SECONDS_DURATION, deprecated = true)
