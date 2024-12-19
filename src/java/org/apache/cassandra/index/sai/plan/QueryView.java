@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 public class QueryView implements AutoCloseable
@@ -160,11 +161,11 @@ public class QueryView implements AutoCloseable
                             // Log about the failures
                             if (failingSince <= 0)
                             {
-                                failingSince = System.nanoTime();
+                                failingSince = MonotonicClock.approxTime.now();
                             }
-                            else if (System.nanoTime() - failingSince > TimeUnit.MILLISECONDS.toNanos(100))
+                            else if (MonotonicClock.approxTime.now() - failingSince > TimeUnit.MILLISECONDS.toNanos(100))
                             {
-                                failingSince = System.nanoTime();
+                                failingSince = MonotonicClock.approxTime.now();
                                 if (success)
                                     NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
                                                      "Spinning trying to capture index reader for {}, but it was released.", index);

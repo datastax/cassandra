@@ -26,6 +26,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.lang.Math.max;
 
@@ -77,12 +78,12 @@ public class QueryContext
     public QueryContext(long executionQuotaMs)
     {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
-        this.queryStartTimeNanos = System.nanoTime();
+        this.queryStartTimeNanos = MonotonicClock.approxTime.now();
     }
 
     public long totalQueryTimeNs()
     {
-        return System.nanoTime() - queryStartTimeNanos;
+        return MonotonicClock.approxTime.now() - queryStartTimeNanos;
     }
 
     // setters
