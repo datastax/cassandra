@@ -37,7 +37,6 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
@@ -341,11 +340,13 @@ public class SSTableIndexWriter implements PerIndexWriter
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
             var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
+            // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
             if (pqi == null && segments.size() > 0)
                 pqi = maybeReadPqFromLastSegment();
 
             if (pqi == null || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
             {
+                // build on heap
                 builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
             }
             else
@@ -392,7 +393,6 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException
     {
-        // No PQ instance available in completed indexes, so check if we just wrote one
         var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
         assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
 
@@ -420,7 +420,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
             {
                 var pq = ProductQuantization.load(reader);
-                return new CassandraOnHeapGraph.PqInfo(pq, unitVectors);
+                return new CassandraOnHeapGraph.PqInfo(pq, unitVectors, sm.numRows);
             }
         }
         return null;
