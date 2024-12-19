@@ -1480,6 +1480,11 @@ public class DatabaseDescriptor
             logInfo("truncate_request_timeout", conf.truncate_request_timeout, LOWEST_ACCEPTED_TIMEOUT);
             conf.truncate_request_timeout = LOWEST_ACCEPTED_TIMEOUT;
         }
+        if(conf.native_transport_timeout.toMilliseconds() < LOWEST_ACCEPTED_TIMEOUT.toMilliseconds())
+        {
+            logInfo("native_transport_timeout", conf.native_transport_timeout, LOWEST_ACCEPTED_TIMEOUT);
+            conf.native_transport_timeout = LOWEST_ACCEPTED_TIMEOUT;
+        }
     }
 
     private static void logInfo(String property, DurationSpec.LongMillisecondsBound actualValue, DurationSpec.LongMillisecondsBound lowestAcceptedValue)
