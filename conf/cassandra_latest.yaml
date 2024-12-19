@@ -1331,6 +1331,15 @@ truncate_request_timeout: 60000ms
 # Lowest acceptable value is 10 ms.
 # Min unit: ms
 request_timeout: 10000ms
+# Upper bound for how long any request received via native transport
+# should be considered live and serviceable by the system. This is
+# currently considered at two points: when the message is dequeued and
+# executed by the NATIVE_TRANSPORT_REQUESTS stage, and when the message
+# is dequeued and executed by an async stage if NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED
+# is set to true. If the request is not completed within this time, an
+# OverloadedException is thrown.
+# Min unit: ms
+native_transport_timeout: 12000ms
 
 # Defensive settings for protecting Cassandra from true network partitions.
 # See (CASSANDRA-14358) for details.
