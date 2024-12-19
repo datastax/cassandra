@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.memory;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,11 +30,12 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Throwables;
 import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
@@ -43,6 +45,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.dht.Bounds;
@@ -56,6 +59,10 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -66,26 +73,43 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
-@Ignore
-public abstract class AbstractTrieMemtableIndexTest extends SAITester
+public abstract class TrieMemtableIndexTestBase extends SAITester
 {
-    private ColumnFamilyStore cfs;
-    protected IndexContext indexContext;
-    protected TrieMemtableIndex memtableIndex;
-    protected AbstractAllocatorMemtable memtable;
-    private IPartitioner partitioner;
-    private Map<DecoratedKey, Integer> keyMap;
-    private Map<Integer, Integer> rowMap;
+    static final Injections.Counter indexSearchCounter = Injections.newCounter("IndexSearchCounter")
+                                                                           .add(InvokePointBuilder.newInvokePoint()
+                                                                                                  .onClass(TrieMemoryIndex.class)
+                                                                                                  .onMethod("search"))
+                                                                           .build();
 
-    @BeforeClass
-    public static void setUpClass()
+    ColumnFamilyStore cfs;
+    IndexContext indexContext;
+    TrieMemtableIndex memtableIndex;
+    AbstractAllocatorMemtable memtable;
+    IPartitioner partitioner;
+    Map<DecoratedKey, Integer> keyMap;
+    Map<Integer, Integer> rowMap;
+
+    public static void setup(Config.MemtableAllocationType allocationType)
     {
-        MEMTABLE_SHARD_COUNT.setInt(8);
+        try
+        {
+            Field confField = DatabaseDescriptor.class.getDeclaredField("conf");
+            confField.setAccessible(true);
+            Config conf = (Config) confField.get(null);
+            conf.memtable_allocation_type = allocationType;
+            conf.memtable_cleanup_threshold = 0.8f; // give us more space to fit test data without flushing
+        }
+        catch (NoSuchFieldException | IllegalAccessException e)
+        {
+            throw Throwables.propagate(e);
+        }
+
         CQLTester.setUpClass();
+        System.out.println("setUpClass done, allocation type " + allocationType);
     }
 
     @Before
@@ -104,8 +128,34 @@ public abstract class AbstractTrieMemtableIndexTest extends SAITester
         partitioner = cfs.getPartitioner();
         memtable = (AbstractAllocatorMemtable) cfs.getCurrentMemtable();
         indexContext = SAITester.createIndexContext("index", Int32Type.instance, cfs);
+        indexSearchCounter.reset();
         keyMap = new TreeMap<>();
         rowMap = new HashMap<>();
+
+        Injections.inject(indexSearchCounter);
+    }
+
+    @Test
+    public void allocation() throws Throwable
+    {
+        assertEquals(8, AbstractShardedMemtable.getDefaultShardCount());
+        memtableIndex = new TrieMemtableIndex(indexContext, memtable);
+        assertEquals(AbstractShardedMemtable.getDefaultShardCount(), memtableIndex.shardCount());
+
+        assertEquals(0, memtable.getAllocator().onHeap().owns());
+        assertEquals(0, memtable.getAllocator().offHeap().owns());
+
+        for (int row = 0; row < 100; row++)
+        {
+            addRow(row, row);
+        }
+
+        assertTrue(memtable.getAllocator().onHeap().owns() > 0);
+
+        if (TrieMemtable.BUFFER_TYPE == BufferType.OFF_HEAP)
+            assertTrue(memtable.getAllocator().onHeap().owns() > 0);
+        else
+            assertEquals(0, memtable.getAllocator().offHeap().owns());
     }
 
     @Test
@@ -163,7 +213,10 @@ public abstract class AbstractTrieMemtableIndexTest extends SAITester
 
         Map<Integer, Set<DecoratedKey>> terms = buildTermMap();
 
-        terms.forEach((key, value) -> value.forEach(pk -> addRow(Int32Type.instance.compose(pk.getKey()), key)));
+        terms.entrySet()
+             .stream()
+             .forEach(entry -> entry.getValue()
+                                    .forEach(pk -> addRow(Int32Type.instance.compose(pk.getKey()), entry.getKey())));
 
         for (int executionCount = 0; executionCount < 1000; executionCount++)
         {
@@ -179,7 +232,7 @@ public abstract class AbstractTrieMemtableIndexTest extends SAITester
             {
                 Pair<ByteComparable, Iterator<PrimaryKey>> termPair = iterator.next();
                 int term = termFromComparable(termPair.left);
-                // The iterator will return keys outside the range of min/max so we need to filter here to
+                // The iterator will return keys outside the range of min/max, so we need to filter here to
                 // get the correct keys
                 List<DecoratedKey> expectedPks = terms.get(term)
                                                       .stream()
@@ -256,8 +309,8 @@ public abstract class AbstractTrieMemtableIndexTest extends SAITester
 
     private int termFromComparable(ByteComparable comparable)
     {
-        ByteSource.Peekable peekable = ByteSource.peekable(comparable.asComparableBytes(ByteComparable.Version.OSS50));
-        return Int32Type.instance.compose(Int32Type.instance.fromComparableBytes(peekable, ByteComparable.Version.OSS50));
+        ByteSource.Peekable peekable = ByteSource.peekable(comparable.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
+        return Int32Type.instance.compose(Int32Type.instance.fromComparableBytes(peekable, TypeUtil.BYTE_COMPARABLE_VERSION));
     }
 
     private Map<Integer, Set<DecoratedKey>> buildTermMap()
@@ -283,7 +336,7 @@ public abstract class AbstractTrieMemtableIndexTest extends SAITester
         return terms;
     }
 
-    protected void addRow(int pk, int value)
+    void addRow(int pk, int value)
     {
         DecoratedKey key = makeKey(cfs.metadata(), pk);
         memtableIndex.index(key,
@@ -294,7 +347,7 @@ public abstract class AbstractTrieMemtableIndexTest extends SAITester
         keyMap.put(key, pk);
     }
 
-    private DecoratedKey makeKey(TableMetadata table, Integer partitionKey)
+    DecoratedKey makeKey(TableMetadata table, Integer partitionKey)
     {
         ByteBuffer key = table.partitionKeyType.fromString(partitionKey.toString());
         return table.partitioner.decorateKey(key);

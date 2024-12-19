@@ -45,6 +45,7 @@ import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.SimpleClient;
 import org.apache.cassandra.transport.messages.OptionsMessage;
+import org.apache.cassandra.utils.concurrent.Future;
 import org.assertj.core.api.Assertions;
 
 /**
@@ -262,7 +263,7 @@ public class UnableToParseClientMessageTest extends TestBaseImpl
         }
 
         @Override
-        protected Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+        protected Future<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
         {
             throw new AssertionError("execute not supported");
         }

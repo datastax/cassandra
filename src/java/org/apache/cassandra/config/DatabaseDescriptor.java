@@ -117,6 +117,7 @@ import org.apache.cassandra.utils.StorageCompatibilityMode;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOCATE_TOKENS_FOR_KEYSPACE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.AUTO_BOOTSTRAP;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CHRONICLE_ANALYTICS_DISABLE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CONFIG_LOADER;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLE_STCS_IN_L0;
 import static org.apache.cassandra.config.CassandraRelevantProperties.FILE_CACHE_SIZE_IN_MB;
@@ -150,6 +151,7 @@ public class DatabaseDescriptor
 {
     static
     {
+        CHRONICLE_ANALYTICS_DISABLE.setBoolean(true);
         // This static block covers most usages
         FBUtilities.preventIllegalAccessWarnings();
         IO_NETTY_TRANSPORT_ESTIMATE_SIZE_ON_SUBMIT.setBoolean(false);
@@ -632,6 +634,16 @@ public class DatabaseDescriptor
         if (conf.concurrent_writes < 2 && TEST_FAIL_MV_LOCKS_COUNT.getString("").isEmpty())
         {
             throw new ConfigurationException("concurrent_writes must be at least 2, but was " + conf.concurrent_writes, false);
+        }
+
+        if (conf.concurrent_coordinator_reads < 2)
+        {
+            throw new ConfigurationException("concurrent_coordinator_reads must be at least 2, but was " + conf.concurrent_coordinator_reads, false);
+        }
+
+        if (conf.concurrent_coordinator_writes < 2)
+        {
+            throw new ConfigurationException("concurrent_coordinator_writes must be at least 2, but was " + conf.concurrent_coordinator_writes, false);
         }
 
         if (conf.concurrent_counter_writes < 2)
@@ -1428,6 +1440,11 @@ public class DatabaseDescriptor
         {
             logInfo("truncate_request_timeout", conf.truncate_request_timeout, LOWEST_ACCEPTED_TIMEOUT);
             conf.truncate_request_timeout = LOWEST_ACCEPTED_TIMEOUT;
+        }
+        if(conf.native_transport_timeout.toMilliseconds() < LOWEST_ACCEPTED_TIMEOUT.toMilliseconds())
+        {
+            logInfo("native_transport_timeout", conf.native_transport_timeout, LOWEST_ACCEPTED_TIMEOUT);
+            conf.native_transport_timeout = LOWEST_ACCEPTED_TIMEOUT;
         }
     }
 
@@ -2364,6 +2381,34 @@ public class DatabaseDescriptor
         conf.phi_convict_threshold = phiConvictThreshold;
     }
 
+    public static int getConcurrentCoordinatorReaders()
+    {
+        return conf.concurrent_coordinator_reads;
+    }
+
+    public static void setConcurrentCoordinatorReaders(int concurrent_reads)
+    {
+        if (concurrent_reads < 0)
+        {
+            throw new IllegalArgumentException("Concurrent coordinator readers must be non-negative");
+        }
+        conf.concurrent_coordinator_reads = concurrent_reads;
+    }
+
+    public static int getConcurrentCoordinatorWriters()
+    {
+        return conf.concurrent_coordinator_writes;
+    }
+
+    public static void setConcurrentCoordinatorWriters(int concurrent_writers)
+    {
+        if (concurrent_writers < 0)
+        {
+            throw new IllegalArgumentException("Concurrent coordinator writers must be non-negative");
+        }
+        conf.concurrent_coordinator_writes = concurrent_writers;
+    }
+
     public static int getConcurrentReaders()
     {
         return conf.concurrent_reads;
@@ -2373,7 +2418,7 @@ public class DatabaseDescriptor
     {
         if (concurrent_reads < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent readers must be non-negative");
         }
         conf.concurrent_reads = concurrent_reads;
     }
@@ -2387,7 +2432,7 @@ public class DatabaseDescriptor
     {
         if (concurrent_writers < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent writers must be non-negative");
         }
         conf.concurrent_writes = concurrent_writers;
     }
@@ -5290,5 +5335,15 @@ public class DatabaseDescriptor
         Preconditions.checkArgument(factor > 0.0, "ANN brute force expense factor must be greater than zero");
         Preconditions.checkArgument(factor <= StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR, "ANN brute force expense factor must be at most " + StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR);
         conf.sai_options.ann_brute_force_factor = factor;
+    }
+
+    public static long getNativeTransportTimeout(TimeUnit timeUnit)
+    {
+        return conf.native_transport_timeout.to(timeUnit);
+    }
+
+    public static void setNativeTransportTimeout(long timeout, TimeUnit timeUnit)
+    {
+        conf.native_transport_timeout = new DurationSpec.LongMillisecondsBound(timeUnit.toMillis(timeout));
     }
 }

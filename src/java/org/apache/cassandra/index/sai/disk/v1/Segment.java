@@ -79,10 +79,13 @@ public class Segment implements Closeable
 
         var version = indexFiles.usedPerIndexComponents().version();
         IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
-        logger.info("Opened searcher {} for segment {}:{} for index [{}] on column [{}] at version {}",
+        logger.info("Opened searcher {} for segment {} with row id meta ({},{},{},{}) for index [{}] on column [{}] at version {}",
                     searcher.getClass().getSimpleName(),
                     sstableContext.descriptor(),
                     metadata.segmentRowIdOffset,
+                    metadata.numRows,
+                    metadata.minSSTableRowId,
+                    metadata.maxSSTableRowId,
                     indexContext.getIndexName(),
                     indexContext.getColumnName(),
                     version);
@@ -229,5 +232,10 @@ public class Segment implements Closeable
         int proportionalLimit = (int) Math.ceil(limit * ((double) segmentRows / totalRows));
         assert proportionalLimit >= 1 : proportionalLimit;
         return proportionalLimit;
+    }
+
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return metadata.estimateNumRowsMatching(predicate);
     }
 }

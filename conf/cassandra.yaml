@@ -1350,6 +1350,16 @@ truncate_request_timeout: 60000ms
 # Lowest acceptable value is 10 ms.
 # Min unit: ms
 request_timeout: 10000ms
+# Upper bound for how long any request received via native transport
+# should be considered live and serviceable by the system. This is
+# currently considered at two points: when the message is dequeued and
+# executed by the NATIVE_TRANSPORT_REQUESTS stage, and when the message
+# is dequeued and executed by an async stage if NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED
+# is set to true. If the request is not completed within this time, an
+# OverloadedException is thrown.
+# Min unit: ms
+native_transport_timeout: 12000ms
+
 
 # Defensive settings for protecting Cassandra from true network partitions.
 # See (CASSANDRA-14358) for details.
@@ -1853,6 +1863,11 @@ unlogged_batch_across_partitions_warn_threshold: 10
 
 # Audit logging - Logs every incoming CQL command request, authentication to a node. See the docs
 # on audit_logging for full details about the various configuration options and production tips.
+# NOTE: Chronicle Queue has changed the enums used for log rolling roll_cycle).
+# Older legacy options will still work for the foreseeable future, but you will see warnings in logs and future dependency
+# upgrades may break your log rolling param. The default log rolling param will be changed with the next major release
+# from HOURLY to FAST_HOURLY, primarily different on how frequently indexes are built. For more info refer to:
+# net.openhft.chronicle.queue.RollCycles
 audit_logging_options:
   enabled: false
   logger:
@@ -2217,6 +2232,14 @@ drop_compact_storage_enabled: false
 # Default offset_rows_failure_threshold is 20000, may differ if emulate_dbaas_defaults is enabled
 # offset_rows_warn_threshold: 10000
 # offset_rows_failure_threshold: 20000
+
+# Guardrail to warn or fail when a SELECT query has more column value filters than threshold.
+# Note that restrictions on indexed columns can be expanded to multiple column filters if the indexes have an analyzer.
+# In that case, there will be a filter for every token produced by the analyzer for the queried column value. This can
+# prevent that productive analyzers such as n-gram explode the query to a large number of filtering operations.
+# Default -1 to disable, may differ if emulate_dbaas_defaults is enabled
+# query_filters_warn_threshold: -1
+# query_filters_fail_threshold: -1
 
 # The default secondary index implementation when CREATE INDEX does not specify one via USING.
 # ex. "legacy_local_table" - (default) legacy secondary index, implemented as a hidden table

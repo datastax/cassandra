@@ -22,17 +22,16 @@ import java.util.Collection;
 import java.util.Collections;
 
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.junit.Assert;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -107,7 +106,7 @@ public class LegacyAbstractCompactionStrategyTest
         Assert.assertEquals(1, tasks.size());
         AbstractCompactionTask task = tasks.iterator().next();
         Assert.assertNotNull(task);
-        try (LifecycleTransaction txn = task.transaction)
+        try (var txn = task.transaction)
         {
             Assert.assertEquals(cfs.getLiveSSTables(), txn.originals());
         }

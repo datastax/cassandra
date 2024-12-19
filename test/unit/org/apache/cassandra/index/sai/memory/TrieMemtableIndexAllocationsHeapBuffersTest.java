@@ -19,39 +19,21 @@
 package org.apache.cassandra.index.sai.memory;
 
 import org.junit.BeforeClass;
-import org.junit.Test;
 
 import org.apache.cassandra.config.Config;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
+import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.io.compress.BufferType;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
-public class OnHeapTrieMemtableIndexTest extends AbstractTrieMemtableIndexTest
+public class TrieMemtableIndexAllocationsHeapBuffersTest extends TrieMemtableIndexTestBase
 {
     @BeforeClass
     public static void setUpClass()
     {
-        DatabaseDescriptor.getRawConfig().memtable_allocation_type = Config.MemtableAllocationType.heap_buffers;
-        AbstractTrieMemtableIndexTest.setUpClass();
-    }
-
-    @Test
-    public void onHeapAllocation()
-    {
-        memtableIndex = new TrieMemtableIndex(indexContext, memtable);
-        assertEquals(AbstractShardedMemtable.getDefaultShardCount(), memtableIndex.shardCount());
-
-        assertEquals(0, memtable.getAllocator().onHeap().owns());
-        assertEquals(0, memtable.getAllocator().offHeap().owns());
-
-        for (int row = 0; row < 100; row++)
-        {
-            addRow(row, row);
-        }
-
-        assertTrue(memtable.getAllocator().onHeap().owns() > 0);
-        assertEquals(0, memtable.getAllocator().offHeap().owns());
+        MEMTABLE_SHARD_COUNT.setInt(8);
+        setup(Config.MemtableAllocationType.heap_buffers);
+        assertEquals(TrieMemtable.BUFFER_TYPE, BufferType.ON_HEAP);
     }
 }

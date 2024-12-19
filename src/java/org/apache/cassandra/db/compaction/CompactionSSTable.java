@@ -21,6 +21,8 @@ package org.apache.cassandra.db.compaction;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.function.BiPredicate;
+
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Ordering;
@@ -56,6 +58,7 @@ public interface CompactionSSTable
     Comparator<CompactionSSTable> sizeComparator = (o1, o2) -> Long.compare(o1.onDiskLength(), o2.onDiskLength());
     Comparator<CompactionSSTable> idComparator = (o1, o2) -> SSTableIdFactory.COMPARATOR.compare(o1.getId(), o2.getId());
     Comparator<CompactionSSTable> idReverseComparator = idComparator.reversed();
+    BiPredicate<CompactionSSTable, CompactionSSTable> startsAfter = (a, b) -> a.getFirst().compareTo(b.getLast()) > 0;
 
     /**
      * @return the position of the first partition in the sstable
@@ -73,7 +76,12 @@ public interface CompactionSSTable
     AbstractBounds<Token> getBounds();
 
     /**
-     * @return the length in bytes of the on disk size for this SSTable. For compressed files, this is not the same
+     * @return the length in bytes of the all on-disk components' file size for this SSTable.
+     */
+    long onDiskComponentsSize();
+
+    /**
+     * @return the length in bytes of the on disk data file size for this SSTable. For compressed files, this is not the same
      * thing as the data length (see {@link #uncompressedLength})
      */
     long onDiskLength();

@@ -124,6 +124,12 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return 0;
+    }
+
+    @Override
     public void close() throws IOException
     {
         // EmptyIndex does not hold any resources

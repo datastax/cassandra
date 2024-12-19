@@ -450,7 +450,7 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
+    public static List<Partition> getAllUnfiltered(ReadCommand command)
     {
         try (ReadExecutionController controller = command.executionController())
         {
@@ -458,9 +458,9 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
+    public static List<Partition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
     {
-        List<ImmutableBTreePartition> results = new ArrayList<>();
+        List<Partition> results = new ArrayList<>();
         try (UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
             while (iterator.hasNext())
@@ -533,7 +533,7 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
         try (ReadExecutionController controller = cmd.executionController())
         {
@@ -541,7 +541,7 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
     {
         try (UnfilteredPartitionIterator iterator = cmd.executeLocally(controller))
         {
@@ -1154,6 +1154,9 @@ public class Util
      */
     public static void setUpgradeFromVersion(String version)
     {
+        if (!Gossiper.instance.isEnabled())
+            Gossiper.instance.maybeInitializeLocalState(0);
+
         int v = Optional.ofNullable(Gossiper.instance.getEndpointStateForEndpoint(FBUtilities.getBroadcastAddressAndPort()))
                         .map(ep -> ep.getApplicationState(ApplicationState.RELEASE_VERSION))
                         .map(rv -> rv.version)
@@ -1161,16 +1164,8 @@ public class Util
 
         Gossiper.instance.addLocalApplicationState(ApplicationState.RELEASE_VERSION,
                                                    VersionedValue.unsafeMakeVersionedValue(version, v + 1));
-        try
-        {
-            // add dummy host to avoid returning early in Gossiper.instance.upgradeFromVersionSupplier
-            Gossiper.instance.initializeNodeUnsafe(InetAddressAndPort.getByName("127.0.0.2"), UUID.randomUUID(), 1);
-        }
-        catch (UnknownHostException e)
-        {
-            throw new RuntimeException(e);
-        }
-        Gossiper.instance.expireUpgradeFromVersion();
+
+        Gossiper.instance.clusterVersionProvider.reset();
     }
 
     /**
@@ -1404,4 +1399,23 @@ public class Util
         }
         return new UserType(ks, UTF8Type.instance.decompose(name), fieldNames, fieldTypes, multicell);
     }
+
+    public static void assumeAssertsEnabled()
+    {
+        Assume.assumeTrue("Asserts must be enabled for this test", assertsEnabled());
+    }
+
+    public static boolean assertsEnabled()
+    {
+        try
+        {
+            assert false;
+            return false;
+        }
+        catch (AssertionError e)
+        {
+            return true;
+        }
+    }
+
 }
