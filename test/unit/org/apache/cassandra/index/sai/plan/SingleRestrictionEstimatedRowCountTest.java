@@ -21,8 +21,6 @@ package org.apache.cassandra.index.sai.plan;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
@@ -44,8 +42,6 @@ import static org.junit.Assert.fail;
 
 public class SingleRestrictionEstimatedRowCountTest extends SAITester
 {
-    private int queryOptLevel;
-
     static protected Object getFilterValue(CQL3Type.Native type, int value)
     {
         switch (type)
@@ -59,19 +55,6 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         }
         fail("Must be known type");
         return null;
-    }
-
-    @Before
-    public void setup()
-    {
-        queryOptLevel = QueryController.QUERY_OPT_LEVEL;
-        QueryController.QUERY_OPT_LEVEL = 0;
-    }
-
-    @After
-    public void teardown()
-    {
-        QueryController.QUERY_OPT_LEVEL = queryOptLevel;
     }
 
     @Test
