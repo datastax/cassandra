@@ -35,6 +35,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.carrotsearch.hppc.IntArrayList;
 import io.github.jbellis.jvector.pq.ProductQuantization;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
@@ -48,12 +49,15 @@ import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
+import org.apache.cassandra.index.sai.disk.v1.postings.PostingsWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -114,6 +118,7 @@ public abstract class SegmentBuilder
     private long maxSSTableRowId = -1;
     private long segmentRowIdOffset = 0;
     int rowCount = 0;
+    IntArrayList nullValuedRows = new IntArrayList();
     int maxSegmentRowId = -1;
     // in token order
     private PrimaryKey minKey;
@@ -443,9 +448,37 @@ public abstract class SegmentBuilder
         metadataBuilder.setKeyRange(minKey, maxKey);
         metadataBuilder.setRowIdRange(minSSTableRowId, maxSSTableRowId);
         metadataBuilder.setTermRange(minTerm, maxTerm);
+        metadataBuilder.setNullValuedRows(nullValuedRows.size());
 
         flushInternal(metadataBuilder);
+
+        indexNullValuedPrimaryKeys(metadataBuilder);
+
         return metadataBuilder.build();
+    }
+
+    private void indexNullValuedPrimaryKeys(SegmentMetadataBuilder metadataBuilder) throws IOException
+    {
+        // Write the row ids that had null values.
+        SegmentMetadata.ComponentMetadataMap componentMetadataMap = new SegmentMetadata.ComponentMetadataMap();
+        try (IndexOutput output = components.addOrGet(IndexComponentType.NULL_POSTING_LIST).openOutput();
+             PostingsWriter postingsWriter = new PostingsWriter(output))
+        {
+            // Because we have a single posting list, we let -1 indicate an empty list.
+            long root = -1;
+            if (!nullValuedRows.isEmpty())
+                root = postingsWriter.write(new IntArrayPostingList(nullValuedRows.toArray()));
+            postingsWriter.complete();
+            long offset = postingsWriter.getStartOffset();
+            long length = postingsWriter.getFilePointer() - offset;
+            componentMetadataMap.put(IndexComponentType.NULL_POSTING_LIST, root, offset, length);
+            metadataBuilder.addComponentsMetadata(componentMetadataMap);
+        }
+    }
+
+    public long addNullValuedSSTableRowId(PrimaryKey key, long sstableRowId)
+    {
+        return add(null, key, sstableRowId);
     }
 
     public long addAll(ByteBuffer term, AbstractType<?> type, PrimaryKey key, long sstableRowId)
@@ -475,12 +508,6 @@ public abstract class SegmentBuilder
         minKey = minKey == null ? key : minKey;
         maxKey = key;
 
-        // Note that the min and max terms are not encoded.
-        minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
-        maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
-
-        rowCount++;
-
         // segmentRowIdOffset should encode sstableRowId into Integer
         int segmentRowId = Math.toIntExact(sstableRowId - segmentRowIdOffset);
 
@@ -489,9 +516,25 @@ public abstract class SegmentBuilder
 
         maxSegmentRowId = Math.max(maxSegmentRowId, segmentRowId);
 
-        long bytesAllocated = supportsAsyncAdd()
-                              ? addInternalAsync(term, segmentRowId)
-                              : addInternal(term, segmentRowId);
+        long bytesAllocated;
+        if (term == null)
+        {
+            nullValuedRows.add(segmentRowId);
+            bytesAllocated = Integer.BYTES;
+        }
+        else
+        {
+            // Note that the min and max terms are not encoded.
+            minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
+            maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
+
+            rowCount++;
+
+            bytesAllocated = supportsAsyncAdd()
+                             ? addInternalAsync(term, segmentRowId)
+                             : addInternal(term, segmentRowId);
+        }
+
         totalBytesAllocated += bytesAllocated;
 
         return bytesAllocated;

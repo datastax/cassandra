@@ -65,17 +65,24 @@ public class KeyRangeTermIterator extends KeyRangeIterator
 
 
     @SuppressWarnings("resource")
-    public static KeyRangeTermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
+    public static KeyRangeTermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit, boolean isNonReducing)
     {
-        KeyRangeIterator rangeIterator = buildRangeIterator(e, perSSTableIndexes, keyRange, queryContext, defer, limit);
-        return new KeyRangeTermIterator(rangeIterator, perSSTableIndexes, queryContext);
+        KeyRangeIterator rangeIterator = buildRangeIterator(e, perSSTableIndexes, keyRange, queryContext, defer, limit, isNonReducing);
+        if (!isNonReducing)
+            return new KeyRangeTermIterator(rangeIterator, perSSTableIndexes, queryContext);
+
+        // In this code path, we get the nulls iterator and merge it with the range iterator
+        var isNullExpression = new Expression(e.context, Expression.Op.IS_NULL);
+        var nullsIterator = buildRangeIterator(isNullExpression, perSSTableIndexes, keyRange, queryContext, defer, limit, true);
+        var merged = new KeyRangeNonReducingLeftJoinIterator(rangeIterator, nullsIterator);
+        return new KeyRangeTermIterator(merged, perSSTableIndexes, queryContext);
     }
 
-    private static KeyRangeIterator buildRangeIterator(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
+    private static KeyRangeIterator buildRangeIterator(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit, boolean isNonReducing)
     {
         final List<KeyRangeIterator> tokens = new ArrayList<>(1 + perSSTableIndexes.size());
 
-        KeyRangeIterator memtableIterator = e.context.searchMemtable(queryContext, e, keyRange, limit);
+        KeyRangeIterator memtableIterator = e.context.searchMemtable(queryContext, e, keyRange, isNonReducing, limit);
         if (memtableIterator != null)
             tokens.add(memtableIterator);
 
@@ -106,7 +113,7 @@ public class KeyRangeTermIterator extends KeyRangeIterator
             }
         }
 
-        return KeyRangeUnionIterator.build(tokens);
+        return KeyRangeUnionIterator.build(tokens, isNonReducing);
     }
 
     protected PrimaryKey computeNext()

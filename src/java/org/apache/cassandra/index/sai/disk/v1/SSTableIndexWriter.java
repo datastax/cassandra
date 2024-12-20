@@ -218,9 +218,6 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private void addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
     {
-        if (!indexContext.validateMaxTermSize(key.partitionKey(), term))
-            return;
-
         if (currentBuilder == null)
         {
             currentBuilder = newSegmentBuilder(sstableRowId);
@@ -231,10 +228,12 @@ public class SSTableIndexWriter implements PerIndexWriter
             currentBuilder = newSegmentBuilder(sstableRowId);
         }
 
-        if (term.remaining() == 0 && !indexContext.getValidator().allowsEmpty())
-            return;
+        long allocated;
+        if ((term.remaining() == 0 && !indexContext.getValidator().allowsEmpty()) || !indexContext.validateMaxTermSize(key.partitionKey(), term))
+            allocated = currentBuilder.addNullValuedSSTableRowId(key, sstableRowId);
+        else
+            allocated = currentBuilder.addAll(term, type, key, sstableRowId);
 
-        long allocated = currentBuilder.addAll(term, type, key, sstableRowId);
         limiter.increment(allocated);
     }
 

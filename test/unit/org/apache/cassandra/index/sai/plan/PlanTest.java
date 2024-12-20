@@ -356,7 +356,7 @@ public class PlanTest
         // because we're getting top of the rows already prefiltered by the index:
         Plan.Executor executor = Mockito.mock(Plan.Executor.class);
         Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
-        Mockito.verify(executor, Mockito.times(1)).getTopKRows((KeyRangeIterator) Mockito.any(), Mockito.eq(limit));
+        Mockito.verify(executor, Mockito.times(1)).getTopKRows((KeyRangeIterator) Mockito.any(), Mockito.eq(limit), Mockito.eq(true));
     }
 
     @Test
@@ -508,7 +508,7 @@ public class PlanTest
         Plan.Executor executor = new Plan.Executor()
         {
             @Override
-            public Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate)
+            public Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate, boolean isReducing)
             {
                 return iterators.get(predicate);
             }
@@ -520,7 +520,7 @@ public class PlanTest
             }
 
             @Override
-            public Iterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator keys, int softLimit)
+            public Iterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator keys, int softLimit, boolean isNonReducing)
             {
                 throw new UnsupportedOperationException();
             }
