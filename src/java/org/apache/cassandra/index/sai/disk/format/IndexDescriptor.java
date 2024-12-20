@@ -720,10 +720,8 @@ public class IndexDescriptor
                 if (context != null)
                     return context.getCompression();
 
-                // The compression used for sstable has likly far too big chunk size.
-                // Index components are random access, so the chunk must be small.
                 var cfs = ColumnFamilyStore.getIfExists(descriptor.ksname, descriptor.cfname);
-                return cfs.metadata().params.compression.withChunkLength(4096);
+                return cfs.metadata().params.indexCompression;
             }
 
             @Override
