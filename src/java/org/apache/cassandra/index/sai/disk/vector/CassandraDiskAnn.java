@@ -227,6 +227,7 @@ public class CassandraDiskAnn
     {
         VectorValidation.validateIndexable(queryVector, similarityFunction);
 
+        rerankK = limit;
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
         try
@@ -236,11 +237,11 @@ public class CassandraDiskAnn
             if (features.contains(FeatureId.FUSED_ADC))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
-                var rr = view.rerankerFor(queryVector, similarityFunction);
-                ssp = new SearchScoreProvider(asf, rr);
+                ssp = new SearchScoreProvider(asf, null);
             }
             else if (compressedVectors == null)
             {
+                // no PQ, search with full-res vectors from disk
                 ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction));
             }
             else
@@ -251,8 +252,7 @@ public class CassandraDiskAnn
                          ? VectorSimilarityFunction.COSINE
                          : similarityFunction;
                 var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
-                var rr = view.rerankerFor(queryVector, similarityFunction);
-                ssp = new SearchScoreProvider(asf, rr);
+                ssp = new SearchScoreProvider(asf, null);
             }
             var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
             if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
