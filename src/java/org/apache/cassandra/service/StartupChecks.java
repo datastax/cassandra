@@ -64,9 +64,10 @@ import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JavaUtils;
 import org.apache.cassandra.utils.INativeLibrary;
+import org.apache.cassandra.utils.JavaUtils;
 import org.apache.cassandra.utils.SigarLibrary;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.COM_SUN_MANAGEMENT_JMXREMOTE_PORT;
@@ -101,7 +102,8 @@ public class StartupChecks
     // The default set of pre-flight checks to run. Order is somewhat significant in that we probably
     // always want the system keyspace check run last, as this actually loads the schema for that
     // keyspace. All other checks should not require any schema initialization.
-    private final List<StartupCheck> DEFAULT_TESTS = ImmutableList.of(checkJemalloc,
+    private final List<StartupCheck> DEFAULT_TESTS = ImmutableList.of(checkPreviousVersion,
+                                                                      checkJemalloc,
                                                                       checkLz4Native,
                                                                       checkValidLaunchDate,
                                                                       checkJMXPorts,
@@ -143,6 +145,25 @@ public class StartupChecks
         for (StartupCheck test : preFlightChecks)
             test.execute();
     }
+
+    public static final StartupCheck checkPreviousVersion = () -> {
+        String previousVersionString = FBUtilities.getPreviousReleaseVersionString();
+        if (null != previousVersionString)
+        {
+            CassandraVersion previousVersion = new CassandraVersion(previousVersionString);
+            boolean incompatible = previousVersion.major < 3;
+
+            if (previousVersion.major == 3)
+            {
+                incompatible |= previousVersion.minor == 0 && previousVersion.patch < 25;
+                incompatible |= previousVersion.minor == 11 && previousVersion.patch < 11;
+                incompatible |= previousVersion.minor != 0 && previousVersion.minor != 11;
+            }
+            if (incompatible)
+                throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
+                                           String.format("Only upgrades from >=3.0.25 and >=3.11.11 are supported (and sstables >= `me` format), found %s", previousVersionString));
+        }
+    };
 
     public static final StartupCheck checkJemalloc = new StartupCheck()
     {
