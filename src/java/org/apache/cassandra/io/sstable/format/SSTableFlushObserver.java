@@ -25,7 +25,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.SSTable;
 
 /**
- * Observer for events in the lifecycle of writing out an sstable.
+ * Observer for events in the lifecycle of writing out an sstable -- for compaction as well as for flush!
  */
 public interface SSTableFlushObserver
 {
