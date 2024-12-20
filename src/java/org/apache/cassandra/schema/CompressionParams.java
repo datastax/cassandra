@@ -20,7 +20,6 @@ package org.apache.cassandra.schema;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -35,6 +34,7 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -56,6 +56,7 @@ public final class CompressionParams
     private static volatile boolean hasLoggedCrcCheckChanceWarning;
 
     public static final int DEFAULT_CHUNK_LENGTH = 1024 * 16;
+    public static final int DEFAULT_INDEX_CHUNK_LENGTH = 1024 * 4;
     public static final double DEFAULT_MIN_COMPRESS_RATIO = 0.0;        // Since pre-4.0 versions do not understand the
                                                                         // new compression parameter we can't use a
                                                                         // different default value.
@@ -66,11 +67,27 @@ public final class CompressionParams
     public static final String ENABLED = "enabled";
     public static final String MIN_COMPRESS_RATIO = "min_compress_ratio";
 
-    public static final CompressionParams DEFAULT = new CompressionParams(LZ4Compressor.create(Collections.<String, String>emptyMap()),
+    public static final CompressionParams FAST = new CompressionParams(LZ4Compressor.create(Collections.emptyMap()),
                                                                           DEFAULT_CHUNK_LENGTH,
                                                                           calcMaxCompressedLength(DEFAULT_CHUNK_LENGTH, DEFAULT_MIN_COMPRESS_RATIO),
                                                                           DEFAULT_MIN_COMPRESS_RATIO,
                                                                           Collections.emptyMap());
+
+    public static final CompressionParams ADAPTIVE = new CompressionParams(AdaptiveCompressor.create(Collections.emptyMap()),
+                                                                           DEFAULT_CHUNK_LENGTH,
+                                                                           calcMaxCompressedLength(DEFAULT_CHUNK_LENGTH, DEFAULT_MIN_COMPRESS_RATIO),
+                                                                           DEFAULT_MIN_COMPRESS_RATIO,
+                                                                           Collections.emptyMap());
+
+    public static final CompressionParams FAST_ADAPTIVE = new CompressionParams(AdaptiveCompressor.createForFlush(Collections.emptyMap()),
+                                                                       DEFAULT_CHUNK_LENGTH,
+                                                                       calcMaxCompressedLength(DEFAULT_CHUNK_LENGTH, DEFAULT_MIN_COMPRESS_RATIO),
+                                                                       DEFAULT_MIN_COMPRESS_RATIO,
+                                                                       Collections.emptyMap());
+
+    public static final CompressionParams DEFAULT = DatabaseDescriptor.shouldUseAdaptiveCompressionByDefault() ? ADAPTIVE : FAST;
+
+    public static final CompressionParams INDEX_DEFAULT = DEFAULT.withChunkLength(DEFAULT_INDEX_CHUNK_LENGTH);
 
     public static final CompressionParams NOOP = new CompressionParams(NoopCompressor.create(Collections.emptyMap()),
                                                                        // 4 KiB is often the underlying disk block size
@@ -241,12 +258,38 @@ public final class CompressionParams
     }
 
     /**
+     * Returns a copy of CompressionParams with a modified chunk length
+     */
+    public CompressionParams withChunkLength(int chunkLength)
+    {
+        return new CompressionParams(sstableCompressor, chunkLength, maxCompressedLength, minCompressRatio, otherOptions);
+    }
+
+    /**
      * Checks if compression is enabled.
      * @return {@code true} if compression is enabled, {@code false} otherwise.
      */
     public boolean isEnabled()
     {
         return sstableCompressor != null;
+    }
+
+    /**
+     * Specializes the compressor for given use.
+     * May cause reconfiguration of parameters on some compressors.
+     * Returns null if params are not compatible with the given use.
+     */
+    public CompressionParams forUse(ICompressor.Uses use)
+    {
+        ICompressor specializedCompressor = this.sstableCompressor.forUse(use);
+        if (specializedCompressor == null)
+            return null;
+
+        assert specializedCompressor.recommendedUses().contains(use);
+        if (specializedCompressor == sstableCompressor)
+            return this;
+
+        return new CompressionParams(specializedCompressor, chunkLength, maxCompressedLength, minCompressRatio, otherOptions);
     }
 
     /**

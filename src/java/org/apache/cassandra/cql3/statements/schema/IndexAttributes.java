@@ -29,6 +29,7 @@ public class IndexAttributes extends PropertyDefinitions
     private static final String DEFAULT_INDEX_CLASS_PROPERTY = "cassandra.default_index_implementation_class";
 
     private static final String KW_OPTIONS = "options";
+    private static final String KW_COMPRESSION = "compression";
 
     private static final Set<String> keywords = new HashSet<>();
     private static final Set<String> obsoleteKeywords = new HashSet<>();
@@ -39,6 +40,7 @@ public class IndexAttributes extends PropertyDefinitions
     static
     {
         keywords.add(KW_OPTIONS);
+        keywords.add(KW_COMPRESSION);
     }
 
     public void maybeApplyDefaultIndex()
