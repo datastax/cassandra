@@ -319,15 +319,17 @@ public class TypeUtil
 
     /**
      * This is used for value comparison in post-filtering - {@link Expression#isSatisfiedBy(ByteBuffer)}.
-     *
+     * <p>
      * This allows types to decide whether they should be compared based on their encoded value or their
-     * raw value. At present only {@link InetAddressType} values are compared by their encoded values to
-     * allow for ipv4 -> ipv6 equivalency in searches.
+     * raw value.
      */
-    public static int comparePostFilter(Expression.Value requestedValue, Expression.Value columnValue, AbstractType<?> type)
+    public static int comparePostFilter(Expression.Value requestedValue, Expression.Value columnValue, AbstractType<?> type, boolean equalV4V6IPs)
     {
         if (isInetAddress(type))
-            return compareInet(requestedValue.encoded, columnValue.encoded);
+            if (equalV4V6IPs)
+                return compareInet(requestedValue.encoded, columnValue.encoded);
+            else
+                return InetAddressType.instance.compareForCQL(requestedValue.raw, columnValue.raw);
         // Override comparisons for frozen collections
         else if (isFrozen(type))
             return FastByteOperations.compareUnsigned(requestedValue.raw, columnValue.raw);

@@ -46,6 +46,7 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import org.apache.cassandra.db.marshal.InetAddressType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,6 +98,7 @@ import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
+import org.apache.cassandra.index.sai.utils.IPv6v4ComparisonSupport;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
@@ -113,6 +115,7 @@ import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR;
 import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K;
+import static org.apache.cassandra.index.sai.utils.IPv6v4ComparisonSupport.IP_COMPARISON_OPTION;
 
 public class StorageAttachedIndex implements Index
 {
@@ -217,7 +220,8 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
                                                                      LuceneAnalyzer.QUERY_ANALYZER,
-                                                                     AnalyzerEqOperatorSupport.OPTION);
+                                                                     AnalyzerEqOperatorSupport.OPTION,
+                                                                     IP_COMPARISON_OPTION);
 
     // this does not include vectors because each Vector declaration is a separate type instance
     public static final Set<CQL3Type> SUPPORTED_TYPES = ImmutableSet.of(CQL3Type.Native.ASCII, CQL3Type.Native.BIGINT, CQL3Type.Native.DATE,
@@ -304,6 +308,8 @@ public class StorageAttachedIndex implements Index
         {
             throw new InvalidRequestException("Failed to retrieve target column for: " + targetColumn);
         }
+
+        IPv6v4ComparisonSupport.fromMap(options, target.left.type);
 
         // In order to support different index target on non-frozen map, ie. KEYS, VALUE, ENTRIES, we need to put index
         // name as part of index file name instead of column name. We only need to check that the target is different

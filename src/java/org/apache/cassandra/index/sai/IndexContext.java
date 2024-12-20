@@ -78,6 +78,7 @@ import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.IPv6v4ComparisonSupport;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -95,6 +96,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
+import static org.apache.cassandra.index.sai.utils.IPv6v4ComparisonSupport.IP_COMPARISON_OPTION;
 
 /**
  * Manage metadata for each column index.
@@ -152,6 +154,8 @@ public class IndexContext
 
     private final int maxTermSize;
 
+    private final boolean equalV4V6IPs;
+
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
                         @Nonnull TableId tableId,
@@ -191,6 +195,7 @@ public class IndexContext
                                         : this.analyzerFactory;
             this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
+            this.equalV4V6IPs = Boolean.parseBoolean(config.options.getOrDefault(IP_COMPARISON_OPTION, String.valueOf(IPv6v4ComparisonSupport.IP_COMPARISON_OPTION_DEFAULT)));
         }
         else
         {
@@ -200,6 +205,7 @@ public class IndexContext
             this.queryAnalyzerFactory = this.analyzerFactory;
             this.vectorSimilarityFunction = null;
             this.hasEuclideanSimilarityFunc = false;
+            this.equalV4V6IPs = IPv6v4ComparisonSupport.IP_COMPARISON_OPTION_DEFAULT;
         }
 
         this.maxTermSize = isVector() ? MAX_VECTOR_TERM_SIZE
@@ -612,6 +618,11 @@ public class IndexContext
             logger.error("Failed to parse index configuration " + name + " = " + value + " as integer");
             return defaultValue;
         }
+    }
+
+    public boolean getIPComparisonOption()
+    {
+        return equalV4V6IPs;
     }
 
     public AbstractAnalyzer.AnalyzerFactory getAnalyzerFactory()

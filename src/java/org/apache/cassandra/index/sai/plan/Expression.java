@@ -269,6 +269,7 @@ public class Expression
     // VSTODO seems like we could optimize for CompositeType here since we know we have a key match
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
+        boolean equalV4V6IPs = context.getIPComparisonOption();
         if (columnValue == null)
             return false;
 
@@ -301,7 +302,7 @@ public class Expression
             else
             {
                 // range or (not-)equals - (mainly) for numeric values
-                int cmp = TypeUtil.comparePostFilter(lower.value, value, validator);
+                int cmp = TypeUtil.comparePostFilter(lower.value, value, validator, equalV4V6IPs);
 
                 // in case of (NOT_)EQ lower == upper
                 if (operation == Op.EQ || operation == Op.CONTAINS_KEY || operation == Op.CONTAINS_VALUE)
@@ -326,7 +327,7 @@ public class Expression
             else
             {
                 // range - mainly for numeric values
-                int cmp = TypeUtil.comparePostFilter(upper.value, value, validator);
+                int cmp = TypeUtil.comparePostFilter(upper.value, value, validator, equalV4V6IPs);
                 if (cmp < 0 || (cmp == 0 && !upperInclusive))
                     return false;
             }
@@ -337,7 +338,7 @@ public class Expression
         for (ByteBuffer term : exclusions)
         {
             if (TypeUtil.isLiteral(validator) && validateStringValue(value.raw, term) ||
-                TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
+                TypeUtil.comparePostFilter(new Value(term, validator), value, validator, equalV4V6IPs) == 0)
                 return false;
         }
 
