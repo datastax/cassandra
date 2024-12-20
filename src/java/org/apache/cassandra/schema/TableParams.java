@@ -46,6 +46,7 @@ public final class TableParams
         COMMENT,
         COMPACTION,
         COMPRESSION,
+        INDEX_COMPRESSION,
         MEMTABLE,
         DEFAULT_TIME_TO_LIVE,
         EXTENSIONS,
@@ -79,6 +80,7 @@ public final class TableParams
     public final CachingParams caching;
     public final CompactionParams compaction;
     public final CompressionParams compression;
+    public final CompressionParams indexCompression;
     public final MemtableParams memtable;
     public final ImmutableMap<String, ByteBuffer> extensions;
     public final boolean cdc;
@@ -101,6 +103,7 @@ public final class TableParams
         caching = builder.caching;
         compaction = builder.compaction;
         compression = builder.compression;
+        indexCompression = builder.indexCompression;
         memtable = builder.memtable;
         extensions = builder.extensions;
         cdc = builder.cdc;
@@ -119,6 +122,7 @@ public final class TableParams
                             .comment(params.comment)
                             .compaction(params.compaction)
                             .compression(params.compression)
+                            .indexCompression(params.indexCompression)
                             .memtable(params.memtable)
                             .crcCheckChance(params.crcCheckChance)
                             .defaultTimeToLive(params.defaultTimeToLive)
@@ -215,6 +219,7 @@ public final class TableParams
             && caching.equals(p.caching)
             && compaction.equals(p.compaction)
             && compression.equals(p.compression)
+            && indexCompression.equals(p.indexCompression)
             && memtable.equals(p.memtable)
             && extensions.equals(p.extensions)
             && cdc == p.cdc
@@ -236,6 +241,7 @@ public final class TableParams
                                 caching,
                                 compaction,
                                 compression,
+                                indexCompression,
                                 memtable,
                                 extensions,
                                 cdc,
@@ -258,6 +264,7 @@ public final class TableParams
                           .add(Option.CACHING.toString(), caching)
                           .add(Option.COMPACTION.toString(), compaction)
                           .add(Option.COMPRESSION.toString(), compression)
+                          .add(Option.INDEX_COMPRESSION.toString(), indexCompression)
                           .add(Option.MEMTABLE.toString(), memtable)
                           .add(Option.EXTENSIONS.toString(), extensions)
                           .add(Option.CDC.toString(), cdc)
@@ -281,6 +288,8 @@ public final class TableParams
                .append("AND compaction = ").append(compaction.asMap())
                .newLine()
                .append("AND compression = ").append(compression.asMap())
+               .newLine()
+               .append("AND index_compression = ").append(indexCompression.asMap())
                .newLine()
                .append("AND memtable = ").append(memtable.asMap())
                .newLine()
@@ -327,6 +336,7 @@ public final class TableParams
         private CachingParams caching = CachingParams.DEFAULT;
         private CompactionParams compaction = CompactionParams.DEFAULT;
         private CompressionParams compression = CompressionParams.DEFAULT;
+        private CompressionParams indexCompression = CompressionParams.INDEX_DEFAULT;
         private MemtableParams memtable = MemtableParams.DEFAULT;
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
@@ -422,6 +432,12 @@ public final class TableParams
         public Builder compression(CompressionParams val)
         {
             compression = val;
+            return this;
+        }
+
+        public Builder indexCompression(CompressionParams val)
+        {
+            indexCompression = val;
             return this;
         }
 
