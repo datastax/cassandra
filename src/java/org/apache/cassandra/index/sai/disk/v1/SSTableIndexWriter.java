@@ -31,9 +31,11 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.pq.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -337,22 +339,27 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         if (indexContext.isVector())
         {
+            int dimension = ((VectorType<?>) indexContext.getValidator()).dimension;
+            boolean bqPreferred = indexContext.getIndexWriterConfig().getSourceModel().compressionProvider.apply(dimension).type == CompressionType.BINARY_QUANTIZATION;
+
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
             var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
             // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
-            if (pqi == null && segments.size() > 0)
+            if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
 
-            if (pqi == null || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            if ((bqPreferred || pqi != null) && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
             {
-                // build on heap
-                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+                var compressor = bqPreferred ? new BinaryQuantization(dimension) : pqi.pq;
+                var unitVectors = bqPreferred ? false : pqi.unitVectors;
+                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
             }
             else
             {
-                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
+                // building on heap is the only way to get a PQ from nothing (CompactionGraph only knows how to fine-tune an existing one)
+                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
             }
         }
         else if (indexContext.isLiteral())
