@@ -20,6 +20,9 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.AbstractMap;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.junit.Test;
 
@@ -42,6 +45,8 @@ import static org.junit.Assert.fail;
 
 public class SingleRestrictionEstimatedRowCountTest extends SAITester
 {
+    static protected Map<Map.Entry<Version, CQL3Type.Native>, ColumnFamilyStore> map = new HashMap<>();
+
     static protected Object getFilterValue(CQL3Type.Native type, int value)
     {
         switch (type)
@@ -103,7 +108,17 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
         createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
-        return getCurrentColumnFamilyStore();
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+
+        // Avoid race condition of flushing after the index creation
+        cfs.unsafeRunWithoutFlushing(() -> {
+            for (int i = 0; i < 100; i++)
+            {
+                execute("INSERT INTO %s (pk, age) VALUES (?," + i + ')', "key" + i);
+            }
+        });
+
+        return cfs;
     }
 
     class RowCountTest
@@ -122,15 +137,10 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             Version latest = Version.latest();
             SAIUtil.setLatestVersion(version);
 
-            ColumnFamilyStore cfs = prepareTable(type);
-            // Avoid race condition of flushing after the index creation
-            cfs.unsafeRunWithoutFlushing(() -> {
-                for (int i = 0; i < 100; i++)
-                {
-                    execute("INSERT INTO %s (pk, age) VALUES (?," + i + ')', "key" + i);
-                }
-            });
+            var key = new AbstractMap.SimpleEntry<>(version, type);
+            ColumnFamilyStore cfs = map.computeIfAbsent(key, k -> prepareTable(type));
 
+//            ColumnFamilyStore cfs = prepareTable(type);
             Object filter = getFilterValue(type, filterValue);
 
             ReadCommand rc = Util.cmd(cfs)
