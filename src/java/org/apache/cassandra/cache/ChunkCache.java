@@ -48,6 +48,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
@@ -61,7 +62,6 @@ import org.apache.cassandra.utils.memory.BufferPools;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNKCACHE_ASYNC_CLEANUP;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNKCACHE_CLEANER_THREADS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNKCACHE_INITIAL_CAPACITY;
-import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS;
 
 public class ChunkCache
         implements RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
@@ -74,6 +74,8 @@ public class ChunkCache
     private static final int CLEANER_THREADS = CHUNKCACHE_CLEANER_THREADS.getInt();
 
     private static final Class PERFORM_CLEANUP_TASK_CLASS;
+    // cached value in order to not call System.getProperty on a hotpath
+    private static final int CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt();
 
     static
     {
@@ -424,12 +426,12 @@ public class ChunkCache
                         }
                         else
                         {
-                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                         }
                     }
                     else
                     {
-                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                     }
 
                     buf = chunk.reference();
