@@ -22,6 +22,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -36,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
+import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.Feature;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
 import io.github.jbellis.jvector.graph.disk.FusedADC;
@@ -63,6 +65,7 @@ import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
+import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -284,18 +287,28 @@ public class CompactionGraph implements Closeable, Accountable
             // fine-tune the PQ if we've collected enough vectors
             if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
             {
-                final var trainingVectors = new ConcurrentVectorValues(dimension);
-                postingsMap.forEach((v, p) -> trainingVectors.add(p.getOrdinal(), v));
+                // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
+                var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
+                // and (2) a map of vectors keyed by ordinal
+                var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
+                postingsMap.forEach((v, p) -> {
+                    trainingVectors.add(v);
+                    vectorsByOrdinal.put(p.getOrdinal(), v);
+                });
+
                 // lock the addGraphNode threads out
                 trainingLock.writeLock().lock();
                 try
                 {
-                    // Fine tune the pq codebook and re-encode the vectors added so far.
-                    compressor = ((ProductQuantization) compressor).refine(trainingVectors);
+                    // Fine tune the pq codebook
+                    compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
+                    trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
+
+                    // re-encode the vectors added so far
                     compressedVectors = new MutablePQVectors((ProductQuantization) compressor, postingsEntriesAllocated);
                     for (int i = 0; i < builder.getGraph().getIdUpperBound(); i++)
                     {
-                        var v = trainingVectors.getVector(i);
+                        var v = vectorsByOrdinal.get(i);
                         if (v == null)
                             compressedVectors.setZero(i);
                         else
