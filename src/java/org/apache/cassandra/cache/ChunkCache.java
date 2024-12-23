@@ -64,8 +64,6 @@ import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS;
-
 public class ChunkCache
         implements RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
 {
@@ -77,6 +75,8 @@ public class ChunkCache
     private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads",1);
 
     private static final Class PERFORM_CLEANUP_TASK_CLASS;
+    // cached value in order to not call System.getProperty on a hotpath
+    private static final int CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt();
 
     static
     {
@@ -426,12 +426,12 @@ public class ChunkCache
                         }
                         else
                         {
-                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                         }
                     }
                     else
                     {
-                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                     }
 
                     buf = chunk.reference();
