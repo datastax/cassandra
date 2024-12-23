@@ -172,10 +172,11 @@ public class SimpleClientPerfTest
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options)
                 {
-                    public Message.Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
+                    @Override
+                    public CompletableFuture<Response> maybeExecuteAsync(QueryState state, long queryStartNanoTime, boolean traceRequest)
                     {
                         int idx = Integer.parseInt(queryMessage.query); // unused
-                        return generateRows(idx, responseCaps);
+                        return CompletableFuture.completedFuture(generateRows(idx, responseCaps));
                     }
                 };
             }
