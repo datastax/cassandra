@@ -46,13 +46,12 @@ public class SharedCompactionProgress implements CompactionProgress
     private final List<CompactionProgress> sources = new CopyOnWriteArrayList<>();
     private final AtomicInteger toComplete = new AtomicInteger(0);
     private final TimeUUID operationId;
-    private final OperationType operationType;
     private final TableOperation.Unit unit;
 
     public SharedCompactionProgress(TimeUUID operationId, OperationType operationType, TableOperation.Unit unit)
     {
         this.operationId = operationId;
-        this.operationType = operationType;
+        // ignore operationType; TODO: remove the argument
         this.unit = unit;
     }
 
@@ -64,7 +63,7 @@ public class SharedCompactionProgress implements CompactionProgress
     public void addSubtask(CompactionProgress progress)
     {
         sources.add(progress);
-        assert progress.operationType() == operationType;
+        assert sources.isEmpty() || progress.operationType() == sources.get(0).operationType();
         assert progress.unit() == unit;
     }
 
@@ -116,7 +115,7 @@ public class SharedCompactionProgress implements CompactionProgress
     @Override
     public OperationType operationType()
     {
-        return operationType;
+        return sources.isEmpty() ? OperationType.COMPACTION : sources.get(0).operationType();
     }
 
     @Override
