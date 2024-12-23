@@ -237,7 +237,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
             while (iterator.hasNext())
                 iterator.next();
         }
-        catch (IndexOutOfBoundsException | AssertionError e)
+        catch (IndexOutOfBoundsException | VIntOutOfRangeException | AssertionError e)
         {
             sstable.markSuspect();
             throw new CorruptSSTableException(e, file);
