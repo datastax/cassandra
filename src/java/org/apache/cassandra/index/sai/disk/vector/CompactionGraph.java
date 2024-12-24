@@ -101,6 +101,11 @@ public class CompactionGraph implements Closeable, Accountable
                                                                        new LowPriorityThreadFactory(),
                                                                        null,
                                                                        false);
+    // see comments to JVector PhysicalCoreExecutor -- HT tends to cause contention for the SIMD units
+    private static final ForkJoinPool compactionSimdPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors() / 2,
+                                                                            new LowPriorityThreadFactory(),
+                                                                            null,
+                                                                            false);
 
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
@@ -200,7 +205,7 @@ public class CompactionGraph implements Closeable, Accountable
                                         indexConfig.getConstructionBeamWidth(),
                                         1.2f,
                                         dimension > 3 ? 1.2f : 1.4f,
-                                        compactionFjp, compactionFjp);
+                                        compactionSimdPool, compactionFjp);
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
