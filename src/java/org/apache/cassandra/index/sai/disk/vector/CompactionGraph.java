@@ -186,7 +186,7 @@ public class CompactionGraph implements Closeable, Accountable
         BuildScoreProvider bsp;
         if (compressor instanceof ProductQuantization)
         {
-            compressedVectors = new MutablePQVectors((ProductQuantization) compressor, postingsEntriesAllocated);
+            compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
             bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors);
         }
         else if (compressor instanceof BinaryQuantization)
@@ -310,7 +310,7 @@ public class CompactionGraph implements Closeable, Accountable
                     trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
 
                     // re-encode the vectors added so far
-                    compressedVectors = new MutablePQVectors((ProductQuantization) compressor, postingsEntriesAllocated);
+                    compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
                     for (int i = 0; i < builder.getGraph().getIdUpperBound(); i++)
                     {
                         var v = vectorsByOrdinal.get(i);
