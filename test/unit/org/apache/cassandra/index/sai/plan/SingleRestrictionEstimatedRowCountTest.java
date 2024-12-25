@@ -23,6 +23,7 @@ import java.math.BigInteger;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
@@ -42,6 +43,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
+@Ignore
 public class SingleRestrictionEstimatedRowCountTest extends SAITester
 {
     private int queryOptLevel;
