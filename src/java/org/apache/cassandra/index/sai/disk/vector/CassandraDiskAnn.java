@@ -130,7 +130,7 @@ public class CassandraDiskAnn
                 if (compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
                 {
                     compressedVectors = PQVectors.load(reader, reader.getFilePointer());
-                    pq = ((PQVectors) compressedVectors).getProductQuantization();
+                    pq = ((PQVectors) compressedVectors).getCompressor();
                     compression = new VectorCompression(compressionType,
                                                         compressedVectors.getOriginalSize(),
                                                         compressedVectors.getCompressedSize());
