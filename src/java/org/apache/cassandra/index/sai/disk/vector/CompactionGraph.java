@@ -40,7 +40,7 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
-import io.github.jbellis.jvector.pq.PQVectors;
+import io.github.jbellis.jvector.pq.MutablePQVectors;
 import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
@@ -95,7 +95,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
     private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
-    private final PQVectors pqVectors;
+    private final MutablePQVectors pqVectors;
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext context;
     private final boolean unitVectors;
@@ -158,7 +158,7 @@ public class CompactionGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         // VSTODO add LVQ
-        pqVectors = new PQVectors(compressor, postingsEntriesAllocated);
+        pqVectors = new MutablePQVectors(compressor);
         builder = new GraphIndexBuilder(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, pqVectors),
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
