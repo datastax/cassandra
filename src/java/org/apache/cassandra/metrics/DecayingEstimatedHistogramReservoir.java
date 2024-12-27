@@ -117,6 +117,7 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
     final static int subBucketHalfCountMagnitude = subBucketCountMagnitude - 1; // power of two of half the number of sub-buckets
     final static long subBucketMask = (long)(subBucketCount - 1) << unitMagnitude;
     final static int leadingZeroCountBase = 64 - unitMagnitude - subBucketHalfCountMagnitude - 1;
+    private static final boolean USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
     // DSE COMPATIBILITY CHANGES END
 
     private static float[] computeTable(int bits)
@@ -217,7 +218,7 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
 
         if (bucketCount == DEFAULT_BUCKET_COUNT)
         {
-            if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+            if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
                 bucketOffsets = considerZeroes ? DEFAULT_DSE_WITH_ZERO_BUCKET_OFFSETS : DEFAULT_DSE_WITHOUT_ZERO_BUCKET_OFFSETS;
             else
                 bucketOffsets = considerZeroes ? DEFAULT_WITH_ZERO_BUCKET_OFFSETS : DEFAULT_WITHOUT_ZERO_BUCKET_OFFSETS;
@@ -273,7 +274,7 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
     @VisibleForTesting
     public static int findIndex(long[] bucketOffsets, long value)
     {
-        if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+        if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
             return findIndexDse(bucketOffsets, value);
 
         // values below zero are nonsense, but we have never failed when presented them
