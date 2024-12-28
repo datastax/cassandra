@@ -192,7 +192,7 @@ public class CompactionGraph implements Closeable, Accountable
         else if (compressor instanceof BinaryQuantization)
         {
             var bq = new BinaryQuantization(dimension);
-            compressedVectors = new MutableBQVectors(bq, postingsEntriesAllocated);
+            compressedVectors = new MutableBQVectors(bq);
             bsp = BuildScoreProvider.bqBuildScoreProvider((BQVectors) compressedVectors);
         }
         else
