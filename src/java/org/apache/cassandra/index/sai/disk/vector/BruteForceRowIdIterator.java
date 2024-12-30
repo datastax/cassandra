@@ -51,9 +51,9 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
 {
     public static class RowWithApproximateScore
     {
-        private final int rowId;
-        private final int ordinal;
-        private final float appoximateScore;
+        public final int rowId;
+        public final int ordinal;
+        public final float appoximateScore;
 
         public RowWithApproximateScore(int rowId, int ordinal, float appoximateScore)
         {

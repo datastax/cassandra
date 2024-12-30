@@ -21,7 +21,9 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -291,7 +293,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                                 VectorFloat<?> queryVector,
                                                                 IntIntPairArray segmentOrdinalPairs,
                                                                 int limit,
-                                                                int rerankK) throws IOException
+                                                                int rerankK)
     {
         var approximateScores = new SortingIterator.Builder<BruteForceRowIdIterator.RowWithApproximateScore>(segmentOrdinalPairs.size());
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
@@ -302,8 +304,27 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
         });
         var approximateScoresQueue = approximateScores.build(BruteForceRowIdIterator.RowWithApproximateScore::compare);
-        var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getView());
-        return new BruteForceRowIdIterator(approximateScoresQueue, reranker, limit, rerankK);
+        var transformed = new Iterator<RowIdWithScore>() {
+            int consumed = 0;
+
+            @Override
+            public boolean hasNext()
+            {
+                if (consumed++ >= limit)
+                    return false;
+                return approximateScoresQueue.hasNext();
+            }
+
+            @Override
+            public RowIdWithScore next()
+            {
+                if (!hasNext())
+                    throw new NoSuchElementException();
+                var approximated = approximateScoresQueue.next();
+                return new RowIdWithScore(approximated.rowId, approximated.appoximateScore);
+            }
+        };
+        return CloseableIterator.wrap(transformed);
     }
 
     /**
