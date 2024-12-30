@@ -310,7 +310,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             @Override
             public boolean hasNext()
             {
-                if (consumed++ >= limit)
+                if (consumed >= limit)
                     return false;
                 return approximateScoresQueue.hasNext();
             }
@@ -320,6 +320,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             {
                 if (!hasNext())
                     throw new NoSuchElementException();
+                consumed++;
                 var approximated = approximateScoresQueue.next();
                 return new RowIdWithScore(approximated.rowId, approximated.appoximateScore);
             }
