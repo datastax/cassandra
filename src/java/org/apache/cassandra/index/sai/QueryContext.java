@@ -36,7 +36,7 @@ import static java.lang.Math.max;
 @NotThreadSafe
 public class QueryContext
 {
-    private static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
+    private static final boolean DISABLE_TIMEOUT = true;
 
     protected final long queryStartTimeNanos;
 

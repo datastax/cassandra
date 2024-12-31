@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.memory;
 
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -277,7 +278,8 @@ public class TrieMemtableIndex implements MemtableIndex
 
                 // We do two kinds of encoding... it'd be great to make this more straight forward, but this is what
                 // we have for now. I leave it to the reader to inspect the two methods to see the nuanced differences.
-                var encoding = encode(TypeUtil.encode(cell.buffer(), validator));
+                ByteComparable encoding = null;
+                encoding = encode(TypeUtil.encode(cell.buffer(), validator));
                 return new PrimaryKeyWithByteComparable(indexContext, memtable, key, encoding);
             },
             Runnables.doNothing()
