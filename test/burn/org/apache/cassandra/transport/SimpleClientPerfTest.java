@@ -50,6 +50,8 @@ import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.AssertUtil;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import static org.apache.cassandra.transport.BurnTestUtil.SizeCaps;
 import static org.apache.cassandra.transport.BurnTestUtil.generateQueryMessage;
@@ -169,10 +171,11 @@ public class SimpleClientPerfTest
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options)
                 {
-                    public Message.Response executeSync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+                    @Override
+                    public Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
                     {
                         int idx = Integer.parseInt(queryMessage.query); // unused
-                        return generateRows(idx, responseCaps);
+                        return ImmediateFuture.success(generateRows(idx, responseCaps));
                     }
                 };
             }
