@@ -35,7 +35,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InheritingClass;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.memtable.Memtable;
-import org.apache.cassandra.db.memtable.SkipListMemtableFactory;
+import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 /**
@@ -95,8 +95,8 @@ public final class MemtableParams
     }
 
     private static final String DEFAULT_CONFIGURATION_KEY = "default";
-    private static final Memtable.Factory DEFAULT_MEMTABLE_FACTORY = SkipListMemtableFactory.INSTANCE;
-    private static final ParameterizedClass DEFAULT_CONFIGURATION = SkipListMemtableFactory.CONFIGURATION;
+    private static final Memtable.Factory DEFAULT_MEMTABLE_FACTORY = new TrieMemtableFactory(null);
+    private static final ParameterizedClass DEFAULT_CONFIGURATION = TrieMemtableFactory.CONFIGURATION;
     private static final Map<String, ParameterizedClass>
         CONFIGURATION_DEFINITIONS = expandDefinitions(DatabaseDescriptor.getMemtableConfigurations());
     private static final Map<String, MemtableParams> CONFIGURATIONS = new HashMap<>();
