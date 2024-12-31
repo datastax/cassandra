@@ -44,6 +44,8 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.AssertUtil;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import static org.apache.cassandra.config.EncryptionOptions.TlsEncryptionPolicy.UNENCRYPTED;
 import static org.apache.cassandra.transport.BurnTestUtil.SizeCaps;
@@ -113,11 +115,12 @@ public class SimpleClientBurnTest
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options)
                 {
-                    public Message.Response executeSync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
+                    @Override
+                    public Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
                     {
                         int idx = Integer.parseInt(queryMessage.query);
                         SizeCaps caps = idx % largeMessageFrequency == 0 ? largeMessageCap : smallMessageCap;
-                        return generateRows(idx, caps);
+                        return ImmediateFuture.success(generateRows(idx, caps));
                     }
                 };
             }
