@@ -189,7 +189,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
                 SingleRestriction lastRestriction = restrictions.lastRestriction();
                 ColumnMetadata lastRestrictionStart = lastRestriction.getFirstColumn();
                 ColumnMetadata newRestrictionStart = newRestriction.getFirstColumn();
-                restrictions.addRestriction(newRestriction, isDisjunction, indexRegistry);
+                restrictions.addRestriction(newRestriction, isDisjunction);
 
                 checkFalse(lastRestriction.isSlice() && newRestrictionStart.position() > lastRestrictionStart.position(),
                            "Clustering column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ relation)",
@@ -203,7 +203,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             }
             else
             {
-                restrictions.addRestriction(newRestriction, isDisjunction, indexRegistry);
+                restrictions.addRestriction(newRestriction, isDisjunction);
             }
 
             return this;

@@ -163,7 +163,7 @@ public class RegularAndStaticColumns implements Iterable<ColumnMetadata>
             }
             else
             {
-                assert c.isRegular();
+                assert c.isRegular() || c.isSynthetic();
                 if (regularColumns == null)
                     regularColumns = BTree.builder(naturalOrder());
                 regularColumns.add(c);
@@ -197,7 +197,7 @@ public class RegularAndStaticColumns implements Iterable<ColumnMetadata>
 
         public RegularAndStaticColumns build()
         {
-            return new RegularAndStaticColumns(staticColumns  == null ? Columns.NONE : Columns.from(staticColumns),
+            return new RegularAndStaticColumns(staticColumns == null ? Columns.NONE : Columns.from(staticColumns),
                                                regularColumns == null ? Columns.NONE : Columns.from(regularColumns));
         }
     }

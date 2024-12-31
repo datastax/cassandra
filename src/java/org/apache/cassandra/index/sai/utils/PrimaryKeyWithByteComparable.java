@@ -21,7 +21,9 @@ package org.apache.cassandra.index.sai.utils;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -34,7 +36,13 @@ public class PrimaryKeyWithByteComparable extends PrimaryKeyWithSortKey
 {
     private final ByteComparable byteComparable;
 
-    public PrimaryKeyWithByteComparable(IndexContext context, Object sourceTable, PrimaryKey primaryKey, ByteComparable byteComparable)
+    public PrimaryKeyWithByteComparable(IndexContext context, Memtable sourceTable, PrimaryKey primaryKey, ByteComparable byteComparable)
+    {
+        super(context, sourceTable, primaryKey);
+        this.byteComparable = byteComparable;
+    }
+
+    public PrimaryKeyWithByteComparable(IndexContext context, SSTableId sourceTable, PrimaryKey primaryKey, ByteComparable byteComparable)
     {
         super(context, sourceTable, primaryKey);
         this.byteComparable = byteComparable;
