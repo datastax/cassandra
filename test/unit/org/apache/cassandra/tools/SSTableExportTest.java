@@ -38,7 +38,7 @@ public class SSTableExportTest extends OfflineToolUtils
     @BeforeClass
     public static void setupTest() throws IOException
     {
-        sstable = findOneSSTable("legacy_sstables", "legacy_ma_simple");
+        sstable = findOneSSTable("legacy_sstables", "legacy_me_simple");
     }
 
     @Test

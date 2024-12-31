@@ -51,17 +51,7 @@ public class StandaloneScrubberTest extends OfflineToolUtils
                        "--\n" + 
                        "Options are:\n" + 
                        "    --debug                     display stack traces\n" + 
-                       " -e,--header-fix <arg>          Option whether and how to perform a check of the sstable serialization-headers and fix\n" + 
-                       "                                known, fixable issues.\n" + 
-                       "                                Possible argument values:\n" + 
-                       "                                - validate-only: validate the serialization-headers, but do not fix those. Do not continue with scrub - i.e. only\n" + 
-                       "                                validate the header (dry-run of fix-only).\n" + 
-                       "                                - validate: (default) validate the serialization-headers, but do not fix those and only continue with scrub if no error\n" + 
-                       "                                were detected.\n" + 
-                       "                                - fix-only: validate and fix the serialization-headers, don't continue with scrub.\n" + 
-                       "                                - fix: validate and fix the serialization-headers, do not fix and do not continue with scrub if the serialization-header\n" + 
-                       "                                check encountered errors.\n" + 
-                       "                                - off: don't perform the serialization-header checks.\n" + 
+                       " -e,--header-fix <arg>          Deprecated Option.\n" +
                        " -h,--help                      display this help message\n" + 
                        " -m,--manifest-check            only check and repair the leveled manifest, without actually scrubbing the sstables\n" + 
                        " -n,--no-validate               do not validate columns using column validator\n" + 
