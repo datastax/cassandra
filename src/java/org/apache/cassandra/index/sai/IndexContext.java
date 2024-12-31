@@ -171,12 +171,8 @@ public class IndexContext
         this.indexType = indexType;
         this.config = config;
         this.viewManager = new IndexViewManager(this);
-        this.indexMetrics = new IndexMetrics(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
         this.cfs = cfs;
-
-        this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
-                                              : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
 
         this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
@@ -191,6 +187,11 @@ public class IndexContext
                                         : this.analyzerFactory;
             this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
+
+            this.indexMetrics = new IndexMetrics(this);
+            this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
+                                                  : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
+
         }
         else
         {
@@ -200,6 +201,12 @@ public class IndexContext
             this.queryAnalyzerFactory = this.analyzerFactory;
             this.vectorSimilarityFunction = null;
             this.hasEuclideanSimilarityFunc = false;
+
+            // null config indicates a "fake" index context. As such, it won't actually be used for indexing/accessing
+            // data, leaving these metrics unused. This also eliminates the overhead of creating these metrics on the
+            // query path.
+            this.indexMetrics = null;
+            this.columnQueryMetrics = null;
         }
 
         this.maxTermSize = isVector() ? MAX_VECTOR_TERM_SIZE
