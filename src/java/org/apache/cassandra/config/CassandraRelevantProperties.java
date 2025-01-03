@@ -568,7 +568,13 @@ public enum CassandraRelevantProperties
      * Do not wait for gossip to be enabled before starting stabilisation period. This is required especially for tests
      * which do not enable gossip at all.
      */
-    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip");
+    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip"),
+
+
+    /**
+     * (Experimental) Thread pool size for RandomAccessReader "vectored" reads.
+     */
+    RAR_VECTORED_READS_THREAD_POOL_SIZE("cassandra.rar.vectored_reads_thread_pool_size");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
