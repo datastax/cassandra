@@ -84,6 +84,18 @@ public class KDTreeIndexBuilder
         }
 
         @Override
+        public long getMinTimestamp()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getMaxTimestamp()
+        {
+            return Long.MAX_VALUE;
+        }
+
+        @Override
         public PrimaryKey primaryKeyFromRowId(long sstableRowId)
         {
             return primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(sstableRowId));

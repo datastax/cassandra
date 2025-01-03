@@ -67,7 +67,10 @@ public interface SearchableIndex extends Closeable
     public KeyRangeIterator search(Expression expression,
                                    AbstractBounds<PartitionPosition> keyRange,
                                    QueryContext context,
-                                   boolean defer, int limit) throws IOException;
+                                   boolean defer,
+                                   int limit) throws IOException;
+
+    public KeyRangeIterator searchNulls(AbstractBounds<PartitionPosition> keyRange, QueryContext context) throws IOException;
 
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
                                                                   Expression slice,
@@ -80,7 +83,8 @@ public interface SearchableIndex extends Closeable
                                                                          List<PrimaryKey> keys,
                                                                          Orderer orderer,
                                                                          int limit,
-                                                                         long totalRows) throws IOException;
+                                                                         long totalRows,
+                                                                         boolean canSkipOutOfWindowPKs) throws IOException;
 
     List<Segment> getSegments();
 

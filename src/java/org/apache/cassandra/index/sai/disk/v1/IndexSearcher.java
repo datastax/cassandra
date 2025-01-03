@@ -37,10 +37,15 @@ import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PostingListKeyRangeIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
+import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.RowIdToPrimaryKeyWithSortKeyIterator;
+import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
@@ -101,6 +106,27 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      */
     public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
 
+
+    public KeyRangeIterator searchNulls(QueryContext queryContext) throws IOException
+    {
+        var nullPl = metadata.componentMetadatas.get(IndexComponentType.NULL_POSTING_LIST);
+        if (nullPl.root < 0)
+            return KeyRangeIterator.empty();
+
+        var postingsFile = indexFiles.getFile(IndexComponentType.NULL_POSTING_LIST);
+        IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+        var blocksSummary = new PostingsReader.BlocksSummary(postingsSummaryInput,
+                                                             nullPl.root,
+                                                             PostingsReader.InputCloser.NOOP);
+
+        IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+        var postingList = new PostingsReader(postingsInput,
+                                             blocksSummary,
+                                             QueryEventListener.PostingListEventListener.NO_OP,
+                                             PostingsReader.InputCloser.NOOP);
+        return toPrimaryKeyIterator(postingList, queryContext);
+    }
+
     /**
      * Order the on-disk index synchronously and produce an iterator in score order
      *
@@ -115,7 +141,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
 
 
     @Override
-    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
+    public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, boolean canSkipOutOfWindowPKs) throws IOException
     {
         return SortingIterator.createCloseable(
             orderer.getComparator(),
@@ -152,7 +178,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
 
     protected KeyRangeIterator toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
     {
-        if (postingList == null || postingList.size() == 0)
+        if (postingList == null || postingList.isEmpty())
             return KeyRangeIterator.empty();
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,

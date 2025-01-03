@@ -34,14 +34,17 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.v1.postings.PostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.ImmutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -180,10 +183,20 @@ public class MemtableIndexWriter implements PerIndexWriter
             return 0;
         }
 
+        // Write the row ids that had null values. This is done after the vector index is written because we implicitly
+        // rely on the fact that all rows are null valued if the index is empty.
+        IntArrayList nullRowIds = indexNullValuedPrimaryKeys(indexMetas);
+
+        // We include the row ids of the null valued rows in the min/max row id range because those are necessary
+        // for proper ORDER BY queries. Practically speaking, this means that the whole segment's range is covered.
+        long minSSTableRowId = Math.min(terms.getMinSSTableRowId(), nullRowIds.isEmpty() ? Long.MAX_VALUE : nullRowIds.get(0));
+        long maxSSTableRowId = Math.max(terms.getMaxSSTableRowId(), nullRowIds.isEmpty() ? Long.MIN_VALUE : nullRowIds.get(nullRowIds.size() - 1));
+
         metadataBuilder.setKeyRange(pkFactory.createPartitionKeyOnly(minKey), pkFactory.createPartitionKeyOnly(maxKey));
-        metadataBuilder.setRowIdRange(terms.getMinSSTableRowId(), terms.getMaxSSTableRowId());
+        metadataBuilder.setRowIdRange(minSSTableRowId, maxSSTableRowId);
         metadataBuilder.setTermRange(terms.getMinTerm(), terms.getMaxTerm());
         metadataBuilder.setComponentsMetadata(indexMetas);
+        metadataBuilder.setNullValuedRows(nullRowIds.size());
         SegmentMetadata metadata = metadataBuilder.build();
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))
@@ -207,10 +220,15 @@ public class MemtableIndexWriter implements PerIndexWriter
 
         SegmentMetadata.ComponentMetadataMap metadataMap = vectorIndex.writeData(perIndexComponents);
 
+        // Write the row ids that had null values. This is done after the vector index is written because we implicitly
+        // rely on the fact that all rows are null valued if the index is empty.
+        IntArrayList nullValuedRows = indexNullValuedPrimaryKeys(metadataMap);
+
         SegmentMetadata metadata = new SegmentMetadata(0,
                                                        rowMapping.size(), // TODO this isn't the right size metric.
                                                        0,
                                                        rowMapping.maxSegmentRowId,
+                                                       nullValuedRows.size(),
                                                        pkFactory.createPartitionKeyOnly(minKey),
                                                        pkFactory.createPartitionKeyOnly(maxKey),
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
@@ -224,6 +242,27 @@ public class MemtableIndexWriter implements PerIndexWriter
         }
 
         completeIndexFlush(rowMapping.size(), startTime, stopwatch);
+    }
+
+    private IntArrayList indexNullValuedPrimaryKeys(SegmentMetadata.ComponentMetadataMap metadataMap) throws IOException
+    {
+        // Write the row ids that had null values.
+        SegmentMetadata.ComponentMetadataMap componentMetadataMap = new SegmentMetadata.ComponentMetadataMap();
+        IntArrayList nullRowIds = rowMapping.convertToPostings(memtableIndex.nullValuedPrimaryKeys());
+        try (IndexOutput output = perIndexComponents.addOrGet(IndexComponentType.NULL_POSTING_LIST).openOutput();
+             PostingsWriter postingsWriter = new PostingsWriter(output))
+        {
+            // Because we have a single posting list, we let -1 indicate an empty list.
+            long root = -1;
+            if (!nullRowIds.isEmpty())
+                root = postingsWriter.write(new IntArrayPostingList(nullRowIds.toArray()));
+            postingsWriter.complete();
+            long offset = postingsWriter.getStartOffset();
+            long length = postingsWriter.getFilePointer() - offset;
+            componentMetadataMap.put(IndexComponentType.NULL_POSTING_LIST, root, offset, length);
+            metadataMap.addAll(componentMetadataMap);
+            return nullRowIds;
+        }
     }
 
     private void completeIndexFlush(long cellCount, long startTime, Stopwatch stopwatch) throws IOException

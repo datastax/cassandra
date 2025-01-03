@@ -194,6 +194,30 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
+    public KeyRangeIterator searchNulls(AbstractBounds<PartitionPosition> keyRange, QueryContext context) throws IOException
+    {
+        KeyRangeConcatIterator.Builder rangeConcatIteratorBuilder = KeyRangeConcatIterator.builder(segments.size());
+
+        try
+        {
+            for (Segment segment : segments)
+            {
+                if (segment.intersects(keyRange))
+                {
+                    rangeConcatIteratorBuilder.add(segment.searchNulls(context));
+                }
+            }
+
+            return rangeConcatIteratorBuilder.build();
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(rangeConcatIteratorBuilder.ranges());
+            throw t;
+        }
+    }
+
+    @Override
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer, Expression slice,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   QueryContext context,
@@ -222,7 +246,7 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows, boolean canSkipOutOfWindowPKs) throws IOException
     {
         var results = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(segments.size());
         try
@@ -232,7 +256,7 @@ public class V1SearchableIndex implements SearchableIndex
                 // Only pass the primary keys in a segment's range to the segment index.
                 var segmentKeys = getKeysInRange(keys, segment);
                 var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
-                results.add(segment.orderResultsBy(context, segmentKeys, orderer, segmentLimit));
+                results.add(segment.orderResultsBy(context, segmentKeys, orderer, segmentLimit, canSkipOutOfWindowPKs));
             }
 
             return results;
