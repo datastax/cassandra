@@ -187,6 +187,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         }
 
         @Override
+        public boolean supportsReadingChunksConcurrently()
+        {
+            return true;
+        }
+
+        @Override
         public void invalidateIfCached(long position)
         {
         }

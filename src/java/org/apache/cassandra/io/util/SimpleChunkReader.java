@@ -50,6 +50,12 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     }
 
     @Override
+    public boolean supportsReadingChunksConcurrently()
+    {
+        return true;
+    }
+
+    @Override
     public int chunkSize()
     {
         return bufferSize;
