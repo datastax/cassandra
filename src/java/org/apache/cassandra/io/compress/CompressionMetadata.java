@@ -121,7 +121,6 @@ public class CompressionMetadata implements AutoCloseable
                                        sliceDescription);
     }
 
-    @VisibleForTesting
     public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize)
     {
         this(indexFilePath, compressedLength, hasMaxCompressedSize, SliceDescriptor.NONE);

@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -45,6 +46,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.oldlucene.EndiannessReverserChecksumIndexInput;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
+import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -52,6 +54,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
@@ -628,12 +631,27 @@ public class IndexDescriptor
             }
 
             @Override
+            public File compressionMetaFile()
+            {
+                return IndexFileUtils.addSuffix(file(), "CompressionInfo");
+            }
+
+            public CompressionMetadata compressionMetadata()
+            {
+                var compressionMetaFile = compressionMetaFile();
+                return (compressionMetaFile.exists())
+                       ? new CompressionMetadata(compressionMetaFile, file().length(), true)
+                       : null;
+            }
+
+            @Override
             public FileHandle createFileHandle()
             {
                 try (var builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
-                    var b = builder.order(byteOrder());
-                    return b.complete();
+                    return builder.order(byteOrder())
+                                  .withCompressionMetadata(compressionMetadata())
+                                  .complete();
                 }
             }
 
@@ -642,7 +660,9 @@ public class IndexDescriptor
             {
                 try (final FileHandle.Builder builder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(this))
                 {
-                    return builder.order(byteOrder()).complete();
+                    return builder.order(byteOrder())
+                                  .withCompressionMetadata(compressionMetadata())
+                                  .complete();
                 }
             }
 
@@ -687,7 +707,21 @@ public class IndexDescriptor
                                  component,
                                  file);
 
-                return IndexFileUtils.instance.openOutput(file, byteOrder(), append);
+                return IndexFileUtils.instance.openOutput(file, byteOrder(), append, compressionMetaFile(), getCompression());
+            }
+
+            private CompressionParams getCompression()
+            {
+                if (!component.compressed)
+                    return CompressionParams.noCompression();
+
+                // Compress per-sstable components with the settings from the sstable metadata.
+                // Compress per-index components with the settings from the index metadata.
+                if (context != null)
+                    return context.getCompression();
+
+                var cfs = ColumnFamilyStore.getIfExists(descriptor.ksname, descriptor.cfname);
+                return cfs.metadata().params.indexCompression;
             }
 
             @Override
