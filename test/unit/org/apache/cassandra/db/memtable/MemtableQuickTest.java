@@ -63,7 +63,9 @@ public class MemtableQuickTest extends CQLTester
         return ImmutableList.of("skiplist",
                                 "skiplist_sharded",
                                 "skiplist_sharded_locking",
-                                "trie");
+                                "trie",
+                                "trie_stage1",
+                                "persistent_memory");
     }
 
     @BeforeClass
@@ -138,6 +140,13 @@ public class MemtableQuickTest extends CQLTester
         logger.info("Selecting *");
         UntypedResultSet result = execute("SELECT * FROM " + table);
         assertRowCount(result, rowsPerPartition * (partitions - deletedPartitions) - deletedRows);
+
+        Memtable memtable = cfs.getCurrentMemtable();
+        Memtable.FlushablePartitionSet<?> flushSet = memtable.getFlushSet(null, null);
+        Assert.assertEquals(partitions, flushSet.partitionCount());
+        double expectedKeySize = partitions * 8;
+        // expected key size must be within 5% of actual
+        Assert.assertEquals(expectedKeySize, flushSet.partitionKeysSize(), expectedKeySize * 0.05);
 
         Util.flush(cfs);
 

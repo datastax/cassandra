@@ -27,11 +27,13 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Maps;
 
 import org.apache.cassandra.io.sstable.KeyIterator;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.TimeUUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,9 +45,9 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.ComponentsBuildId;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
@@ -131,6 +133,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     private boolean indexSSTable(SSTableReader sstable, Set<StorageAttachedIndex> indexes)
     {
         logger.debug(logMessage("Starting index build on {}"), sstable.descriptor);
+        long startTimeNanos = Clock.Global.nanoTime();
 
         CountDownLatch perSSTableFileLock = null;
         StorageAttachedIndexWriter indexWriter = null;
@@ -142,9 +145,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return false;
         }
 
-        SSTableWatcher.instance.onIndexBuild(sstable);
+        SSTableWatcher.instance.onIndexBuild(sstable, indexes);
 
         IndexDescriptor indexDescriptor = group.descriptorFor(sstable);
+
         Set<Component> replacedComponents = new HashSet<>();
 
         try (RandomAccessReader dataFile = sstable.openDataReader();
@@ -159,7 +163,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 prepareForRebuild(indexDescriptor.perIndexComponents(index.getIndexContext()), replacedComponents);
 
             long keyCount = SSTableReader.getApproximateKeyCount(Set.of(sstable));
-            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, metadata, indexes, txn, keyCount, perIndexComponentsOnly);
+            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, metadata, indexes, txn, keyCount, perIndexComponentsOnly, group.table().metric);
 
             indexWriter.begin();
 
@@ -199,7 +203,9 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
                 completeSSTable(txn, indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
             }
-            logger.debug("Completed indexing sstable {}", sstable.descriptor);
+            long timeTaken = Clock.Global.nanoTime() - startTimeNanos;
+            group.table().metric.updateStorageAttachedIndexBuildTime(timeTaken);
+            logger.trace("Completed indexing sstable {} in {} seconds", sstable.descriptor, TimeUnit.NANOSECONDS.toSeconds(timeTaken));
 
             return false;
         }
@@ -283,16 +289,16 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         // The current components are "replaced" (by "other" components) if the build create different components than
         // the existing ones. This will happen in the following cases:
         // 1. if we use immutable components, that's the point of immutable components.
-        // 2. when we do not use immutable components, there is still 2 cases where this will happen:
+        // 2. when we do not use immutable components, the rebuild components will always be for the latest version and
+        // for generation 0, so if the current components are not for that specific built, then we won't be rebuilding
+        // the exact same components, and we're "replacing", not "overwriting" ()
         //   a) the old components are from an older version: a new build will alawys be for `Version.latest()` and
-        //     so will create new files in that case.
-        //   b) the old components are from a non-0 generation: a new build will always be for generation 0 and so
-        //     here again new files will be created. Note that "normally" we should not have non-0 generation in the
+        //     so will create new files in that case (Note that "normally" we should not have non-0 generation in the
         //     first place if immutable components are not used, but we handle this case to better support "downgrades"
         //     where immutable components was enabled, but then disabled for some reason. If that happens, we still
         //     want to ensure a new build removes the old files both from disk (happens below) and from the sstable TOC
-        //     (which is what `replacedComponents` is about).
-        if (components.version().useImmutableComponentFiles() || !components.version().equals(Version.latest()) || components.generation() != 0)
+        //     (which is what `replacedComponents` is about)).
+        if (components.version().useImmutableComponentFiles() || !components.buildId().equals(ComponentsBuildId.forNewSSTable()))
             replacedComponents.addAll(components.allAsCustomComponents());
 
         if (!components.version().useImmutableComponentFiles())

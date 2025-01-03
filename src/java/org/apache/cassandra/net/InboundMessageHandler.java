@@ -152,14 +152,14 @@ public class InboundMessageHandler extends AbstractMessageHandler
         receivedBytes += size;
 
         if (size <= largeThreshold)
-            processSmallMessage(bytes, size, header);
+            processSmallMessage(bytes, size, header, currentTimeNanos);
         else
-            processLargeMessage(bytes, size, header);
+            processLargeMessage(bytes, size, header, currentTimeNanos);
 
         return true;
     }
 
-    private void processSmallMessage(ShareableBytes bytes, int size, Header header)
+    private void processSmallMessage(ShareableBytes bytes, int size, Header header, long messageProcessingStartTimeNanos)
     {
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
@@ -197,13 +197,13 @@ public class InboundMessageHandler extends AbstractMessageHandler
         }
 
         if (null != message)
-            dispatch(new ProcessSmallMessage(message, size));
+            dispatch(new ProcessSmallMessage(message, size, messageProcessingStartTimeNanos));
     }
 
     // for various reasons, it's possible for a large message to be contained in a single frame
-    private void processLargeMessage(ShareableBytes bytes, int size, Header header)
+    private void processLargeMessage(ShareableBytes bytes, int size, Header header, long handlingStartNanos)
     {
-        new LargeMessage(size, header, bytes.sliceAndConsume(size).share()).schedule();
+        new LargeMessage(size, header, bytes.sliceAndConsume(size).share(), handlingStartNanos).schedule();
     }
 
     /*
@@ -225,7 +225,7 @@ public class InboundMessageHandler extends AbstractMessageHandler
 
         callbacks.onHeaderArrived(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
         receivedBytes += buf.remaining();
-        largeMessage = new LargeMessage(size, header, expired);
+        largeMessage = new LargeMessage(size, header, expired, currentTimeNanos);
         largeMessage.supply(frame);
         return true;
     }
@@ -320,19 +320,23 @@ public class InboundMessageHandler extends AbstractMessageHandler
      */
     private class LargeMessage extends AbstractMessageHandler.LargeMessage<Header>
     {
-        private LargeMessage(int size, Header header, boolean isExpired)
+        private long handlingStartNanos;
+
+        private LargeMessage(int size, Header header, boolean isExpired, long handlingStartNanos)
         {
             super(size, header, header.expiresAtNanos, isExpired);
+            this.handlingStartNanos = handlingStartNanos;
         }
 
-        private LargeMessage(int size, Header header, ShareableBytes bytes)
+        private LargeMessage(int size, Header header, ShareableBytes bytes, long handlingStartNanos)
         {
             super(size, header, header.expiresAtNanos, bytes);
+            this.handlingStartNanos = handlingStartNanos;
         }
 
         private void schedule()
         {
-            dispatch(new ProcessLargeMessage(this));
+            dispatch(new ProcessLargeMessage(this, handlingStartNanos));
         }
 
         protected void onComplete()
@@ -447,10 +451,13 @@ public class InboundMessageHandler extends AbstractMessageHandler
 
                 releaseResources();
 
-                callbacks.onExecuted(size(), header, approxTime.now() - currentTimeNanos, NANOSECONDS);
+                long now = approxTime.now();
+                callbacks.onExecuted(size(), header, now - currentTimeNanos, NANOSECONDS);
+                callbacks.onMessageHandlingCompleted(header, now - handlingStartNanos(), NANOSECONDS);
             }
         }
 
+        abstract long handlingStartNanos();
         abstract int size();
         abstract Header header();
         abstract Message provideMessage();
@@ -461,11 +468,19 @@ public class InboundMessageHandler extends AbstractMessageHandler
     {
         private final int size;
         private final Message message;
+        private final long handlingStartNanos;
 
-        ProcessSmallMessage(Message message, int size)
+        ProcessSmallMessage(Message message, int size, long handlingStartNanos)
         {
             this.size = size;
             this.message = message;
+            this.handlingStartNanos = handlingStartNanos;
+        }
+
+        @Override
+        long handlingStartNanos()
+        {
+            return handlingStartNanos;
         }
 
         int size()
@@ -487,10 +502,18 @@ public class InboundMessageHandler extends AbstractMessageHandler
     private class ProcessLargeMessage extends ProcessMessage
     {
         private final LargeMessage message;
+        private final long handlingStartNanos;
 
-        ProcessLargeMessage(LargeMessage message)
+        ProcessLargeMessage(LargeMessage message, long handlingStartNanos)
         {
             this.message = message;
+            this.handlingStartNanos = handlingStartNanos;
+        }
+
+        @Override
+        long handlingStartNanos()
+        {
+            return handlingStartNanos;
         }
 
         int size()

@@ -36,6 +36,8 @@ import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ProductType;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 /**
  * Message to indicate that the server is ready to receive requests.
@@ -67,7 +69,12 @@ public class OptionsMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    protected Future<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    {
+        return ImmediateFuture.success(executeSync(queryState, queryStartNanoTime, traceRequest));
+    }
+
+    private Message.Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
     {
         List<String> cqlVersions = new ArrayList<String>();
         cqlVersions.add(QueryProcessor.CQL_VERSION.toString());

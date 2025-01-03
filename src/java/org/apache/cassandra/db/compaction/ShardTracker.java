@@ -24,7 +24,6 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 
 public interface ShardTracker
@@ -44,6 +43,9 @@ public interface ShardTracker
      */
     boolean advanceTo(Token nextToken);
 
+    /**
+     * Returns the number of shards tracked by this tracker.
+     */
     int count();
 
     /**
@@ -54,9 +56,12 @@ public interface ShardTracker
 
     double rangeSpanned(PartitionPosition first, PartitionPosition last);
 
+    /**
+     * The index of the shard this tracker is currently on.
+     */
     int shardIndex();
 
-    default long shardAdjustedKeyCount(Set<SSTableReader> sstables)
+    default long shardAdjustedKeyCount(Set<? extends CompactionSSTable> sstables)
     {
         // Note: computationally non-trivial; can be optimized if we save start/stop shards and size per table.
         long shardAdjustedKeyCount = 0;

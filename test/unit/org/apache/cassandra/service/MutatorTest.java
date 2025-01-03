@@ -20,6 +20,7 @@ package org.apache.cassandra.service;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -43,6 +44,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.awaitility.Awaitility;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
@@ -108,8 +110,9 @@ public class MutatorTest
         assertThat(metrics.writeMetrics.executionTimeMetrics.latency.getCount()).isEqualTo(count + 1);
         assertThat(metrics.writeMetrics.serviceTimeMetrics.latency.getCount()).isEqualTo(countServiceTime + 1);
 
-        // verify batchlog is removed
-        Util.assertEmpty(Util.cmd(cfs(SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES)).withNowInSeconds(FBUtilities.nowInSeconds()).build());
+        // verify batchlog is removed -- this happens async, so we may need to check several times
+        Awaitility.await().timeout(10, TimeUnit.SECONDS)
+                  .untilAsserted(() -> Util.assertEmpty(Util.cmd(cfs(SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES)).withNowInSeconds(FBUtilities.nowInSeconds()).build()));
 
         // verify data is inserted
         Util.getOnlyRow(Util.cmd(cfs(KEYSPACE, TABLE0), dk("1")).includeRow("column0").withNowInSeconds(FBUtilities.nowInSeconds()).build());

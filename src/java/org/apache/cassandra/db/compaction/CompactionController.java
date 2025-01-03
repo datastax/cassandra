@@ -24,6 +24,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.LongPredicate;
+import java.util.function.UnaryOperator;
+
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
@@ -34,11 +36,13 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.AbstractCompactionController;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.NEVER_PURGE_TOMBSTONES;
 
@@ -125,7 +129,7 @@ public class CompactionController extends AbstractCompactionController
     {
         if (overlapTracker == null)
             return Collections.emptySet();
-        return getFullyExpiredSSTables(realm, compacting, overlapTracker.overlaps(), gcBefore, ignoreOverlaps());
+        return getFullyExpiredSSTables(realm, compacting, c -> overlapTracker.overlaps(), gcBefore, ignoreOverlaps());
     }
 
     /**
@@ -140,7 +144,7 @@ public class CompactionController extends AbstractCompactionController
      *
      * @param realm
      * @param compacting we take the drop-candidates from this set, it is usually the sstables included in the compaction
-     * @param overlapping the sstables that overlap the ones in compacting.
+     * @param overlappingSupplier called on the compacting sstables to compute the set of sstables that overlap with them if needed
      * @param gcBefore
      * @param ignoreOverlaps don't check if data shadows/overlaps any data in other sstables
      * @return
@@ -148,7 +152,7 @@ public class CompactionController extends AbstractCompactionController
     public static
     Set<CompactionSSTable> getFullyExpiredSSTables(CompactionRealm realm,
                                                    Iterable<? extends CompactionSSTable> compacting,
-                                                   Iterable<? extends CompactionSSTable> overlapping,
+                                                   UnaryOperator<Iterable<? extends CompactionSSTable>> overlappingSupplier,
                                                    long gcBefore,
                                                    boolean ignoreOverlaps)
     {
@@ -163,6 +167,7 @@ public class CompactionController extends AbstractCompactionController
         long minTimestamp;
         if (!ignoreOverlaps)
         {
+            var overlapping = overlappingSupplier.apply(compacting);
             minTimestamp = Math.min(Math.min(minSurvivingTimestamp(overlapping, gcBefore),
                                              minSurvivingTimestamp(compacting, gcBefore)),
                                     minTimestamp(realm.getAllMemtables()));
@@ -220,10 +225,10 @@ public class CompactionController extends AbstractCompactionController
     public static
     Set<CompactionSSTable> getFullyExpiredSSTables(CompactionRealm realm,
                                                    Iterable<? extends CompactionSSTable> compacting,
-                                                   Iterable<? extends CompactionSSTable> overlapping,
+                                                   UnaryOperator<Iterable<? extends CompactionSSTable>> overlappingSupplier,
                                                    long gcBefore)
     {
-        return getFullyExpiredSSTables(realm, compacting, overlapping, gcBefore, false);
+        return getFullyExpiredSSTables(realm, compacting, overlappingSupplier, gcBefore, false);
     }
 
     /**
@@ -257,17 +262,30 @@ public class CompactionController extends AbstractCompactionController
             }
         }
 
-        for (Memtable memtable : memtables)
+        OpOrder.Group readGroup = null;
+        try
         {
-            long memtableMinTimestamp = memtable.getMinTimestamp();
-            if (memtableMinTimestamp >= minTimestampSeen || memtableMinTimestamp == Memtable.NO_MIN_TIMESTAMP)
-                continue;
-
-            if (memtable.rowIterator(key) != null)
+            for (Memtable memtable : memtables)
             {
-                minTimestampSeen = Math.min(minTimestampSeen, memtable.getMinTimestamp());
-                hasTimestamp = true;
+                long memtableMinTimestamp = memtable.getMinTimestamp();
+                if (memtableMinTimestamp >= minTimestampSeen || memtableMinTimestamp == Memtable.NO_MIN_TIMESTAMP)
+                    continue;
+
+                if (readGroup == null)
+                    readGroup = memtable.readOrdering().start(); // the read order is the same for all memtables of a CFS
+
+                Partition partition = memtable.getPartition(key);
+                if (partition != null)
+                {
+                    minTimestampSeen = Math.min(minTimestampSeen, partition.stats().minTimestamp);
+                    hasTimestamp = true;
+                }
             }
+        }
+        finally
+        {
+            if (readGroup != null)
+                readGroup.close();
         }
 
         if (!hasTimestamp)

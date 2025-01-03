@@ -26,10 +26,9 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.plan.QueryViewBuilder;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.utils.MonotonicClock;
 
-import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static java.lang.Math.max;
 
 /**
@@ -43,8 +42,6 @@ public class QueryContext
     protected final long queryStartTimeNanos;
 
     public final long executionQuotaNano;
-
-    public QueryViewBuilder.QueryView view;
 
     private final LongAdder sstablesHit = new LongAdder();
     private final LongAdder segmentsHit = new LongAdder();
@@ -82,12 +79,12 @@ public class QueryContext
     public QueryContext(long executionQuotaMs)
     {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
-        queryStartTimeNanos = nanoTime();
+        this.queryStartTimeNanos = MonotonicClock.Global.approxTime.now();
     }
 
     public long totalQueryTimeNs()
     {
-        return nanoTime() - queryStartTimeNanos;
+        return MonotonicClock.Global.approxTime.now() - queryStartTimeNanos;
     }
 
     // setters

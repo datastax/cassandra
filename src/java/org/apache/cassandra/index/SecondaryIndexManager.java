@@ -1275,7 +1275,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (indexes.isEmpty() || rowFilter.isEmpty())
             return null;
 
-        for (RowFilter.Expression expression : rowFilter)
+        for (RowFilter.Expression expression : rowFilter.expressions())
         {
             if (expression.isCustom())
             {
@@ -1353,6 +1353,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         for (Index index : indexes.values())
             index.validate(update);
+    }
+
+    @Override
+    public void validate(RowFilter filter)
+    {
+        RowFilterValidator.validate(filter, indexes.values());
     }
 
     /*

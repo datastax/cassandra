@@ -152,7 +152,32 @@ public class TokenMetadata
     @VisibleForTesting
     public TokenMetadata cloneWithNewPartitioner(IPartitioner newPartitioner)
     {
-        return new TokenMetadata(tokenToEndpointMap, endpointToHostIdMap, topology, newPartitioner);
+        lock.readLock().lock();
+        try
+        {
+            return new TokenMetadata(tokenToEndpointMap, endpointToHostIdMap, topology, newPartitioner);
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+    }
+
+    /**
+     * To be used by tests only (via {@link org.apache.cassandra.service.StorageService#setPartitionerUnsafe}).
+     */
+    public TokenMetadata cloneWithNewSnitch(IEndpointSnitch snitch)
+    {
+        lock.readLock().lock();
+        try
+        {
+            var clonedTopology = topology.unbuild().withSnitchSupplier(() -> snitch).build();
+            return new TokenMetadata(tokenToEndpointMap, endpointToHostIdMap, clonedTopology, partitioner);
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
     }
 
     private ArrayList<Token> sortTokens()
@@ -1491,7 +1516,7 @@ public class TokenMetadata
 
         static Topology empty()
         {
-            return builder(() -> DatabaseDescriptor.getEndpointSnitch()).build();
+            return builder(DatabaseDescriptor::getEndpointSnitch).build();
         }
 
         private static class Builder
@@ -1502,7 +1527,7 @@ public class TokenMetadata
             private final Map<String, Multimap<String, InetAddressAndPort>> dcRacks;
             /** reverse-lookup map for endpoint to current known dc/rack assignment */
             private final Map<InetAddressAndPort, Pair<String, String>> currentLocations;
-            private final Supplier<IEndpointSnitch> snitchSupplier;
+            private Supplier<IEndpointSnitch> snitchSupplier;
 
             Builder(Supplier<IEndpointSnitch> snitchSupplier)
             {
@@ -1574,7 +1599,7 @@ public class TokenMetadata
 
             Builder updateEndpoint(InetAddressAndPort ep)
             {
-                IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
+                IEndpointSnitch snitch = snitchSupplier.get();
                 if (snitch == null || !currentLocations.containsKey(ep))
                     return this;
 
@@ -1584,7 +1609,7 @@ public class TokenMetadata
 
             Builder updateEndpoints()
             {
-                IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
+                IEndpointSnitch snitch = snitchSupplier.get();
                 if (snitch == null)
                     return this;
 
@@ -1604,6 +1629,12 @@ public class TokenMetadata
 
                 doRemoveEndpoint(ep, current);
                 doAddEndpoint(ep, dc, rack);
+            }
+
+            Builder withSnitchSupplier(Supplier<IEndpointSnitch> snitchSupplier)
+            {
+                this.snitchSupplier = snitchSupplier;
+                return this;
             }
 
             Topology build()

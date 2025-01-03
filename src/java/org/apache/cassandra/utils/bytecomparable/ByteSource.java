@@ -19,8 +19,12 @@ package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
+import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.marshal.ValueAccessor;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable.Version;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 
@@ -35,6 +39,26 @@ public interface ByteSource
 {
     /** Consume the next byte, unsigned. Must be between 0 and 255, or END_OF_STREAM if there are no more bytes. */
     int next();
+
+    /**
+     * Consume the next bytes of the source and transfer them to the given array.
+     *
+     * @return The number of bytes transferred. If equal to the size of the destination, the source may have further
+     *         bytes to consume. Otherwise, the source has been fully consumed, and it would be an error to call this
+     *         method (or next()) again.
+     */
+    default int nextBytes(byte[] dest)
+    {
+        int i;
+        for (i = 0; i < dest.length; ++i)
+        {
+            int next = next();
+            if (next == END_OF_STREAM)
+                return i;
+            dest[i] = (byte) next;
+        }
+        return i;
+    }
 
     /** Value returned if at the end of the stream. */
     int END_OF_STREAM = -1;
@@ -57,11 +81,14 @@ public interface ByteSource
 
     // Next component marker.
     int NEXT_COMPONENT = 0x40;
-    // Marker used to present null values represented by empty buffers (e.g. by Int32Type)
-    int NEXT_COMPONENT_EMPTY = 0x3F;
-    int NEXT_COMPONENT_EMPTY_REVERSED = 0x41;
-    // Marker for null components in tuples, maps, sets and clustering keys.
-    int NEXT_COMPONENT_NULL = 0x3E;
+    // Marker used to present null values represented by empty buffers (e.g. by Int32Type), as well as nulls in
+    // collections.
+    int NEXT_COMPONENT_NULL = 0x3F;
+    int NEXT_COMPONENT_NULL_REVERSED = 0x41;
+    // Marker for null components in clustering keys. Null clusterings are normally encoded by empty buffers (which end
+    // up using NEXT_COMPONENT_EMPTY above), but in some cases (secondary indexes and compact storage) we may get null
+    // pointers that compare differently.
+    int NEXT_CLUSTERING_NULL = 0x3E;
 
     // Section for next component markers which is not allowed for use
     int MIN_NEXT_COMPONENT = 0x3C;
@@ -274,36 +301,26 @@ public interface ByteSource
         };
     }
 
-    /**
-     * Wrap a ByteSource in a length-fixing facade.
-     *
-     * If the length of {@code src} is less than {@code cutoff}, then pad it on the right with {@code padding} until
-     * the overall length equals {@code cutoff}.  If the length of {@code src} is greater than {@code cutoff}, then
-     * truncate {@code src} to that size.  Effectively a noop if {@code src} happens to have length {@code cutoff}.
-     *
-     * @param src the input source to wrap
-     * @param cutoff the size of the source returned
-     * @param padding a padding byte (an int subject to a 0xFF mask)
-     */
-    public static ByteSource cutOrRightPad(ByteSource src, int cutoff, int padding)
+    public static ByteSource append(ByteSource src, int lastByte)
     {
         return new ByteSource()
         {
-            int pos = 0;
+            boolean done = false;
 
             @Override
             public int next()
             {
-                if (pos++ >= cutoff)
-                {
+                if (done)
                     return END_OF_STREAM;
-                }
-                int next = src.next();
-                return next == END_OF_STREAM ? padding : next;
+                int n = src.next();
+                if (n != END_OF_STREAM)
+                    return n;
+
+                done = true;
+                return lastByte;
             }
         };
     }
-
 
     /**
      * Variable-length encoding. Escapes 0s as ESCAPE + zero or more ESCAPED_0_CONT + ESCAPED_0_DONE.
@@ -666,7 +683,8 @@ public interface ByteSource
     }
 
     /**
-     * Combination of multiple byte sources. Adds {@link NEXT_COMPONENT} before sources, or {@link NEXT_COMPONENT_NULL} if next is null.
+     * Combination of multiple byte sources. Adds {@link #NEXT_COMPONENT} before sources, or {@link #NEXT_COMPONENT_NULL}
+     * if next is null.
      */
     static class Multi implements ByteSource
     {
@@ -737,9 +755,78 @@ public interface ByteSource
         }
     }
 
+    /**
+     * A byte source representing a value of fixed length than can be compared using unsigned byte comparison. Such
+     * value can be used unchanged because their fixed length ensures that the encoding is prefix-free.
+     * This method also permits the value to be empty and encodes this as null.
+     */
     static <V> ByteSource optionalFixedLength(ValueAccessor<V> accessor, V data)
     {
-        return !accessor.isEmpty(data) ? fixedLength(accessor, data) : null;
+        return !accessor.isEmpty(data) ? preencoded(accessor, data) : null;
+    }
+
+    /**
+     * A byte source of the given bytes without any encoding. This has several uses:
+     * - to store a value that is already encoded for a given version (see ByteComparable.preencoded)
+     * - to store fixed-length values that can be used directly because their length ensures that the encoding is
+     *   prefix-free (see optionalFixedLength)
+     * - to implement ByteSource duplication
+     * - to store a value that has a custom encoding not handled by ByteSource and AbstractType implementations
+     *   (e.g. some SAI indexes)
+     * - to generate non-escaped test cases
+     */
+    public static <V> ByteSource preencoded(ValueAccessor<V> accessor, V data)
+    {
+        return new PreencodedBytesByAccessor<>(accessor, data, 0, accessor.size(data));
+    }
+
+    class PreencodedBytesByAccessor<V> implements Duplicatable
+    {
+        int pos;
+        final int end;
+        final V data;
+        final ValueAccessor<V> accessor;
+
+        PreencodedBytesByAccessor(ValueAccessor<V> accessor, V data, int start, int end)
+        {
+            this.data = data;
+            this.accessor = accessor;
+            this.pos = start;
+            this.end = end;
+        }
+
+        @Override
+        public int next()
+        {
+            return pos < end ? accessor.getByte(data, pos++) & 0xFF : END_OF_STREAM;
+        }
+
+        @Override
+        public int peek()
+        {
+            return pos < end ? accessor.getByte(data, pos) & 0xFF : END_OF_STREAM;
+        }
+
+        @Override
+        public int nextBytes(byte[] array)
+        {
+            int len = Math.min(end - pos, array.length);
+            accessor.copyTo(data, pos, array, ByteArrayAccessor.instance, 0, len);
+            pos += len;
+            return len;
+        }
+
+        @Override
+        public byte[] remainingBytesToArray()
+        {
+            return accessor.toArray(data, pos, end - pos);
+        }
+
+        @Override
+        public Duplicatable duplicate()
+        {
+            return new PreencodedBytesByAccessor(accessor, data, pos, end);
+        }
     }
 
     /**
@@ -748,38 +835,56 @@ public interface ByteSource
      * underlying type has a fixed length.
      * In tests, this method is also used to generate non-escaped test cases.
      */
-    public static <V> ByteSource fixedLength(ValueAccessor<V> accessor, V data)
+    public static Duplicatable preencoded(ByteBuffer b)
     {
-        return new ByteSource()
-        {
-            int pos = -1;
-
-            @Override
-            public int next()
-            {
-                return ++pos < accessor.size(data) ? accessor.getByte(data, pos) & 0xFF : END_OF_STREAM;
-            }
-        };
+        return new PreencodedByteBuffer(b, b.position(), b.limit());
     }
 
-    /**
-     * A byte source of the given bytes without any encoding.
-     * The resulting source is only guaranteed to give correct comparison results and be prefix-free if the
-     * underlying type has a fixed length.
-     * In tests, this method is also used to generate non-escaped test cases.
-     */
-    public static ByteSource fixedLength(ByteBuffer b)
+    class PreencodedByteBuffer implements Duplicatable
     {
-        return new ByteSource()
-        {
-            int pos = b.position() - 1;
+        int pos;
+        final int end;
+        final ByteBuffer b;
 
-            @Override
-            public int next()
-            {
-                return ++pos < b.limit() ? b.get(pos) & 0xFF : END_OF_STREAM;
-            }
-        };
+        PreencodedByteBuffer(ByteBuffer b, int start, int end)
+        {
+            this.b = b;
+            this.pos = start;
+            this.end = end;
+        }
+
+        @Override
+        public int next()
+        {
+            return pos < end ? b.get(pos++) & 0xFF : END_OF_STREAM;
+        }
+
+        @Override
+        public int peek()
+        {
+            return pos < end ? b.get(pos) & 0xFF : END_OF_STREAM;
+        }
+
+        @Override
+        public int nextBytes(byte[] array)
+        {
+            int len = Math.min(end - pos, array.length);
+            FastByteOperations.copy(b, pos, array, 0, len);
+            pos += len;
+            return len;
+        }
+
+        @Override
+        public byte[] remainingBytesToArray()
+        {
+            return ByteBufferUtil.getArray(b, pos, end - pos);
+        }
+
+        @Override
+        public Duplicatable duplicate()
+        {
+            return new PreencodedByteBuffer(b, pos, end);
+        }
     }
 
     /**
@@ -788,36 +893,79 @@ public interface ByteSource
      * underlying type has a fixed length.
      * In tests, this method is also used to generate non-escaped test cases.
      */
-    public static ByteSource fixedLength(byte[] b)
+    public static Duplicatable preencoded(byte[] b)
     {
-        return fixedLength(b, 0, b.length);
+        return preencoded(b, 0, b.length);
     }
 
-    public static ByteSource fixedLength(byte[] b, int offset, int length)
+    public static Duplicatable preencoded(byte[] b, int offset, int length)
     {
         checkArgument(offset >= 0 && offset <= b.length);
         checkArgument(length >= 0 && offset + length <= b.length);
 
-        return new ByteSource()
-        {
-            int pos = offset - 1;
-
-            @Override
-            public int next()
-            {
-                return ++pos < offset + length ? b[pos] & 0xFF : END_OF_STREAM;
-            }
-        };
+        return new PreencodedBytes(b, offset, offset + length);
     }
 
-    public class Peekable implements ByteSource
+    class PreencodedBytes implements Duplicatable
+    {
+        int pos;
+        final int end;
+        final byte[] b;
+
+        PreencodedBytes(byte[] b, int start, int end)
+        {
+            this.b = b;
+            this.pos = start;
+            this.end = end;
+        }
+
+        @Override
+        public int next()
+        {
+            return pos < end ? b[pos++] & 0xFF : END_OF_STREAM;
+        }
+
+        @Override
+        public int peek()
+        {
+            return pos < end ? b[pos] & 0xFF : END_OF_STREAM;
+        }
+
+        @Override
+        public int nextBytes(byte[] array)
+        {
+            int len = Math.min(end - pos, array.length);
+            FastByteOperations.copy(b, pos, array, 0, len);
+            pos += len;
+            return len;
+        }
+
+        @Override
+        public byte[] remainingBytesToArray()
+        {
+            return Arrays.copyOfRange(b, pos, end);
+        }
+
+        @Override
+        public Duplicatable duplicate()
+        {
+            return new PreencodedBytes(b, pos, end);
+        }
+    }
+
+    interface Peekable extends ByteSource
+    {
+        int peek();
+    }
+
+    public class PeekableImpl implements Peekable
     {
         private static final int NONE = Integer.MIN_VALUE;
 
         private final ByteSource wrapped;
         private int peeked = NONE;
 
-        public Peekable(ByteSource wrapped)
+        public PeekableImpl(ByteSource wrapped)
         {
             this.wrapped = wrapped;
         }
@@ -852,6 +1000,24 @@ public interface ByteSource
             return null;
         return (p instanceof Peekable)
                ? (Peekable) p
-               : new Peekable(p);
+               : new PeekableImpl(p);
+    }
+
+    interface ConvertableToArray extends Peekable
+    {
+        byte[] remainingBytesToArray();
+    }
+
+    interface Duplicatable extends ConvertableToArray
+    {
+        Duplicatable duplicate();
+    }
+
+    public static Duplicatable duplicatable(ByteSource src)
+    {
+        if (src instanceof Duplicatable)
+            return (Duplicatable) src;
+
+        return preencoded(ByteSourceInverse.readBytes(src));
     }
 }

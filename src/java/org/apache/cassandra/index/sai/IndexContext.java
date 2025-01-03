@@ -33,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
@@ -138,7 +137,7 @@ public class IndexContext
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;
     private final AbstractType<?> validator;
-    private final ColumnFamilyStore owner;
+    private final ColumnFamilyStore cfs;
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
     private final IndexMetadata config;
@@ -166,7 +165,7 @@ public class IndexContext
                         @Nonnull ColumnMetadata column,
                         @Nonnull IndexTarget.Type indexType,
                         IndexMetadata config,
-                        @Nonnull ColumnFamilyStore owner)
+                        @Nonnull ColumnFamilyStore cfs)
     {
         this.keyspace = keyspace;
         this.table = table;
@@ -177,12 +176,8 @@ public class IndexContext
         this.indexType = indexType;
         this.config = config;
         this.viewManager = new IndexViewManager(this);
-        this.indexMetrics = new IndexMetrics(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
-        this.owner = owner;
-
-        this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
-                                              : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
+        this.cfs = cfs;
 
         this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
@@ -197,6 +192,11 @@ public class IndexContext
                                         : this.analyzerFactory;
             this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
+
+            this.indexMetrics = new IndexMetrics(this);
+            this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
+                                                  : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
+
         }
         else
         {
@@ -206,6 +206,12 @@ public class IndexContext
             this.queryAnalyzerFactory = this.analyzerFactory;
             this.vectorSimilarityFunction = null;
             this.hasEuclideanSimilarityFunc = false;
+
+            // null config indicates a "fake" index context. As such, it won't actually be used for indexing/accessing
+            // data, leaving these metrics unused. This also eliminates the overhead of creating these metrics on the
+            // query path.
+            this.indexMetrics = null;
+            this.columnQueryMetrics = null;
         }
 
         this.maxTermSize = isVector() ? MAX_VECTOR_TERM_SIZE
@@ -255,14 +261,14 @@ public class IndexContext
         return tableId;
     }
 
-    public Memtable.Owner owner()
+    public ColumnFamilyStore columnFamilyStore()
     {
-        return owner;
+        return cfs;
     }
 
     public IPartitioner getPartitioner()
     {
-        return owner.getPartitioner();
+        return cfs.getPartitioner();
     }
 
     public void index(DecoratedKey key, Row row, Memtable mt, OpOrder.Group opGroup)
@@ -434,14 +440,39 @@ public class IndexContext
                             .orElse(null);
     }
 
-    public KeyRangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    // Returns an iterator for NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE, which
+    // 1. Either includes everything if the column type values can be truncated and
+    // thus the keys cannot be matched precisely,
+    // 2. or includes everything minus the keys matching the expression
+    // if the column type values cannot be truncated, i.e., matching the keys is always precise.
+    // (not matching precisely will lead to false negatives)
+    //
+    // keys k such that row(k) not contains v = (all keys) \ (keys k such that row(k) contains v)
+    //
+    // Note that rows in other indexes are not matched, so this can return false positives,
+    // but they are not a problem as post-filtering would get rid of them.
+    // The keys matched in other indexes cannot be safely subtracted
+    // as indexes may contain false positives caused by deletes and updates.
+    private KeyRangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        if (e.getOp().isNonEquality())
+        KeyRangeIterator allKeys = scanMemtable(keyRange);
+        if (TypeUtil.supportsRounding(expression.validator))
         {
-            Expression negExpression = e.negated();
-            KeyRangeIterator allKeys = scanMemtable(keyRange);
+            return allKeys;
+        }
+        else
+        {
+            Expression negExpression = expression.negated();
             KeyRangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
             return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
+        }
+    }
+
+    public KeyRangeIterator searchMemtable(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        if (expression.getOp().isNonEquality())
+        {
+            return getNonEqIterator(context, expression, keyRange);
         }
 
         Collection<MemtableIndex> memtables = liveMemtables.values();
@@ -457,7 +488,7 @@ public class IndexContext
         {
             for (MemtableIndex index : memtables)
             {
-                builder.add(index.search(context, e, keyRange, limit));
+                builder.add(index.search(context, expression, keyRange, limit));
             }
 
             return builder.build();
@@ -577,6 +608,23 @@ public class IndexContext
         return this.config == null ? null : config.name;
     }
 
+    public int getIntOption(String name, int defaultValue)
+    {
+        String value = this.config.options.get(name);
+        if (value == null)
+            return defaultValue;
+
+        try
+        {
+            return Integer.parseInt(value);
+        }
+        catch (NumberFormatException e)
+        {
+            logger.error("Failed to parse index configuration " + name + " = " + value + " as integer");
+            return defaultValue;
+        }
+    }
+
     public AbstractAnalyzer.AnalyzerFactory getAnalyzerFactory()
     {
         return analyzerFactory;
@@ -643,7 +691,6 @@ public class IndexContext
         }
     }
 
-    @VisibleForTesting
     public ConcurrentMap<Memtable, MemtableIndex> getLiveMemtables()
     {
         return liveMemtables;
@@ -873,7 +920,7 @@ public class IndexContext
             {
                 if (validate)
                 {
-                    if (!perIndexComponents.validateComponents(context.sstable, owner.getTracker(), true, false))
+                    if (!perIndexComponents.validateComponents(context.sstable, cfs.getTracker(), false, false))
                     {
                         // Note that a precise warning is already logged by the validation if there is an issue.
                         invalid.add(context);
@@ -882,7 +929,8 @@ public class IndexContext
                 }
 
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
-                logger.debug(logMessage("Successfully created index for SSTable {}."), context.descriptor());
+                long count = context.primaryKeyMapFactory().count();
+                logger.debug(logMessage("Successfully created index for SSTable {} with {} rows."), context.descriptor(), count);
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.
                 // This covers situation when SSTable collection has the same SSTable multiple
