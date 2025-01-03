@@ -37,6 +37,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -47,6 +48,7 @@ import org.slf4j.LoggerFactory;
 
 import static org.junit.Assert.*;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -506,6 +508,134 @@ public class RandomAccessReaderTest
             assertTrue(reader.isEOF());
             assertEquals(0, reader.bytesRemaining());
         }
+    }
+
+    // read vectored array tests - ints
+
+    private static final class VectoredIntReadArrayCase
+    {
+        private final int[][] expected;
+        private final long totalBytes;
+
+        static int counter;
+
+        VectoredIntReadArrayCase(int... numElements)
+        {
+            this.expected = new int[numElements.length][];
+            long bytes = 0;
+            for (int i = 0; i < numElements.length; i++)
+            {
+                int num = numElements[i];
+                bytes += ((long)num) * Integer.BYTES;
+                this.expected[i] = new int[num];
+                for (int j = 0; j < num; j++)
+                {
+                    this.expected[i][j] = counter++;
+                }
+            }
+            this.totalBytes = bytes;
+        }
+
+        int[][] createSizedArray()
+        {
+            int[][] arr = new int[expected.length][];
+            for (int i = 0; i < expected.length; i++)
+                arr[i] = new int[expected[i].length];
+            return arr;
+        }
+
+        long[] computePositions(long initial)
+        {
+            long[] positions = new long[expected.length];
+            positions[0] = initial;
+            for (int i = 1; i < expected.length; i++)
+                positions[i] = positions[i - 1] + ((long)expected[i - 1].length) * Integer.BYTES;
+            return positions;
+        }
+
+        @Override
+        public String toString()
+        {
+            return Arrays.stream(expected).map(arr -> Integer.toString(arr.length)).collect(Collectors.joining(", ", "[", "]"));
+        }
+    }
+
+    @Test
+    public void testVectoredIntArray() throws IOException
+    {
+        testVectoredReadIntArray(ByteOrder.BIG_ENDIAN);
+        testVectoredReadIntArray(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    private void testVectoredReadIntArray(ByteOrder order) throws IOException
+    {
+        // Note: using a small buffer would not work; the code in FileHandle enforce at least 4096 in the case
+        // we care about (simpl chunk reader), so reflecting this here.
+        int bufferSize = 4096;
+
+        List<VectoredIntReadArrayCase> cases = new ArrayList<>();
+        cases.add(new VectoredIntReadArrayCase(0, 0, 0));
+        cases.add(new VectoredIntReadArrayCase(10, 0, 10));
+        cases.add(new VectoredIntReadArrayCase(17, 100, 4, 12));
+        cases.add(new VectoredIntReadArrayCase(100, 100, 100));
+        cases.add(new VectoredIntReadArrayCase(121));
+        cases.add(new VectoredIntReadArrayCase(10000, 1));
+        cases.add(new VectoredIntReadArrayCase(1000, 20000, 10000, 30000));
+
+        File file = writeFile(writer -> {
+            try
+            {
+                writer.order(order);
+                for (VectoredIntReadArrayCase testCase : cases)
+                {
+                    for (int[] array : testCase.expected)
+                        for (int f : array)
+                            writer.writeInt(f);
+                }
+                return false;
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        });
+
+        try (ChannelProxy channel = new ChannelProxy(file);
+             FileHandle.Builder builder = new FileHandle.Builder(channel)
+                                          .order(order)
+                                          .bufferType(BufferType.OFF_HEAP)
+                                          .mmapped(false)
+                                          .withChunkCache(ChunkCache.instance)
+                                          .bufferSize(bufferSize);
+             FileHandle fh = builder.complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertEquals(channel.size(), reader.length());
+            assertEquals(channel.size(), reader.bytesRemaining());
+            assertEquals(file.length(), reader.available());
+
+            // Running twice: first run will mostly read from the file; the 2nd run will use the chunk cache
+            doTestVectoredReadIntArray(reader, cases);
+            doTestVectoredReadIntArray(reader, cases);
+        }
+    }
+
+    private void doTestVectoredReadIntArray(RandomAccessReader reader, List<VectoredIntReadArrayCase> cases) throws IOException
+    {
+        long position = 0;
+        for (VectoredIntReadArrayCase testCase : cases)
+        {
+            int[][] readArray = testCase.createSizedArray();
+            long[] positions = testCase.computePositions(position);
+            reader.read(readArray, positions);
+
+            assertArrayEquals(testCase.expected, readArray);
+
+            position += testCase.totalBytes;
+        }
+
+        assertTrue(reader.isEOF());
+        assertEquals(0, reader.bytesRemaining());
     }
 
     /** A fake file channel that simply increments the position and doesn't

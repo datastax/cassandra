@@ -386,6 +386,12 @@ public class ChunkCache
         }
 
         @Override
+        public boolean supportsConcurrentRebuffer()
+        {
+            return source.supportsReadingChunksConcurrently();
+        }
+
+        @Override
         public BufferHolder rebuffer(long position)
         {
             try

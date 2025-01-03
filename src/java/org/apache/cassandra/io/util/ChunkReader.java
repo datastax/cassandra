@@ -42,6 +42,11 @@ public interface ChunkReader extends RebuffererFactory
      */
     void readChunk(long position, ByteBuffer buffer);
 
+    default boolean supportsReadingChunksConcurrently()
+    {
+        return false;
+    }
+
     /**
      * Buffer size required for this rebufferer. Must be power of 2 if alignment is required.
      */
