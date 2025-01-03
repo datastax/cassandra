@@ -164,18 +164,38 @@ public class TopKProcessor
         // priority queue ordered by score in descending order
         Comparator<Triple<PartitionInfo, Row, ?>> comparator;
         if (queryVector != null)
+        {
             comparator = Comparator.comparing((Triple<PartitionInfo, Row, ?> t) -> (Float) t.getRight()).reversed();
+        }
         else
         {
             comparator = Comparator.comparing(t -> (ByteBuffer) t.getRight(), indexContext.getValidator());
             if (expression.operator() == Operator.ORDER_BY_DESC)
                 comparator = comparator.reversed();
         }
-        var topK = new TopKSelector<>(comparator, limit);
-        // to store top-k results in primary key order
-        TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition = new TreeMap<>(Comparator.comparing(p -> p.key));
 
-        if (PARALLEL_EXECUTOR != ImmediateExecutor.INSTANCE && partitions instanceof ParallelCommandProcessor) {
+        // If we are ordering filtered rows in the coordinator after reconciliation, we can simply return the rows in
+        // the requested top-k order straight away.
+        // However, if we are ordering unfiltered rows in the replica side before reconciliation, we'll also collect the
+        // rows in the requested index order, but we'll also reorder and return them in primary key order, so it doesn't
+        // confuse the reconciliation process or any other thing in the way to the call to Idex.QueryPlan#postProcessor,
+        // which will go back here again with filtered rows.
+        // TODO: given that top-k queries don't support CL>ONE, we might not need to return the unfiltered rows in PK order.
+        TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition = null;
+        if (partitions instanceof PartitionIterator)
+        {
+            comparator = comparator.thenComparing(Triple::getLeft, Comparator.comparing(p -> p.key))
+                                   .thenComparing(Triple::getMiddle, command.metadata().comparator);
+        }
+        else
+        {
+            unfilteredByPartition = new TreeMap<>(Comparator.comparing(p -> p.key));
+        }
+
+        var topK = new TopKSelector<>(comparator, limit);
+
+        if (PARALLEL_EXECUTOR != ImmediateExecutor.INSTANCE && partitions instanceof ParallelCommandProcessor)
+        {
             ParallelCommandProcessor pIter = (ParallelCommandProcessor) partitions;
             var commands = pIter.getUninitializedCommands();
             List<CompletableFuture<PartitionResults>> results = new ArrayList<>(commands.size());
@@ -201,7 +221,8 @@ public class TopKProcessor
                 });
             }
 
-            for (CompletableFuture<PartitionResults> triplesFuture: results) {
+            for (CompletableFuture<PartitionResults> triplesFuture: results)
+            {
                 PartitionResults pr;
                 try
                 {
@@ -219,7 +240,9 @@ public class TopKProcessor
                 for (var uf: pr.tombstones)
                     addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
-        } else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) {
+        }
+        else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever)
+        {
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
             int rowsMatched = 0;
@@ -232,7 +255,9 @@ public class TopKProcessor
                     rowsMatched += processSingleRowPartition(unfilteredByPartition, partitionRowIterator);
                 }
             }
-        } else {
+        }
+        else
+        {
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
             while (partitions.hasNext())
@@ -244,7 +269,7 @@ public class TopKProcessor
                     {
                         PartitionResults pr = processPartition(partitionRowIterator);
                         topK.addAll(pr.rows);
-                        for (var uf: pr.tombstones)
+                        for (var uf : pr.tombstones)
                             addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
                     }
                     else
@@ -255,18 +280,26 @@ public class TopKProcessor
                             topK.add(Triple.of(PartitionInfo.create(partitionRowIterator), row, row.getCell(expression.column()).buffer()));
                         }
                     }
-
                 }
             }
         }
 
-        // reorder rows in partition/clustering order
-        for (var triple : topK.getUnsortedShared())
-            addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
+        // If we are ordering filtered rows in the coordinator, we can use the top-k order straight away.
+        if (unfilteredByPartition == null)
+        {
+            List<Pair<PartitionInfo, Row>> sortedRows = new ArrayList<>(topK.size());
+            for (Triple<PartitionInfo, Row, ?> triple : topK.getShared())
+                sortedRows.add(Pair.create(triple.getLeft(), triple.getMiddle()));
 
-        if (partitions instanceof PartitionIterator)
-            return new InMemoryPartitionIterator(command, unfilteredByPartition);
-        return new InMemoryUnfilteredPartitionIterator(command, unfilteredByPartition);
+            return InMemoryPartitionIterator.create(command, sortedRows);
+        }
+        // If we are ordering unfiltered rows in the replica side we reorder the rows by primary key.
+        else
+        {
+            for (var triple : topK.getUnsortedShared())
+                addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
+            return new InMemoryUnfilteredPartitionIterator(command, unfilteredByPartition);
+        }
     }
 
     private class PartitionResults {
