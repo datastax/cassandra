@@ -20,6 +20,9 @@ package org.apache.cassandra.db.memtable;
 
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.collect.ImmutableMap;
+
+import org.apache.cassandra.config.InheritingClass;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
@@ -73,4 +76,6 @@ public class DefaultMemtableFactory implements Memtable.Factory
     {
         return TriePartitionUpdate.FACTORY;
     }
+
+    public static InheritingClass CONFIGURATION = new InheritingClass(null, TrieMemtable.class.getName(), ImmutableMap.of());
 }
