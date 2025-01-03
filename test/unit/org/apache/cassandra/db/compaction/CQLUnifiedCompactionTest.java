@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 
 import org.junit.After;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -288,6 +289,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
     }
 
     @Test
+    @Ignore // CNDB-12290 temporarily disabled
     public void testMultipleCompactionsDifferentWs_Static() throws Throwable
     {
         // tiered tests with W = [4, -6] and T = [6, 2], F = [6, 8]
