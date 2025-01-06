@@ -21,7 +21,6 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.sensors.NoOpRequestSensors;
 import org.apache.cassandra.sensors.RequestSensors;
 
 /**

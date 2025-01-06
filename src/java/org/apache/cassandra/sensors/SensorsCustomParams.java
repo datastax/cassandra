@@ -79,7 +79,7 @@ public final class SensorsCustomParams
     }
 
     /**
-     * AIterate over all sensors in the {@link RequestSensors} and encodes each sensor value by applying the given
+     * Iterate over all sensors in the {@link RequestSensors} and encodes each sensor value by applying the given
      * {@param valueFunction} in the internode response message as custom parameters.
      *
      * @param sensors the collection of sensors to encode in the response
@@ -97,7 +97,7 @@ public final class SensorsCustomParams
     }
 
     /**
-     * AIterate over all sensors in the {@link RequestSensors} and encodes each sensor values in the internode response
+     * Iterate over all sensors in the {@link RequestSensors} and encodes each sensor values in the internode response
      * message as custom parameters.
      *
      * @param sensors the collection of sensors to encode in the response

@@ -55,7 +55,9 @@ public interface SensorsFactory
     };
 
     /**
-     * Creates {@link RequestSensors} for the given keyspaces. Implementations should be very efficient because this method is potentially invoked on each verb handler serving a user request.
+     * Creates {@link RequestSensors} for the given keyspaces. This method is invoked by coordinators and replicas when
+     * handling requests at various stages/thread pools (e.g. when processing CQL queries or when applying verbs).
+     * Consequently, implementations should be very efficient.
      *
      * @param keyspaces the keyspaces associated with the request.
      * @return a {@link RequestSensors} instance. The default implementation returns a singleton no-op instance.

@@ -24,7 +24,7 @@ import java.util.Optional;
  * Implementation of the {@link SensorsFactory} that creates:
  * <ul>
  *   <li> a new {@link ActiveRequestSensors} instance for all keyspaces.</li>
- *   <li> a singtlon {@link SensorEncoder} implementation that encodes the sensor name as "<SENSOR_TYPE>_REQUEST.<TABLE_NAME>" for request sensors and "<SENSOR_TYPE>_GLOBAL.<TABLE_NAME>" for global sensors.</li>
+ *   <li> a singleton {@link SensorEncoder} implementation that encodes the sensor name as "<SENSOR_TYPE>_REQUEST.<TABLE_NAME>" for request sensors and "<SENSOR_TYPE>_GLOBAL.<TABLE_NAME>" for global sensors.</li>
  * </ul>
  */
 public class ActiveSensorsFactory implements SensorsFactory
