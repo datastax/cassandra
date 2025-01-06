@@ -27,8 +27,6 @@ import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import javax.annotation.Nullable;
 
 import org.apache.commons.lang3.tuple.Triple;
@@ -38,10 +36,6 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
-import org.apache.cassandra.concurrent.ImmediateExecutor;
-import org.apache.cassandra.concurrent.LocalAwareExecutorService;
-import org.apache.cassandra.concurrent.SharedExecutorPool;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -49,7 +43,6 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
-import org.apache.cassandra.db.partitions.ParallelCommandProcessor;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
@@ -59,7 +52,6 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.InMemoryPartitionIterator;
 import org.apache.cassandra.index.sai.utils.InMemoryUnfilteredPartitionIterator;
 import org.apache.cassandra.index.sai.utils.PartitionInfo;
@@ -92,7 +84,6 @@ public class TopKProcessor
     public static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. Ordering on non-clustering " +
                                                              "column requires the column to be indexed";
     protected static final Logger logger = LoggerFactory.getLogger(TopKProcessor.class);
-    private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor();
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private final ReadCommand command;
@@ -120,28 +111,7 @@ public class TopKProcessor
         this.limit = command.limits().count();
     }
 
-    /**
-     * Executor to use for parallel index reads.
-     * Defined by -Dcassandra.index_read.parallele=true/false, true by default.
-     *
-     * INDEX_READ uses 2 * cpus threads by default but can be overridden with -Dcassandra.index_read.parallel_thread_num=<value>
-     *
-     * @return stage to use, default INDEX_READ
-     */
-    private static LocalAwareExecutorService getExecutor()
-    {
-        boolean isParallel = CassandraRelevantProperties.USE_PARALLEL_INDEX_READ.getBoolean();
 
-        if (isParallel)
-        {
-            int numThreads = CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.isPresent()
-                                ? CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.getInt()
-                                : FBUtilities.getAvailableProcessors() * 2;
-            return SharedExecutorPool.SHARED.newExecutor(numThreads, maximumPoolSize -> {}, "request", "IndexParallelRead");
-        }
-        else
-            return ImmediateExecutor.INSTANCE;
-    }
 
     /**
      * Filter given partitions and keep the rows with highest scores. In case of {@link UnfilteredPartitionIterator},
@@ -161,67 +131,10 @@ public class TopKProcessor
 
     private <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filterInternal(P partitions)
     {
-        // priority queue ordered by score in descending order
-        Comparator<Triple<PartitionInfo, Row, ?>> comparator;
-        if (queryVector != null)
-            comparator = Comparator.comparing((Triple<PartitionInfo, Row, ?> t) -> (Float) t.getRight()).reversed();
-        else
-        {
-            comparator = Comparator.comparing(t -> (ByteBuffer) t.getRight(), indexContext.getValidator());
-            if (expression.operator() == Operator.ORDER_BY_DESC)
-                comparator = comparator.reversed();
-        }
-        var topK = new TopKSelector<>(comparator, limit);
         // to store top-k results in primary key order
         TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition = new TreeMap<>(Comparator.comparing(p -> p.key));
 
-        if (PARALLEL_EXECUTOR != ImmediateExecutor.INSTANCE && partitions instanceof ParallelCommandProcessor) {
-            ParallelCommandProcessor pIter = (ParallelCommandProcessor) partitions;
-            var commands = pIter.getUninitializedCommands();
-            List<CompletableFuture<PartitionResults>> results = new ArrayList<>(commands.size());
-
-            int count = commands.size();
-            for (var command: commands) {
-                CompletableFuture<PartitionResults> future = new CompletableFuture<>();
-                results.add(future);
-
-                // run last command immediately, others in parallel (if possible)
-                count--;
-                var executor = count == 0 ? ImmediateExecutor.INSTANCE : PARALLEL_EXECUTOR;
-
-                executor.maybeExecuteImmediately(() -> {
-                    try (var partitionRowIterator = pIter.commandToIterator(command.left(), command.right()))
-                    {
-                        future.complete(partitionRowIterator == null ? null : processPartition(partitionRowIterator));
-                    }
-                    catch (Throwable t)
-                    {
-                        future.completeExceptionally(t);
-                    }
-                });
-            }
-
-            for (CompletableFuture<PartitionResults> triplesFuture: results) {
-                PartitionResults pr;
-                try
-                {
-                    pr = triplesFuture.join();
-                }
-                catch (CompletionException t)
-                {
-                    if (t.getCause() instanceof AbortedOperationException)
-                        throw (AbortedOperationException) t.getCause();
-                    throw t;
-                }
-                if (pr == null)
-                    continue;
-                topK.addAll(pr.rows);
-                for (var uf: pr.tombstones)
-                    addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
-            }
-        } else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) {
-            // FilteredPartitions does not implement ParallelizablePartitionIterator.
-            // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
+        if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) {
             int rowsMatched = 0;
             // Check rowsMatched first to prevent fetching one more partition than needed.
             while (rowsMatched < limit && partitions.hasNext())
@@ -233,8 +146,19 @@ public class TopKProcessor
                 }
             }
         } else {
-            // FilteredPartitions does not implement ParallelizablePartitionIterator.
-            // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
+            // Only the coordinator reaches this block when doing postprocessing on query results, which are all in
+            // memory, so we do not parallelize the processing.
+            // priority queue ordered by score in descending order
+            Comparator<Triple<PartitionInfo, Row, ?>> comparator;
+            if (queryVector != null)
+                comparator = Comparator.comparing((Triple<PartitionInfo, Row, ?> t) -> (Float) t.getRight()).reversed();
+            else
+            {
+                comparator = Comparator.comparing(t -> (ByteBuffer) t.getRight(), indexContext.getValidator());
+                if (expression.operator() == Operator.ORDER_BY_DESC)
+                    comparator = comparator.reversed();
+            }
+            var topK = new TopKSelector<>(comparator, limit);
             while (partitions.hasNext())
             {
                 // have to close to move to the next partition, otherwise hasNext() fails
@@ -258,11 +182,10 @@ public class TopKProcessor
 
                 }
             }
+            // reorder rows in partition/clustering order
+            for (var triple : topK.getUnsortedShared())
+                addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
         }
-
-        // reorder rows in partition/clustering order
-        for (var triple : topK.getUnsortedShared())
-            addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
 
         if (partitions instanceof PartitionIterator)
             return new InMemoryPartitionIterator(command, unfilteredByPartition);
