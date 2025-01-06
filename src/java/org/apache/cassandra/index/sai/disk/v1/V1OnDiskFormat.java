@@ -271,9 +271,9 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator)
     {
-        if (TypeUtil.isLiteral(indexContext.getValidator()))
+        if (TypeUtil.isLiteral(validator))
             return LITERAL_COMPONENTS;
         return NUMERIC_COMPONENTS;
     }

@@ -215,9 +215,9 @@ public enum CassandraRelevantProperties
     UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
 
     /**
-     * The handler of the storage of sstables, and possibly other files such as txn logs.
+     * The factory for handler of the storage of sstables
      */
-    REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+    REMOTE_STORAGE_HANDLER_FACTORY("cassandra.remote_storage_handler_factory"),
 
     /**
      * To provide a provider to a different implementation of the truncate statement.
@@ -508,6 +508,11 @@ public enum CassandraRelevantProperties
     COMPACTION_SKIP_REPAIR_STATE_CHECKING("cassandra.compaction.skip_repair_state_checking", "false"),
 
     /**
+     * If this is true, compaction will not verify that sstables selected for compaction are marked compacted.
+     */
+    COMPACTION_SKIP_COMPACTING_STATE_CHECKING("cassandra.compaction.skip_compacting_state_checking", "false"),
+
+    /**
      * If true, the searcher object created when opening a SAI index will be replaced by a dummy object and index
      * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
      * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
@@ -540,6 +545,31 @@ public enum CassandraRelevantProperties
      * @see Stage for details
      */
     CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class"),
+
+    /**
+     * If true, makes read and write CQL statements async, splitting them from the {@link org.apache.cassandra.concurrent.Stage#NATIVE_TRANSPORT_REQUESTS}
+     * stage and into the {@link org.apache.cassandra.concurrent.Stage#COORDINATE_READ} and {@link org.apache.cassandra.concurrent.Stage#COORDINATE_MUTATION}
+     * stages respectively; in other words, the native transport stage will not block, offloading request processing
+     * (and any related blocking behaviour) to the specific read and write stages.
+     */
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false"),
+
+    /**
+     * Minimum time that needs to pass after the cluster is detected as fully upgraded to report that there is
+     * no upgrade in progress (when using the default cluster version provider).
+     */
+    CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION("cassandra.cluster_version_provider.min_stable_duration_ms", "60000"),
+
+    /**
+     * The class name of the custom cluster version provider to use.
+     */
+    CLUSTER_VERSION_PROVIDER_CLASS_NAME("cassandra.cluster_version_provider.class_name"),
+
+    /**
+     * Do not wait for gossip to be enabled before starting stabilisation period. This is required especially for tests
+     * which do not enable gossip at all.
+     */
+    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip"),
 
     /**
      * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.

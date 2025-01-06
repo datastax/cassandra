@@ -32,6 +32,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.commons.lang3.time.DateUtils;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import org.slf4j.Logger;
@@ -42,6 +43,7 @@ import ch.qos.logback.classic.joran.ReconfigureOnChangeTask;
 import ch.qos.logback.classic.spi.TurboFilterList;
 import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
 import ch.qos.logback.classic.turbo.TurboFilter;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -2173,5 +2175,22 @@ public class AggregationTest extends CQLTester
             }).isInstanceOf(InvalidRequestException.class)
               .hasMessageContaining("Aggregate name '%s' is invalid", funcName);
         }
+    }
+
+    @Test
+    public void testAggregatesAreNonDeterministicByDefault() throws Throwable
+    {
+        String fName = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s(i int, j int) RETURNS NULL ON NULL INPUT " +
+                                                       "RETURNS int " +
+                                                       "LANGUAGE java " +
+                                                       "AS 'return i + j;'");
+        String aName = createAggregate(KEYSPACE, "int", String.format("CREATE AGGREGATE %%s (int) SFUNC %s STYPE int INITCOND 1;", shortFunctionName(fName)));
+
+        UntypedResultSet aggregates = execute("SELECT * FROM system_schema.aggregates " +
+                                             "WHERE keyspace_name=? AND aggregate_name=?;",
+                                             KEYSPACE, shortFunctionName(aName));
+
+        Assert.assertEquals(1, aggregates.size());
+        Assert.assertFalse(aggregates.one().getBoolean("deterministic"));
     }
 }

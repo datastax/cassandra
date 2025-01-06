@@ -482,7 +482,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
     {
         Iterator<IndexPosIterator> partitionKeyIterators = TrieIndexScanner.makeBounds(this,
-                                                                                       Collections.singleton(range))
+                                                                                       Range.makeRowRange(range))
                                                                            .stream()
                                                                            .map(this::indexPosIteratorForRange)
                                                                            .iterator();
@@ -628,14 +628,6 @@ public class TrieIndexSSTableReader extends SSTableReader
                : new SSTableIterator(this, dataFileInput, key, indexEntry, slices, selectedColumns, rowIndexFile);
     }
 
-    public interface PartitionReader extends Closeable
-    {
-        /**
-         * Returns next item or null if exhausted.
-         */
-        Unfiltered next() throws IOException;
-    }
-
     @Override
     public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
     {
@@ -648,27 +640,6 @@ public class TrieIndexSSTableReader extends SSTableReader
     public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, RowIndexEntry indexEntry, boolean tombstoneOnly)
     {
         return SSTableIdentityIterator.create(this, dfile, indexEntry, key, tombstoneOnly);
-    }
-
-    @Override
-    public ISSTableScanner getScanner()
-    {
-        return TrieIndexScanner.getScanner(this);
-    }
-
-    @Override
-    public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
-    {
-        if (ranges != null)
-            return TrieIndexScanner.getScanner(this, ranges);
-        else
-            return getScanner();
-    }
-
-    @Override
-    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
-    {
-        return TrieIndexScanner.getScanner(this, rangeIterator);
     }
 
     @Override

@@ -24,7 +24,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Assert;
@@ -41,7 +40,9 @@ import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
 @RunWith(Parameterized.class)
@@ -71,10 +72,14 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
         ArrayList<Object[]> params = new ArrayList<>();
         for (Reservations.Type reservationsType : Reservations.Type.values())
             for (int reservations : new int[]{ 0, 1, Integer.MAX_VALUE })
+            {
+                if (reservations == 0 && reservationsType == Reservations.Type.LEVEL_OR_BELOW)
+                    continue; // if we don't have reservations, the type doesn't matter, save some time
                 for (double modifier : new double[]{ 0.0, 0.5, 1.0 })
                     for (int levels = 1; levels < 5; ++levels)
-                        for (int compactors : new int[] {1, 4, 12, 30})
+                        for (int compactors : new int[]{ 1, 4, 15, 30 })
                             params.add(new Object[]{ modifier, reservations, reservationsType, levels, compactors });
+            }
         return params;
     }
 
@@ -82,6 +87,7 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
     public void testGetSelection()
     {
         testGetSelection(generateCompactions(levels, 8 + compactors * 4, START_SIZE, modifier),
+                         requestedParallelism(),
                          reservations,
                          reservationsType,
                          compactors,
@@ -93,6 +99,11 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
     boolean ignoreRepeats()
     {
         return true;
+    }
+
+    int requestedParallelism()
+    {
+        return 1;
     }
 
     List<CompactionSSTable> getSSTablesSet(List<List<CompactionSSTable>> sets, int levels, int perLevel, int level, int sstableInLevel)
@@ -129,6 +140,8 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
                 when(aggregate.getSelected()).thenReturn(pick);
                 when(aggregate.maxOverlap()).thenReturn(overlap);
                 when(aggregate.toString()).thenAnswer(inv -> toString((CompactionAggregate) inv.getMock()));
+                Mockito.doCallRealMethod().when(aggregate).setPermittedParallelism(anyInt());
+                Mockito.doCallRealMethod().when(aggregate).getPermittedParallelism();
                 list.add(aggregate);
             }
             size *= growth;
@@ -140,10 +153,11 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
     {
         CompactionAggregate.UnifiedAggregate u = (CompactionAggregate.UnifiedAggregate) a;
         CompactionPick p = u.getSelected();
-        return String.format("level %d size %s overlap %d%s", levelOf(p), FBUtilities.prettyPrintMemory(p.totSizeInBytes()), u.maxOverlap(), p.hotness() < 0 ? " adaptive" : "");
+        return String.format("level %d size %s overlap %d parallelism %d%s", levelOf(p), FBUtilities.prettyPrintMemory(p.totSizeInBytes()), u.maxOverlap(), u.getPermittedParallelism(), p.hotness() < 0 ? " adaptive" : "");
     }
 
     public void testGetSelection(List<CompactionAggregate.UnifiedAggregate> compactions,
+                                 int requestedParallelism,
                                  int reservations,
                                  Reservations.Type reservationType,
                                  int totalCount,
@@ -151,10 +165,11 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
                                  long spaceAvailable,
                                  int adaptiveLimit)
     {
-        System.out.println(String.format("Starting testGetSelection: reservations %d, totalCount %d, levelCount %d, spaceAvailable %s, adaptiveLimit %d",
+        System.out.println(String.format("Starting testGetSelection: reservations %d, totalCount %d, levelCount %d, requestedParallelism %d, spaceAvailable %s, adaptiveLimit %d",
                                          reservations,
                                          totalCount,
                                          levelCount,
+                                         requestedParallelism,
                                          FBUtilities.prettyPrintMemory(spaceAvailable),
                                          adaptiveLimit));
         boolean ignoreRepeats = ignoreRepeats();
@@ -167,6 +182,13 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
         when(controller.getOverheadSizeInBytes(any())).thenAnswer(inv -> ((CompactionPick) inv.getArgument(0)).totSizeInBytes());
         when(controller.isRecentAdaptive(any())).thenAnswer(inv -> ((CompactionPick) inv.getArgument(0)).hotness() < 0);  // hotness is used to mock adaptive
         when(controller.overlapInclusionMethod()).thenReturn(ignoreRepeats ? Overlaps.InclusionMethod.TRANSITIVE : Overlaps.InclusionMethod.NONE);
+        when(controller.parallelizeOutputShards()).thenReturn(true);
+
+        UnifiedCompactionStrategy.ShardingStats stats = new UnifiedCompactionStrategy.ShardingStats(null, null, 0, 0, 0, 0, requestedParallelism);
+        UnifiedCompactionStrategy strategy = Mockito.mock(UnifiedCompactionStrategy.class, Mockito.withSettings().stubOnly());
+        when(strategy.getController()).thenReturn(controller);
+        when(strategy.getShardingStats(any())).thenReturn(stats);
+        when(strategy.getSelection(any(), anyInt(), any(), anyLong(), anyInt())).thenCallRealMethod();
 
         int[] perLevel = new int[levelCount];
         int maxReservations = totalCount / levelCount;
@@ -185,18 +207,18 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
             {
                 CompactionPick compaction = aggregate.getSelected();
                 final int level = levelOf(compaction);
-                ++perLevel[level];
+                final int threads = ((CompactionAggregate.UnifiedAggregate) aggregate).getPermittedParallelism();
+                perLevel[level] += threads;
                 spaceTaken += compaction.totSizeInBytes();
                 if (controller.isRecentAdaptive(compaction))
-                    ++adaptiveUsed;
+                    adaptiveUsed += threads;
             }
 
-            List<CompactionAggregate> result = UnifiedCompactionStrategy.getSelection(compactions,
-                                                                                      controller,
-                                                                                      totalCount,
-                                                                                      perLevel,
-                                                                                      spaceAvailable - spaceTaken,
-                                                                                      adaptiveLimit - adaptiveUsed);
+            List<CompactionAggregate> result = strategy.getSelection(compactions,
+                                                                     totalCount,
+                                                                     perLevel,
+                                                                     spaceAvailable - spaceTaken,
+                                                                     adaptiveLimit - adaptiveUsed);
 
             System.out.println("Selected " + result.size() + ": " + result.stream()
                                                                           .map(a -> toString(a))
@@ -218,10 +240,11 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
             {
                 CompactionPick compaction = aggregate.getSelected();
                 final int level = levelOf(compaction);
-                ++perLevel[level];
+                final int threads = ((CompactionAggregate.UnifiedAggregate) aggregate).getPermittedParallelism();
+                perLevel[level] += threads;
                 spaceTaken += compaction.totSizeInBytes();
                 if (controller.isRecentAdaptive(compaction))
-                    ++adaptiveUsed;
+                    adaptiveUsed += threads;
             }
 
             // Check that restrictions are honored
@@ -270,6 +293,10 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
                         Assert.assertThat(other.bucketIndex(), Matchers.lessThanOrEqualTo(unifiedAggregate.bucketIndex()));
                 }
             }
+
+            // Check that we don't assign higher parallelism than requested
+            for (CompactionAggregate c : result)
+                Assert.assertThat(((CompactionAggregate.UnifiedAggregate) c).getPermittedParallelism(), Matchers.lessThanOrEqualTo(requestedParallelism));
 
 
             // randomly simulate some of them completing

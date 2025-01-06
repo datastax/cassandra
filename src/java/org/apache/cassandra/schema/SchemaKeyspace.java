@@ -841,7 +841,11 @@ public final class SchemaKeyspace
                .add("language", function.language())
                .add("return_type", function.returnType().asCQL3Type().toString())
                .add("called_on_null_input", function.isCalledOnNullInput())
-               .add("argument_names", function.argNames().stream().map((c) -> bbToString(c.bytes)).collect(toList()));
+               .add("argument_names", function.argNames().stream().map((c) -> bbToString(c.bytes)).collect(toList()))
+               // below values (deterministic, monotonic, monotonic_on) are needed to keep the backward compatibility with some drivers (C# driver for instance)
+               .add("deterministic", false)
+               .add("monotonic", false)
+               .add("monotonic_on", Collections.emptyList());
     }
 
     private static String bbToString(ByteBuffer bb)
@@ -869,6 +873,8 @@ public final class SchemaKeyspace
                .add("state_func", aggregate.stateFunction().name().name)
                .add("state_type", aggregate.stateType().asCQL3Type().toString())
                .add("final_func", aggregate.finalFunction() != null ? aggregate.finalFunction().name().name : null)
+                // below value (deterministic) is needed to keep the backward compatibility with some drivers (C# driver for instance)
+               .add("deterministic", false)
                .add("initcond", aggregate.initialCondition() != null
                                 // must use the frozen state type here, as 'null' for unfrozen collections may mean 'empty'
                                 ? aggregate.stateType().freeze().asCQL3Type().toCQLLiteral(aggregate.initialCondition(), ProtocolVersion.CURRENT)

@@ -150,6 +150,7 @@
                                           -Dcassandra.storagedir=$PROJECT_DIR$/data
                                           -Djava.library.path=$PROJECT_DIR$/lib/sigar-bin
                                           -Dlogback.configurationFile=file://$PROJECT_DIR$/conf/logback.xml
+                                          -Dcassandra.cluster_version_provider.min_stable_duration_ms=0
                                           -ea" />
       <option name="PROGRAM_PARAMETERS" value="" />
       <option name="WORKING_DIRECTORY" value="" />
@@ -192,6 +193,8 @@
                                           -Dcassandra.tolerate_sstable_size=true
                                           -Dcassandra.use_nix_recursive_delete=true
                                           -Dcassandra.testtag=ide
+                                          -Dcassandra.cluster_version_provider.min_stable_duration_ms=0
+                                          -Dcassandra.test.cluster_version_provider.skip_wait_for_gossip=true
                                           -Dinvalid-legacy-sstable-root=$PROJECT_DIR$/test/data/invalid-legacy-sstables
                                           -Djava.library.path=$PROJECT_DIR$/lib/sigar-bin
                                           -Dlegacy-sstable-root=$PROJECT_DIR$/test/data/legacy-sstables

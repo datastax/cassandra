@@ -93,165 +93,118 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     @Override
     public void read(float[] dest, int offset, int count) throws IOException
     {
-        var copied = 0;
-        while (copied < count)
+        for (int inBuffer = buffer.remaining() / Float.BYTES;
+             inBuffer < count;
+             inBuffer = buffer.remaining() / Float.BYTES)
         {
-            var bh = bufferHolder;
-            long position = getPosition();
-
-            FloatBuffer floatBuffer;
-            if (bh.offset() == 0 && position % Float.BYTES == 0 && bh.order() == order)
+            if (inBuffer >= 1)
             {
-                // this is a separate code path because buffer() and asFloatBuffer() both allocate
-                // new and relatively expensive xBuffer objects, so we want to avoid doing that
-                // twice, where possible. If the BufferHandler has a different underlying
-                // byte order, we duplicate first because there is not yet a way to configure
-                // the buffer handler to use the correct byte order.
-                floatBuffer = bh.floatBuffer();
-                floatBuffer.position(Ints.checkedCast(position / Float.BYTES));
-            }
-            else
-            {
-                // bufferHolder offset is non-zero, and probably not aligned to Float.BYTES, so
-                // set the position before converting to FloatBuffer.
-                var bb = bh.buffer();
-                bb.order(order);
-                bb.position(Ints.checkedCast(position - bh.offset()));
-                floatBuffer = bb.asFloatBuffer();
+                // read as much as we can from the buffer
+                readFloats(buffer, order, dest, offset, inBuffer);
+                offset += inBuffer;
+                count -= inBuffer;
             }
 
-            var remaining = floatBuffer.remaining();
-            if (remaining == 0)
+            if (buffer.remaining() > 0)
             {
-                // slow path -- the next float bytes are across a buffer boundary (we never start a loop iteration with
-                // the "current" buffer fully exhausted, so `remaining == 0` truly means "some bytes remains, but not
-                // enough for a float"), so we read that float individually (which will read it byte by byte,
-                // reBuffering as needed). After that we loop, which will switch back to the faster path for any
-                // remaining floats in the newly reloaded buffer.
-                dest[offset + copied] = readFloat();
-                seek(position + Float.BYTES);
-                copied++;
+                // read the buffer-spanning value using the slow path
+                dest[offset++] = readFloat();
+                --count;
             }
             else
-            {
-                var elementsToRead = Math.min(remaining, count - copied);
-                floatBuffer.get(dest, offset + copied, elementsToRead);
-                seek(position + ((long) elementsToRead * Float.BYTES));
-                copied += elementsToRead;
-            }
+                reBuffer();
         }
+
+        readFloats(buffer, order, dest, offset, count);
     }
 
     @Override
-    public void readFully(long[] dest) throws IOException {
-        int copied = 0;
-        while (copied < dest.length)
-        {
-            var bh = bufferHolder;
-            long position = getPosition();
-
-            LongBuffer longBuffer;
-            if (bh.offset() == 0 && position % Long.BYTES == 0 && bh.order() == order)
-            {
-                // this is a separate code path because buffer() and asLongBuffer() both allocate
-                // new and relatively expensive xBuffer objects, so we want to avoid doing that
-                // twice, where possible. If the BufferHandler has a different underlying
-                // byte order, we duplicate first because there is not yet a way to configure
-                // the buffer handler to use the correct byte order.
-                longBuffer = bh.longBuffer();
-                longBuffer.position(Ints.checkedCast(position / Long.BYTES));
-            }
-            else
-            {
-                // offset is non-zero, and probably not aligned to Long.BYTES, so
-                // set the position before converting to LongBuffer.
-                var bb = bh.buffer();
-                bb.order(order);
-                bb.position(Ints.checkedCast(position - bh.offset()));
-                longBuffer = bb.asLongBuffer();
-            }
-
-            var remaining = longBuffer.remaining();
-            if (remaining == 0)
-            {
-                // slow path -- the next long bytes are across a buffer boundary (we never start a loop iteration with
-                // the "current" buffer fully exhausted, so `remaining == 0` truly means "some bytes remains, but not
-                // enough for a long"), so we read that long individually (which will read it byte by byte,
-                // reBuffering as needed). After that we loop, which will switch back to the faster path for any
-                // remaining longs in the newly reloaded buffer.
-                dest[copied] = readLong();
-                seek(position + Long.BYTES);
-                copied++;
-            }
-            else
-            {
-                var elementsToRead = Math.min(remaining, dest.length - copied);
-                longBuffer.get(dest, copied, elementsToRead);
-                seek(position + ((long) elementsToRead * Long.BYTES));
-                copied += elementsToRead;
-            }
-        }
+    public void readFully(long[] dest) throws IOException
+    {
+        read(dest, 0, dest.length);
     }
 
-    /**
-     * Read ints into an int[], starting at the current position.
-     *
-     * @param dest the array to read into
-     * @param offset the offset in the array at which to start writing ints
-     * @param count the number of ints to read
-     *
-     * Will change the buffer position.
-     */
+    public void read(long[] dest, int offset, int count) throws IOException
+    {
+        for (int inBuffer = buffer.remaining() / Long.BYTES;
+             inBuffer < count;
+             inBuffer = buffer.remaining() / Long.BYTES)
+        {
+            if (inBuffer >= 1)
+            {
+                // read as much as we can from the buffer
+                readLongs(buffer, order, dest, offset, inBuffer);
+                offset += inBuffer;
+                count -= inBuffer;
+            }
+
+            if (buffer.remaining() > 0)
+            {
+                // read the buffer-spanning value using the slow path
+                dest[offset++] = readLong();
+                --count;
+            }
+            else
+                reBuffer();
+        }
+
+        readLongs(buffer, order, dest, offset, count);
+    }
+
     @Override
     public void read(int[] dest, int offset, int count) throws IOException
     {
-        int copied = 0;
-        while (copied < count)
+        for (int inBuffer = buffer.remaining() / Integer.BYTES;
+             inBuffer < count;
+             inBuffer = buffer.remaining() / Integer.BYTES)
         {
-            var bh = bufferHolder;
-            long position = getPosition();
-
-            IntBuffer intBuffer;
-            if (bh.offset() == 0 && position % Integer.BYTES == 0 && bh.order() == order)
+            if (inBuffer >= 1)
             {
-                // this is a separate code path because buffer() and asIntBuffer() both allocate
-                // new and relatively expensive xBuffer objects, so we want to avoid doing that
-                // twice, where possible. If the BufferHandler has a different underlying
-                // byte order, we duplicate first because there is not yet a way to configure
-                // the buffer handler to use the correct byte order.
-                intBuffer = bh.intBuffer();
-                intBuffer.position(Ints.checkedCast(position / Integer.BYTES));
-            }
-            else
-            {
-                // offset is non-zero, and probably not aligned to Integer.BYTES, so
-                // set the position before converting to IntBuffer.
-                var bb = bh.buffer();
-                bb.order(order);
-                bb.position(Ints.checkedCast(position - bh.offset()));
-                intBuffer = bb.asIntBuffer();
+                // read as much as we can from the buffer
+                readInts(buffer, order, dest, offset, inBuffer);
+                offset += inBuffer;
+                count -= inBuffer;
             }
 
-            var remaining = intBuffer.remaining();
-            if (remaining == 0)
+            if (buffer.remaining() > 0)
             {
-                // slow path -- the next int bytes are across a buffer boundary (we never start a loop iteration with
-                // the "current" buffer fully exhausted, so `remaining == 0` truly means "some bytes remains, but not
-                // enough for an int"), so we read that int individually (which will read it byte by byte,
-                // reBuffering as needed). After that we loop, which will switch back to the faster path for any
-                // remaining ints in the newly reloaded buffer.
-                dest[offset + copied] = readInt();
-                seek(position + Integer.BYTES);
-                copied++;
+                // read the buffer-spanning value using the slow path
+                dest[offset++] = readInt();
+                --count;
             }
             else
-            {
-                var elementsToRead = Math.min(remaining, count - copied);
-                intBuffer.get(dest, offset + copied, elementsToRead);
-                seek(position + ((long) elementsToRead * Integer.BYTES));
-                copied += elementsToRead;
-            }
+                reBuffer();
         }
+
+        readInts(buffer, order, dest, offset, count);
+    }
+
+    private static void readFloats(ByteBuffer buffer, ByteOrder order, float[] dest, int offset, int count)
+    {
+        FloatBuffer floatBuffer = updateBufferByteOrderIfNeeded(buffer, order).asFloatBuffer();
+        floatBuffer.get(dest, offset, count);
+        buffer.position(buffer.position() + count * Float.BYTES);
+    }
+
+    private static void readLongs(ByteBuffer buffer, ByteOrder order, long[] dest, int offset, int count)
+    {
+        LongBuffer longBuffer = updateBufferByteOrderIfNeeded(buffer, order).asLongBuffer();
+        longBuffer.get(dest, offset, count);
+        buffer.position(buffer.position() + count * Long.BYTES);
+    }
+
+    private static void readInts(ByteBuffer buffer, ByteOrder order, int[] dest, int offset, int count)
+    {
+        IntBuffer intBuffer = updateBufferByteOrderIfNeeded(buffer, order).asIntBuffer();
+        intBuffer.get(dest, offset, count);
+        buffer.position(buffer.position() + count * Integer.BYTES);
+    }
+
+    private static ByteBuffer updateBufferByteOrderIfNeeded(ByteBuffer buffer, ByteOrder order)
+    {
+        return buffer.order() != order
+               ? buffer.duplicate().order(order)
+               : buffer;    // Note: ?: rather than if to hit one-liner inlining path
     }
 
     @Override

@@ -18,6 +18,7 @@
 package org.apache.cassandra.transport.messages;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.auth.AuthEvents;
@@ -69,7 +70,12 @@ public class AuthResponse extends Message.Request
     }
 
     @Override
-    protected Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    protected CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    {
+        return CompletableFuture.completedFuture(executeSync(queryState, queryStartNanoTime, traceRequest));
+    }
+
+    private Response executeSync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
     {
         try
         {

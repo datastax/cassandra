@@ -251,10 +251,10 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
         }
     }
 
-    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
         removeDeadSSTables();
-        return super.getMaximalTasks(gcBefore, splitOutput);
+        return super.getMaximalTasks(gcBefore, splitOutput, permittedParallelism);
     }
 
     /**
@@ -312,7 +312,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
             // there is no overlap, tombstones are safely droppable
             return true;
         }
-        else if (CompactionController.getFullyExpiredSSTables(realm, Collections.singleton(sstable), overlaps, gcBefore).size() > 0)
+        else if (CompactionController.getFullyExpiredSSTables(realm, Collections.singleton(sstable), c -> overlaps, gcBefore).size() > 0)
         {
             return true;
         }

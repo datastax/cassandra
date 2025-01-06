@@ -113,6 +113,8 @@ public class Config
 
     public volatile long repair_prepare_message_timeout_in_ms = 10000L;
 
+    public volatile long native_transport_timeout_in_ms = 12000L;
+
     public Integer streaming_connections_per_host = 1;
     public Integer streaming_keep_alive_period_in_secs = 300; //5 minutes
 
@@ -124,6 +126,8 @@ public class Config
 
     public int concurrent_reads = 32;
     public int concurrent_writes = 32;
+    public int concurrent_coordinator_reads = 32;
+    public int concurrent_coordinator_writes = 32;
     public int concurrent_counter_writes = 32;
     public int concurrent_materialized_view_writes = 32;
 

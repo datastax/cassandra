@@ -75,7 +75,8 @@ public class QueryController
 
     public Collection<RowFilter.Expression> getExpressions()
     {
-        return command.rowFilter().getExpressions();
+        // This index doesn't support disjunctions, so we only consider the top-level AND expressions.
+        return command.rowFilter().withoutDisjunctions().expressions();
     }
 
     public DataRange dataRange()

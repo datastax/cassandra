@@ -27,6 +27,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -102,12 +103,12 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator)
     {
         // VSTODO add checksums and actual validation
-        if (indexContext.isVector())
+        if (validator.isVector())
             return VECTOR_COMPONENTS_V3;
-        return super.perIndexComponentTypes(indexContext);
+        return super.perIndexComponentTypes(validator);
     }
 
     @VisibleForTesting

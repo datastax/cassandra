@@ -19,7 +19,6 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -28,7 +27,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -40,14 +38,11 @@ import org.apache.cassandra.db.rows.LazilyInitializedUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.AbstractBounds.Boundary;
-import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPositionBounds;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -76,33 +71,12 @@ public class TrieIndexScanner implements ISSTableScanner
 
     protected CloseableIterator<UnfilteredRowIterator> iterator;
 
-    // Full scan of the sstables
-    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable)
-    {
-        return getScanner(sstable, Iterators.singletonIterator(fullRange(sstable)));
-    }
-
     public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable,
                                              ColumnFilter columns,
                                              DataRange dataRange,
                                              SSTableReadsListener listener)
     {
-        return new TrieIndexScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator(), listener);
-    }
-
-    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable, Collection<Range<Token>> tokenRanges)
-    {
-        // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
-        List<PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
-        if (positions.isEmpty())
-            return new EmptySSTableScanner(sstable);
-
-        return getScanner(sstable, makeBounds(sstable, tokenRanges).iterator());
-    }
-
-    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable, Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
-    {
-        return new TrieIndexScanner(sstable, ColumnFilter.all(sstable.metadata()), null, rangeIterator, SSTableReadsListener.NOOP_LISTENER);
+        return new TrieIndexScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange.keyRange()).iterator(), listener);
     }
 
     private TrieIndexScanner(TrieIndexSSTableReader sstable,
@@ -121,24 +95,11 @@ public class TrieIndexScanner implements ISSTableScanner
         this.listener = listener;
     }
 
-    public static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
-    {
-        List<AbstractBounds<PartitionPosition>> boundsList = new ArrayList<>(tokenRanges.size());
-        for (Range<Token> range : Range.normalize(tokenRanges))
-            addRange(sstable, Range.makeRowRange(range), boundsList);
-        return boundsList;
-    }
-
-    static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, DataRange dataRange)
+    static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, AbstractBounds<PartitionPosition> dataRange)
     {
         List<AbstractBounds<PartitionPosition>> boundsList = new ArrayList<>(2);
-        addRange(sstable, dataRange.keyRange(), boundsList);
+        addRange(sstable, dataRange, boundsList);
         return boundsList;
-    }
-
-    static AbstractBounds<PartitionPosition> fullRange(SSTableReader sstable)
-    {
-        return new Bounds<>(sstable.first, sstable.last);
     }
 
     private static void addRange(SSTableReader sstable, AbstractBounds<PartitionPosition> requested, List<AbstractBounds<PartitionPosition>> boundsList)
