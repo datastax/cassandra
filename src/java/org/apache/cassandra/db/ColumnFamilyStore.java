@@ -3242,6 +3242,34 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             this.sstables = sstables;
             this.memtables = memtables;
         }
+
+        public void sortSSTablesByMaxTimestampDescending()
+        {
+            sstables.sort(SSTableReader.maxTimestampDescending);
+        }
+    }
+
+    // A RefViewFragment that is sorted by max timestamp descending, which makes this object safe to reuse and to
+    // share across threads.
+    public static class SortedRefViewFragment extends RefViewFragment
+    {
+        private SortedRefViewFragment(RefViewFragment view)
+        {
+            // Copy sstable list to an immutable list to ensure there is not a future change that modifies the list
+            super(List.copyOf(view.sstables), view.memtables, view.refs);
+        }
+
+        // sstables are expected to be pre-sorted
+        @Override
+        public void sortSSTablesByMaxTimestampDescending()
+        {
+        }
+
+        public static SortedRefViewFragment sortThenCreateFrom(RefViewFragment view)
+        {
+            view.sortSSTablesByMaxTimestampDescending();
+            return new SortedRefViewFragment(view);
+        }
     }
 
     public static class RefViewFragment extends ViewFragment implements AutoCloseable
