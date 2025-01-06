@@ -448,12 +448,14 @@ public class BatchStatement implements CQLStatement
 
         ResultMessage<ResultMessage.Void> result = new ResultMessage.Void();
         RequestSensors sensors = RequestTracker.instance.get();
-        Set<Context> uniqueContexts = statements.stream()
-                                                .map(ModificationStatement::metadata)
-                                                .map(Context::from)
-                                                .collect(Collectors.toSet());
-        for (Context context : uniqueContexts)
+        Map<TableId, TableMetadata> tableMetadataById = statements.stream()
+                                                                  .map(ModificationStatement::metadata)
+                                                                  .collect(Collectors.toMap(metadata -> metadata.id, Function.identity(), (existing, replacement) -> existing));
+        for (TableMetadata metadata : tableMetadataById.values())
+        {
+            Context context = Context.from(metadata);
             SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_BYTES);
+        }
 
         return result;
     }
