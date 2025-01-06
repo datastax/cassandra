@@ -3451,6 +3451,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             logger.trace("CFS {} is being dropped: indexes removed", name);
 
         CompactionManager.instance.interruptCompactionForCFs(concatWithIndexes(), (sstable) -> true, true, TableOperation.StopTrigger.DROP_TABLE);
+        CompactionManager.instance.waitForCessation(concatWithIndexes(), (sstable) -> true);
+        if (CompactionManager.instance.isCompacting(concatWithIndexes(), ssTableReader -> true))
+            logger.warn(String.format("Unable to cancel in-progress compactions for %s. Perhaps there is an unusually " +
+                                      "large row in progress somewhere, or the system is simply overloaded.", metadata()));
         if (logger.isTraceEnabled())
             logger.trace("CFS {} is being dropped: compactions stopped", name);
 
