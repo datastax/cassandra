@@ -93,14 +93,6 @@ public interface PartitionUpdate extends Partition
      */
     int operationCount();
 
-    // FIXME review
-    /**
-     * The accumulated BTree size of the data contained in this update.
-     *
-     * @return the accumulated BTree size of the data contained in this update.
-     */
-    long accumulatedDataSize();
-
     /**
      * The size of the data contained in this update.
      *
