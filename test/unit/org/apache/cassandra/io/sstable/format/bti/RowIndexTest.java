@@ -65,7 +65,9 @@ public class RowIndexTest
 {
     private final static Logger logger = LoggerFactory.getLogger(RowIndexTest.class);
     private static final Version latestVersion = new BtiFormat(null).getLatestVersion();
-    private static final Version legacyVersion = new BtiFormat(null).getVersion("aa");
+    private static final Version version_aa = new BtiFormat(null).getVersion("aa");
+    private static final Version version_ca = new BtiFormat(null).getVersion("ca");
+    private static final Version version_da = new BtiFormat(null).getVersion("da");
 
 
     static final Random RANDOM;
@@ -88,8 +90,13 @@ public class RowIndexTest
     {
         return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard, latestVersion },
                              new Object[]{ Config.DiskAccessMode.mmap, latestVersion },
-                             new Object[]{ Config.DiskAccessMode.standard, legacyVersion },
-                             new Object[]{ Config.DiskAccessMode.mmap, legacyVersion });
+                             new Object[]{ Config.DiskAccessMode.standard, version_aa },
+                             new Object[]{ Config.DiskAccessMode.mmap, version_aa },
+                             new Object[]{ Config.DiskAccessMode.standard, version_ca },
+                             new Object[]{ Config.DiskAccessMode.mmap, version_ca },
+                             new Object[]{ Config.DiskAccessMode.standard, version_da },
+                             new Object[]{ Config.DiskAccessMode.mmap, version_da }
+        );
     }
 
     @Parameterized.Parameter(value = 0)
