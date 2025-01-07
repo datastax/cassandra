@@ -322,7 +322,17 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @Override
     public long unsharedHeapSize()
     {
-        return dataSize;
+        assert trie instanceof InMemoryTrie;
+        InMemoryTrie<Object> inMemoryTrie = (InMemoryTrie<Object>) trie;
+        long heapSize = inMemoryTrie.usedSizeOnHeap();
+        for (Object o : inMemoryTrie.values())
+        {
+            if (o instanceof RowData)
+                heapSize += ((RowData) o).unsharedHeapSizeExcludingData();
+            else
+                heapSize += ((DeletionInfo) o).unsharedHeapSize();
+        }
+        return heapSize;
     }
 
     /**

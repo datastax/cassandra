@@ -20,7 +20,6 @@ package org.apache.cassandra.db.tries;
 
 import org.junit.Test;
 
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 public class TrieToMermaidTest
@@ -28,7 +27,7 @@ public class TrieToMermaidTest
     @Test
     public void testToMermaidContent() throws Exception
     {
-        InMemoryTrie<Object> trie = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.OFF_HEAP, InMemoryTrie.ExpectedLifetime.LONG, null);
+        InMemoryTrie<Object> trie = InMemoryTrie.shortLived(ByteComparable.Version.OSS50);
         // This was used as a basis the graphs in BTIFormat.md
         String s = "a allow an and any are as node of on the this to trie types with without";
         s = s.toLowerCase();

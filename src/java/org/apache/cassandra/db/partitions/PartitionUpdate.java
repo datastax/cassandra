@@ -100,7 +100,6 @@ public interface PartitionUpdate extends Partition
      */
     int dataSize();
 
-    // FIXME review
     long unsharedHeapSize();
 
     @Override

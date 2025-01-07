@@ -180,11 +180,6 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         return Trie.mergeDistinct(tries);
     }
 
-    protected Factory factory()
-    {
-        return FACTORY;
-    }
-
     public boolean isClean()
     {
         for (MemtableShard shard : shards)

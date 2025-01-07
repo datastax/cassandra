@@ -278,7 +278,6 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
                 + holder.staticRow.dataSize());
     }
 
-    // FIXME review
     /**
      * The size of the data contained in this update.
      *
