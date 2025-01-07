@@ -100,6 +100,12 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     }
 
     @Override
+    public void addMemoryUsageTo(MemoryUsage stats)
+    {
+        super.addMemoryUsageTo(stats);
+    }
+
+    @Override
     public boolean isClean()
     {
         return partitions.isEmpty();
