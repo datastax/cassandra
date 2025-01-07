@@ -36,6 +36,8 @@ import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 public class EstimatedHistogram
 {
     public static final EstimatedHistogramSerializer serializer = new EstimatedHistogramSerializer();
+    public static final boolean USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
+    private static final Logger log = LoggerFactory.getLogger(EstimatedHistogram.class);
 
     /**
      * The series of values to which the counts in `buckets` correspond:
@@ -60,12 +62,18 @@ public class EstimatedHistogram
 
     public EstimatedHistogram(int bucketCount)
     {
-        this(bucketCount, false);
+        this(bucketCount, false, USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
+    }
+
+    public EstimatedHistogram(int bucketCount, boolean considerZeroes, boolean useDseCompatibleBoundaries)
+    {
+        bucketOffsets = newOffsets(bucketCount, considerZeroes, useDseCompatibleBoundaries);
+        buckets = new AtomicLongArray(bucketOffsets.length + 1);
     }
 
     public EstimatedHistogram(int bucketCount, boolean considerZeroes)
     {
-        bucketOffsets = newOffsets(bucketCount, considerZeroes);
+        bucketOffsets = newOffsets(bucketCount, considerZeroes, USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
         buckets = new AtomicLongArray(bucketOffsets.length + 1);
     }
 
@@ -77,7 +85,7 @@ public class EstimatedHistogram
     public EstimatedHistogram(long[] bucketData)
     {
         assert bucketData != null && bucketData.length > 0 : "Bucket data must be an array of size more than 0";
-        bucketOffsets = newOffsets(bucketData.length - 1, false);
+        bucketOffsets = newOffsets(bucketData.length - 1, false, USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
         buckets = new AtomicLongArray(bucketData);
     }
 
@@ -88,9 +96,9 @@ public class EstimatedHistogram
         buckets = new AtomicLongArray(bucketData);
     }
 
-    public static long[] newOffsets(int size, boolean considerZeroes)
+    public static long[] newOffsets(int size, boolean considerZeroes, boolean useDseCompatibleBoundaries)
     {
-        if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+        if (useDseCompatibleBoundaries)
             return DecayingEstimatedHistogramReservoir.newDseOffsets(size, considerZeroes);
         else
             return newCassandraOffsets(size, considerZeroes);

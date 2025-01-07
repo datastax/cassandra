@@ -19,6 +19,7 @@
 package org.apache.cassandra.metrics;
 
 import java.io.ByteArrayOutputStream;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -26,6 +27,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
@@ -44,6 +46,9 @@ import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.ReflectionUtils;
+import org.awaitility.reflect.WhiteboxImpl;
+import org.mockito.Mockito;
 import org.quicktheories.core.Gen;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -81,14 +86,26 @@ public class DecayingEstimatedHistogramReservoirTest
     private Gen<long[]> generateOffsets()
     {
         assertEquals(useDseHistogramBehaviour, CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean());
+        assertEquals(useDseHistogramBehaviour, DecayingEstimatedHistogramReservoir.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
+        assertEquals(useDseHistogramBehaviour, EstimatedHistogram.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
         return integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT)
                   .upToAndIncluding(DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT - 10)
-                  .zip(booleans().all(), EstimatedHistogram::newOffsets);
+                  .zip(booleans().all(), new BiFunction<Integer, Boolean, long[]>()
+                       {
+                           @Override
+                           public long[] apply(Integer size, Boolean considerZeroes)
+                           {
+                               return EstimatedHistogram.newOffsets(size, considerZeroes, useDseHistogramBehaviour);
+                           }
+                       }
+                  );
     }
 
     @Before
-    public void setup()
+    public void setup() throws Exception
     {
+        ReflectionUtils.setFinalStaticField(DecayingEstimatedHistogramReservoir.class, "USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES", useDseHistogramBehaviour);
+        ReflectionUtils.setFinalStaticField(EstimatedHistogram.class, "USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES", useDseHistogramBehaviour);
         CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.setBoolean(useDseHistogramBehaviour);
         offsets = generateOffsets();
     }
@@ -110,6 +127,12 @@ public class DecayingEstimatedHistogramReservoirTest
         int model = findIndexModel(offsets, value);
         int actual = DecayingEstimatedHistogramReservoir.findIndex(offsets, value);
 
+        if (model != actual)
+        {
+            logger.info("offsets: " + Arrays.stream(offsets).mapToObj(Long::toString).collect(Collectors.joining(", ")));
+            model = findIndexModel(offsets, value);
+            actual = DecayingEstimatedHistogramReservoir.findIndex(offsets, value);
+        }
         return model == actual;
     }
 
@@ -196,7 +219,7 @@ public class DecayingEstimatedHistogramReservoirTest
     {
         qt().forAll(integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT).upToAndIncluding(1000))
             .check(count -> {
-                long[] offsets = EstimatedHistogram.newOffsets(count, false);
+                long[] offsets = EstimatedHistogram.newOffsets(count, false, useDseHistogramBehaviour);
                 for (long offset : offsets)
                     if (offset < 0)
                         return false;
@@ -777,7 +800,7 @@ public class DecayingEstimatedHistogramReservoirTest
 
     private void assertEstimatedQuantile(long expectedValue, double actualValue)
     {
-        if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+        if (useDseHistogramBehaviour)
         {
             // DSE histograms have a different bucketing scheme, so let's be more liberal
             // checking the estimated quantiles (especially that we're only using the non-decaying buckets)

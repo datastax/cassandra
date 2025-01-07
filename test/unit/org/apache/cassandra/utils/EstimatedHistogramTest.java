@@ -187,11 +187,12 @@ public class EstimatedHistogramTest
     }
 
     @Test
-    public void testDSEBoundaries()
+    public void testDSEBoundaries() throws Exception
     {
         boolean bucketBoundaries = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
         try
         {
+            ReflectionUtils.setFinalStaticField(EstimatedHistogram.class, "USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES", true);
             CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.setBoolean(true);
             // these boundaries were computed in DSE
             long[] dseBoundaries = new long[]{ 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40,
@@ -226,6 +227,7 @@ public class EstimatedHistogramTest
         }
         finally
         {
+            ReflectionUtils.setFinalStaticField(EstimatedHistogram.class, "USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES", bucketBoundaries);
             CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.setBoolean(bucketBoundaries);
         }
     }
