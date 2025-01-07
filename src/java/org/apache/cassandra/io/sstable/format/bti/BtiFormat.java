@@ -362,7 +362,9 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
             isLatestVersion = version.compareTo(current_version) == 0;
             correspondingMessagingVersion = MessagingService.VERSION_50;
-            byteComparableVersion = version.compareTo("ca") >= 0 ? ByteComparable.Version.OSS41 : ByteComparable.Version.LEGACY;
+            byteComparableVersion = version.compareTo("da") >= 0 ? ByteComparable.Version.OSS50
+                                                                 : version.compareTo("ca") >= 0 ? ByteComparable.Version.OSS41
+                                                                                                : ByteComparable.Version.LEGACY;
             hasOldBfFormat = aOrLater && !bOrLater;
             hasImprovedMinMax = bOrLater;
             hasLegacyMinMax = aOrLater && !bOrLater;
