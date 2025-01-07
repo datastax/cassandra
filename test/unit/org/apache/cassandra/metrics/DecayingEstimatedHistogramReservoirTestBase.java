@@ -19,7 +19,6 @@
 package org.apache.cassandra.metrics;
 
 import java.io.ByteArrayOutputStream;
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -27,17 +26,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
-import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,9 +40,6 @@ import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.ReflectionUtils;
-import org.awaitility.reflect.WhiteboxImpl;
-import org.mockito.Mockito;
 import org.quicktheories.core.Gen;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -62,50 +53,31 @@ import static org.quicktheories.generators.SourceDSL.booleans;
 import static org.quicktheories.generators.SourceDSL.integers;
 import static org.quicktheories.generators.SourceDSL.longs;
 
-@RunWith(Parameterized.class)
-public class DecayingEstimatedHistogramReservoirTest
+public abstract class DecayingEstimatedHistogramReservoirTestBase
 {
-    @Parameterized.Parameter
-    public Boolean useDseHistogramBehaviour;
+    public boolean useDseHistogramBehaviour;
 
-    @Parameterized.Parameters(name = "dseHistograms={0}")
-    public static Iterable<Boolean> useDseHistogramBehaviour()
-    {
-        return ImmutableSet.of(false, true);
-    }
-
-    public static final Logger logger = LoggerFactory.getLogger(DecayingEstimatedHistogramReservoirTest.class);
+    public static final Logger logger = LoggerFactory.getLogger(DecayingEstimatedHistogramReservoirTestBase.class);
     private static final double DOUBLE_ASSERT_DELTA = 0;
 
     public static final int numExamples = 1000000;
     public Gen<long[]> offsets;
 
-    public static final long[] dseOffsetsWith0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, true);
-    public static final long[] dseOffsetsWithout0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, false);
+    // not static so that test superclasses can set USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES before it's cached by DEHR initialization
+    public final long[] dseOffsetsWith0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, true);
+    public final long[] dseOffsetsWithout0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, false);
 
-    private Gen<long[]> generateOffsets()
+    public DecayingEstimatedHistogramReservoirTestBase()
     {
-        assertEquals(useDseHistogramBehaviour, CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean());
-        assertEquals(useDseHistogramBehaviour, EstimatedHistogram.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
-        return integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT)
-                  .upToAndIncluding(DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT - 10)
-                  .zip(booleans().all(), new BiFunction<Integer, Boolean, long[]>()
-                       {
-                           @Override
-                           public long[] apply(Integer size, Boolean considerZeroes)
-                           {
-                               return EstimatedHistogram.newOffsets(size, considerZeroes, useDseHistogramBehaviour);
-                           }
-                       }
-                  );
+        useDseHistogramBehaviour = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
+        offsets = generateOffsets();
     }
 
-    @Before
-    public void setup() throws Exception
+    private static Gen<long[]> generateOffsets()
     {
-        ReflectionUtils.setFinalStaticField(EstimatedHistogram.class, "USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES", useDseHistogramBehaviour);
-        CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.setBoolean(useDseHistogramBehaviour);
-        offsets = generateOffsets();
+        return integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT)
+                         .upToAndIncluding(DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT - 10)
+                         .zip(booleans().all(), EstimatedHistogram::newOffsets);
     }
 
     @Test
@@ -211,7 +183,7 @@ public class DecayingEstimatedHistogramReservoirTest
     {
         qt().forAll(integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT).upToAndIncluding(1000))
             .check(count -> {
-                long[] offsets = EstimatedHistogram.newOffsets(count, false, useDseHistogramBehaviour);
+                long[] offsets = EstimatedHistogram.newOffsets(count, false);
                 for (long offset : offsets)
                     if (offset < 0)
                         return false;
@@ -232,7 +204,7 @@ public class DecayingEstimatedHistogramReservoirTest
                                                                                            clock);
 
         long seed = System.nanoTime();
-        System.out.println("DecayingEstimatedHistogramReservoirTest#testStriping.seed = " + seed);
+        System.out.println("DecayingEstimatedHistogramReservoirTestBase#testStriping.seed = " + seed);
         Random valGen = new Random(seed);
         ExecutorService executors = Executors.newFixedThreadPool(nStripes * 2);
         for (int i = 0; i < 1_000_000; i++)

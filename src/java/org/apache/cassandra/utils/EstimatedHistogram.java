@@ -61,18 +61,12 @@ public class EstimatedHistogram
 
     public EstimatedHistogram(int bucketCount)
     {
-        this(bucketCount, false, USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
-    }
-
-    public EstimatedHistogram(int bucketCount, boolean considerZeroes, boolean useDseCompatibleBoundaries)
-    {
-        bucketOffsets = newOffsets(bucketCount, considerZeroes, useDseCompatibleBoundaries);
-        buckets = new AtomicLongArray(bucketOffsets.length + 1);
+        this(bucketCount, false);
     }
 
     public EstimatedHistogram(int bucketCount, boolean considerZeroes)
     {
-        bucketOffsets = newOffsets(bucketCount, considerZeroes, USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
+        bucketOffsets = newOffsets(bucketCount, considerZeroes);
         buckets = new AtomicLongArray(bucketOffsets.length + 1);
     }
 
@@ -84,7 +78,7 @@ public class EstimatedHistogram
     public EstimatedHistogram(long[] bucketData)
     {
         assert bucketData != null && bucketData.length > 0 : "Bucket data must be an array of size more than 0";
-        bucketOffsets = newOffsets(bucketData.length - 1, false, USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
+        bucketOffsets = newOffsets(bucketData.length - 1, false);
         buckets = new AtomicLongArray(bucketData);
     }
 
@@ -95,9 +89,9 @@ public class EstimatedHistogram
         buckets = new AtomicLongArray(bucketData);
     }
 
-    public static long[] newOffsets(int size, boolean considerZeroes, boolean useDseCompatibleBoundaries)
+    public static long[] newOffsets(int size, boolean considerZeroes)
     {
-        if (useDseCompatibleBoundaries)
+        if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
             return DecayingEstimatedHistogramReservoir.newDseOffsets(size, considerZeroes);
         else
             return newCassandraOffsets(size, considerZeroes);
