@@ -52,8 +52,8 @@ import org.assertj.core.api.Assertions;
 @RunWith(Parameterized.class)
 public class SensorsTest extends TestBaseImpl
 {
-    private static final String EXPECTED_WRITE_BYTES_HEADER = "WRITE_BYTES_REQUEST.tbl";
-    private static final String EXPECTED_READ_BYTES_HEADER = "READ_BYTES_REQUEST.tbl";
+    private static final String EXPECTED_WRITE_BYTES_HEADER = "WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl";
+    private static final String EXPECTED_READ_BYTES_HEADER = "READ_BYTES_REQUEST." + KEYSPACE + ".tbl";
     /**
      * Using a combination of 2 nodes with ALL consistency level to ensure internode communication code paths are exercised in the test
      */

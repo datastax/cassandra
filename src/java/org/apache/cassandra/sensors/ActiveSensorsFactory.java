@@ -34,13 +34,13 @@ public class ActiveSensorsFactory implements SensorsFactory
         @Override
         public Optional<String> encodeRequestSensorName(Sensor sensor)
         {
-            return Optional.of(sensor.getType() + "_REQUEST." + sensor.getContext().getTable());
+            return Optional.of(sensor.getType() + "_REQUEST." + sensor.getContext().getKeyspace() + '.' + sensor.getContext().getTable());
         }
 
         @Override
         public Optional<String> encodeGlobalSensorName(Sensor sensor)
         {
-            return Optional.of(sensor.getType() + "_GLOBAL." + sensor.getContext().getTable());
+            return Optional.of(sensor.getType() + "_GLOBAL." + sensor.getContext().getKeyspace() + '.' + sensor.getContext().getTable());
         }
     };
 

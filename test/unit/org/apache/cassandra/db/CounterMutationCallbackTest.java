@@ -162,22 +162,22 @@ public class CounterMutationCallbackTest
         Map<String, byte[]> customParam = capturedOutboundMessages.get(0).header.customParams();
         assertThat(customParam).isNotNull();
         int expectedSensorValueMultiplier = replicaCountAndExpectedSensorValueMultiplier.right;
-        assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_REQUEST.Counter",
+        assertThat(customParam).hasEntrySatisfying(String.format("WRITE_BYTES_REQUEST.%s.%s", KEYSPACE1, CF_COUTNER),
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_WRITE_BYTES * expectedSensorValueMultiplier);
                                                    });
-        assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_GLOBAL.Counter",
+        assertThat(customParam).hasEntrySatisfying(String.format("WRITE_BYTES_GLOBAL.%s.%s", KEYSPACE1, CF_COUTNER),
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_WRITE_BYTES * expectedSensorValueMultiplier);
                                                    });
-        assertThat(customParam).hasEntrySatisfying("INTERNODE_BYTES_REQUEST.Counter",
+        assertThat(customParam).hasEntrySatisfying(String.format("INTERNODE_BYTES_REQUEST.%s.%s", KEYSPACE1, CF_COUTNER),
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES * expectedSensorValueMultiplier);
                                                    });
-        assertThat(customParam).hasEntrySatisfying("INTERNODE_BYTES_GLOBAL.Counter",
+        assertThat(customParam).hasEntrySatisfying(String.format("INTERNODE_BYTES_GLOBAL.%s.%s", KEYSPACE1, CF_COUTNER),
                                                    v -> {
                                                        double actual = SensorsCustomParams.sensorValueFromBytes(v);
                                                        assertThat(actual).isEqualTo(COUNTER_MUTATION_INTERNODE_BYTES * expectedSensorValueMultiplier);
