@@ -20,7 +20,6 @@ package org.apache.cassandra.db.tries;
 
 import org.junit.Test;
 
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 public class TrieToDotTest
@@ -28,7 +27,7 @@ public class TrieToDotTest
     @Test
     public void testToDotContent() throws Exception
     {
-        InMemoryTrie<Object> trie = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.OFF_HEAP, InMemoryTrie.ExpectedLifetime.LONG, null);
+        InMemoryTrie<Object> trie = InMemoryTrie.shortLived(ByteComparable.Version.OSS50);
         String s = "Trie node types and manipulation mechanisms. The main purpose of this is to allow for handling tries directly as" +
                    " they are on disk without any serialization, and to enable the creation of such files.";
         s = s.toLowerCase();
