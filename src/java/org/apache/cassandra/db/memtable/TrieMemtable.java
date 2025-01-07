@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -65,7 +64,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
-import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -92,8 +90,6 @@ import org.github.jamm.Unmetered;
 public class TrieMemtable extends AbstractShardedMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtable.class);
-
-    public static final Factory FACTORY = new TrieMemtable.Factory(null);
 
     /** Buffer type to use for memtable tries (on- vs off-heap) */
     public static final BufferType BUFFER_TYPE = DatabaseDescriptor.getMemtableAllocationType().toBufferType();
@@ -789,52 +785,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     {
         String shardsString = optionsCopy.remove(SHARDS_OPTION);
         Integer shardCount = shardsString != null ? Integer.parseInt(shardsString) : null;
-        return new Factory(shardCount);
-    }
-
-    static class Factory implements Memtable.Factory
-    {
-        final Integer shardCount;
-
-        Factory(Integer shardCount)
-        {
-            this.shardCount = shardCount;
-        }
-
-        public Memtable create(AtomicReference<CommitLogPosition> commitLogLowerBound,
-                               TableMetadataRef metadaRef,
-                               Owner owner)
-        {
-            return new TrieMemtable(commitLogLowerBound, metadaRef, owner, shardCount);
-        }
-
-        @Override
-        public PartitionUpdate.Factory partitionUpdateFactory()
-        {
-            return TriePartitionUpdate.FACTORY;
-        }
-
-        @Override
-        public TableMetrics.ReleasableMetric createMemtableMetrics(TableMetadataRef metadataRef)
-        {
-            TrieMemtableMetricsView metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
-            return metrics::release;
-        }
-
-        public boolean equals(Object o)
-        {
-            if (this == o)
-                return true;
-            if (o == null || getClass() != o.getClass())
-                return false;
-            Factory factory = (Factory) o;
-            return Objects.equals(shardCount, factory.shardCount);
-        }
-
-        public int hashCode()
-        {
-            return Objects.hash(shardCount);
-        }
+        return new TrieMemtableFactory(shardCount);
     }
 
     @Override
