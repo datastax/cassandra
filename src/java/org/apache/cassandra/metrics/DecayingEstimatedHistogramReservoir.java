@@ -81,7 +81,6 @@ import static org.apache.cassandra.utils.EstimatedHistogram.USE_DSE_COMPATIBLE_H
  */
 public class DecayingEstimatedHistogramReservoir implements Reservoir
 {
-
     /**
      * The default number of decayingBuckets. Use this bucket count to reduce memory allocation for bucket offsets.
      */
@@ -225,7 +224,7 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
         }
         else
         {
-            bucketOffsets = EstimatedHistogram.newOffsets(bucketCount, considerZeroes, USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
+            bucketOffsets = EstimatedHistogram.newOffsets(bucketCount, considerZeroes);
         }
 
         nStripes = stripes;
@@ -274,7 +273,7 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
     @VisibleForTesting
     public static int findIndex(long[] bucketOffsets, long value)
     {
-        if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+        if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
             return findIndexDse(bucketOffsets, value);
 
         // values below zero are nonsense, but we have never failed when presented them
