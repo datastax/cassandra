@@ -170,25 +170,52 @@ public enum Stage
     }
 
     // Convenience functions to execute on this stage
-    public void execute(Runnable command) { executor().execute(withTimeMeasurement(command)); }
+    public void execute(Runnable command)
+    {
+        long enqueueStartTime = System.nanoTime();
+        executor().execute(withTimeMeasurement(command, enqueueStartTime));
+    }
 
-    public void execute(Runnable command, ExecutorLocals locals) { executor().execute(withTimeMeasurement(command), locals); }
-    public void maybeExecuteImmediately(Runnable command) { executor().maybeExecuteImmediately(withTimeMeasurement(command)); }
-    public <T> CompletableFuture<T> submit(Callable<T> task) { return CompletableFuture.supplyAsync(() -> {
+    public void execute(Runnable command, ExecutorLocals locals)
+    {
+        long enqueueStartTime = System.nanoTime();
+        executor().execute(withTimeMeasurement(command, enqueueStartTime), locals);
+    }
+
+    public void maybeExecuteImmediately(Runnable command)
+    {
+        long enqueueStartTime = System.nanoTime();
+        executor().maybeExecuteImmediately(withTimeMeasurement(command, enqueueStartTime));
+    }
+
+    public <T> CompletableFuture<T> submit(Callable<T> task)
+    {
+        long enqueueStartTime = System.nanoTime();
+        return CompletableFuture.supplyAsync(() -> {
         try
         {
-            return withTimeMeasurement(task).call();
+            return withTimeMeasurement(task, enqueueStartTime).call();
         }
         catch (Exception e)
         {
             throw Throwables.unchecked(e);
         }
     }, executor()); }
-    public CompletableFuture<Void> submit(Runnable task) { return CompletableFuture.runAsync(withTimeMeasurement(task), executor()); }
-    public <T> CompletableFuture<T> submit(Runnable task, T result) { return CompletableFuture.supplyAsync(() -> {
-        withTimeMeasurement(task).run();
-        return result;
-    }, executor()); }
+
+    public CompletableFuture<Void> submit(Runnable task)
+    {
+        long enqueueStartTime = System.nanoTime();
+        return CompletableFuture.runAsync(withTimeMeasurement(task, enqueueStartTime), executor());
+    }
+
+    public <T> CompletableFuture<T> submit(Runnable task, T result)
+    {
+        long enqueueStartTime = System.nanoTime();
+        return CompletableFuture.supplyAsync(() -> {
+            withTimeMeasurement(task, enqueueStartTime).run();
+            return result;
+        }, executor());
+    }
 
     private LocalAwareExecutorService executor()
     {
@@ -409,9 +436,8 @@ public enum Stage
         }
     }
 
-    private Runnable withTimeMeasurement(Runnable command)
+    private Runnable withTimeMeasurement(Runnable command, long queueStartTime)
     {
-        long queueStartTime = System.nanoTime();
         return () -> {
             long executionStartTime = System.nanoTime();
             try
@@ -426,17 +452,18 @@ public enum Stage
         };
     }
 
-    private <T> Callable<T> withTimeMeasurement(Callable<T> command)
+    private <T> Callable<T> withTimeMeasurement(Callable<T> command, long queueStartTime)
     {
         return () -> {
-            long startTime = System.nanoTime();
+            long executionStartTime = System.nanoTime();
             try
             {
+                TaskExecutionCallback.instance.onDequeue(this, executionStartTime - queueStartTime);
                 return command.call();
             }
             finally
             {
-                TaskExecutionCallback.instance.onCompleted(this, System.nanoTime() - startTime);
+                TaskExecutionCallback.instance.onCompleted(this, System.nanoTime() - executionStartTime);
             }
         };
     }
