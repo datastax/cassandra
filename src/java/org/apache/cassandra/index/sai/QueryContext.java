@@ -218,7 +218,7 @@ public class QueryContext
 
     public void checkpoint()
     {
-        if (approximateRemainingTimeNs() >= 0 && !DISABLE_TIMEOUT)
+        if (approximateRemainingTimeNs() < 0 && !DISABLE_TIMEOUT)
         {
             addQueryTimeouts(1);
             throw new AbortedOperationException();
