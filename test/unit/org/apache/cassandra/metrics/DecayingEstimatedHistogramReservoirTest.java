@@ -86,7 +86,6 @@ public class DecayingEstimatedHistogramReservoirTest
     private Gen<long[]> generateOffsets()
     {
         assertEquals(useDseHistogramBehaviour, CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean());
-        assertEquals(useDseHistogramBehaviour, DecayingEstimatedHistogramReservoir.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
         assertEquals(useDseHistogramBehaviour, EstimatedHistogram.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES);
         return integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT)
                   .upToAndIncluding(DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT - 10)
@@ -104,7 +103,6 @@ public class DecayingEstimatedHistogramReservoirTest
     @Before
     public void setup() throws Exception
     {
-        ReflectionUtils.setFinalStaticField(DecayingEstimatedHistogramReservoir.class, "USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES", useDseHistogramBehaviour);
         ReflectionUtils.setFinalStaticField(EstimatedHistogram.class, "USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES", useDseHistogramBehaviour);
         CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.setBoolean(useDseHistogramBehaviour);
         offsets = generateOffsets();
@@ -127,12 +125,6 @@ public class DecayingEstimatedHistogramReservoirTest
         int model = findIndexModel(offsets, value);
         int actual = DecayingEstimatedHistogramReservoir.findIndex(offsets, value);
 
-        if (model != actual)
-        {
-            logger.info("offsets: " + Arrays.stream(offsets).mapToObj(Long::toString).collect(Collectors.joining(", ")));
-            model = findIndexModel(offsets, value);
-            actual = DecayingEstimatedHistogramReservoir.findIndex(offsets, value);
-        }
         return model == actual;
     }
 

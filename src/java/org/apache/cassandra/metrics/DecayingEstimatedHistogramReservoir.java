@@ -38,6 +38,7 @@ import org.apache.cassandra.utils.EstimatedHistogram;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
+import static org.apache.cassandra.utils.EstimatedHistogram.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES;
 
 /**
  * A decaying histogram reservoir where values collected during each minute will be twice as significant as the values
@@ -117,7 +118,6 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
     final static int subBucketHalfCountMagnitude = subBucketCountMagnitude - 1; // power of two of half the number of sub-buckets
     final static long subBucketMask = (long)(subBucketCount - 1) << unitMagnitude;
     final static int leadingZeroCountBase = 64 - unitMagnitude - subBucketHalfCountMagnitude - 1;
-    public static final boolean USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
     // DSE COMPATIBILITY CHANGES END
 
     private static float[] computeTable(int bits)

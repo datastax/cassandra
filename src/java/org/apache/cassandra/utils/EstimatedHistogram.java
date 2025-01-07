@@ -37,7 +37,6 @@ public class EstimatedHistogram
 {
     public static final EstimatedHistogramSerializer serializer = new EstimatedHistogramSerializer();
     public static final boolean USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
-    private static final Logger log = LoggerFactory.getLogger(EstimatedHistogram.class);
 
     /**
      * The series of values to which the counts in `buckets` correspond:
