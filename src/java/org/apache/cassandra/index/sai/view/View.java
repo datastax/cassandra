@@ -27,27 +27,30 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
 
 public class View implements Iterable<SSTableIndex>
 {
+    private final Set<Descriptor> sstables;
     private final Map<Descriptor, SSTableIndex> view;
 
     private final TermTree termTree;
     private final AbstractType<?> keyValidator;
     private final IntervalTree<Key, SSTableIndex, Interval<Key, SSTableIndex>> keyIntervalTree;
 
-    public View(IndexContext context, Collection<SSTableIndex> indexes)
+    public View(IndexContext context, Collection<Descriptor> sstables, Collection<SSTableIndex> indexes)
     {
         this.view = new HashMap<>();
+        this.sstables = new HashSet<>(sstables);
         this.keyValidator = context.keyValidator();
 
         AbstractType<?> validator = context.getValidator();
@@ -94,19 +97,49 @@ public class View implements Iterable<SSTableIndex>
         return view.values().iterator();
     }
 
+    public Collection<Descriptor> getSSTables()
+    {
+        return sstables;
+    }
+
     public Collection<SSTableIndex> getIndexes()
     {
         return view.values();
     }
 
-    public boolean containsSSTable(SSTableReader sstable)
-    {
-        return view.containsKey(sstable.descriptor);
-    }
-
     public int size()
     {
         return view.size();
+    }
+
+    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
+    {
+        return view.get(descriptor);
+    }
+    
+    /**
+     * Tells if an index for the given sstable exists.
+     * It's equivalent to {@code getSSTableIndex(descriptor) != null }.
+     * @param descriptor identifies the sstable
+     */
+    public boolean containsSSTableIndex(Descriptor descriptor)
+    {
+        return view.containsKey(descriptor);
+    }
+
+    /**
+     * Returns true if this view has been based on the Cassandra view containing given sstable.
+     * In other words, it tells if SAI was given a chance to load the index for the given sstable.
+     * It does not determine if the index exists and was actually loaded.
+     * To check the existence of the index, use {@link #containsSSTableIndex(Descriptor)}.
+     * <p>
+     * This method allows to distinguish a situation when the sstable has no index, the index is
+     * invalid, or was not loaded for whatever reason,
+     * from a situation where the view hasn't been updated yet to reflect the newly added sstable.
+     */
+    public boolean isAwareOfSSTable(Descriptor descriptor)
+    {
+        return sstables.contains(descriptor);
     }
 
     /**
