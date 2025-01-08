@@ -102,31 +102,6 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
         return buffer.duplicate();
     }
 
-    @Override
-    public ByteOrder order()
-    {
-        return buffer.order();
-    }
-
-    @Override
-    public FloatBuffer floatBuffer()
-    {
-        return buffer.asFloatBuffer();
-    }
-
-    @Override
-    public IntBuffer intBuffer()
-    {
-        return buffer.asIntBuffer();
-    }
-
-    @Override
-    public LongBuffer longBuffer()
-    {
-        return buffer.asLongBuffer();
-    }
-
-
     public long offset()
     {
         return offset;
