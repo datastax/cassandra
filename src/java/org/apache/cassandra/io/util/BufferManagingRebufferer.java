@@ -45,14 +45,14 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     protected BufferManagingRebufferer(ChunkReader wrapped)
     {
         this.source = wrapped;
-        buffer = BufferPools.forChunkCache().get(wrapped.chunkSize(), wrapped.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
+        buffer = BufferPools.forNetworking().get(wrapped.chunkSize(), wrapped.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
         buffer.limit(0);
     }
 
     @Override
     public void closeReader()
     {
-        BufferPools.forChunkCache().put(buffer);
+        BufferPools.forNetworking().put(buffer);
         offset = -1;
     }
 
