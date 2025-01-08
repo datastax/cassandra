@@ -102,12 +102,6 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     }
 
     @Override
-    public ByteOrder order()
-    {
-        return buffer.order();
-    }
-
-    @Override
     public long offset()
     {
         assert buffer != null : "Buffer holder has not been acquired";

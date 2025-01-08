@@ -212,12 +212,6 @@ abstract public class AbstractTrieTestBase
         }
 
         @Override
-        public ByteOrder order()
-        {
-            return buffer.order();
-        }
-
-        @Override
         public long fileLength()
         {
             return buffer.remaining();
