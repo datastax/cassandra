@@ -23,6 +23,7 @@ import java.lang.ref.ReferenceQueue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Queue;
 import java.util.Set;
@@ -216,19 +217,41 @@ public class BufferPool
 
 
     /**
-     * Bulk allocate multiple buffers.
+     * Allocate the given amount of memory, where the caller can accept the space to be split into multiple buffers.
      *
-     * @param size the size of each individual buffer
-     * @param numBuffers the number of buffers
+     * @param totalSize the total size to be allocated
+     * @param chunkSize the minimum size of each buffer returned
      *
      * @return an array of allocated buffers
      */
-    public ByteBuffer[] getMultiple(int size, BufferType bufferType, int numBuffers)
+    public ByteBuffer[] getMultiple(int totalSize, int chunkSize, BufferType bufferType)
     {
-        ByteBuffer[] buffers = new ByteBuffer[numBuffers];
+        if (bufferType == BufferType.ON_HEAP || totalSize > NORMAL_CHUNK_SIZE)
+            return new ByteBuffer[] { allocate(totalSize, bufferType) };
 
-        for (int i = 0; i < buffers.length; i++)
-            buffers[i] = get(size, bufferType);
+        // Try to find a buffer to fit the full request. Fragmentation can make this impossible even if we are below
+        // the limits.
+        LocalPool pool = localPool.get();
+        ByteBuffer full = pool.tryGet(totalSize, false);
+        if (full != null)
+            return new ByteBuffer[] { full };
+
+        // If we don't get a whole buffer, allocate buffers of the requested minimum size.
+        int numBuffers = (totalSize + chunkSize - 1) / chunkSize;
+        ByteBuffer[] buffers = new ByteBuffer[numBuffers];
+        int remainingSize = totalSize;
+        int idx = 0;
+
+        while (remainingSize >= chunkSize)
+        {
+            buffers[idx] = pool.getAtLeast(chunkSize);
+            remainingSize -= buffers[idx].capacity();
+            ++idx;
+        }
+        if (remainingSize > 0)
+            buffers[idx++] = pool.get(chunkSize);
+        if (idx < numBuffers)
+            buffers = Arrays.copyOf(buffers, idx);
 
         return buffers;
     }
