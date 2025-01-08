@@ -214,6 +214,25 @@ public class BufferPool
             return localPool.get().getAtLeast(size);
     }
 
+
+    /**
+     * Bulk allocate multiple buffers.
+     *
+     * @param size the size of each individual buffer
+     * @param numBuffers the number of buffers
+     *
+     * @return an array of allocated buffers
+     */
+    public ByteBuffer[] getMultiple(int size, BufferType bufferType, int numBuffers)
+    {
+        ByteBuffer[] buffers = new ByteBuffer[numBuffers];
+
+        for (int i = 0; i < buffers.length; i++)
+            buffers[i] = get(size, bufferType);
+
+        return buffers;
+    }
+
     /** Unlike the get methods, this will return null if the pool is exhausted */
     public ByteBuffer tryGet(int size)
     {
@@ -239,6 +258,17 @@ public class BufferPool
             localPool.get().put(buffer);
         else
             updateOverflowMemoryUsage(-buffer.capacity());
+    }
+
+    /**
+     * Bulk release multiple buffers.
+     *
+     * @param buffers The buffers to be released.
+     */
+    public void putMultiple(ByteBuffer[] buffers)
+    {
+        for (ByteBuffer buffer : buffers)
+            put(buffer);
     }
 
     public void putUnusedPortion(ByteBuffer buffer)
