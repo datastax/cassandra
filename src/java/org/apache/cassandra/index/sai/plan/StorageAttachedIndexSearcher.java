@@ -75,7 +75,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
-    private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
+    protected static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
 
     private final ReadCommand command;
     private final QueryController controller;
@@ -111,8 +111,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             try
             {
                 FilterTree filterTree = analyzeFilter();
-                maybeTriggerReferencedIndexesGuardrail(filterTree);
-
                 Plan plan = controller.buildPlan();
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
