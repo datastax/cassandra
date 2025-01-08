@@ -67,6 +67,8 @@ import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
@@ -97,32 +99,54 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @SuppressWarnings("unchecked")
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
-        try
+        int retries = 0;
+        while (true)
         {
-            FilterTree filterTree = analyzeFilter();
-            Plan plan = controller.buildPlan();
-            Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
+            try
+            {
+                FilterTree filterTree = analyzeFilter();
+                Plan plan = controller.buildPlan();
+                Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
-            // Can't check for `command.isTopK()` because the planner could optimize sorting out
-            Orderer ordering = plan.ordering();
-            if (ordering != null)
-            {
-                assert !(keysIterator instanceof KeyRangeIterator);
-                var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-                var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
-                                                             executionController, queryContext, command.limits().count());
-                return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
+                // Can't check for `command.isTopK()` because the planner could optimize sorting out
+                Orderer ordering = plan.ordering();
+                if (ordering != null)
+                {
+                    assert !(keysIterator instanceof KeyRangeIterator);
+                    var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
+                    var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
+                                                                 executionController, queryContext, command.limits().count());
+                    return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
+                }
+                else
+                {
+                    assert keysIterator instanceof KeyRangeIterator;
+                    return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
+                }
             }
-            else
+            catch (QueryView.Builder.MissingIndexException e)
             {
-                assert keysIterator instanceof KeyRangeIterator;
-                return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
+                // If an index was dropped while we were preparing the plan or between preparing the plan
+                // and creating the result retriever, we can retry without that index,
+                // because there may be other indexes that could be used to run the query.
+                // And if there are no good indexes left, we'd get a good contextual request error message.
+                if (e.context.isDropped() && retries < 8)
+                {
+                    logger.debug("Index " + e.context.getIndexName() + " dropped while preparing the query plan. Retrying.");
+                    retries++;
+                    continue;
+                }
+
+                // If we end up here, this is either a bug or a problem with an index (corrupted / missing components?).
+                controller.abort();
+                logger.error("Index not found", e);
+                throw invalidRequest("Index missing or corrupt: " + e.context.getIndexName());
             }
-        }
-        catch (Throwable t)
-        {
-            controller.abort();
-            throw t;
+            catch (Throwable t)
+            {
+                controller.abort();
+                throw t;
+            }
         }
     }
 
