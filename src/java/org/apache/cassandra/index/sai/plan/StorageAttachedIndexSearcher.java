@@ -585,7 +585,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 var primaryKeyValidators = entry.getValue();
                 CompletableFuture<UnfilteredRowIterator> future = new CompletableFuture<>();
                 rowFutures.add(future);
-                PARALLEL_EXECUTOR.maybeExecuteImmediately(() -> {
+                PARALLEL_EXECUTOR.submit(() -> {
                     // We cancel the future if the query has timed out, so it is worth a quick read to the
                     // volatile field to possibly avoid getting the partition unnecessarily.
                     if (future.isDone())
