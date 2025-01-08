@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -107,6 +109,11 @@ public class View implements Iterable<SSTableIndex>
     public int size()
     {
         return view.size();
+    }
+
+    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
+    {
+        return view.get(descriptor);
     }
 
     /**
