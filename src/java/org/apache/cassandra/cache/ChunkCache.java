@@ -244,12 +244,10 @@ public class ChunkCache
         private final ByteBuffer[] buffers;
         private final long offset;
 
-        public MultiBufferChunk(Key key)
+        public MultiBufferChunk(long offset, ByteBuffer[] buffers)
         {
-            this.offset = key.position;
-
-            int numPages = PageAware.numPages(key.file.chunkSize());
-            this.buffers = bufferPool.getMultiple(PageAware.PAGE_SIZE, BufferType.OFF_HEAP, numPages);
+            this.offset = offset;
+            this.buffers = buffers;
         }
 
         void releaseBuffers()
@@ -314,11 +312,10 @@ public class ChunkCache
         private final ByteBuffer buffer;
         private final long offset;
 
-        public SingleBuffer(Key key)
+        public SingleBuffer(long offset, ByteBuffer buffer)
         {
-            this.buffer = bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
-            assert key.file.chunkSize() <= PageAware.PAGE_SIZE;
-            this.offset = key.position;
+            this.buffer = buffer;
+            this.offset = offset;
         }
 
         public ByteBuffer buffer()
@@ -352,16 +349,20 @@ public class ChunkCache
 
         int capacity()
         {
-            return PageAware.PAGE_SIZE;
+            return capacity;
         }
     }
 
     Chunk newChunk(Key key)
     {
-        if (key.file.chunkSize() > PageAware.PAGE_SIZE)
-            return new MultiBufferChunk(key);
+        if (key.file.chunkSize() <= PageAware.PAGE_SIZE)
+            return new SingleBuffer(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
+
+        ByteBuffer[] buffers = bufferPool.getMultiple(key.file.chunkSize(), PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+        if (buffers.length > 1)
+            return new MultiBufferChunk(key.position, buffers);
         else
-            return new SingleBuffer(key);
+            return new SingleBuffer(key.position, buffers[0]);
     }
 
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
