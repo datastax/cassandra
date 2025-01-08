@@ -488,17 +488,11 @@ public class ChunkCache
     }
 
     /**
-     * Read a chunk to be stored in the chunk cache.
-     * <p/>
-     * The chunk cache will only store buffers of a fixed size, known as pages. If a chunk only has a single page,
-     * then this method will read directly into this page. Otherwise this method will use a temporary scratch buffer
-     * to read all the pages at once and will then copy the data back into the individual pages.
+     * Read a chunk to be stored in the chunk cache into multiple buffers.
      *
      * @param position the start position of the chunk
      * @param chunkSize the amount of data to read
      * @param buffers an array of smaller-sized buffers whose total capacity needs to be >= chunkSize
-     *
-     * @return a future that will complete when all the buffers in the chunk have been read.
      */
     void readScattering(ChunkReader file, long position, int chunkSize, ByteBuffer[] buffers)
     {
