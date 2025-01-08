@@ -36,6 +36,9 @@ import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -70,8 +73,12 @@ import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
+    protected static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
+
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
@@ -106,8 +113,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             try
             {
                 FilterTree filterTree = analyzeFilter();
-                maybeTriggerReferencedIndexesGuardrail(filterTree);
-
                 Plan plan = controller.buildPlan();
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
