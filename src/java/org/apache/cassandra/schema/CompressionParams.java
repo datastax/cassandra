@@ -89,8 +89,6 @@ public final class CompressionParams
 
     public static final CompressionParams DEFAULT = DatabaseDescriptor.shouldUseAdaptiveCompressionByDefault() ? ADAPTIVE : FAST;
 
-    public static final CompressionParams INDEX_DEFAULT = DEFAULT.withChunkLength(DEFAULT_INDEX_CHUNK_LENGTH);
-
     public static final CompressionParams NOOP = new CompressionParams(NoopCompressor.create(Collections.emptyMap()),
                                                                        // 4 KiB is often the underlying disk block size
                                                                        1024 * 4,

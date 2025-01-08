@@ -308,10 +308,22 @@ public final class IndexMetadata
                    .append(") USING ")
                    .appendWithSingleQuotes(copyOptions.remove(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
 
-            builder.append(" WITH compression = ")
-                   .append(compression.asMap())
-                   .append(" AND options = ")
-                   .append(copyOptions);
+            if (compression.isEnabled())
+            {
+                builder.append(" WITH compression = ")
+                       .append(compression.asMap());
+
+                if (!copyOptions.isEmpty())
+                {
+                    builder.append(" AND options = ")
+                           .append(copyOptions);
+                }
+            }
+            else if (!copyOptions.isEmpty())
+            {
+                builder.append(" WITH options = ")
+                       .append(copyOptions);
+            }
         }
         else
         {

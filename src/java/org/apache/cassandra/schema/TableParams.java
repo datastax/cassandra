@@ -289,12 +289,11 @@ public final class TableParams
                .newLine()
                .append("AND compression = ").append(compression.asMap())
                .newLine()
-               .append("AND index_compression = ").append(indexCompression.asMap())
-               .newLine()
                .append("AND memtable = ").append(memtable.asMap())
                .newLine()
                .append("AND crc_check_chance = ").append(crcCheckChance)
                .newLine();
+
 
         if (!isView)
         {
@@ -309,8 +308,16 @@ public final class TableParams
                                                    false)
                .newLine()
                .append("AND gc_grace_seconds = ").append(gcGraceSeconds)
-               .newLine()
-               .append("AND max_index_interval = ").append(maxIndexInterval)
+               .newLine();
+
+
+        if (indexCompression.isEnabled())
+        {
+            builder.append("AND index_compression = ").append(indexCompression.asMap())
+                   .newLine();
+        }
+
+        builder.append("AND max_index_interval = ").append(maxIndexInterval)
                .newLine()
                .append("AND memtable_flush_period_in_ms = ").append(memtableFlushPeriodInMs)
                .newLine()
@@ -336,7 +343,7 @@ public final class TableParams
         private CachingParams caching = CachingParams.DEFAULT;
         private CompactionParams compaction = CompactionParams.DEFAULT;
         private CompressionParams compression = CompressionParams.DEFAULT;
-        private CompressionParams indexCompression = CompressionParams.INDEX_DEFAULT;
+        private CompressionParams indexCompression = CompressionParams.noCompression();
         private MemtableParams memtable = MemtableParams.DEFAULT;
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
