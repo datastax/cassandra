@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -52,16 +53,17 @@ public class IndexViewManager
     private final IndexContext context;
     private final AtomicReference<View> view = new AtomicReference<>();
 
+
     public IndexViewManager(IndexContext context)
     {
-        this(context, Collections.emptySet());
+        this(context, Collections.emptySet(), Collections.emptySet());
     }
 
     @VisibleForTesting
-    IndexViewManager(IndexContext context, Collection<SSTableIndex> indices)
+    IndexViewManager(IndexContext context, Collection<Descriptor> sstables, Collection<SSTableIndex> indices)
     {
         this.context = context;
-        this.view.set(new View(context, indices));
+        this.view.set(new View(context, sstables, indices));
     }
 
     public View getView()
@@ -73,12 +75,16 @@ public class IndexViewManager
      * Replaces old SSTables with new by creating new immutable view.
      *
      * @param oldSSTables A set of SSTables to remove.
+     * @param newSSTables A set of SSTables added in Cassandra.
      * @param newSSTableContexts A set of SSTableContexts to add to tracker.
      * @param validate if true, per-column index files' header and footer will be validated.
      *
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> update(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTableContexts, boolean validate)
+    public Set<SSTableContext> update(Collection<SSTableReader> oldSSTables,
+                                      Collection<SSTableReader> newSSTables,
+                                      Collection<SSTableContext> newSSTableContexts,
+                                      boolean validate)
     {
         // Valid indexes on the left and invalid SSTable contexts on the right...
         Pair<Set<SSTableIndex>, Set<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validate);
@@ -87,12 +93,18 @@ public class IndexViewManager
         Map<Descriptor, SSTableIndex> newViewIndexes = new HashMap<>();
         Collection<SSTableIndex> releasableIndexes = new ArrayList<>();
         Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
-        
+
         do
         {
             currentView = view.get();
             newViewIndexes.clear();
             releasableIndexes.clear();
+
+            Set<Descriptor> sstables = new HashSet<>(currentView.getSSTables());
+            for (SSTableReader sstable : oldSSTables)
+                sstables.remove(sstable.descriptor);
+            for (SSTableReader sstable : newSSTables)
+                sstables.add(sstable.descriptor);
 
             for (SSTableIndex sstableIndex : currentView)
             {
@@ -111,7 +123,7 @@ public class IndexViewManager
                 addOrUpdateSSTableIndex(sstableIndex, newViewIndexes, releasableIndexes);
             }
 
-            newView = new View(context, newViewIndexes.values());
+            newView = new View(context, sstables, newViewIndexes.values());
         }
         while (!view.compareAndSet(currentView, newView));
 
@@ -145,19 +157,24 @@ public class IndexViewManager
 
     public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
     {
-        View currentView = view.get();
-
         Set<SSTableReader> toRemove = new HashSet<>(sstablesToRebuild);
-        for (SSTableIndex index : currentView)
+        View oldView, newView;
+        Set<SSTableIndex> indexesToRemove;
+        do
         {
-            SSTableReader sstable = index.getSSTable();
-            if (!toRemove.contains(sstable))
-                continue;
-
-            index.release();
+            oldView = view.get();
+            indexesToRemove = oldView.getIndexes()
+                                     .stream()
+                                     .filter(index -> toRemove.contains(index.getSSTable()))
+                                     .collect(Collectors.toSet());
+            var newIndexes = new HashSet<>(oldView.getIndexes());
+            newIndexes.removeAll(indexesToRemove);
+            newView = new View(context, oldView.getSSTables(), newIndexes);
         }
+        while (!view.compareAndSet(oldView, newView));
 
-        update(toRemove, Collections.emptyList(), false);
+        for (SSTableIndex index : indexesToRemove)
+            index.release();
     }
 
     /**
@@ -169,9 +186,15 @@ public class IndexViewManager
      */
     public void invalidate(boolean indexWasDropped)
     {
-        View previousView = view.getAndSet(new View(context, Collections.emptyList()));
+        View oldView, newView;
+        do
+        {
+            oldView = view.get();
+            newView = new View(context, oldView.getSSTables(), Collections.emptySet());
 
-        for (SSTableIndex index : previousView)
+        } while (!view.compareAndSet(oldView, newView));
+
+        for (SSTableIndex index : oldView)
         {
             if (indexWasDropped)
                 index.markIndexDropped();
