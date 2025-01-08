@@ -46,6 +46,7 @@ import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
@@ -248,7 +249,7 @@ public class ChunkCache
             this.offset = key.position;
 
             int numPages = PageAware.numPages(key.file.chunkSize());
-            this.buffers = bufferPool.getMultiple(PageAware.PAGE_SIZE, key.file.preferredBufferType(), numPages);
+            this.buffers = bufferPool.getMultiple(PageAware.PAGE_SIZE, BufferType.OFF_HEAP, numPages);
         }
 
         void releaseBuffers()
@@ -315,7 +316,7 @@ public class ChunkCache
 
         public SingleBuffer(Key key)
         {
-            this.buffer = bufferPool.get(PageAware.PAGE_SIZE, key.file.preferredBufferType());
+            this.buffer = bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
             assert key.file.chunkSize() <= PageAware.PAGE_SIZE;
             this.offset = key.position;
         }
@@ -504,6 +505,7 @@ public class ChunkCache
         // Note: We cannot use ThreadLocalByteBufferHolder because readChunk uses it for its temporary buffer.
         // Note: This uses the "Networking" buffer pool, which is meant to serve short-term buffers. Using
         // our buffer pool can cause problems due to the difference in buffer sizes and lifetime.
+        // Note: As this buffer is not retained in the cache, it can use the chunk reader's preferred buffer type.
         ByteBuffer scratchBuffer = BufferPools.forNetworking().get(chunkSize, file.preferredBufferType());
         try
         {
