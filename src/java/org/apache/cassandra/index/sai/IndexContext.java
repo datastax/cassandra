@@ -83,6 +83,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -692,6 +693,16 @@ public class IndexContext
         return liveMemtables;
     }
 
+    public @Nullable MemtableIndex getMemtableIndex(Memtable memtable)
+    {
+        return liveMemtables.get(memtable);
+    }
+
+    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
+    {
+        return getView().getSSTableIndex(descriptor);
+    }
+
     public boolean supports(Operator op)
     {
         if (op.isLike() || op == Operator.LIKE) return false;
@@ -983,4 +994,5 @@ public class IndexContext
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
     }
+
 }

@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -33,6 +34,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -104,77 +106,95 @@ public class QueryView implements AutoCloseable
         /**
          * Acquire references to all the memtables, memtable indexes, sstables, and sstable indexes required for the
          * given expression.
-         * <p>
-         * Will retry if the active sstables change concurrently.
          */
         protected QueryView build()
         {
             var referencedIndexes = new HashSet<SSTableIndex>();
-            long failingSince = -1L;
+
+            // We must use the canonical view in order for the equality check for source sstable/memtable
+            // to work correctly.
+            var filter = RangeUtil.coversFullRing(range)
+                         ? View.selectFunction(SSTableSet.CANONICAL)
+                         : View.select(SSTableSet.CANONICAL, s -> RangeUtil.intersects(s, range));
+
+
             try
             {
+                // Keeps track of which memtables we've already tried to match the index to.
+                // If we fail to match the index to the memtable for the first time, this is not necessarily an
+                // error, because the memtable could be flushed and its index removed between the moment we
+                // got the view and the moment we did the lookup.
+                // However, if we get the same memtable in the view again, and there is no index,
+                // then the missing index is not due to a concurrent modification but likely a bug, so
+                // we log an error and break the loop. This makes debugging easier (infinite looping is much worse
+                // than erroring out).
+                var processedMemtables = new HashSet<Memtable>();
+
                 outer:
                 while (true)
                 {
                     // Prevent an infinite loop
                     queryContext.checkpoint();
 
-                    // Acquire live memtable index and memtable references first to avoid missing an sstable due to flush.
-                    // Copy the memtable indexes to avoid concurrent modification.
-                    var memtableIndexes = new HashSet<>(indexContext.getLiveMemtables().values());
-
-                    // We must use the canonical view in order for the equality check for source sstable/memtable
-                    // to work correctly.
-                    var filter = RangeUtil.coversFullRing(range)
-                                 ? View.selectFunction(SSTableSet.CANONICAL)
-                                 : View.select(SSTableSet.CANONICAL, s -> RangeUtil.intersects(s, range));
+                    // Lock a consistent view of memtables and sstables.
+                    // A consistent view is required for correctness of order by and vector queries.
                     var refViewFragment = cfs.selectAndReference(filter);
-                    var memtables = Iterables.toSet(refViewFragment.memtables);
-                    // Confirm that all the memtables associated with the memtable indexes we already have are still live.
-                    // There might be additional memtables that are not associated with the expression because tombstones
-                    // are not indexed.
-                    for (MemtableIndex memtableIndex : memtableIndexes)
+
+                    // Lookup the indexes corresponding to memtables:
+                    var memtableIndexes = new HashSet<MemtableIndex>();
+
+                    for (Memtable memtable : refViewFragment.memtables)
                     {
-                        if (!memtables.contains(memtableIndex.getMemtable()))
+                        // Empty memtables have no index but that's not a problem, we can ignore them.
+                        if (memtable.isClean())
+                            continue;
+
+                        MemtableIndex index = indexContext.getMemtableIndex(memtable);
+                        if (index == null)
                         {
+                            // We can end up here if a flush happened right after we referenced the refViewFragment
+                            // but before looking up the memtable index.
+                            // In that case, we need to retry with the updated view
+                            // (we expect the updated view to not contain this memtable).
                             refViewFragment.release();
-                            continue outer;
+
+                            if (!processedMemtables.contains(memtable))
+                            {
+                                // Protect from infinite looping in case we have a permanent inconsistency between
+                                // the index set and the memtable set.
+                                processedMemtables.add(memtable);
+                                continue outer;
+                            }
+                            else
+                            {
+                                // So the memtable still exists in the second attempt, but it is not empty
+                                // and has no index. Oh, that looks like a bug.
+                                throw new IllegalStateException("Index not found for memtable: " + memtable);
+                            }
                         }
+                        memtableIndexes.add(index);
                     }
 
-                    Set<SSTableIndex> indexes = getIndexesForExpression(indexContext);
-                    // Attempt to reference each of the indexes, and thn confirm that the sstable associated with the index
-                    // is in the refViewFragment. If it isn't in the refViewFragment, we will get incorrect results, so
-                    // we release the indexes and refViewFragment and try again.
-                    for (SSTableIndex index : indexes)
+                    // Lookup and reference the indexes corresponding to the sstables:
+                    for (SSTableReader sstable : refViewFragment.sstables)
                     {
-                        var success = index.reference();
-                        if (success)
-                            referencedIndexes.add(index);
+                        SSTableIndex index = indexContext.getSSTableIndex(sstable.descriptor);
 
-                        if (!success || !refViewFragment.sstables.contains(index.getSSTable()))
+                        // If there is no index for given sstable, we don't retry, because we should never
+                        // release an index before we release the sstable. The sstables are already referenced
+                        // in the refViewFragment, so that protects indexes from being released. Hence, we should
+                        // always get an index and if we don't, it is a bug.
+                        if (index == null)
                         {
-                            referencedIndexes.forEach(SSTableIndex::release);
-                            referencedIndexes.clear();
                             refViewFragment.release();
-
-                            // Log about the failures
-                            if (failingSince <= 0)
-                            {
-                                failingSince = MonotonicClock.approxTime.now();
-                            }
-                            else if (MonotonicClock.approxTime.now() - failingSince > TimeUnit.MILLISECONDS.toNanos(100))
-                            {
-                                failingSince = MonotonicClock.approxTime.now();
-                                if (success)
-                                    NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
-                                                     "Spinning trying to capture index reader for {}, but it was released.", index);
-                                else
-                                    NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
-                                                     "Spinning trying to capture readers for {}, but : {}, ", refViewFragment.sstables, index.getSSTable());
-                            }
-                            continue outer;
+                            throw new IllegalStateException("Index not found for sstable: " + sstable);
                         }
+                        if (!index.reference())
+                        {
+                            refViewFragment.release();
+                            throw new IllegalStateException("Index for sstable " + sstable + " found but already released and cannot be referenced");
+                        }
+                        referencedIndexes.add(index);
                     }
 
                     // freeze referencedIndexes and memtableIndexes, so we can safely give access to them
@@ -199,33 +219,5 @@ public class QueryView implements AutoCloseable
                 }
             }
         }
-
-        /**
-         * Get the index
-         */
-        private Set<SSTableIndex> getIndexesForExpression(IndexContext indexContext)
-        {
-            if (!indexContext.isIndexed())
-                throw new IllegalArgumentException("Expression is not indexed");
-
-            // Get all the indexes in the range.
-            return indexContext.getView().getIndexes().stream().filter(this::indexInRange).collect(Collectors.toSet());
-        }
-
-        // I've removed the concept of "most selective index" since we don't actually have per-sstable
-        // statistics on that; it looks like it was only used to check bounds overlap, so computing
-        // an actual global bounds should be an improvement.  But computing global bounds as an intersection
-        // of individual bounds is messy because you can end up with more than one range.
-        private boolean indexInRange(SSTableIndex index)
-        {
-            SSTableReader sstable = index.getSSTable();
-            if (range instanceof Bounds && range.left.equals(range.right) && (!range.left.isMinimum()) && range.left instanceof DecoratedKey)
-            {
-                if (!sstable.getBloomFilter().isPresent((DecoratedKey)range.left))
-                    return false;
-            }
-            return range.left.compareTo(sstable.last) <= 0 && (range.right.isMinimum() || sstable.first.compareTo(range.right) <= 0);
-        }
     }
-
 }
