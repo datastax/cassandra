@@ -396,18 +396,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     }
 
     /**
-     * Similar to {@link #isValueCompatibleWith(AbstractType)}, but takes into account {@link Cell} encoding.
-     * In particular, this method doesn't consider two types serialization compatible if one of them has fixed
-     * length (overrides {@link #valueLengthIfFixed()}, and the other one doesn't.
-     */
-    public boolean isSerializationCompatibleWith(AbstractType<?> previous)
-    {
-        return isValueCompatibleWith(previous)
-               && valueLengthIfFixed() == previous.valueLengthIfFixed()
-               && isMultiCell() == previous.isMultiCell();
-    }
-
-    /**
      * An alternative comparison function used by CollectionsType in conjunction with CompositeType.
      *
      * This comparator is only called to compare components of a CompositeType. It gets the value of the
