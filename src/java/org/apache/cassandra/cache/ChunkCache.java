@@ -21,36 +21,27 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
-import java.nio.IntBuffer;
-import java.nio.LongBuffer;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
-import com.google.common.util.concurrent.MoreExecutors;
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
 import org.cliffc.high_scale_lib.NonBlockingIdentityHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.benmanes.caffeine.cache.AsyncCache;
-import com.github.benmanes.caffeine.cache.AsyncLoadingCache;
 import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.RemovalListener;
-import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -60,12 +51,15 @@ import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
+import org.apache.cassandra.io.util.ThreadLocalByteBufferHolder;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
+import org.apache.cassandra.utils.FastByteOperations;
+import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 public class ChunkCache
-        implements RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
+        implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
@@ -103,9 +97,9 @@ public class ChunkCache
     // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
     // safe for concurrent access.
     private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
-    private final AsyncCache<Key, Buffer> cache;
-    private final Cache<Key, Buffer> synchronousCache;
-    private final ConcurrentMap<Key, CompletableFuture<Buffer>> cacheAsMap;
+    private final AsyncCache<Key, Chunk> cache;
+    private final Cache<Key, Chunk> synchronousCache;
+    private final ConcurrentMap<Key, CompletableFuture<Chunk>> cacheAsMap;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
     private final ShutdownableExecutor cleanupExecutor;
@@ -163,52 +157,210 @@ public class ChunkCache
         }
     }
 
-    class Buffer implements Rebufferer.BufferHolder
+    abstract static class Chunk
     {
-        private final ByteBuffer buffer;
-        private final long offset;
-        private final AtomicInteger references;
+        volatile int references = 1; // Start referenced
 
-        public Buffer(ByteBuffer buffer, long offset)
-        {
-            this.buffer = buffer;
-            this.offset = offset;
-            references = new AtomicInteger(1);  // start referenced.
-        }
-
-        Buffer reference()
+        /**
+         * Return the correct buffer depending on the position requested by the client, also taking a reference to this
+         * chunk.
+         *
+         * @param position the position requested by the client, this has not been aligned to neither the chunk nor the page
+         * @return the buffer covering this position, or null if no reference can be taken
+         */
+        @Nullable
+        Rebufferer.BufferHolder getReferencedBuffer(long position)
         {
             int refCount;
             do
             {
-                refCount = references.get();
-                if (refCount == 0)
-                    // Buffer was released before we managed to reference it.
-                    return null;
-            } while (!references.compareAndSet(refCount, refCount + 1));
+                refCount = references;
 
-            return this;
+                if (refCount == 0)
+                    return null; // Buffer was released before we managed to reference it.
+
+            } while (!referencesUpdater.compareAndSet(this, refCount, refCount + 1));
+
+            return getBuffer(position);
         }
 
-        @Override
+        /**
+         * Release the chunk when the cache or a reader no longer needs it.
+         */
+        public void release()
+        {
+            if (referencesUpdater.decrementAndGet(this) == 0)
+                releaseBuffers();
+        }
+
+        <B> Chunk handleLoadResult(B loadResult, Throwable loadError)
+        {
+            if (loadError == null)
+                return this;
+
+            release();
+            throw Throwables.propagate(loadError);
+        }
+
+        /**
+         * Load the data for this chunk.
+         *
+         * @param key The key / file & position that this chunk corresponds to.
+         * @return a future holding the loaded chunk when it completes.
+         */
+        abstract void read(Key key);
+
+        /**
+         * Return the correct buffer depending on the position requested by the client. The returned buffer cannot be
+         * null, but may be empty and must contain the given position
+         * (i.e. buf.offset <= position <= buf.offset + buf.buffer.limit where the latter can only be == if at the end
+         * of the file and buffer is empty).
+         *
+         * @param position the position requested by the client, this has not been aligned to neither the chunk nor the page
+         * @return the buffer covering this position, or null if no reference can be taken
+         */
+        abstract Rebufferer.BufferHolder getBuffer(long position);
+
+        /**
+         * @return the space taken by this chunk
+         */
+        abstract int capacity();
+
+        /**
+         * Release the buffers when this chunk is no longer used. Called when all references are released.
+         */
+        abstract void releaseBuffers();
+    }
+
+    private static final AtomicIntegerFieldUpdater<Chunk> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(Chunk.class, "references");
+
+    /**
+     * A chunk is a group of buffers of size {@link PageAware#PAGE_SIZE} that will be allocated and released
+     * at the same time. The {@link ChunkReader} will read into the buffers of a chunk.
+     */
+    public class MultiBufferChunk extends Chunk
+    {
+        private final ByteBuffer[] buffers;
+        private final long offset;
+
+        public MultiBufferChunk(Key key)
+        {
+            this.offset = key.position;
+
+            int numPages = PageAware.numPages(key.file.chunkSize());
+            this.buffers = bufferPool.getMultiple(PageAware.PAGE_SIZE, key.file.preferredBufferType(), numPages);
+        }
+
+        void releaseBuffers()
+        {
+            bufferPool.putMultiple(buffers);
+        }
+
+        void read(Key key)
+        {
+            readScattering(key.file, offset, capacity(), buffers);
+        }
+
+        @Nullable
+        Buffer getBuffer(long position)
+        {
+            int index = PageAware.pageNum(position - offset);
+            Preconditions.checkArgument(index >= 0 && index < buffers.length, "Invalid position: %s, index: %s", position, index);
+
+            long pageAlignedPosition = PageAware.pageStart(position);
+            return new Buffer(buffers[index], pageAlignedPosition);
+        }
+
+        public int capacity()
+        {
+            return buffers.length * PageAware.PAGE_SIZE;
+        }
+
+        class Buffer implements Rebufferer.BufferHolder
+        {
+            private final ByteBuffer buffer;
+            private final long offset;
+
+            public Buffer(ByteBuffer buffer, long offset)
+            {
+                this.buffer = buffer;
+                this.offset = offset;
+            }
+
+            @Override
+            public ByteBuffer buffer()
+            {
+                assert references > 0 : "Already unreferenced";
+                return buffer.duplicate();
+            }
+
+            @Override
+            public long offset()
+            {
+                return offset;
+            }
+
+            @Override
+            public void release()
+            {
+                MultiBufferChunk.this.release();
+            }
+        }
+    }
+
+    class SingleBuffer extends Chunk implements Rebufferer.BufferHolder
+    {
+        private final ByteBuffer buffer;
+        private final long offset;
+
+        public SingleBuffer(Key key)
+        {
+            this.buffer = bufferPool.get(PageAware.PAGE_SIZE, key.file.preferredBufferType());
+            assert key.file.chunkSize() <= PageAware.PAGE_SIZE;
+            this.offset = key.position;
+        }
+
         public ByteBuffer buffer()
         {
-            assert references.get() > 0;
             return buffer.duplicate();
         }
 
-        @Override
         public long offset()
         {
             return offset;
         }
 
-        @Override
-        public void release()
+        void releaseBuffers()
         {
-            if (references.decrementAndGet() == 0)
-                bufferPool.put(buffer);
+            bufferPool.put(buffer);
         }
+
+        void read(Key key)
+        {
+            assert offset == key.position;
+
+            buffer.limit(key.file.chunkSize());
+            key.file.readChunk(offset, buffer);
+        }
+
+        @Nullable
+        Rebufferer.BufferHolder getBuffer(long position)
+        {
+            return this;
+        }
+
+        int capacity()
+        {
+            return PageAware.PAGE_SIZE;
+        }
+    }
+
+    Chunk newChunk(Key key)
+    {
+        if (key.file.chunkSize() > PageAware.PAGE_SIZE)
+            return new MultiBufferChunk(key);
+        else
+            return new SingleBuffer(key);
     }
 
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
@@ -228,7 +380,7 @@ public class ChunkCache
                             else
                                 r.run();
                         })
-                        .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
+                        .weigher((key, buffer) -> ((Chunk) buffer).capacity())
                         .removalListener(this)
                         .recordStats(() -> metrics)
                         .buildAsync();
@@ -237,17 +389,18 @@ public class ChunkCache
     }
 
 
-    private Buffer load(Key key)
+    private Chunk load(Key key)
     {
-        ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
-        assert buffer != null;
+        Chunk chunk = null;
         try
         {
-            key.file.readChunk(key.position, buffer);
+            chunk = newChunk(key);  // Note: we need `chunk` to be assigned before we call read to release on error
+            chunk.read(key);
         }
         catch (RuntimeException t)
         {
-            bufferPool.put(buffer);
+            if (chunk != null)
+                chunk.release();
             throw t;
         }
         // Complete addition within compute remapping function to ensure there is no race condition with removal.
@@ -257,13 +410,13 @@ public class ChunkCache
             v.add(key);
             return v;
         });
-        return new Buffer(buffer, key.position);
+        return chunk;
     }
 
     @Override
-    public void onRemoval(Key key, Buffer buffer, RemovalCause cause)
+    public void onRemoval(Key key, Chunk chunk, RemovalCause cause)
     {
-        buffer.release();
+        chunk.release();
         // Complete addition within compute remapping function to ensure there is no race condition with load.
         keysByFile.compute(key.internedPath, (k, v) -> {
             if (v == null)
@@ -333,6 +486,45 @@ public class ChunkCache
         wrapper = rdr -> interceptor.apply(prevWrapper.apply(rdr));
     }
 
+    /**
+     * Read a chunk to be stored in the chunk cache.
+     * <p/>
+     * The chunk cache will only store buffers of a fixed size, known as pages. If a chunk only has a single page,
+     * then this method will read directly into this page. Otherwise this method will use a temporary scratch buffer
+     * to read all the pages at once and will then copy the data back into the individual pages.
+     *
+     * @param position the start position of the chunk
+     * @param chunkSize the amount of data to read
+     * @param buffers an array of smaller-sized buffers whose total capacity needs to be >= chunkSize
+     *
+     * @return a future that will complete when all the buffers in the chunk have been read.
+     */
+    void readScattering(ChunkReader file, long position, int chunkSize, ByteBuffer[] buffers)
+    {
+        // Note: We cannot use ThreadLocalByteBufferHolder because readChunk uses it for its temporary buffer.
+        // Note: This uses the "Networking" buffer pool, which is meant to serve short-term buffers. Using
+        // our buffer pool can cause problems due to the difference in buffer sizes and lifetime.
+        ByteBuffer scratchBuffer = BufferPools.forNetworking().get(chunkSize, file.preferredBufferType());
+        try
+        {
+            file.readChunk(position, scratchBuffer);
+            int remaining = scratchBuffer.remaining();
+            int pos = 0;
+            for (ByteBuffer buf : buffers)
+            {
+                int len = Math.min(remaining, buf.capacity());
+                FastByteOperations.copy(scratchBuffer, pos, buf, 0, len);
+                buf.position(0).limit(len);
+                pos += len;
+                remaining -= len;
+            }
+        }
+        finally
+        {
+            bufferPool.put(scratchBuffer);
+        }
+    }
+
     // TODO: Invalidate caches for obsoleted/MOVED_START tables?
 
     /**
@@ -369,13 +561,13 @@ public class ChunkCache
                 //so we spin loop while waiting for the cache to re-populate
                 while (buf == null)
                 {
-                    Buffer chunk;
+                    Chunk chunk;
                     // Using cache.get(k, compute) results in lots of allocation, rather risk the unlikely race...
-                    CompletableFuture<Buffer> cachedValue = cache.getIfPresent(chunkKey);
+                    CompletableFuture<Chunk> cachedValue = cache.getIfPresent(chunkKey);
                     if (cachedValue == null)
                     {
-                        CompletableFuture<Buffer> entry = new CompletableFuture<>();
-                        CompletableFuture<Buffer> existing = cacheAsMap.putIfAbsent(chunkKey, entry);
+                        CompletableFuture<Chunk> entry = new CompletableFuture<>();
+                        CompletableFuture<Chunk> existing = cacheAsMap.putIfAbsent(chunkKey, entry);
                         if (existing == null)
                         {
                             try
@@ -403,7 +595,7 @@ public class ChunkCache
                         chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                     }
 
-                    buf = chunk.reference();
+                    buf = chunk.getReferencedBuffer(position);
 
                     if (buf == null && ++spin == 1000)
                     {
