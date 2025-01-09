@@ -58,6 +58,7 @@ import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
+import org.github.jamm.Unmetered;
 
 public class ChunkCache
         implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
@@ -92,6 +93,7 @@ public class ChunkCache
                                               ? new ChunkCache(BufferPools.forChunkCache(), DatabaseDescriptor.getFileCacheSizeInMB(), ChunkCacheMetrics::create)
                                               : null;
 
+    @Unmetered
     private final BufferPool bufferPool;
 
     // Relies on the implementation detail that keys are interned strings and can be compared by reference.
@@ -102,7 +104,9 @@ public class ChunkCache
     private final Cache<Key, Chunk> synchronousCache;
     private final ConcurrentMap<Key, CompletableFuture<Chunk>> cacheAsMap;
     private final long cacheSize;
+    @Unmetered
     public final ChunkCacheMetrics metrics;
+    @Unmetered
     private final ShutdownableExecutor cleanupExecutor;
 
     private boolean enabled;
@@ -355,8 +359,13 @@ public class ChunkCache
 
     Chunk newChunk(Key key)
     {
-        if (key.file.chunkSize() <= PageAware.PAGE_SIZE)
+        if (key.file.chunkSize() == PageAware.PAGE_SIZE)
             return new SingleBuffer(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
+        if (key.file.chunkSize() < PageAware.PAGE_SIZE)
+        {
+
+            return new SingleBuffer(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(key.file.chunkSize()).slice());
+        }
 
         ByteBuffer[] buffers = bufferPool.getMultiple(key.file.chunkSize(), PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
         if (buffers.length > 1)
@@ -461,6 +470,11 @@ public class ChunkCache
             return file;
 
         return wrapper.apply(file);
+    }
+
+    public boolean isEnabled()
+    {
+        return enabled;
     }
 
     public void invalidateFile(String filePath)
