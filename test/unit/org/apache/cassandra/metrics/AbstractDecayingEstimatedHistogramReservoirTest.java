@@ -32,10 +32,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.runners.Enclosed;
@@ -65,27 +63,20 @@ import static org.quicktheories.generators.SourceDSL.integers;
 import static org.quicktheories.generators.SourceDSL.longs;
 
 @RunWith(Enclosed.class)
-public class DecayingEstimatedHistogramReservoirTest
+public abstract class AbstractDecayingEstimatedHistogramReservoirTest
 {
-    public static final Logger logger = LoggerFactory.getLogger(DecayingEstimatedHistogramReservoirTest.class);
-    @RunWith(Parameterized.class)
     public static class NonParameterizedTests
     {
-        @Parameterized.Parameter
-        public Boolean useDseHistogramBehaviour;
+        public boolean useDseHistogramBehaviour;
 
-        @Parameterized.Parameters(name = "dseHistograms={0}")
-        public static Iterable<Boolean> useDseHistogramBehaviour()
-        {
-            return ImmutableSet.of(false, true);
-        }
-
+        public static final Logger logger = LoggerFactory.getLogger(NonParameterizedTests.class);
         public static final int numExamples = 1000000;
 
         public Gen<long[]> offsets;
 
-        public static final long[] dseOffsetsWith0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, true);
-        public static final long[] dseOffsetsWithout0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, false);
+        // not static so that test superclasses can set USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES before it's cached by DEHR initialization
+        public final long[] dseOffsetsWith0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, true);
+        public final long[] dseOffsetsWithout0 = DecayingEstimatedHistogramReservoir.newDseOffsets(MAX_BUCKET_COUNT, false);
 
         private Gen<long[]> generateOffsets()
         {
@@ -95,13 +86,12 @@ public class DecayingEstimatedHistogramReservoirTest
                              .zip(booleans().all(), EstimatedHistogram::newOffsets);
         }
 
-        @Before
-        public void setup()
+        public NonParameterizedTests()
         {
-            CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.setBoolean(useDseHistogramBehaviour);
+            useDseHistogramBehaviour = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
             offsets = generateOffsets();
         }
-        
+
         @Test
         public void testFindIndex()
         {
@@ -217,6 +207,9 @@ public class DecayingEstimatedHistogramReservoirTest
     @RunWith(Parameterized.class)
     public static class ParameterizedTests
     {
+        public boolean useDseHistogramBehaviour;
+
+        public static final Logger logger = LoggerFactory.getLogger(NonParameterizedTests.class);
         private static final double DOUBLE_ASSERT_DELTA = 0;
 
         @Parameterized.Parameter
@@ -225,18 +218,19 @@ public class DecayingEstimatedHistogramReservoirTest
         @Parameterized.Parameter(1)
         public Function<DecayingEstimatedHistogramReservoir, Snapshot> toSnapshot;
 
-        @Parameterized.Parameter(2)
-        public Boolean useDseHistogramBehaviour;
-
         @Parameterized.Parameters(name="{0} dseHistograms={2}")
         public static Collection<Object[]> suppliers()
         {
             Function<DecayingEstimatedHistogramReservoir, Snapshot> snapshot = DecayingEstimatedHistogramReservoir::getSnapshot;
             Function<DecayingEstimatedHistogramReservoir, Snapshot> decayingOnly = DecayingEstimatedHistogramReservoir::getPercentileSnapshot;
             return ImmutableList.of(
-                new Object[] { "normal", snapshot, false }, new Object[] { "decaying buckets", decayingOnly, false },
-                new Object[] { "normal", snapshot, true }, new Object[] { "decaying buckets", decayingOnly, true }
+                new Object[] { "normal", snapshot }, new Object[] { "decaying buckets", decayingOnly }
             );
+        }
+
+        public ParameterizedTests()
+        {
+            useDseHistogramBehaviour = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
         }
 
         @Test
@@ -251,7 +245,7 @@ public class DecayingEstimatedHistogramReservoirTest
                                                                                                clock);
 
             long seed = nanoTime();
-            System.out.println("DecayingEstimatedHistogramReservoirTest#testStriping.seed = " + seed);
+            System.out.println("AbstractDecayingEstimatedHistogramReservoirTest.ParameterizedTests#testStriping.seed = " + seed);
             Random valGen = new Random(seed);
             ExecutorService executors = Executors.newFixedThreadPool(nStripes * 2);
             for (int i = 0; i < 1_000_000; i++)
@@ -325,17 +319,15 @@ public class DecayingEstimatedHistogramReservoirTest
             histogram.update(16);
             Snapshot snapshot = toSnapshot.apply(histogram);
             assertEquals(15, snapshot.getMin());
-            assertEquals(17, snapshot.getMax());
-            // TODO CNDB-9091: It is unclear why he below CC 4.0 change is not needed here.  
-//            if (useDseHistogramBehaviour)
-//            {
-//                // DSE bucket boundary is 16, not 17
-//                assertEquals(16, snapshot.getMax());
-//            }
-//            else
-//            {
-//                assertEquals(17, snapshot.getMax());
-//            }
+            if (useDseHistogramBehaviour)
+            {
+                // DSE bucket boundary is 16, not 17
+                assertEquals(16, snapshot.getMax());
+            }
+            else
+            {
+                assertEquals(17, snapshot.getMax());
+            }
         }
 
         @Test
@@ -805,7 +797,7 @@ public class DecayingEstimatedHistogramReservoirTest
 
         private void assertEstimatedQuantile(long expectedValue, double actualValue)
         {
-            if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+            if (useDseHistogramBehaviour)
             {
                 // DSE histograms have a different bucketing scheme, so let's be more liberal
                 // checking the estimated quantiles (especially that we're only using the non-decaying buckets)
