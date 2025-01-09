@@ -270,7 +270,9 @@ public class IndexContext
 
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
     {
-        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
+        // Index must have been created before switching the memtable
+        MemtableIndex target = liveMemtables.get(memtable);
+        assert target != null : "Index not found for memtable " + memtable;
 
         long start = System.nanoTime();
 
@@ -415,6 +417,11 @@ public class IndexContext
         ByteBuffer oldValue = getValueOf(key, oldRow, 0);
         ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
         target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
+    }
+
+    public void createMemtable(Memtable memtable)
+    {
+        liveMemtables.put(memtable, MemtableIndex.createIndex(this, memtable));
     }
 
     public void renewMemtable(Memtable renewed)
