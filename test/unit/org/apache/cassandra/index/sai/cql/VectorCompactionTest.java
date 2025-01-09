@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;

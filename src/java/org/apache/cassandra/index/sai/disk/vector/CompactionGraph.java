@@ -132,7 +132,7 @@ public class CompactionGraph implements Closeable, Accountable
     // (and creates happens-before events so we don't need to mark the other fields volatile)
     private final ReadWriteLock trainingLock = new ReentrantReadWriteLock();
     private boolean pqFinetuned = false;
-    // will be updated to different objects after fine-tuning
+    // not final; will be updated to different objects after fine-tuning
     private VectorCompressor<?> compressor;
     private MutableCompressedVectors compressedVectors;
     private GraphIndexBuilder builder;
@@ -293,15 +293,15 @@ public class CompactionGraph implements Closeable, Accountable
             if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
             {
                 // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
-                var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
                 // and (2) a map of vectors keyed by ordinal
+                var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
                 var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
                 postingsMap.forEach((v, p) -> {
                     trainingVectors.add(v);
                     vectorsByOrdinal.put(p.getOrdinal(), v);
                 });
 
-                // lock the addGraphNode threads out
+                // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
                 trainingLock.writeLock().lock();
                 try
                 {

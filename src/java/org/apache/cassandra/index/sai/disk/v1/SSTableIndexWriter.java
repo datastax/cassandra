@@ -381,12 +381,10 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
     {
-        int segmentsChecked = 0;
         for (SSTableIndex index : indexContext.getView().getIndexes())
         {
             for (Segment segment : index.getSegments())
             {
-                segmentsChecked++;
                 if (segment.getIndexSearcher() instanceof  V2VectorIndexSearcher)
                     return true; // V2 doesn't know, so we err on the side of being optimistic.  See comments in CompactionGraph
                 var searcher = (V5VectorIndexSearcher) segment.getIndexSearcher();
