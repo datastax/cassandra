@@ -23,16 +23,31 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.primitives.Ints;
 
+import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.Rebufferer.BufferHolder;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 
 @NotThreadSafe
 public class RandomAccessReader extends RebufferingInputStream implements FileDataInput, io.github.jbellis.jvector.disk.RandomAccessReader
 {
+    private static final int VECTORED_READS_POOL_SIZE = CassandraRelevantProperties.RAR_VECTORED_READS_THREAD_POOL_SIZE.getInt(FBUtilities.getAvailableProcessors() / 2);
+
     // The default buffer size when the client doesn't specify it
     public static final int DEFAULT_BUFFER_SIZE = 4096;
 
@@ -42,6 +57,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     final Rebufferer rebufferer;
     private final ByteOrder order;
     private BufferHolder bufferHolder;
+
+    private VectoredReadsPool vectoredReadsPool;
 
     /**
      * Only created through Builder
@@ -177,6 +194,55 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
 
         readInts(buffer, order, dest, offset, count);
+    }
+
+    @Override
+    public void read(int[][] ints, long[] positions) throws IOException
+    {
+        if (!rebufferer.supportsConcurrentRebuffer())
+        {
+            io.github.jbellis.jvector.disk.RandomAccessReader.super.read(ints, positions);
+            return;
+        }
+
+        if (ints.length != positions.length)
+            throw new IllegalArgumentException(String.format("ints.length %d != positions.length %d", ints.length, positions.length));
+
+        if (ints.length == 0)
+            return;
+
+        maybeInitVectoredReadsPool();
+        List<CompletableFuture<Void>> futures = new ArrayList<>(ints.length - 1);
+        for (int i = 0; i < ints.length - 1; i++)
+        {
+            if (ints[i].length == 0)
+                continue;
+
+            futures.add(vectoredReadsPool.readAsync(ints[i], positions[i]));
+        }
+
+        // Read last array in the current thread both because "why not" and also so this RAR is set "as if" the read
+        // was done synchronously.
+        seek(positions[ints.length - 1]);
+        read(ints[ints.length - 1], 0, ints[ints.length - 1].length);
+
+        for (CompletableFuture<Void> future : futures)
+        {
+            try
+            {
+                future.get();
+            }
+            catch (Exception e)
+            {
+                throw Throwables.cleaned(e);
+            }
+        }
+    }
+
+    private void maybeInitVectoredReadsPool()
+    {
+        if (vectoredReadsPool == null)
+            vectoredReadsPool = new VectoredReadsPool(VECTORED_READS_POOL_SIZE, rebufferer, order);
     }
 
     private static void readFloats(ByteBuffer buffer, ByteOrder order, float[] dest, int offset, int count)
@@ -475,6 +541,53 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         {
             channel.close();
             throw t;
+        }
+    }
+
+    private static class VectoredReadsPool
+    {
+        private final ThreadPoolExecutor executor;
+        private final FastThreadLocal<RandomAccessReader> perThreadReaders;
+        protected static final AtomicInteger id = new AtomicInteger(1);
+
+        VectoredReadsPool(int size, Rebufferer rebufferer, ByteOrder order)
+        {
+            this.executor = new DebuggableThreadPoolExecutor(size, Integer.MAX_VALUE, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), new NamedThreadFactory("rar-vectored-reads-" + id.getAndIncrement()));
+            this.perThreadReaders = new FastThreadLocal<>()
+            {
+                @Override
+                protected RandomAccessReader initialValue()
+                {
+                    return new RandomAccessReader(rebufferer, order, Rebufferer.EMPTY);
+                }
+
+                @Override
+                protected void onRemoval(RandomAccessReader reader)
+                {
+                    reader.close();
+                }
+            };
+        }
+
+        CompletableFuture<Void> readAsync(int[] ints, long position)
+        {
+            return CompletableFuture.runAsync(() -> {
+                try
+                {
+                    RandomAccessReader reader = perThreadReaders.get();
+                    reader.seek(position);
+                    reader.read(ints, 0, ints.length);
+                }
+                catch (Exception e)
+                {
+                    throw Throwables.cleaned(e);
+                }
+            }, executor);
+        }
+
+        void close()
+        {
+            executor.shutdown();
         }
     }
 

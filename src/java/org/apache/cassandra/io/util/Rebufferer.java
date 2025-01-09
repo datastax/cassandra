@@ -37,6 +37,11 @@ public interface Rebufferer extends ReaderFileProxy
      */
     BufferHolder rebuffer(long position);
 
+    default boolean supportsConcurrentRebuffer()
+    {
+        return false;
+    }
+
     /**
      * Called when a reader is closed. Should clean up reader-specific data.
      */
