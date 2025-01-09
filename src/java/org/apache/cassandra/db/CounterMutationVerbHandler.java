@@ -32,7 +32,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.StorageProxy;
 
@@ -51,7 +51,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         logger.trace("Applying forwarded {}", cm);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors requestSensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
         Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
         RequestTracker.instance.set(requestSensors);
 

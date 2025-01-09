@@ -25,6 +25,9 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
@@ -34,20 +37,35 @@ public abstract class AbstractPaxosCallback<T> implements RequestCallback<T>
 {
     protected final CountDownLatch latch;
     protected final int targets;
+    private final TableMetadata metadata;
     private final ConsistencyLevel consistency;
     private final long queryStartNanoTime;
+    private final RequestSensors requestSensors;
 
-    public AbstractPaxosCallback(int targets, ConsistencyLevel consistency, long queryStartNanoTime)
+    public AbstractPaxosCallback(TableMetadata metadata, int targets, ConsistencyLevel consistency, long queryStartNanoTime)
     {
+        this.metadata = metadata;
         this.targets = targets;
         this.consistency = consistency;
         latch = newCountDownLatch(targets);
         this.queryStartNanoTime = queryStartNanoTime;
+        this.requestSensors = RequestTracker.instance.get();
+    }
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return requestSensors;
     }
 
     public int getResponseCount()
     {
         return targets - latch.count();
+    }
+
+    public TableMetadata getMetadata()
+    {
+        return metadata;
     }
 
     public void await() throws WriteTimeoutException
