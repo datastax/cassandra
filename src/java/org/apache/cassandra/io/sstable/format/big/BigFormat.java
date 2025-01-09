@@ -205,7 +205,7 @@ public class BigFormat implements SSTableFormat
         // mc (3.0.8, 3.9): commit log intervals included
         // md (3.0.18, 3.11.4): corrected sstable min/max clustering
 
-        // only `me` and above, and upgrades from 3.0.25, 3.11.11, and dse-5.1 are supported (see CassandraDaemon.checkForCompatibleUpgrades())
+        // only `me` and above, and upgrades from C* 3.0.25, 3.11.11 and dse-5.1, are supported (see CassandraDaemon.checkForCompatibleUpgrades())
 
         // me (3.0.25, 3.11.11): added hostId of the node from which the sstable originated
 
