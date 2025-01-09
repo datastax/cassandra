@@ -31,6 +31,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -311,14 +312,17 @@ public class CompactionGraph implements Closeable, Accountable
 
                     // re-encode the vectors added so far
                     compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
-                    for (int i = 0; i < builder.getGraph().getIdUpperBound(); i++)
-                    {
-                        var v = vectorsByOrdinal.get(i);
-                        if (v == null)
-                            compressedVectors.setZero(i);
-                        else
-                            compressedVectors.encodeAndSet(i, v);
-                    }
+                    compactionFjp.submit(() -> {
+                        IntStream.range(0, builder.getGraph().getIdUpperBound())
+                                 .parallel()
+                                 .forEach(i -> {
+                                     var v = vectorsByOrdinal.get(i);
+                                     if (v == null)
+                                         compressedVectors.setZero(i);
+                                     else
+                                         compressedVectors.encodeAndSet(i, v);
+                                 });
+                    }).join();
 
                     // Keep the existing edges but recompute their scores
                     builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
