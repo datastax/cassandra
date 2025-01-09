@@ -92,7 +92,7 @@ public class CachingRebuffererTest
     }
 
     // Helper test to estimate the memory overhead caused by buffer cache
-    @Ignore
+//    @Ignore
     @Test
     public void calculateMemoryOverhead() throws InterruptedException
     {
@@ -143,6 +143,11 @@ public class CachingRebuffererTest
             public double getCrcCheckChance()
             {
                 return 0;
+            }
+
+            public ReaderType type()
+            {
+                return ReaderType.SIMPLE;
             }
         }
 

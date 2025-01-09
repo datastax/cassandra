@@ -92,6 +92,11 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         return new BufferManagingRebufferer.Aligned(this);
     }
 
+    public ReaderType type()
+    {
+        return ReaderType.COMPRESSED;
+    }
+
     public static class Standard extends CompressedChunkReader
     {
         // we read the raw compressed bytes into this buffer, then uncompressed them into the provided one.

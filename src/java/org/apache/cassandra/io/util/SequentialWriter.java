@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.utils.PageAware;
@@ -124,6 +125,9 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
                     try { channel.close(); }
                     catch (Throwable t2) { t.addSuppressed(t2); }
                 }
+
+                // Invalidate any cache entries that may exist for a previous file with the same name.
+                ChunkCache.instance.invalidateFile(file);
                 return channel;
             }
         }
