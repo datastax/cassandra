@@ -406,7 +406,7 @@ public class InboundMessageHandler extends AbstractMessageHandler
         if (state != null) state.trace("{} message received from {}", header.verb, header.from);
 
         callbacks.onDispatched(task.size(), header);
-        header.verb.stage.execute(ExecutorLocals.create(state), task);
+        header.verb.stage.execute(task, ExecutorLocals.create(state));
     }
 
     private abstract class ProcessMessage implements Runnable
