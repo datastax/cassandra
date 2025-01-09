@@ -54,7 +54,7 @@ public class PrepareCallback extends AbstractPaxosCallback<PrepareResponse>
 
     public PrepareCallback(DecoratedKey key, TableMetadata metadata, int targets, ConsistencyLevel consistency, Dispatcher.RequestTime requestTime)
     {
-        super(targets, consistency, requestTime);
+        super(metadata, targets, consistency, requestTime);
         // need to inject the right key in the empty commit so comparing with empty commits in the response works as expected
         mostRecentCommit = Commit.emptyCommit(key, metadata);
         mostRecentInProgressCommit = Commit.emptyCommit(key, metadata);

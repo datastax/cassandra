@@ -19,6 +19,7 @@ package org.apache.cassandra.sensors;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.After;
@@ -66,16 +67,13 @@ public class SensorsReadTest
     public static final String CF_STANDARD_SAI = "StandardSAI";
     public static final String CF_STANDARD_SECONDARY_INDEX = "StandardSecondaryIndex";
 
-    private static final String READ_BYTES_REQUEST = "READ_BYTES_REQUEST";
-    private static final String READ_BYTES_TABLE = "READ_BYTES_TABLE";
-
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
 
     @BeforeClass
     public static void defineSchema() throws Exception
     {
-        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(ActiveRequestSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
 
         // build SAI indexes
         Indexes.Builder saiIndexes = Indexes.builder();
@@ -164,7 +162,7 @@ public class SensorsReadTest
 
         assertRequestAndRegistrySensorsEquality(context);
         Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
-        assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
+        assertResponseSensors(requestSensor, requestSensor);
     }
 
     @Test
@@ -191,7 +189,7 @@ public class SensorsReadTest
 
         assertRequestAndRegistrySensorsEquality(context);
         Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
-        assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
+        assertResponseSensors(requestSensor, requestSensor);
     }
 
     @Test
@@ -220,7 +218,7 @@ public class SensorsReadTest
         assertRequestAndRegistrySensorsEquality(context);
 
         Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
-        assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
+        assertResponseSensors(requestSensor, requestSensor);
     }
 
     @Test
@@ -252,7 +250,7 @@ public class SensorsReadTest
 
         assertThat(request1Sensor.getValue()).isGreaterThan(0);
         assertThat(request1Sensor).isEqualTo(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES));
-        assertResponseSensors(request1Sensor.getValue(), request1Sensor.getValue());
+        assertResponseSensors(request1Sensor, SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES));
 
         SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES).reset();
         capturedOutboundMessages.clear();
@@ -263,7 +261,7 @@ public class SensorsReadTest
         Sensor request2Sensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
         assertThat(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
-        assertResponseSensors(request2Sensor.getValue(), request1Bytes + request2Sensor.getValue());
+        assertResponseSensors(request2Sensor, SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES));
     }
 
     @Test
@@ -294,7 +292,7 @@ public class SensorsReadTest
 
         assertThat(request1Sensor.getValue()).isGreaterThan(0);
         assertThat(request1Sensor).isEqualTo(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES));
-        assertResponseSensors(request1Bytes, request1Bytes);
+        assertResponseSensors(request1Sensor, SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES));
 
         SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES).reset();
         capturedOutboundMessages.clear();
@@ -305,7 +303,7 @@ public class SensorsReadTest
         Sensor request2Sensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
         assertThat(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
-        assertResponseSensors(request2Sensor.getValue(), request1Bytes + request2Sensor.getValue());
+        assertResponseSensors(request2Sensor, SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES));
     }
 
     @Test
@@ -332,7 +330,7 @@ public class SensorsReadTest
         assertRequestAndRegistrySensorsEquality(context);
 
         Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
-        assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
+        assertResponseSensors(requestSensor, requestSensor);
     }
 
     @Test
@@ -398,7 +396,7 @@ public class SensorsReadTest
         assertRequestAndRegistrySensorsEquality(context);
 
         Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
-        assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
+        assertResponseSensors(requestSensor, requestSensor);
     }
 
     private static void handleReadCommand(ReadCommand command)
@@ -415,27 +413,34 @@ public class SensorsReadTest
         assertThat(registrySensor).isEqualTo(localSensor);
     }
 
-    private void assertResponseSensors(double requestValue, double registryValue)
+    private void assertResponseSensors(Sensor requestSensor, Sensor registrySensor)
     {
         assertThat(capturedOutboundMessages).hasSize(1);
         Message message = capturedOutboundMessages.get(0);
-        assertResponseSensors(message, requestValue, registryValue);
+        assertResponseSensors(message, requestSensor, registrySensor);
 
         // make sure messages with sensor values can be deserialized on the receiving node
         DataOutputBuffer out = SensorsTestUtil.serialize(message);
         Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
-        assertResponseSensors(deserializedMessage, requestValue, registryValue);
+        assertResponseSensors(deserializedMessage, requestSensor, registrySensor);
     }
 
-    private void assertResponseSensors(Message message, double requestValue, double registryValue)
+    private void assertResponseSensors(Message message, Sensor requestSensor, Sensor registrySensor)
     {
+        Optional<String> expectedRequestParam = SensorsCustomParams.paramForRequestSensor(registrySensor);
+        Optional<String> expectedGlobalParam = SensorsCustomParams.paramForRequestSensor(registrySensor);
         assertThat(message.header.customParams()).isNotNull();
-        assertThat(message.header.customParams()).containsKey(READ_BYTES_REQUEST);
-        assertThat(message.header.customParams()).containsKey(READ_BYTES_TABLE);
+        assertThat(expectedRequestParam).isPresent();
+        assertThat(expectedGlobalParam).isPresent();
 
-        double requestReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(READ_BYTES_REQUEST));
-        double tableReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(READ_BYTES_TABLE));
-        assertThat(requestReadBytes).isEqualTo(requestValue);
-        assertThat(tableReadBytes).isEqualTo(registryValue);
+        String requestParam = expectedRequestParam.get();
+        String globalParam = expectedGlobalParam.get();
+        assertThat(message.header.customParams()).containsKey(requestParam);
+        assertThat(message.header.customParams()).containsKey(globalParam);
+
+        double requestReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(requestParam));
+        double tableReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(globalParam));
+        assertThat(requestReadBytes).isEqualTo(requestSensor.getValue());
+        assertThat(tableReadBytes).isEqualTo(requestSensor.getValue());
     }
 }
