@@ -31,11 +31,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
+import org.apache.cassandra.service.paxos.Commit;
 
 import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -95,6 +97,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     /**
      * Register the provided {@link RequestCallback}, inferring expiry and id from the provided {@link Message}.
      */
+    @VisibleForTesting
     public void addWithExpiration(RequestCallback<?> cb, Message<?> message, InetAddressAndPort to)
     {
         // mutations need to call the overload
@@ -118,7 +121,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
                 logger.trace("Received request after messaging service shutdown so ignoring it");
             return;
         }
-        CallbackInfo previous = callbacks.put(key(message.id(), to.endpoint()), new CallbackInfo(message, to.endpoint(), cb));
+        CallbackInfo previous = callbacks.put(key(message.id(), to.endpoint()), new WriteCallbackInfo(message, to.endpoint(), cb));
         assert previous == null : format("Callback already exists for id %d/%s! (%s)", message.id(), to.endpoint(), previous);
     }
 
@@ -278,6 +281,34 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         public String toString()
         {
             return "{peer:" + peer + ", callback:" + callback + ", invokeOnFailure:" + invokeOnFailure() + '}';
+        }
+    }
+
+    static class WriteCallbackInfo extends CallbackInfo
+    {
+        // either a Mutation, or a Paxos Commit (MessageOut)
+        private final Object mutation;
+
+        @VisibleForTesting
+        WriteCallbackInfo(Message message, InetAddressAndPort peer, RequestCallback<?> callback)
+        {
+            super(message, peer, callback);
+            this.mutation = message.payload;
+        }
+
+        /**
+         * Used for sensors tracking.
+         */
+        public IMutation iMutation()
+        {
+            return iMutation(mutation);
+        }
+
+        private static IMutation iMutation(Object object)
+        {
+            assert object instanceof Commit || object instanceof IMutation : object;
+            return object instanceof Commit ? ((Commit) object).makeMutation()
+                                            : (IMutation) object;
         }
     }
 

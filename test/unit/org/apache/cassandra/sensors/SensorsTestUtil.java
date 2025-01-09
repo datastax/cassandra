@@ -32,9 +32,9 @@ import org.apache.cassandra.net.MessagingService;
 public final class SensorsTestUtil
 {
     /**
-     * Returns the default implementation of the {@link RequestSensorsFactory}
+     * Returns the default implementation of the {@link SensorsFactory}
      */
-    public static class NoOpRequestSensorsFactory implements RequestSensorsFactory
+    public static class NoOpRequestSensorsFactory implements SensorsFactory
     {
     }
     
