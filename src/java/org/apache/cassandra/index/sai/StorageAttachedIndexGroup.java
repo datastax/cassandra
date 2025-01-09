@@ -63,6 +63,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
+import org.apache.cassandra.notifications.MemtableCreatedNotification;
 import org.apache.cassandra.notifications.MemtableDiscardedNotification;
 import org.apache.cassandra.notifications.MemtableRenewedNotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -311,6 +312,10 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             // Avoid validation for index files just written during compaction.
             onSSTableChanged(notice.removed, notice.added, indices, false);
         }
+        else if (notification instanceof MemtableCreatedNotification)
+        {
+            indices.forEach(index -> index.getIndexContext().createMemtable(((MemtableCreatedNotification) notification).memtable));
+        }
         else if (notification instanceof MemtableRenewedNotification)
         {
             indices.forEach(index -> index.getIndexContext().renewMemtable(((MemtableRenewedNotification) notification).renewed));
@@ -319,6 +324,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         {
             indices.forEach(index -> index.getIndexContext().discardMemtable(((MemtableDiscardedNotification) notification).memtable));
         }
+
     }
 
     void prepareIndexSSTablesForRebuild(Collection<SSTableReader> ss, StorageAttachedIndex index)
