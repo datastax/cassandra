@@ -46,6 +46,8 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.ReplicaPlan.ForWrite;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.RequestCallback;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.concurrent.Condition;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
@@ -83,6 +85,8 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     private final Dispatcher.RequestTime requestTime;
     private @Nullable final Supplier<Mutation> hintOnFailure;
 
+    private final RequestSensors requestSensors;
+
     /**
       * Delegate to another WriteResponseHandler or possibly this one to track if the ideal consistency level was reached.
       * Will be set to null if ideal CL was not configured
@@ -110,6 +114,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
         this.hintOnFailure = hintOnFailure;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.requestTime = requestTime;
+        this.requestSensors = RequestTracker.instance.get();
     }
 
     public int failures()
@@ -368,6 +373,12 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     public boolean invokeOnFailure()
     {
         return true;
+    }
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return requestSensors;
     }
 
     /**
