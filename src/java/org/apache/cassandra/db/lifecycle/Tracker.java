@@ -288,6 +288,7 @@ public class Tracker
     @VisibleForTesting
     public void reset(Memtable memtable)
     {
+        notifyCreated(memtable);
         view.set(new View(memtable != null ? singletonList(memtable) : Collections.emptyList(),
                           Collections.emptyList(),
                           Collections.emptyMap(),

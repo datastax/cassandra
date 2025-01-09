@@ -314,7 +314,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         }
         else if (notification instanceof MemtableCreatedNotification)
         {
-            indices.forEach(index -> index.getIndexContext().createMemtable(((MemtableCreatedNotification) notification).memtable));
+            indices.forEach(index -> index.getIndexContext().registerMemtable(((MemtableCreatedNotification) notification).memtable));
         }
         else if (notification instanceof MemtableRenewedNotification)
         {
