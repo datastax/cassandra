@@ -28,12 +28,12 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
-import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.MonotonicClock;
@@ -52,7 +52,7 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
 
         Message.Builder<NoPayload> response = respondToMessage.emptyResponseBuilder();
         // no need to calculate outbound internode bytes because the response is NoPayload
-        SensorsCustomParams.addSensorsToResponse(requestSensors, response);
+        SensorsCustomParams.addSensorsToInternodeResponse(requestSensors, response);
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
@@ -88,7 +88,7 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
         try
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors requestSensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
+            RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
             RequestTracker.instance.set(requestSensors);
 
             // Initialize internode bytes with the inbound message size:
@@ -112,7 +112,7 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
     protected void applyMutation(Message<Mutation> message, InetAddressAndPort respondToAddress)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors requestSensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
         RequestTracker.instance.set(requestSensors);
 
         message.payload.applyFuture(WriteOptions.DEFAULT).addCallback(o -> respond(requestSensors, message, respondToAddress), wto -> failed());
