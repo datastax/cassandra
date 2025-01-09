@@ -34,6 +34,7 @@ import org.apache.cassandra.cql3.Operation;
 import org.apache.cassandra.cql3.Operations;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.SingleColumnRelation;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.UpdateParameters;
@@ -45,9 +46,17 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
@@ -122,6 +131,23 @@ public class UpdateStatement extends ModificationStatement
     public void addUpdateForKey(PartitionUpdate.Builder update, Slice slice, UpdateParameters params)
     {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public ResultMessage execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
+    {
+        ResultMessage result = super.execute(state, options, requestTime);
+
+        if (result == null)
+            result = new ResultMessage.Void();
+
+        RequestSensors sensors = RequestTracker.instance.get();
+        Context context = Context.from(this.metadata());
+        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
+        // CAS updates incorporate read sensors
+        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+
+        return result;
     }
 
     public static class ParsedInsert extends ModificationStatement.Parsed
