@@ -48,6 +48,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import static java.util.stream.Collectors.toMap;
@@ -164,13 +165,53 @@ public enum Stage
     }
 
     // Convenience functions to execute on this stage
-    public void execute(Runnable task) { executor().execute(withTimeMeasurement(task)); }
+    public void execute(Runnable command)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        executor().execute(withTimeMeasurement(command, enqueueStartTime));
+    }
 
-    public void execute(ExecutorLocals locals, Runnable task) { executor().execute(locals, withTimeMeasurement(task)); }
-    public void maybeExecuteImmediately(Runnable task) { executor().maybeExecuteImmediately(withTimeMeasurement(task)); }
-    public <T> Future<T> submit(Callable<T> task) { return executor().submit(withTimeMeasurement(task)); }
-    public Future<?> submit(Runnable task) { return executor().submit(withTimeMeasurement(task)); }
-    public <T> Future<T> submit(Runnable task, T result) { return executor().submit(withTimeMeasurement(task), result); }
+    public void execute(Runnable command, ExecutorLocals locals)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        executor().execute(locals, withTimeMeasurement(command, enqueueStartTime));
+    }
+
+    public void maybeExecuteImmediately(Runnable command)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        executor().maybeExecuteImmediately(withTimeMeasurement(command, enqueueStartTime));
+    }
+
+    public <T> Future<T> submit(Callable<T> task)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        return executor().submit(() -> {
+            try
+            {
+                return withTimeMeasurement(task, enqueueStartTime).call();
+            }
+            catch (Exception e)
+            {
+                throw Throwables.unchecked(e);
+            }
+        });
+    }
+
+    public Future<?> submit(Runnable task)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        return executor().submit(withTimeMeasurement(task, enqueueStartTime), executor());
+    }
+
+    public <T> Future<T> submit(Runnable task, T result)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        return executor().submit(() -> {
+            withTimeMeasurement(task, enqueueStartTime).run();
+            return result;
+        });
+    }
 
     public ExecutorPlus executor()
     {
@@ -366,9 +407,8 @@ public enum Stage
         executor().setMaximumPoolSize(newMaximumPoolSize);
     }
 
-    private Runnable withTimeMeasurement(Runnable command)
+    private Runnable withTimeMeasurement(Runnable command, long queueStartTime)
     {
-        long queueStartTime = Clock.Global.nanoTime();
         return () -> {
             long executionStartTime = Clock.Global.nanoTime();
             try
@@ -383,17 +423,18 @@ public enum Stage
         };
     }
 
-    private <T> Callable<T> withTimeMeasurement(Callable<T> command)
+    private <T> Callable<T> withTimeMeasurement(Callable<T> command, long queueStartTime)
     {
         return () -> {
-            long startTime = Clock.Global.nanoTime();
+            long executionStartTime = Clock.Global.nanoTime();
             try
             {
+                TaskExecutionCallback.instance.onDequeue(this, executionStartTime - queueStartTime);
                 return command.call();
             }
             finally
             {
-                TaskExecutionCallback.instance.onCompleted(this, Clock.Global.nanoTime() - startTime);
+                TaskExecutionCallback.instance.onCompleted(this, Clock.Global.nanoTime() - executionStartTime);
             }
         };
     }
