@@ -136,6 +136,8 @@ public class FilterComponent
             filter = load(descriptor);
             if (filter == null || !filter.isInformative())
                 logger.info("Bloom filter for {} is missing or invalid", descriptor);
+            else
+                logger.debug("Loading bloom filter from {}", descriptor);
         }
         catch (IOException ex)
         {
