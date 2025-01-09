@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.Nemesis;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * ProposeCallback has two modes of operation, controlled by the failFast parameter.
@@ -50,13 +51,14 @@ public class ProposeCallback extends AbstractPaxosCallback<Boolean>
     private final int requiredAccepts;
     private final boolean failFast;
 
-    public ProposeCallback(int totalTargets, int requiredTargets, boolean failFast, ConsistencyLevel consistency, Dispatcher.RequestTime requestTime)
+    public ProposeCallback(TableMetadata metadata, int totalTargets, int requiredTargets, boolean failFast, ConsistencyLevel consistency, Dispatcher.RequestTime requestTime)
     {
-        super(totalTargets, consistency, requestTime);
+        super(metadata, totalTargets, consistency, requestTime);
         this.requiredAccepts = requiredTargets;
         this.failFast = failFast;
     }
 
+    @Override
     public void onResponse(Message<Boolean> msg)
     {
         logger.trace("Propose response {} from {}", msg.payload, msg.from());

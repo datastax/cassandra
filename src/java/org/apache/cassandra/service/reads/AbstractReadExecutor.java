@@ -16,7 +16,6 @@
  * limitations under the License.
  */
 package org.apache.cassandra.service.reads;
-
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,7 +78,6 @@ public abstract class AbstractReadExecutor
     private   final int initialDataRequestCount;
     protected volatile PartitionIterator result = null;
     protected final QueryInfoTracker.ReadTracker readTracker;
-
     static
     {
         MessagingService.instance().latencySubscribers.subscribe(ReadCoordinationMetrics::updateReplicaLatency);
@@ -103,7 +101,6 @@ public abstract class AbstractReadExecutor
         this.traceState = Tracing.instance.get();
         this.requestTime = requestTime;
         this.readTracker = readTracker;
-
 
         // Set the digest version (if we request some digests). This is the smallest version amongst all our target replicas since new nodes
         // knows how to produce older digest but the reverse is not true.
