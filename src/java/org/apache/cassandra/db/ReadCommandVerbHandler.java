@@ -34,10 +34,10 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -100,7 +100,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         MessageParams.reset();
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors requestSensors = RequestSensorsFactory.instance.create(command.metadata().keyspace);
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
         Context context = Context.from(command);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         RequestTracker.instance.set(requestSensors);
@@ -153,7 +153,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
             int size = replyBuilder.currentPayloadSize(MessagingService.current_version);
             requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
             requestSensors.syncAllSensors();
-            SensorsCustomParams.addSensorsToResponse(requestSensors, replyBuilder);
+            SensorsCustomParams.addSensorsToInternodeResponse(requestSensors, replyBuilder);
 
             Tracing.trace("Enqueuing response to {}", message.from());
             Message<ReadResponse> reply = replyBuilder.build();
