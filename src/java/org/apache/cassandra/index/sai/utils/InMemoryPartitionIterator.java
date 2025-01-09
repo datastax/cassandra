@@ -18,10 +18,10 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
-import java.util.Map;
-import java.util.SortedMap;
-import java.util.TreeSet;
+import java.util.List;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
@@ -29,18 +29,48 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Pair;
 
 public class InMemoryPartitionIterator implements PartitionIterator
 {
-    private final ReadCommand command;
-    private final Iterator<Map.Entry<PartitionInfo, TreeSet<Unfiltered>>> partitions;
+    private final Iterator<InMemoryRowIterator> partitions;
 
-    public InMemoryPartitionIterator(ReadCommand command, SortedMap<PartitionInfo, TreeSet<Unfiltered>> rowsByPartitions)
+    private InMemoryPartitionIterator(List<InMemoryRowIterator> partitions)
     {
-        this.command = command;
-        this.partitions = rowsByPartitions.entrySet().iterator();
+        this.partitions = partitions.iterator();
+    }
+
+    public static InMemoryPartitionIterator create(ReadCommand command, List<Pair<PartitionInfo, Row>> sortedRows)
+    {
+        if (sortedRows.isEmpty())
+            return new InMemoryPartitionIterator(Collections.emptyList());
+
+        List<InMemoryRowIterator> partitions = new ArrayList<>();
+
+        PartitionInfo currentPartitionInfo = null;
+        List<Row> currentRows = null;
+
+        for (Pair<PartitionInfo, Row> pair : sortedRows)
+        {
+            PartitionInfo partitionInfo = pair.left;
+            Row row = pair.right;
+
+            if (currentPartitionInfo == null || !currentPartitionInfo.key.equals(partitionInfo.key))
+            {
+                if (currentPartitionInfo != null)
+                    partitions.add(new InMemoryRowIterator(command, currentPartitionInfo, currentRows));
+
+                currentPartitionInfo = partitionInfo;
+                currentRows = new ArrayList<>(1);
+            }
+
+            currentRows.add(row);
+        }
+
+        partitions.add(new InMemoryRowIterator(command, currentPartitionInfo, currentRows));
+
+        return new InMemoryPartitionIterator(partitions);
     }
 
     @Override
@@ -57,19 +87,21 @@ public class InMemoryPartitionIterator implements PartitionIterator
     @Override
     public RowIterator next()
     {
-        return new InMemoryRowIterator(partitions.next());
+        return partitions.next();
     }
 
 
-    private class InMemoryRowIterator implements RowIterator
+    private static class InMemoryRowIterator implements RowIterator
     {
+        private final ReadCommand command;
         private final PartitionInfo partitionInfo;
-        private final Iterator<Unfiltered> rows;
+        private final Iterator<Row> rows;
 
-        public InMemoryRowIterator(Map.Entry<PartitionInfo, TreeSet<Unfiltered>> rows)
+        public InMemoryRowIterator(ReadCommand command, PartitionInfo partitionInfo, List<Row> rows)
         {
-            this.partitionInfo = rows.getKey();
-            this.rows = rows.getValue().iterator();
+            this.command = command;
+            this.partitionInfo = partitionInfo;
+            this.rows = rows.iterator();
         }
 
         @Override
@@ -86,7 +118,7 @@ public class InMemoryPartitionIterator implements PartitionIterator
         @Override
         public Row next()
         {
-            return (Row) rows.next();
+            return rows.next();
         }
 
         @Override
