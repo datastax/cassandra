@@ -30,6 +30,7 @@ import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.FileSystemOwnershipCheck;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 import org.apache.cassandra.utils.FBUtilities;
@@ -619,11 +620,6 @@ public enum CassandraRelevantProperties
     REPLACE_NODE("cassandra.replace_node"),
     REPLACE_TOKEN("cassandra.replace_token"),
     /**
-     * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
-     * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
-     */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
-    /**
      * Number of replicas required to store batchlog for atomicity, only accepts values of 1 or 2.
      */
     REQUIRED_BATCHLOG_REPLICA_COUNT("cassandra.batchlog.required_replica_count", "2"),
@@ -691,6 +687,15 @@ public enum CassandraRelevantProperties
      * The default used in SimpleSeedProvider is 20.
      */
     SEED_COUNT_WARN_THRESHOLD("cassandra.seed_count_warn_threshold"),
+    /**
+     * Allows custom implementation of {@link SensorsFactory} to optionally create
+     * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
+     */
+    SENSORS_FACTORY("cassandra.sensors_factory_class"),
+    /**
+     * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
+     */
+    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false"),
     SERIALIZATION_EMPTY_TYPE_NONEMPTY_BEHAVIOR("cassandra.serialization.emptytype.nonempty_behavior"),
     SET_SEP_THREAD_NAME("cassandra.set_sep_thread_name", "true"),
     SHUTDOWN_ANNOUNCE_DELAY_IN_MS("cassandra.shutdown_announce_in_ms", "2000"),
