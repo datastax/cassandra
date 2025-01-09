@@ -52,4 +52,17 @@ public interface ChunkReader extends RebuffererFactory
      * This is not guaranteed to be fulfilled.
      */
     BufferType preferredBufferType();
+
+    /**
+     * In some cases we may end up with both compressed and uncompressed data for the same file in
+     * the cache. This type is used to distinguish between them.
+     */
+    enum ReaderType
+    {
+        SIMPLE,
+        COMPRESSED;
+        /** The number of types. Declared as a constant to avoid allocating on values(). */
+        public static final int COUNT = ReaderType.values().length;
+    }
+    ReaderType type();
 }

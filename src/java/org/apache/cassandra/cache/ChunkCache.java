@@ -22,9 +22,11 @@ package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import javax.annotation.Nullable;
@@ -32,8 +34,6 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
-import org.cliffc.high_scale_lib.NonBlockingHashSet;
-import org.cliffc.high_scale_lib.NonBlockingIdentityHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,9 +50,9 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
-import org.apache.cassandra.io.util.ThreadLocalByteBufferHolder;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.PageAware;
@@ -96,10 +96,6 @@ public class ChunkCache
     @Unmetered
     private final BufferPool bufferPool;
 
-    // Relies on the implementation detail that keys are interned strings and can be compared by reference.
-    // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
-    // safe for concurrent access.
-    private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
     private final AsyncCache<Key, Chunk> cache;
     private final Cache<Key, Chunk> synchronousCache;
     private final ConcurrentMap<Key, CompletableFuture<Chunk>> cacheAsMap;
@@ -112,10 +108,74 @@ public class ChunkCache
     private boolean enabled;
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
+    // Global file id management
+    private static final ConcurrentHashMap<File, Long> fileIdMap = new ConcurrentHashMap<>();
+    private static final AtomicLong nextFileId = new AtomicLong(0);
+
+    // number of bits required to store the log2 of the chunk size (highestOneBit(highestOneBit(Integer.MAX_VALUE)))
+    private final static int CHUNK_SIZE_LOG2_BITS = 5;
+
+    // number of bits required to store the ready type
+    private final static int READER_TYPE_BITS = Integer.highestOneBit(ChunkReader.ReaderType.COUNT - 1);
+
+
+    /**
+     * Removes FileId for given file if cache is initialized.
+     * @param file file to remove from the map.
+     */
+    public static void removeFileIdFromCache(File file)
+    {
+        if (instance != null) instance.invalidateFile(file);
+    }
+
+    /**
+     * Invalidate all buffers from the given file, i.e. make sure they can not be accessed by any reader using a
+     * FileHandle opened after this call. The buffers themselves will remain in the cache until they get normally
+     * evicted, because it is too costly to remove them.
+     *
+     * Note that this call has no effect of handles that are already opened. The correct usage is to call this when
+     * a file is deleted, or when a file is created for writing. It cannot be used to update and resynchronize the
+     * cached view of an existing file.
+     */
+    public void invalidateFile(File file)
+    {
+        // Removing the name from the id map suffices -- the next time someone wants to read this file, it will get
+        // assigned a fresh id.
+        fileIdMap.remove(file);
+    }
+
+    protected static long assignFileId(File file)
+    {
+        return nextFileId.getAndIncrement();
+    }
+
+    /**
+     * Maps a reader to a file id, used by the cache to find content.
+     *
+     * Uses the file name (through the fileId map), reader type and chunk size to define the id.
+     * The lowest {@link #READER_TYPE_BITS} are occupied by ready type, then the next {@link #CHUNK_SIZE_LOG2_BITS}
+     * are occupied by log 2 of chunk size (we assume the chunk size is the power of 2), and the rest of the bits
+     * are occupied by fileId counter which is incremented with for each unseen file name)
+     */
+    protected static long fileIdFor(File file, ChunkReader.ReaderType type, int chunkSize)
+    {
+        return (((fileIdMap.computeIfAbsent(file, ChunkCache::assignFileId)
+                  << CHUNK_SIZE_LOG2_BITS) | Integer.numberOfTrailingZeros(chunkSize))
+                << READER_TYPE_BITS) | type.ordinal();
+    }
+
+    /**
+     * Maps a reader to a file id, used by the cache to find content.
+     */
+    protected static long fileIdFor(ChunkReader source)
+    {
+        return fileIdFor(source.channel().getFile(), source.type(), source.chunkSize());
+    }
+
     static class Key
     {
         final ChunkReader file;
-        final String internedPath;
+        final long fileId;
         final long position;
         final int hashCode;
 
@@ -123,12 +183,12 @@ public class ChunkCache
          * Attention!  internedPath must be interned by caller -- intern() is too expensive
          * to be done for every Key instantiation.
          */
-        private Key(ChunkReader file, String internedPath, long position)
+        private Key(ChunkReader file, long fileId, long position)
         {
             super();
             this.file = file;
             this.position = position;
-            this.internedPath = internedPath;
+            this.fileId = fileId;
             hashCode = hashCodeInternal();
         }
 
@@ -141,7 +201,7 @@ public class ChunkCache
         {
             final int prime = 31;
             int result = 1;
-            result = prime * result + internedPath.hashCode();
+            result = prime * result + Long.hashCode(fileId);
             result = prime * result + Long.hashCode(position);
             result = prime * result + Integer.hashCode(file.chunkSize());
             return result;
@@ -157,7 +217,7 @@ public class ChunkCache
 
             Key other = (Key) obj;
             return (position == other.position)
-                   && internedPath == other.internedPath // == is okay b/c we explicitly intern
+                   && fileId == other.fileId
                    && file.chunkSize() == other.file.chunkSize(); // TODO we should not allow different chunk sizes
         }
     }
@@ -381,7 +441,6 @@ public class ChunkCache
         enabled = cacheSize > 0;
         bufferPool = pool;
         metrics = createMetrics.apply(this);
-        keysByFile = new NonBlockingIdentityHashMap<>();
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .initialCapacity(INITIAL_CAPACITY)
@@ -414,13 +473,6 @@ public class ChunkCache
                 chunk.release();
             throw t;
         }
-        // Complete addition within compute remapping function to ensure there is no race condition with removal.
-        keysByFile.compute(key.internedPath, (k, v) -> {
-            if (v == null)
-                v = new NonBlockingHashSet<>();
-            v.add(key);
-            return v;
-        });
         return chunk;
     }
 
@@ -428,13 +480,6 @@ public class ChunkCache
     public void onRemoval(Key key, Chunk chunk, RemovalCause cause)
     {
         chunk.release();
-        // Complete addition within compute remapping function to ensure there is no race condition with load.
-        keysByFile.compute(key.internedPath, (k, v) -> {
-            if (v == null)
-                return null;
-            v.remove(key);
-            return v.isEmpty() ? null : v;
-        });
     }
 
     /**
@@ -442,7 +487,6 @@ public class ChunkCache
      */
     public void clear() {
         // Clear keysByFile first to prevent unnecessary computation in onRemoval method.
-        keysByFile.clear();
         synchronousCache.invalidateAll();
     }
 
@@ -479,11 +523,7 @@ public class ChunkCache
 
     public void invalidateFile(String filePath)
     {
-        var internedPath = filePath.intern();
-        var keys = keysByFile.remove(internedPath);
-        if (keys == null)
-            return;
-        keys.forEach(synchronousCache::invalidate);
+        removeFileIdFromCache(new File(filePath));
     }
 
     @VisibleForTesting
@@ -545,13 +585,13 @@ public class ChunkCache
     class CachingRebufferer implements Rebufferer, RebuffererFactory
     {
         private final ChunkReader source;
-        private final String internedPath;
+        private final long fileId;
         final long alignmentMask;
 
         public CachingRebufferer(ChunkReader file)
         {
             source = file;
-            internedPath = source.channel().filePath().intern();
+            fileId = fileIdFor(file);
             int chunkSize = file.chunkSize();
             assert Integer.bitCount(chunkSize) == 1 : String.format("%d must be a power of two", chunkSize);
             alignmentMask = -chunkSize;
@@ -564,7 +604,7 @@ public class ChunkCache
             {
                 long pageAlignedPos = position & alignmentMask;
                 BufferHolder buf = null;
-                Key chunkKey = new Key(source, internedPath, pageAlignedPos);
+                Key chunkKey = new Key(source, fileId, pageAlignedPos);
 
                 int spin = 0;
                 //There is a small window when a released buffer/invalidated chunk
@@ -637,7 +677,7 @@ public class ChunkCache
         public void invalidateIfCached(long position)
         {
             long pageAlignedPos = position & alignmentMask;
-            synchronousCache.invalidate(new Key(source, internedPath, pageAlignedPos));
+            synchronousCache.invalidate(new Key(source, fileId, pageAlignedPos));
         }
 
         @Override
@@ -708,7 +748,11 @@ public class ChunkCache
      */
     @VisibleForTesting
     public int sizeOfFile(String filePath) {
-        var internedPath = filePath.intern();
-        return (int) cacheAsMap.keySet().stream().filter(x -> x.internedPath == internedPath).count();
+        Long fileIdMaybeNull = fileIdMap.get(new File(filePath));
+        if (fileIdMaybeNull == null)
+            return 0;
+        long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
+        long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
+        return (int) cacheAsMap.keySet().stream().filter(x -> (x.fileId & mask) == fileId).count();
     }
 }
