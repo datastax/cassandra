@@ -176,7 +176,6 @@ public class IndexContext
         this.viewManager = new IndexViewManager(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
         this.cfs = cfs;
-
         this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
         if (config != null)
@@ -421,9 +420,9 @@ public class IndexContext
         target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
     }
 
-    public void createMemtable(Memtable memtable)
+    public void registerMemtable(Memtable memtable)
     {
-        liveMemtables.put(memtable, MemtableIndex.createIndex(this, memtable));
+        liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
     }
 
     public void renewMemtable(Memtable renewed)

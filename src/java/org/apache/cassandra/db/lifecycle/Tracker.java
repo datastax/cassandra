@@ -52,7 +52,6 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.InitialSSTableAddedNotification;
-import org.apache.cassandra.notifications.MemtableCreatedNotification;
 import org.apache.cassandra.notifications.MemtableDiscardedNotification;
 import org.apache.cassandra.notifications.MemtableRenewedNotification;
 import org.apache.cassandra.notifications.MemtableSwitchedNotification;
@@ -459,8 +458,6 @@ public class Tracker
      */
     public Memtable switchMemtable(boolean truncating, Memtable newMemtable)
     {
-        notifyCreated(newMemtable);
-
         Pair<View, View> result = apply(View.switchMemtable(newMemtable));
         if (truncating)
             notifyRenewed(newMemtable);
@@ -598,11 +595,6 @@ public class Tracker
     public void notifyTruncated(CommitLogPosition replayAfter, long truncatedAt)
     {
         notify(new TruncationNotification(replayAfter, truncatedAt));
-    }
-
-    public void notifyCreated(Memtable created)
-    {
-        notify(new MemtableCreatedNotification(created));
     }
 
     public void notifyRenewed(Memtable renewed)
