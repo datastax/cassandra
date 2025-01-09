@@ -47,6 +47,9 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
 
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+import static org.apache.cassandra.index.sai.plan.QueryController.INDEX_MAY_HAVE_BEEN_DROPPED;
+
 public class QueryView implements AutoCloseable
 {
     final ColumnFamilyStore.RefViewFragment view;
@@ -104,10 +107,25 @@ public class QueryView implements AutoCloseable
         }
 
         /**
+         * Denotes a situation when there exist no index for an active memtable or sstable.
+         * This can happen e.g. when the index gets dropped while running the query.
+         */
+        static class MissingIndexException extends RuntimeException
+        {
+            final IndexContext context;
+
+            public MissingIndexException(IndexContext context, String message)
+            {
+                super(message);
+                this.context = context;
+            }
+        }
+
+        /**
          * Acquire references to all the memtables, memtable indexes, sstables, and sstable indexes required for the
          * given expression.
          */
-        protected QueryView build()
+        protected QueryView build() throws MissingIndexException
         {
             var referencedIndexes = new HashSet<SSTableIndex>();
 
@@ -168,8 +186,9 @@ public class QueryView implements AutoCloseable
                             else
                             {
                                 // So the memtable still exists in the second attempt, but it is not empty
-                                // and has no index. Oh, that looks like a bug.
-                                throw new IllegalStateException("Index not found for memtable: " + memtable);
+                                // and has no index. The index might have been dropped.
+                                throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
+                                                                              " not found for memtable: " + memtable);
                             }
                         }
                         memtableIndexes.add(index);
@@ -187,12 +206,18 @@ public class QueryView implements AutoCloseable
                         if (index == null)
                         {
                             refViewFragment.release();
-                            throw new IllegalStateException("Index not found for sstable: " + sstable);
+                            throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
+                                                                          " not found for sstable: " + sstable);
                         }
+
+                        if (!indexInRange(index))
+                            continue;
+
                         if (!index.reference())
                         {
                             refViewFragment.release();
-                            throw new IllegalStateException("Index for sstable " + sstable + " found but already released and cannot be referenced");
+                            throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() + " for sstable " + sstable +
+                                                                          " found but already released and cannot be referenced");
                         }
                         referencedIndexes.add(index);
                     }
@@ -218,6 +243,21 @@ public class QueryView implements AutoCloseable
                     Tracing.trace("Querying storage-attached indexes {}", summary);
                 }
             }
+        }
+
+        // I've removed the concept of "most selective index" since we don't actually have per-sstable
+        // statistics on that; it looks like it was only used to check bounds overlap, so computing
+        // an actual global bounds should be an improvement.  But computing global bounds as an intersection
+        // of individual bounds is messy because you can end up with more than one range.
+        private boolean indexInRange(SSTableIndex index)
+        {
+            SSTableReader sstable = index.getSSTable();
+            if (range instanceof Bounds && range.left.equals(range.right) && (!range.left.isMinimum()) && range.left instanceof DecoratedKey)
+            {
+                if (!sstable.getBloomFilter().isPresent((DecoratedKey)range.left))
+                    return false;
+            }
+            return range.left.compareTo(sstable.last) <= 0 && (range.right.isMinimum() || sstable.first.compareTo(range.right) <= 0);
         }
     }
 }

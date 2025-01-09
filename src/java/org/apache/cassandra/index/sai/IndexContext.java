@@ -153,6 +153,8 @@ public class IndexContext
 
     private final int maxTermSize;
 
+    private volatile boolean dropped = false;
+
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
                         @Nonnull TableId tableId,
@@ -664,7 +666,12 @@ public class IndexContext
 
     public boolean isIndexed()
     {
-        return config != null;
+        return config != null && !dropped;
+    }
+
+    public boolean isDropped()
+    {
+        return dropped;
     }
 
     /**
@@ -683,6 +690,7 @@ public class IndexContext
      */
     public void invalidate(boolean obsolete)
     {
+        dropped = true;
         liveMemtables.clear();
         viewManager.invalidate(obsolete);
         indexMetrics.release();
